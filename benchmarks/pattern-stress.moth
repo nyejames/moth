@@ -1,0 +1,404 @@
+-- pattern-stress.moth
+-- Pattern matching stress test:
+-- - Exhaustive matches on choice types
+-- - Guard expressions
+-- - Payload capture patterns
+-- - Relational patterns for scalars
+-- - Nested match expressions
+-- - Large match arms (20+ cases)
+
+-- Choice types for pattern matching
+Status ::
+    Pending,
+    Running,
+    Paused,
+    Cancelled,
+    Completed,
+    Failed,
+;
+
+Priority ::
+    Low,
+    Medium,
+    High,
+    Critical,
+    Urgent,
+;
+
+Color ::
+    Red,
+    Green,
+    Blue,
+    Yellow,
+    Magenta,
+    Cyan,
+    White,
+    Black,
+;
+
+-- Choices with payloads
+Result ::
+    Ok,
+    Err | message String |,
+;
+
+Optional ::
+    None,
+    Some | value Int |,
+;
+
+Message ::
+    Text | content String |,
+    Number | value Int |,
+    Flag | active Bool |,
+    Pair | first Int, second Int |,
+    Triple | a Int, b Int, c Int |,
+;
+
+HttpResponse ::
+    Success | code Int, body String |,
+    Redirect | url String |,
+    ClientError | code Int, message String |,
+    ServerError | code Int, message String |,
+;
+
+Event ::
+    Click | x Int, y Int |,
+    KeyPress | key String, ctrl Bool, shift Bool, alt Bool |,
+    Scroll | delta Float |,
+    Resize | width Int, height Int |,
+;
+
+-- Exhaustive match on choice without else
+handle_status |status Status| -> String:
+    if status is:
+        Pending => return "Status is pending"
+        Running => return "Status is running"
+        Paused => return "Status is paused"
+        Cancelled => return "Status is cancelled"
+        Completed => return "Status is completed"
+        Failed => return "Status is failed"
+    ;
+;
+
+handle_priority |priority Priority| -> Int:
+    if priority is:
+        Low => return 1
+        Medium => return 2
+        High => return 3
+        Critical => return 4
+        Urgent => return 5
+    ;
+;
+
+handle_color |color Color| -> String:
+    if color is:
+        Red => return "#ff0000"
+        Green => return "#00ff00"
+        Blue => return "#0000ff"
+        Yellow => return "#ffff00"
+        Magenta => return "#ff00ff"
+        Cyan => return "#00ffff"
+        White => return "#ffffff"
+        Black => return "#000000"
+    ;
+;
+
+-- Match with else fallback
+handle_status_else |status Status| -> String:
+    if status is:
+        Running => return "active"
+        Completed => return "done"
+        Failed => return "error"
+        else => return "other"
+    ;
+;
+
+-- Guard expressions
+classify_number |value Int| -> String:
+    if value is:
+        0 => return "zero"
+        1 => return "one"
+        2 => return "two"
+        < 0 => return "negative"
+        < 10 => return "small"
+        < 100 => return "medium"
+        < 1000 => return "large"
+        else => return "huge"
+    ;
+;
+
+classify_with_guards |value Int, enabled Bool| -> String:
+    if value is:
+        0 if enabled => return "zero-enabled"
+        0 => return "zero-disabled"
+        1 if enabled => return "one-enabled"
+        1 => return "one-disabled"
+        < 10 if enabled => return "small-enabled"
+        < 10 => return "small-disabled"
+        else => return "other"
+    ;
+;
+
+check_range |value Int| -> String:
+    if value is:
+        < 0 => return "below-zero"
+        0 => return "zero"
+        <= 10 => return "one-to-ten"
+        <= 50 => return "eleven-to-fifty"
+        <= 100 => return "fifty-one-to-hundred"
+        > 100 => return "above-hundred"
+        else => return "impossible"
+    ;
+;
+
+-- Payload capture patterns
+handle_result |result Result| -> String:
+    if result is:
+        Ok => return "Success"
+        Err(message) => return [: Error: [message]]
+    ;
+;
+
+handle_optional |opt Optional| -> String:
+    if opt is:
+        None => return "No value"
+        Some(value) => return [: Value: [value]]
+    ;
+;
+
+handle_message |msg Message| -> String:
+    if msg is:
+        Text(content) => return [: Text: [content]]
+        Number(value) => return [: Number: [value]]
+        Flag(active) => return [: Flag: [active]]
+        Pair(first, second) => return [: Pair: ([first], [second])]
+        Triple(a, b, c) => return [: Triple: ([a], [b], [c])]
+    ;
+;
+
+handle_http |response HttpResponse| -> String:
+    if response is:
+        Success(code, body) => return [: Success [code]: [body]]
+        Redirect(url) => return [: Redirect to [url]]
+        ClientError(code, message) => return [: Client error [code]: [message]]
+        ServerError(code, message) => return [: Server error [code]: [message]]
+    ;
+;
+
+handle_event |event Event| -> String:
+    if event is:
+        Click(x, y) => return [: Click at ([x], [y])]
+        KeyPress(key, ctrl, shift, alt) => return [: Key: [key] ctrl=[ctrl] shift=[shift] alt=[alt]]
+        Scroll(delta) => return [: Scroll: [delta]]
+        Resize(width, height) => return [: Resize: [width]x[height]]
+    ;
+;
+
+-- Relational patterns
+compare_to_ten |value Int| -> String:
+    if value is:
+        < 10 => return "less than ten"
+        10 => return "exactly ten"
+        > 10 => return "greater than ten"
+        else => return "impossible"
+    ;
+;
+
+grade_score |score Int| -> String:
+    if score is:
+        < 0 => return "invalid"
+        < 60 => return "F"
+        < 70 => return "D"
+        < 80 => return "C"
+        < 90 => return "B"
+        <= 100 => return "A"
+        > 100 => return "invalid"
+        else => return "unknown"
+    ;
+;
+
+categorize_string |text String| -> String:
+    if text is:
+        < "a" => return "before-a"
+        < "m" => return "a-to-l"
+        < "z" => return "m-to-y"
+        "z" => return "exactly-z"
+        else => return "z-or-after"
+    ;
+;
+
+-- Nested match expressions
+outer = 10
+inner = 5
+
+nested_match || -> String:
+    if outer is:
+        < 5 =>
+            if inner is:
+                < 5 => return "outer-small inner-small"
+                5 => return "outer-small inner-five"
+                else => return "outer-small inner-large"
+            ;
+        10 =>
+            if inner is:
+                < 5 => return "outer-ten inner-small"
+                5 => return "outer-ten inner-five"
+                else => return "outer-ten inner-large"
+            ;
+        else =>
+            if inner is:
+                < 5 => return "outer-other inner-small"
+                else => return "outer-other inner-other"
+            ;
+    ;
+;
+
+-- Large match (20+ arms)
+large_match |value Int| -> String:
+    if value is:
+        0 => return "zero"
+        1 => return "one"
+        2 => return "two"
+        3 => return "three"
+        4 => return "four"
+        5 => return "five"
+        6 => return "six"
+        7 => return "seven"
+        8 => return "eight"
+        9 => return "nine"
+        10 => return "ten"
+        11 => return "eleven"
+        12 => return "twelve"
+        13 => return "thirteen"
+        14 => return "fourteen"
+        15 => return "fifteen"
+        16 => return "sixteen"
+        17 => return "seventeen"
+        18 => return "eighteen"
+        19 => return "nineteen"
+        20 => return "twenty"
+        else => return "other"
+    ;
+;
+
+-- Payload capture with guards
+guarded_payload |opt Optional| -> String:
+    if opt is:
+        None => return "no value"
+        Some(value) if value < 0 => return "negative value"
+        Some(value) if value is 0 => return "zero value"
+        Some(value) if value < 100 => return "small positive"
+        Some(value) => return "large positive"
+    ;
+;
+
+guarded_http |response HttpResponse| -> String:
+    if response is:
+        Success(code, body) if code < 200 => return "info"
+        Success(code, body) if code < 300 => return "success"
+        Redirect(url) => return "redirect"
+        ClientError(code, message) if code is 400 => return "bad request"
+        ClientError(code, message) if code is 404 => return "not found"
+        ClientError(code, message) => return "client error"
+        ServerError(code, message) if code is 500 => return "internal error"
+        ServerError(code, message) => return "server error"
+    ;
+;
+
+-- Mixed patterns in sequence
+process_all |status Status, priority Priority, result Result| -> String:
+    status_str = handle_status(status)
+    priority_num = handle_priority(priority)
+    result_str = handle_result(result)
+    return [: Status: [status_str] / Priority: [priority_num] / Result: [result_str]]
+;
+
+-- Capture pattern for whole value
+capture_whole |value Int| -> String:
+    if value is:
+        captured if captured < 0 => return [: Negative: [captured]]
+        captured => return [: Non-negative: [captured]]
+        else => return "unreachable"
+    ;
+;
+
+-- Multiple choice match sequence
+match_sequence || -> String:
+    result ~= ""
+
+    statuses = {Status::Pending, Status::Running, Status::Completed, Status::Failed}
+
+    loop statuses |s|:
+        str = handle_status(s)
+        result = [: [result][str]; ]
+    ;
+
+    return result
+;
+
+-- Stress test entry
+run_pattern_stress ||:
+    io.line("Pattern matching stress test starting")
+
+    -- Exhaustive matches
+    io.line([: [handle_status(Status::Running)]])
+    io.line([: [handle_status(Status::Failed)]])
+    io.line([: [handle_priority(Priority::Critical)]])
+    io.line([: [handle_color(Color::Magenta)]])
+
+    -- Matches with else
+    io.line([: [handle_status_else(Status::Pending)]])
+
+    -- Guards
+    io.line([: [classify_number(0)]])
+    io.line([: [classify_number(-5)]])
+    io.line([: [classify_number(50)]])
+    io.line([: [classify_number(500)]])
+    io.line([: [classify_with_guards(0, true)]])
+    io.line([: [classify_with_guards(0, false)]])
+    io.line([: [check_range(25)]])
+
+    -- Payload captures
+    io.line([: [handle_result(Result::Ok)]])
+    io.line([: [handle_result(Result::Err("something went wrong"))]])
+    io.line([: [handle_optional(Optional::None)]])
+    io.line([: [handle_optional(Optional::Some(42))]])
+    io.line([: [handle_message(Message::Text("hello"))]])
+    io.line([: [handle_message(Message::Pair(10, 20))]])
+    io.line([: [handle_http(HttpResponse::Success(200, "OK"))]])
+    io.line([: [handle_http(HttpResponse::ClientError(404, "Not Found"))]])
+    io.line([: [handle_event(Event::Click(100, 200))]])
+    io.line([: [handle_event(Event::KeyPress("Enter", true, false, false))]])
+
+    -- Relational patterns
+    io.line([: [compare_to_ten(5)]])
+    io.line([: [compare_to_ten(10)]])
+    io.line([: [compare_to_ten(15)]])
+    io.line([: [grade_score(85)]])
+    io.line([: [categorize_string("hello")]])
+
+    -- Nested match
+    io.line([: [nested_match()]])
+
+    -- Large match
+    io.line([: [large_match(15)]])
+    io.line([: [large_match(100)]])
+
+    -- Guarded payloads
+    io.line([: [guarded_payload(Optional::Some(-10))]])
+    io.line([: [guarded_payload(Optional::Some(50))]])
+    io.line([: [guarded_http(HttpResponse::Success(200, "OK"))]])
+    io.line([: [guarded_http(HttpResponse::ClientError(404, "Not Found"))]])
+
+    -- Capture whole
+    io.line([: [capture_whole(-10)]])
+    io.line([: [capture_whole(10)]])
+
+    -- Sequence
+    io.line([: [match_sequence()]])
+
+    io.line("Pattern matching stress test complete")
+;
+
+run_pattern_stress()

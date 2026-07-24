@@ -236,7 +236,7 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     /// Returns true when any emitted reachable JS body can construct, store, copy, display, or
-    /// operate on a Beanstalk map.
+    /// operate on a Moth map.
     ///
     /// WHAT: scans the same function/block subset that JS lowering will emit.
     /// WHY: map helpers are new runtime surface. Emitting them only for map-using programs avoids

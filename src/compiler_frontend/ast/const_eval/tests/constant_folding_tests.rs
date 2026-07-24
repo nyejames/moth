@@ -106,12 +106,12 @@ fn cast_expression(
 fn evaluate_operator_concatenates_string_literals() {
     let mut string_table = StringTable::new();
     let lhs = Expression::string_slice(
-        string_table.intern("bean"),
+        string_table.intern("moth"),
         Default::default(),
         ValueMode::ImmutableOwned,
     );
     let rhs = Expression::string_slice(
-        string_table.intern("stalk"),
+        string_table.intern("ball"),
         Default::default(),
         ValueMode::ImmutableOwned,
     );
@@ -125,7 +125,7 @@ fn evaluate_operator_concatenates_string_literals() {
     let ExpressionKind::StringSlice(interned) = result.kind else {
         unreachable!("checked above");
     };
-    assert_eq!(string_table.resolve(interned), "beanstalk");
+    assert_eq!(string_table.resolve(interned), "mothball");
 }
 
 #[test]

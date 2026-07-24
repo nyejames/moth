@@ -21,7 +21,7 @@ use std::os::unix::ffi::OsStringExt;
 
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "beanstalk_display_messages_{name}_{}",
+        "moth_display_messages_{name}_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
@@ -89,16 +89,16 @@ fn special_file_renderer_names_arbitrary_hash_roots() {
 
     assert_eq!(
         special_file_name_from_path(&extensionless_path, &string_table),
-        "#home.bst"
+        "#home.moth"
     );
 
     let mut explicit_path = InternedPath::new();
     explicit_path.push_str("input", &mut string_table);
-    explicit_path.push_str("#home.bst", &mut string_table);
+    explicit_path.push_str("#home.moth", &mut string_table);
 
     assert_eq!(
         special_file_name_from_path(&explicit_path, &string_table),
-        "#home.bst"
+        "#home.moth"
     );
 }
 
@@ -184,7 +184,7 @@ fn compiler_messages_from_error_wraps_one_error_without_warnings() {
         messages
             .first_error()
             .map(|diagnostic| diagnostic.kind.code()),
-        Some("BST-INFRA-0001"),
+        Some("MOTH-INFRA-0001"),
     );
 }
 
@@ -192,7 +192,7 @@ fn compiler_messages_from_error_wraps_one_error_without_warnings() {
 fn compiler_error_metadata_and_overrides_are_preserved() {
     let mut string_table = StringTable::new();
     let mut error = CompilerError::compiler_error("bad compiler state")
-        .with_scope_path(Path::new("project/main.bst"), &mut string_table)
+        .with_scope_path(Path::new("project/main.moth"), &mut string_table)
         .with_error_type(ErrorType::Config);
     error.new_metadata_entry(
         CompilerErrorMetadataKey::PrimarySuggestion,
@@ -202,7 +202,7 @@ fn compiler_error_metadata_and_overrides_are_preserved() {
     assert_eq!(error.error_type, ErrorType::Config);
     assert_eq!(
         error.location.scope.to_path_buf(&string_table),
-        PathBuf::from("project/main.bst")
+        PathBuf::from("project/main.moth")
     );
     assert_eq!(
         error
@@ -219,7 +219,7 @@ fn with_scope_path_preserves_existing_span_positions() {
         "bad compiler state",
         SourceLocation::new(
             crate::compiler_frontend::symbols::interned_path::InternedPath::try_from_filesystem_path(
-                Path::new("old.bst"),
+                Path::new("old.moth"),
                 &mut string_table,
             ).expect("test path should be UTF-8"),
             crate::compiler_frontend::tokenizer::tokens::CharPosition {
@@ -234,21 +234,21 @@ fn with_scope_path_preserves_existing_span_positions() {
         ErrorType::Compiler,
     );
 
-    error = error.with_scope_path(Path::new("project/main.bst"), &mut string_table);
+    error = error.with_scope_path(Path::new("project/main.moth"), &mut string_table);
 
     assert_eq!(error.location.start_pos.line_number, 4);
     assert_eq!(error.location.start_pos.char_column, 7);
     assert_eq!(
         error.location.scope.to_path_buf(&string_table),
-        PathBuf::from("project/main.bst")
+        PathBuf::from("project/main.moth")
     );
 }
 
 #[cfg(unix)]
 #[test]
 fn invalid_utf8_diagnostic_scopes_remain_distinct() {
-    let first_path = PathBuf::from(OsString::from_vec(b"source-\xFF.bst".to_vec()));
-    let second_path = PathBuf::from(OsString::from_vec(b"source-\xFE.bst".to_vec()));
+    let first_path = PathBuf::from(OsString::from_vec(b"source-\xFF.moth".to_vec()));
+    let second_path = PathBuf::from(OsString::from_vec(b"source-\xFE.moth".to_vec()));
     let mut string_table = StringTable::new();
 
     let first_scope = SourceLocation::from_path(&first_path, &mut string_table)
@@ -268,24 +268,24 @@ fn invalid_utf8_diagnostic_scopes_remain_distinct() {
 #[test]
 fn relative_display_path_strips_root_prefix() {
     let root = Path::new("/workspace/project");
-    let scope = Path::new("/workspace/project/src/main.bst");
+    let scope = Path::new("/workspace/project/src/main.moth");
 
     let relative = relative_display_path_from_root(scope, root);
 
-    assert_eq!(relative, "src/main.bst");
+    assert_eq!(relative, "src/main.moth");
 }
 
 #[cfg(windows)]
 #[test]
 fn normalize_display_path_strips_windows_extended_prefix() {
-    let normalized = normalize_path(Path::new(r"\\?\C:\workspace\main.bst"));
-    assert_eq!(normalized, PathBuf::from(r"C:\workspace\main.bst"));
+    let normalized = normalize_path(Path::new(r"\\?\C:\workspace\main.moth"));
+    assert_eq!(normalized, PathBuf::from(r"C:\workspace\main.moth"));
 }
 
 #[test]
 fn resolve_source_file_path_strips_header_suffix_before_lookup() {
     let root: PathBuf = temp_dir("header_scope");
-    let source_file = root.join("main.bst");
+    let source_file = root.join("main.moth");
     fs::write(&source_file, "page #= []").expect("should write source file");
 
     let mut string_table = StringTable::new();
@@ -310,7 +310,7 @@ fn resolve_source_file_path_strips_header_suffix_before_lookup() {
 #[test]
 fn formatted_warning_uses_resolved_source_file_path_for_header_scopes() {
     let root: PathBuf = temp_dir("header_warning_scope");
-    let source_file = root.join("main.bst");
+    let source_file = root.join("main.moth");
     fs::write(&source_file, "page #= []").expect("should write source file");
 
     let mut string_table = StringTable::new();
@@ -323,7 +323,7 @@ fn formatted_warning_uses_resolved_source_file_path_for_header_scopes() {
         .expect("test path should be UTF-8");
 
     let displayed = resolved_display_path(&header_scope, &string_table);
-    assert!(displayed.ends_with("main.bst"));
+    assert!(displayed.ends_with("main.moth"));
     assert!(!displayed.contains(".header"));
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
@@ -332,7 +332,7 @@ fn formatted_warning_uses_resolved_source_file_path_for_header_scopes() {
 #[test]
 fn resolve_source_file_path_normalizes_canonical_windows_paths() {
     let root: PathBuf = temp_dir("resolve_normalize");
-    let source_file = root.join("main.bst");
+    let source_file = root.join("main.moth");
     fs::write(&source_file, "page #= []").expect("should write source file");
 
     let mut string_table = StringTable::new();

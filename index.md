@@ -1,13 +1,13 @@
-# Beanstalk codebase index for quick navigation
+# Moth codebase index for quick navigation
 
 Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compiler_frontend](src/compiler_frontend/) → tokenizer → headers → module_dependencies → ast → hir → borrow_checker → backends/projects.
 
 ## Root
 
-- [bean CLI entry](src/main.rs)
+- [moth CLI entry](src/main.rs)
 - [crate module surface](src/lib.rs)
-- [Beanstalk source packages](packages/): compiler-shipped source-backed packages.
-    - [@html Builder package](packages/html/#mod.bst): HTML helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.) and the `Canvas`/`get_canvas` wrapper. Internal helpers live in [packages/html/private_helpers.bst](packages/html/private_helpers.bst).
+- [Moth source packages](packages/): compiler-shipped source-backed packages.
+    - [@html Builder package](packages/html/#mod.moth): HTML helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.) and the `Canvas`/`get_canvas` wrapper. Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
     - [Core binding packages](src/builder_surface/core_packages/): compiler-owned operations and prelude visibility policy.
 - [validate/bench/docs workflow](justfile)
 - [contributor workflow and validation commands](CONTRIBUTING.md)
@@ -24,7 +24,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [html_project](src/projects/html_project/): HTML builder and HTML-Wasm integration. kw: shell, assets, wasm.
 - [builder boundary above frontend](src/build_system/): kw — config, modules, artifacts, cleanup.
     - [build.rs](src/build_system/build.rs): build_project, BuildResult, current `Module` container with explicit executable, link-fact and compiler-metadata lanes, output writing.
-    - [project_config.rs](src/build_system/project_config.rs) + [project_config/](src/build_system/project_config/): config.bst parse/validate through frontend+AST.
+    - [project_config.rs](src/build_system/project_config.rs) + [project_config/](src/build_system/project_config/): config.moth parse/validate through frontend+AST.
     - [path_validation.rs](src/build_system/path_validation.rs): project path policy checks.
     - [utils.rs](src/build_system/utils.rs): shared builder helpers.
     - [create_project_modules](src/build_system/create_project_modules/): Stage 0 module/source discovery.
@@ -157,7 +157,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [external_js](src/projects/html_project/external_js/): provider-backed JS imports, runtime modules/assets/glue.
 - [binding_packages](src/projects/html_project/binding_packages/): builder-owned binding packages for HTML projects.
     - [@web/canvas binding package](src/projects/html_project/binding_packages/web/canvas/): built-in JS canvas asset (`canvas.js`) and `@web/canvas` registration. Used by the `@html` canvas helpers.
-- [beandown](src/projects/html_project/beandown/): direct .bd compile/extract support.
+- [moth_template](src/projects/html_project/moth_template/): direct .mtf compile/extract support.
 - [tracked_assets.rs](src/projects/html_project/tracked_assets.rs): copied assets.
 - [new_html_project](src/projects/html_project/new_html_project/): scaffold command.
 
@@ -176,8 +176,8 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
 - [language semantics overview](docs/language-overview.md)
-- [memory management design](docs/src/docs/codebase/memory-management/overview.bd)
+- [memory management design](docs/src/docs/codebase/memory-management/overview.mtf)
 - [codebase style guide](docs/codebase-style-guide.md)
 - [docs website source](docs/src/docs/); [generated output](docs/release/)
-- [language support progress matrix](docs/src/docs/progress/#page.bst)
+- [language support progress matrix](docs/src/docs/progress/#page.moth)
 - [planned work and implementation plans](docs/roadmap/)

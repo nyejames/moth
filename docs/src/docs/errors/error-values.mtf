@@ -1,0 +1,29 @@
+`Error` is Moth's builtin structured error type.
+
+Its public fields are:
+
+- `message String`
+- `code Int = 0`
+
+[codeblock, $code("moth"):
+    missing = Error("Missing value")
+    coded = Error(message = "Missing value", code = 200)
+]
+
+### Contract
+
+- `message` carries the human-readable explanation.
+- `code` carries a stable integer code and defaults to `0`.
+- Positional construction follows field order.
+- Named construction follows normal constructor argument rules.
+- `Error` is reserved by the language.
+- `ErrorKind`, `ErrorLocation` and `StackFrame` remain ordinary user-available names.
+
+`Error!` in a function signature marks an error return channel. It does not
+create a panic path and it is not a separate ordinary value type.
+
+Custom structs and other compatible types may also be used as explicit error
+slot types. The builtin `Error` type is the common language-owned surface and
+the only automatic target for checked numeric recovery.
+
+Casts between `String` and `Error` are documented by @../casts (Casts).

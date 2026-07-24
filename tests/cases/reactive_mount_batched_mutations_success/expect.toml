@@ -9,19 +9,19 @@ rendered_output_exact = "reactive_mount_batched_mutations_success 3\nreactive_mo
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_reactive_schedule(sourceId)",
-    "if (__bs_reactive_flush_scheduled)",
-    "queueMicrotask(__bs_reactive_flush)",
+    "function __moth_reactive_schedule(sourceId)",
+    "if (__moth_reactive_flush_scheduled)",
+    "queueMicrotask(__moth_reactive_flush)",
 ]
-must_contain_exactly_once = ["__bs_mount_template_fragment(el, bst_frags[i])"]
+must_contain_exactly_once = ["__moth_mount_template_fragment(el, moth_frags[i])"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0064"]
+diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
-code = "BST-RULE-0064"
+code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.reactive_template_runtime"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 3

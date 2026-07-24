@@ -1,8 +1,0 @@
-ErrorLocation = |
-    file String,
-    line Int,
-    column Int,
-|
-
-loc = ErrorLocation(file = "test.bst", line = 42, column = 1)
-[:error_location_name_user_available file=[loc.file] line=[loc.line]]

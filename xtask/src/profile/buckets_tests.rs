@@ -1,7 +1,7 @@
 //! Tests for owner bucket mapping.
 //!
 //! WHAT: Validates that function names are correctly mapped to the expected
-//! owner buckets, including Beanstalk modules, third-party libraries, and
+//! owner buckets, including Moth modules, third-party libraries, and
 //! edge cases like empty and unknown names.
 //!
 //! WHY: Bucket mapping is the bridge between profiler output and actionable
@@ -10,12 +10,12 @@
 use super::*;
 
 // ----------------------------
-//  Beanstalk module buckets
+//  Moth module buckets
 // ----------------------------
 
 #[test]
 fn tokenizer_prefix_maps_to_tokenization_bucket() {
-    let result = match_owner_bucket("beanstalk::compiler_frontend::tokenizer::tokenize");
+    let result = match_owner_bucket("moth::compiler_frontend::tokenizer::tokenize");
     assert_eq!(result.label, "Tokenization");
     assert_eq!(
         result.suggested_paths,
@@ -25,7 +25,7 @@ fn tokenizer_prefix_maps_to_tokenization_bucket() {
 
 #[test]
 fn headers_prefix_maps_to_header_parsing_bucket() {
-    let result = match_owner_bucket("beanstalk::compiler_frontend::headers::parse_header");
+    let result = match_owner_bucket("moth::compiler_frontend::headers::parse_header");
     assert_eq!(result.label, "Header parsing");
     assert_eq!(
         result.suggested_paths,
@@ -35,7 +35,7 @@ fn headers_prefix_maps_to_header_parsing_bucket() {
 
 #[test]
 fn module_dependencies_prefix_maps_to_dependency_sorting_bucket() {
-    let result = match_owner_bucket("beanstalk::compiler_frontend::module_dependencies::sort");
+    let result = match_owner_bucket("moth::compiler_frontend::module_dependencies::sort");
     assert_eq!(result.label, "Dependency sorting");
     assert_eq!(
         result.suggested_paths,
@@ -45,22 +45,21 @@ fn module_dependencies_prefix_maps_to_dependency_sorting_bucket() {
 
 #[test]
 fn ast_prefix_maps_to_ast_bucket() {
-    let result = match_owner_bucket("beanstalk::compiler_frontend::ast::resolve_type");
+    let result = match_owner_bucket("moth::compiler_frontend::ast::resolve_type");
     assert_eq!(result.label, "AST");
     assert_eq!(result.suggested_paths, vec!["src/compiler_frontend/ast/"]);
 }
 
 #[test]
 fn hir_prefix_maps_to_hir_bucket() {
-    let result = match_owner_bucket("beanstalk::compiler_frontend::hir::generate");
+    let result = match_owner_bucket("moth::compiler_frontend::hir::generate");
     assert_eq!(result.label, "HIR");
     assert_eq!(result.suggested_paths, vec!["src/compiler_frontend/hir/"]);
 }
 
 #[test]
 fn borrow_checker_prefix_maps_to_borrow_validation_bucket() {
-    let result =
-        match_owner_bucket("beanstalk::compiler_frontend::analysis::borrow_checker::validate");
+    let result = match_owner_bucket("moth::compiler_frontend::analysis::borrow_checker::validate");
     assert_eq!(result.label, "Borrow validation");
     assert_eq!(
         result.suggested_paths,
@@ -70,28 +69,28 @@ fn borrow_checker_prefix_maps_to_borrow_validation_bucket() {
 
 #[test]
 fn build_system_prefix_maps_to_build_system_bucket() {
-    let result = match_owner_bucket("beanstalk::build_system::build");
+    let result = match_owner_bucket("moth::build_system::build");
     assert_eq!(result.label, "Build system");
     assert_eq!(result.suggested_paths, vec!["src/build_system/"]);
 }
 
 #[test]
 fn js_backend_prefix_maps_to_js_bucket() {
-    let result = match_owner_bucket("beanstalk::backends::js::emit");
+    let result = match_owner_bucket("moth::backends::js::emit");
     assert_eq!(result.label, "JS backend");
     assert_eq!(result.suggested_paths, vec!["src/backends/js/"]);
 }
 
 #[test]
 fn wasm_backend_prefix_maps_to_wasm_bucket() {
-    let result = match_owner_bucket("beanstalk::backends::wasm::emit");
+    let result = match_owner_bucket("moth::backends::wasm::emit");
     assert_eq!(result.label, "Wasm backend");
     assert_eq!(result.suggested_paths, vec!["src/backends/wasm/"]);
 }
 
 #[test]
 fn html_project_prefix_maps_to_html_bucket() {
-    let result = match_owner_bucket("beanstalk::projects::html_project::build");
+    let result = match_owner_bucket("moth::projects::html_project::build");
     assert_eq!(result.label, "HTML project builder");
     assert_eq!(result.suggested_paths, vec!["src/projects/html_project/"]);
 }

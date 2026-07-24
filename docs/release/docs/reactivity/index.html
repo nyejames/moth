@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Reactivity | Beanstalk</title>
-    <meta name="description" content="Reactive sources, template subscriptions and live sinks in Beanstalk.">
+    <title>Reactivity | Moth</title>
+    <meta name="description" content="Reactive sources, template subscriptions and live sinks in Moth.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -668,7 +668,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Reactivity</p><h1>Reactivity</h1><p>Reactivity lets a template observe a stable source without turning Beanstalk into a callback language.</p><p>Sources are explicit. Subscriptions are explicit. Mutation still follows the ordinary type and access rules.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Reactivity</p><h1>Reactivity</h1><p>Reactivity lets a template observe a stable source without turning Moth into a callback language.</p><p>Sources are explicit. Subscriptions are explicit. Mutation still follows the ordinary type and access rules.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Reactive sources
@@ -719,27 +719,27 @@ body {
 
 
             <p>A reactive source is a value that templates can watch for changes.</p><h3>A counter source</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
     </code></pre><p><code>$Int</code> says <code>count</code> is reactive storage for an <code>Int</code>.</p><h3>Inferred type</h3><pre style=""><code class='codeblock'>
-    enabled <span class='bst-code-operator'>$</span><span class='bst-code-operator'>=</span> true
+    enabled <span class='moth-code-operator'>$</span><span class='moth-code-operator'>=</span> true
     </code></pre><p><code>$=</code> lets the compiler infer the underlying type from the initializer.</p><h3>Snapshot read</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    current <span class='bst-code-operator'>=</span> count
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    current <span class='moth-code-operator'>=</span> count
     </code></pre><p>Reading <code>count</code> normally gives the current value. It is a snapshot, not a live view.</p><h3>Remember</h3><ul><li><code>$Type</code> and <code>$=</code> declare reactive sources.</li><li>The source still has the underlying type, such as <code>Int</code> or <code>String</code>.</li><li>Reactive syntax is not valid in fields, return types or aliases.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>A reactive source is stable mutation-capable runtime storage declared with <code>$Type</code> or <code>$=</code>.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    enabled <span class='bst-code-operator'>$</span><span class='bst-code-operator'>=</span> true
-    names <span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>{</span><span class='bst-code-type'>String</span><span class='bst-code-parenthesis'>}</span> <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-string'>&quot;Priya&quot;</span><span class='bst-code-parenthesis'>}</span>
-    scores <span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>{</span><span class='bst-code-type'>String</span> <span class='bst-code-operator'>=</span> <span class='bst-code-type'>Int</span><span class='bst-code-parenthesis'>}</span> <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-parenthesis'>}</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    enabled <span class='moth-code-operator'>$</span><span class='moth-code-operator'>=</span> true
+    names <span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>}</span>
+    scores <span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
     </code></pre><h3>Exact contract</h3><ul><li><code>$Type</code> declares a reactive source with an explicit underlying type.</li><li><code>$=</code> infers the underlying type from the initializer.</li><li>Reactive syntax is access and storage metadata, not a first-class wrapper type.</li><li>Semantic type identity remains the underlying ordinary type.</li><li>The declaration owns stable mutation-capable storage in its runtime scope.</li><li>Source identity belongs to the binding.</li><li>Ordinary reads snapshot the current value.</li><li>A reactive declaration is runtime storage, not a compile-time constant.</li><li>Normal no-shadowing and type compatibility rules apply.</li><li>Collection and map source values retain their ordinary collection and map semantics.</li></ul><h3>Explicit and inferred types</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    enabled <span class='bst-code-operator'>$</span><span class='bst-code-operator'>=</span> true
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    enabled <span class='moth-code-operator'>$</span><span class='moth-code-operator'>=</span> true
     </code></pre><p>Both forms create the same kind of source. <code>$=</code> is convenient when the initializer makes the type obvious.</p><h3>Snapshot reads</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    snapshot <span class='bst-code-operator'>=</span> count
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    snapshot <span class='moth-code-operator'>=</span> count
     </code></pre><p>A plain read of a reactive source evaluates to its current value. It is a snapshot, not a live dependency.</p><h3>Reactive values are not a second type system</h3><p>A <code>$Int</code> source stores an <code>Int</code>. You can pass its current value anywhere an <code>Int</code> is expected. The <code>$</code> only marks the binding as reactive storage.</p><h3>Invalid positions</h3><p>Reactive syntax is not valid in struct fields, choice payloads, return slots or type aliases unless another accepted surface explicitly defines it. Function parameters are the only other accepted position. See <a href="#reactive-parameters">Reactive parameters</a>.</p><h3>Related concepts</h3><ul><li>For live template subscriptions see <a href="#subscriptions">Subscriptions</a>.</li><li>For function boundaries see <a href="#reactive-parameters">Reactive parameters</a>.</li></ul>
     </div>
     </fieldset></section>
@@ -793,27 +793,27 @@ body {
 
 
             <p>A subscription tells a template to watch a reactive source and update when it changes.</p><h3>Snapshot versus subscription</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    once <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>count<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
-    live <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    once <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>count<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
+    live <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     </code></pre><p>A plain capture reads the value once. A dollar-paren capture creates a live subscription.</p><h3>One bare source</h3><p>A subscription must name exactly one reactive source identifier.</p><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    view <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    view <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Not an expression</h3><p>You cannot subscribe to a field path, a function call, an arithmetic expression or mutable access. Those forms are deferred.</p><h3>Remember</h3><ul><li>Use dollar-paren syntax for live subscriptions.</li><li>Use plain capture for one-time snapshot reads.</li><li>Subscriptions work only in template positions.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>A template subscription creates a read-only live dependency on a reactive source.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    view <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    view <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Exact contract</h3><ul><li>A subscription is valid only in template head or capture positions accepted by V1.</li><li>It accepts exactly one bare reactive source identifier.</li><li>It captures stable source identity and read-only dependency metadata.</li><li>It does not capture a mutable borrow.</li><li>It does not copy the value.</li><li>It does not evaluate a computed expression.</li><li>An ordinary template capture is a snapshot.</li><li>The dollar sign must be immediately followed by an opening parenthesis.</li><li>Whitespace-separated dollar-paren is not subscription syntax.</li></ul><h3>Invalid operands</h3><p>The following are deferred or invalid:</p><ul><li>field paths such as a source field access</li><li>collection or map operations such as an indexed get call</li><li>function calls</li><li>arithmetic or other expressions</li><li>mutable access</li><li>empty argument</li><li>multiple arguments</li></ul><h3>Invalid contexts</h3><p>Subscriptions are invalid in:</p><ul><li>compile-time templates</li><li>constants</li><li>ordinary expression positions</li><li>non-template syntax positions</li></ul><h3>Snapshot versus subscription</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    snapshot <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>count<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
-    live <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    snapshot <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>count<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
+    live <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     </code></pre><p>The first reads the value once. The second records a dependency that may rerender when the source changes.</p><h3>Related concepts</h3><ul><li>For reactive sources see <a href="#reactive-sources">Reactive sources</a>.</li><li>For reactive parameters see <a href="#reactive-parameters">Reactive parameters</a>.</li><li>For template syntax see <a href="../templates">Templates</a>.</li></ul>
     </div>
     </fieldset></section>
@@ -867,49 +867,49 @@ body {
 
 
             <p>A reactive parameter lets a function receive a live source instead of a snapshot.</p><h3>Reactive parameter</h3><pre style=""><code class='codeblock'>
-    counter_view <span class='bst-code-operator'>|</span>count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    counter_view <span class='moth-code-operator'>|</span>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     ;
 
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    view <span class='bst-code-operator'>=</span> counter_view<span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    view <span class='moth-code-operator'>=</span> counter_view<span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span>
     </code></pre><p><code>$Int</code> means the function receives a reactive source of <code>Int</code>. Inside the function, a subscription to the parameter can stay live.</p><h3>Ordinary parameter</h3><pre style=""><code class='codeblock'>
-    show <span class='bst-code-operator'>|</span>count <span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>count<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    show <span class='moth-code-operator'>|</span>count <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>count<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     ;
 
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    view <span class='bst-code-operator'>=</span> show<span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    view <span class='moth-code-operator'>=</span> show<span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span>
     </code></pre><p>An ordinary <code>Int</code> parameter reads the current value once.</p><h3>Remember</h3><ul><li>Reactive parameters keep source identity.</li><li>They do not grant mutation permission.</li><li>A plain value cannot be passed where a reactive source is required.</li><li>Reactive parameters cannot have defaults.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>A reactive parameter passes stable source identity across a function boundary without granting mutation permission.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    counter_view <span class='bst-code-operator'>|</span>count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    counter_view <span class='moth-code-operator'>|</span>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     ;
     </code></pre><h3>Exact contract</h3><ul><li>A reactive parameter preserves stable source identity across the function boundary.</li><li>It is a read and subscription handle.</li><li>It does not grant mutation permission.</li><li>A non-reactive value cannot satisfy a reactive parameter.</li><li>Reactive parameters do not support defaults.</li><li>Passing a source to an ordinary <code>T</code> parameter performs an ordinary snapshot read.</li><li>A reactive parameter is not a first-class <code>$T</code> value type.</li><li>Reactive syntax is not valid in fields, return slots or aliases unless another accepted surface explicitly defines it.</li></ul><h3>Passing a source to a reactive parameter</h3><pre style=""><code class='codeblock'>
-    counter_view <span class='bst-code-operator'>|</span>count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    counter_view <span class='moth-code-operator'>|</span>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     ;
 
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    view <span class='bst-code-operator'>=</span> counter_view<span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    view <span class='moth-code-operator'>=</span> counter_view<span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span>
     </code></pre><h3>Passing a source to an ordinary parameter</h3><pre style=""><code class='codeblock'>
-    show <span class='bst-code-operator'>|</span>count <span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>count<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    show <span class='moth-code-operator'>|</span>count <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>count<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     ;
 
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    view <span class='bst-code-operator'>=</span> show<span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    view <span class='moth-code-operator'>=</span> show<span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span>
     </code></pre><p>The source is read once and the snapshot value is passed.</p><h3>Plain values cannot satisfy reactive parameters</h3><pre style=""><code class='codeblock'>
-    counter_view <span class='bst-code-operator'>|</span>count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    counter_view <span class='moth-code-operator'>|</span>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     ;
 
-    plain <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    <span class='bst-code-comment'>-- Error: plain value cannot satisfy reactive parameter</span>
-    <span class='bst-code-comment'>-- view = counter_view(plain)</span>
+    plain <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    <span class='moth-code-comment'>-- Error: plain value cannot satisfy reactive parameter</span>
+    <span class='moth-code-comment'>-- view = counter_view(plain)</span>
     </code></pre><h3>Related concepts</h3><ul><li>For reactive sources see <a href="#reactive-sources">Reactive sources</a>.</li><li>For subscriptions see <a href="#subscriptions">Subscriptions</a>.</li></ul>
     </div>
     </fieldset></section>
@@ -963,26 +963,26 @@ body {
 
 
             <p>Changing a reactive source notifies its subscribers.</p><h3>Assignment</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    count <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
     </code></pre><p>Assigning to <code>count</code> updates the source. Anything subscribed to <code>count</code> will know it may need to update.</p><h3>Mutable collection source</h3><pre style=""><code class='codeblock'>
-    names <span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>{</span><span class='bst-code-type'>String</span><span class='bst-code-parenthesis'>}</span> <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-string'>&quot;Priya&quot;</span><span class='bst-code-parenthesis'>}</span>
+    names <span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-    <span class='bst-code-operator'>~</span>names.push<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;Grace&quot;</span><span class='bst-code-parenthesis'>)</span> catch<span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;push failed&quot;</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>You still need <code>~</code> to mutate the collection. Reactivity does not relax the access rules. Fallible operations like <code>push</code> must be handled with <code>catch</code> or propagated inside a compatible <code>Error!</code> function.</p><h3>Remember</h3><ul><li>Assignment invalidates subscribers.</li><li>V1 invalidates the whole source.</li><li>Field, item or path-level invalidation is deferred.</li><li>Subscriptions are not active borrows. They do not block mutation.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Mutating a reactive source updates the same stable storage and invalidates its subscribers.</p><h3>Assignment</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    count <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
     </code></pre><p>Assignment updates the same stable source. Subscribers to that source are marked invalid.</p><h3>Invalidation in V1</h3><p>Mutation through a source invalidates the whole source in V1. Invalidating operations include:</p><ul><li>assignment</li><li>field writes</li><li>collection mutation</li><li>map mutation</li><li>mutable write-through calls</li></ul><p>Field, item and path-level invalidation are deferred.</p><h3>Mutation still follows access rules</h3><pre style=""><code class='codeblock'>
-    names <span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>{</span><span class='bst-code-type'>String</span><span class='bst-code-parenthesis'>}</span> <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-string'>&quot;Priya&quot;</span><span class='bst-code-parenthesis'>}</span>
+    names <span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-    <span class='bst-code-operator'>~</span>names.push<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;Grace&quot;</span><span class='bst-code-parenthesis'>)</span> catch<span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;push failed&quot;</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>Mutation still requires explicit <code>~</code> for mutable or exclusive receiver access. Reactive syntax does not bypass ordinary borrowing. Fallible mutations must be handled with <code>catch</code> or propagated inside a compatible <code>Error!</code> function. Top-level <code>!</code> propagation is rejected when no error channel exists.</p><h3>Subscriptions are not borrows</h3><p>A subscription is a read-only dependency record. It does not capture a mutable borrow, copy the value or extend a source-language lifetime. Subscriptions do not block later valid mutable access by themselves.</p><h3>Borrow validation</h3><p>Borrow validation records source dependencies and conservative invalidation facts. Reactive metadata is separate from active borrow lifetimes.</p><h3>Related concepts</h3><ul><li>For access and aliasing see <a href="../bindings">Values and bindings</a> and <a href="../codebase/memory-management/access-and-aliasing">Access and aliasing</a>.</li><li>For reactive sources see <a href="#reactive-sources">Reactive sources</a>.</li></ul>
     </div>
@@ -1037,12 +1037,12 @@ body {
 
 
             <p>A template with a subscription is still a <code>String</code>, but a supported backend can keep it live.</p><h3>Still a String</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
-    view <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+    view <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     </code></pre><p><code>view</code> has type <code>String</code>. The compiler just keeps extra metadata about the subscription.</p><h3>HTML-JS live fragment</h3><p>In an HTML-JS project, a top-level runtime template with a subscription can rerender when the source changes.</p><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Not every sink is live</h3><p><code>io.line</code> and <code>assert</code> do not accept reactive templates. HTML-Wasm rejects reactive runtime features for now.</p><h3>Remember</h3><ul><li>Subscription-bearing templates are ordinary <code>String</code> values.</li><li>HTML-JS can mount them as live fragments.</li><li>Other targets reject or snapshot them according to their own rules.</li></ul>
     </div>
 
@@ -1099,11 +1099,11 @@ body {
 
 
 
-            <p>Reactivity in Beanstalk is deliberately small. It covers UI state, not general callbacks.</p><h3>Constrained purpose</h3><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>$</span><span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+            <p>Reactivity in Moth is deliberately small. It covers UI state, not general callbacks.</p><h3>Constrained purpose</h3><pre style=""><code class='codeblock'>
+    count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span><span class='bst-code-parenthesis'>(</span>count<span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
-    </code></pre><p>You can declare a source, subscribe to it in a template and let the backend rerender when it changes.</p><h3>Not closures</h3><p>Beanstalk does not have anonymous function values, generic function values or general closures. Reactivity is the UI-oriented alternative.</p><h3>Remember</h3><ul><li>Reactivity is for explicit sources and template subscriptions.</li><li>It does not replace callbacks or higher-order functions.</li><li>Field subscriptions, derived values and finer DOM updates are deferred.</li></ul>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
+    </code></pre><p>You can declare a source, subscribe to it in a template and let the backend rerender when it changes.</p><h3>Not closures</h3><p>Moth does not have anonymous function values, generic function values or general closures. Reactivity is the UI-oriented alternative.</p><h3>Remember</h3><ul><li>Reactivity is for explicit sources and template subscriptions.</li><li>It does not replace callbacks or higher-order functions.</li><li>Field subscriptions, derived values and finer DOM updates are deferred.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -1135,109 +1135,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1252,63 +1252,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1318,36 +1318,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1360,65 +1360,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1426,10 +1426,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

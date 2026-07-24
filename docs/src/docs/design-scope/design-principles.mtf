@@ -1,0 +1,32 @@
+Moth keeps the source language deliberately small. Compiler complexity is acceptable when it makes the programmer-facing model simpler, safer and more predictable.
+
+### Central bias
+
+- keep the source language small, explicit and statically inspectable
+- prefer constrained built-in mechanisms over general metaprogramming
+- prefer static resolution over runtime dynamism
+- keep backend optimisations hidden behind stable source semantics
+- avoid features that need pervasive solver-heavy reasoning
+
+### Preferred constrained mechanisms
+
+| Need | Preferred mechanism |
+| ---- | ------------------- |
+| Compile-time generation | Templates, constants and builder directives |
+| Static reuse | Generic functions and explicit trait bounds |
+| Runtime heterogeneity | Choices |
+| Expected failure | `Error!`, postfix propagation and `catch` |
+| Platform integration | Builder packages, external packages and source-backed packages |
+| Memory safety | GC baseline plus mandatory borrow and lifetime-region validation |
+| Mutation | Explicit exclusive access rather than implicit mutation |
+| Ownership | Compiler-inferred optional transfer rather than source-visible move or lifetime syntax |
+| Declared bulk lifetimes | Accepted deferred `group` / `into` hard lifetime regions |
+| Performance | Hidden compiler and backend optimisation |
+
+### Read next
+
+- @#deferred-and-outside-scope (Deferred and outside scope)
+- @#excluded-language-families (Excluded language families)
+
+For the complete compiler-facing scope list, see
+@../../language-overview.md (Language overview).

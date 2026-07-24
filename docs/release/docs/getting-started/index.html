@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Getting Started with bean | Beanstalk</title>
-    <meta name="description" content="How to use the Beanstalk compiler CLI, create a project, run the dev server, and read compiler diagnostics.">
+    <title>Getting Started with moth | Moth</title>
+    <meta name="description" content="How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -668,7 +668,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with bean</h1><p><code>bean</code> is the Beanstalk compiler and project tool. You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.</p><p>It has a bunch of other tooling that is under rapid developemnt.</p><p>If you are running the compiler from the repository instead of an installed <code>bean</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
+    <section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with moth</h1><p><code>moth</code> is the Moth compiler and project tool. You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.</p><p>It has a bunch of other tooling that is under rapid developemnt.</p><p>If you are running the compiler from the repository instead of an installed <code>moth</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -676,9 +676,9 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    cargo run <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span> dev .
-    cargo run <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span> check .
-    cargo run <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span> build .
+    cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> dev .
+    cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> check .
+    cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> build .
     </code></pre></section>
     <section class="container"><h2>Commands</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
@@ -706,7 +706,7 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "><p><code>new html</code></p></td>
      <td style="padding: 0.1em 0.5em; "> Creates a complete HTML project scaffold.</td>
-     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, bean shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice, and creates the full default scaffold including <code>src/#page.bst</code>, <code>lib/</code>, output manifests, and an optional .gitignore.</p></td>
+     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice, and creates the full default scaffold including <code>src/#page.moth</code>, <code>lib/</code>, output manifests, and an optional .gitignore.</p></td>
         </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -786,10 +786,10 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean new html
-    bean new html my<span class='bst-code-operator'>-</span>site
-    bean new html <span class='bst-code-operator'>~</span><span class='bst-code-operator'>/</span>projects<span class='bst-code-operator'>/</span>my<span class='bst-code-operator'>-</span>site
-    </code></pre><p>If you omit the path, bean asks for confirmation in the current directory:</p><pre style="
+    moth new html
+    moth new html my<span class='moth-code-operator'>-</span>site
+    moth new html <span class='moth-code-operator'>~</span><span class='moth-code-operator'>/</span>projects<span class='moth-code-operator'>/</span>my<span class='moth-code-operator'>-</span>site
+    </code></pre><p>If you omit the path, moth asks for confirmation in the current directory:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -816,7 +816,7 @@ body {
               3. Cancel
 
             Choose 1/2/3:
-        </code></pre><p>If the path contains directories that do not exist, bean asks before creating them:</p><pre style="
+        </code></pre><p>If the path contains directories that do not exist, moth asks before creating them:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -824,11 +824,11 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    <span class='bst-code-struct'>The</span> project target contains directories that <span class='bst-code-keyword'>do</span> not exist<span class='bst-code-operator'>:</span>
-    <span class='bst-code-operator'>/</span>path<span class='bst-code-operator'>/</span>to<span class='bst-code-operator'>/</span>new<span class='bst-code-operator'>/</span>site
+    <span class='moth-code-struct'>The</span> project target contains directories that <span class='moth-code-keyword'>do</span> not exist<span class='moth-code-operator'>:</span>
+    <span class='moth-code-operator'>/</span>path<span class='moth-code-operator'>/</span>to<span class='moth-code-operator'>/</span>new<span class='moth-code-operator'>/</span>site
 
-    <span class='bst-code-struct'>Create</span> the missing directories and scaffold the project there<span class='bst-code-operator'>?</span> y<span class='bst-code-operator'>/</span><span class='bst-code-struct'>N</span><span class='bst-code-operator'>:</span>
-    </code></pre><p>After the final directory is chosen, bean asks for the project name:</p><pre style="
+    <span class='moth-code-struct'>Create</span> the missing directories and scaffold the project there<span class='moth-code-operator'>?</span> y<span class='moth-code-operator'>/</span><span class='moth-code-struct'>N</span><span class='moth-code-operator'>:</span>
+    </code></pre><p>After the final directory is chosen, moth asks for the project name:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -836,8 +836,8 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    <span class='bst-code-struct'>Project</span> name <span class='bst-code-parenthesis'>(</span>press <span class='bst-code-struct'>Enter</span> to use project directory name<span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>:</span>
-    </code></pre><p>Then it asks whether to add a .gitignore with Beanstalk defaults:</p><pre style="
+    <span class='moth-code-struct'>Project</span> name <span class='moth-code-parenthesis'>(</span>press <span class='moth-code-struct'>Enter</span> to use project directory name<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span>
+    </code></pre><p>Then it asks whether to add a .gitignore with Moth defaults:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -845,8 +845,8 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    <span class='bst-code-struct'>Add</span> a .gitignore with <span class='bst-code-struct'>Beanstalk</span> defaults<span class='bst-code-operator'>?</span> <span class='bst-code-struct'>Y</span><span class='bst-code-operator'>/</span>n<span class='bst-code-operator'>:</span>
-    </code></pre><p>If .gitignore already exists, bean asks whether to append missing defaults instead of overwriting.</p><h3>Generated project structure</h3><p>A scaffolded project looks like this:</p><pre style="
+    <span class='moth-code-struct'>Add</span> a .gitignore with <span class='moth-code-struct'>Moth</span> defaults<span class='moth-code-operator'>?</span> <span class='moth-code-struct'>Y</span><span class='moth-code-operator'>/</span>n<span class='moth-code-operator'>:</span>
+    </code></pre><p>If .gitignore already exists, moth asks whether to append missing defaults instead of overwriting.</p><h3>Generated project structure</h3><p>A scaffolded project looks like this:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -855,16 +855,16 @@ body {
         overflow-x: auto;
     "><code class='codeblock'>
             project-root/
-            ├── config.bst
+            ├── config.moth
             ├── src/
-            │   └── #page.bst
+            │   └── #page.moth
             ├── lib/
             ├── dev/
-            │   └── .beanstalk_manifest
-            ├── release/
-            │   └── .beanstalk_manifest
-            └── .gitignore
-        </code></pre><ul><li><code>lib/</code> is created empty by default for project-local source-backed packages.</li><li><code>dev/</code> and <code>release/</code> are output folders.</li><li>.beanstalk_manifest files are build-system metadata for safe stale-output cleanup.</li><li><code>src/#page.bst</code> is the conventional module root with a starter page. The filename is cosmetic.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
+        │   └── .moth_manifest
+        ├── release/
+        │   └── .moth_manifest
+        └── .gitignore
+    </code></pre><ul><li><code>lib/</code> is created empty by default for project-local source-backed packages.</li><li><code>dev/</code> and <code>release/</code> are output folders.</li><li>.moth_manifest files are build-system metadata for safe stale-output cleanup.</li><li><code>src/#page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -872,7 +872,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean new html my<span class='bst-code-operator'>-</span>site <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span>force
+    moth new html my<span class='moth-code-operator'>-</span>site <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>force
     </code></pre><p>It still asks for a second confirmation and never overwrites .gitignore or unrelated files.</p><p>After creation, check and run the project:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
@@ -881,11 +881,11 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    cd my<span class='bst-code-operator'>-</span>site
-    bean check .
-    bean dev .
+    cd my<span class='moth-code-operator'>-</span>site
+    moth check .
+    moth dev .
     </code></pre></section>
-    <section class="container"><h2>Run the dev server</h2><p><code>dev</code> is currently the most useful command for normal Beanstalk project work. It builds the project, serves the generated files locally, watches for source changes, and sends reload events to the browser.</p><pre style="
+    <section class="container"><h2>Run the dev server</h2><p><code>dev</code> is currently the most useful command for normal Moth project work. It builds the project, serves the generated files locally, watches for source changes, and sends reload events to the browser.</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -893,7 +893,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean dev .
+    moth dev .
     </code></pre><p>By default, open:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
@@ -911,9 +911,9 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean dev . <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span>port <span class='bst-code-number'>8080</span>
-    bean dev . <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span>host <span class='bst-code-number'>0.0.0.0</span>
-    bean dev . <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span>poll<span class='bst-code-operator'>-</span>interval<span class='bst-code-operator'>-</span>ms <span class='bst-code-number'>100</span>
+    moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>port <span class='moth-code-number'>8080</span>
+    moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>host <span class='moth-code-number'>0.0.0.0</span>
+    moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>poll<span class='moth-code-operator'>-</span>interval<span class='moth-code-operator'>-</span>ms <span class='moth-code-number'>100</span>
     </code></pre><p>When a build fails, fix the reported error and save again. The dev server is designed around fast feedback rather than a manual rebuild loop.</p></section>
     <section class="container"><h2>Build a project</h2><p>Use <code>build</code> when you want files written to disk without running the dev server.</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
@@ -923,7 +923,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean build .
+    moth build .
     </code></pre><p>For a release build:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
@@ -932,7 +932,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean build . <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span>release
+    moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release
     </code></pre><p>For HTML projects, generated files are written under the configured output folder. The default scaffold currently uses <code>dev</code> for development output and <code>release</code> for release output.</p></section>
     <section class="container"><h2>Check without building</h2><p><code>check</code> is the fastest correctness command for editor loops and CI-style validation. It does not write output artifacts, but it still runs the shared frontend diagnostics used by all backends.</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
@@ -942,7 +942,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean check .
+    moth check .
     </code></pre><p>Use terse mode when another tool will read the output:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
@@ -951,7 +951,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean check . <span class='bst-code-operator'>-</span><span class='bst-code-operator'>-</span>terse
+    moth check . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>terse
     </code></pre><p>Terse diagnostics have a stable compact shape:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
@@ -960,10 +960,10 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-            E|type|src/#page.bst|4:12|Expected Bool, found Int|help=Use a Bool expression here.
-            W|identifier_naming_convention|src/button.bst|1:1|Import alias case mismatch
+            E|type|src/#page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
+            W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch
         </code></pre></section>
-    <section class="container"><h2>Reading compiler errors</h2><p>Beanstalk uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors, and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
+    <section class="container"><h2>Reading compiler errors</h2><p>Moth uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors, and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -974,7 +974,7 @@ body {
             Type Error (ಠ_ಠ) 🔥
             Declaration 'count' has incompatible initializer type. Expected 'Int', but found 'String'.
 
-              --> src/#page.bst:6:17
+              --> src/#page.moth:6:17
                 |
               6 | count Int = "wrong"
                 |             ^^^^^^^
@@ -993,7 +993,7 @@ body {
 
     <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Syntax Error</td>
-     <td style="padding: 0.1em 0.5em; "> The source text could not be parsed as Beanstalk syntax.</td>
+     <td style="padding: 0.1em 0.5em; "> The source text could not be parsed as Moth syntax.</td>
      <td style="padding: 0.1em 0.5em; "> Check punctuation, block delimiters, template brackets, imports, and declaration shape.</td>
         </tr>
 
@@ -1018,12 +1018,12 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Malformed Config</td>
      <td style="padding: 0.1em 0.5em; "> The project config exists but contains unsupported, missing, or invalid settings.</td>
-     <td style="padding: 0.1em 0.5em; "> Check `config.bst` and backend-specific config rules.</td>
+     <td style="padding: 0.1em 0.5em; "> Check `config.moth` and backend-specific config rules.</td>
         </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Borrow Checker Violation</td>
-     <td style="padding: 0.1em 0.5em; "> The program violates Beanstalk's access and ownership rules.</td>
+     <td style="padding: 0.1em 0.5em; "> The program violates Moth's access and ownership rules.</td>
      <td style="padding: 0.1em 0.5em; "> Check mutable/exclusive access, later uses after possible moves, and overlapping borrows.</td>
         </tr>
 
@@ -1041,7 +1041,7 @@ body {
             
 
     </table></section>
-    <section class="container"><h2>Warnings and future suggestions</h2><p>Warnings are for code that can still compile but deserves attention. Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues, and import alias case mismatches.</p><p>Beanstalk deliberately separates correctness from style pressure. The future <code>suggest</code> command is planned to become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Beanstalk code. That is where noisy suggestions such as unused variables, unused imports, unused declarations, and more specific style improvements should live.</p><p>The intended workflow will be:</p><pre style="
+    <section class="container"><h2>Warnings and future suggestions</h2><p>Warnings are for code that can still compile but deserves attention. Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues, and import alias case mismatches.</p><p>Moth deliberately separates correctness from style pressure. The future <code>suggest</code> command is planned to become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code. That is where noisy suggestions such as unused variables, unused imports, unused declarations, and more specific style improvements should live.</p><p>The intended workflow will be:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
@@ -1049,11 +1049,11 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    bean check .
-    bean suggest .
-    bean fmt .
+    moth check .
+    moth suggest .
+    moth fmt .
     </code></pre><p>For now, use <code>check</code> and the compiler&#39;s normal warnings as the practical baseline.</p></section>
-    <section class="container"><h2>Planned bean extensions</h2><p><code>bean</code> is expected to become the main Beanstalk project tool, not just a thin compiler launcher. Planned additions include:</p><ul><li>a package manager for Beanstalk packages and project dependencies</li><li>a formatter for stable project-wide formatting</li><li><code>suggest</code>, a pedantic style and cleanup command to use alongside <code>check</code></li><li>richer <code>new</code> project options, including more complete config templates</li><li>stronger project maintenance commands as the build system matures</li></ul><p>The short-term rule is simple: <code>dev</code> for fast browser feedback, <code>check</code> for correctness, and <code>build</code> when you want output files.</p></section>
+    <section class="container"><h2>Planned moth extensions</h2><p><code>moth</code> is expected to become the main Moth project tool, not just a thin compiler launcher. Planned additions include:</p><ul><li>a package manager for Moth packages and project dependencies</li><li>a formatter for stable project-wide formatting</li><li><code>suggest</code>, a pedantic style and cleanup command to use alongside <code>check</code></li><li>richer <code>new</code> project options, including more complete config templates</li><li>stronger project maintenance commands as the build system matures</li></ul><p>The short-term rule is simple: <code>dev</code> for fast browser feedback, <code>check</code> for correctness, and <code>build</code> when you want output files.</p></section>
     <section class="container"><nav class="doc-pager doc-pager--single" aria-label="Language documentation">
         <a
             class="doc-pager__link doc-pager__link--next"
@@ -1068,109 +1068,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1185,63 +1185,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1251,36 +1251,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1293,65 +1293,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1359,10 +1359,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

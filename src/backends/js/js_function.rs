@@ -60,14 +60,14 @@ impl<'hir> JsEmitter<'hir> {
                 }
             }
             self.indent -= 1;
-            self.emit_line("} catch (__bs_err) {");
+            self.emit_line("} catch (__moth_err) {");
             self.indent += 1;
-            self.emit_line("if (__bs_err && __bs_err.__bs_result_propagate === true) {");
+            self.emit_line("if (__moth_err && __moth_err.__moth_result_propagate === true) {");
             self.indent += 1;
-            self.emit_line("return { tag: \"err\", value: __bs_err.value };");
+            self.emit_line("return { tag: \"err\", value: __moth_err.value };");
             self.indent -= 1;
             self.emit_line("}");
-            self.emit_line("throw __bs_err;");
+            self.emit_line("throw __moth_err;");
             self.indent -= 1;
             self.emit_line("}");
             Ok(())
@@ -126,17 +126,17 @@ impl<'hir> JsEmitter<'hir> {
 
     /// Returns the JS initializer for a local declaration.
     ///
-    /// WHAT: reactive source locals receive `__bs_reactive_binding(sourceId, undefined)` so writes
+    /// WHAT: reactive source locals receive `__moth_reactive_binding(sourceId, undefined)` so writes
     /// through the binding can schedule source dirtying. Ordinary locals keep the existing
-    /// `__bs_binding(undefined)` initializer.
+    /// `__moth_binding(undefined)` initializer.
     /// WHY: reactive source identity is HIR metadata, not a type distinction, so JS lowering must
     /// tag the runtime binding with the stable source id.
     fn reactive_local_initializer(&self, local_id: LocalId) -> String {
         let Some(source_id) = self.hir.side_table.reactive_source_id_for_local(local_id) else {
-            return "__bs_binding(undefined)".to_owned();
+            return "__moth_binding(undefined)".to_owned();
         };
 
-        format!("__bs_reactive_binding({}, undefined)", source_id.0)
+        format!("__moth_reactive_binding({}, undefined)", source_id.0)
     }
 
     fn function_is_fallible(&self, function: &HirFunction) -> bool {
@@ -151,7 +151,7 @@ impl<'hir> JsEmitter<'hir> {
         for parameter_local in &function.params {
             let parameter_name = self.local_name(*parameter_local)?;
             self.emit_line(&format!(
-                "{parameter_name} = __bs_param_binding({parameter_name});"
+                "{parameter_name} = __moth_param_binding({parameter_name});"
             ));
         }
 
@@ -404,7 +404,7 @@ impl<'hir> JsEmitter<'hir> {
             let source_name = self.local_name(*source_local)?.to_owned();
             let captured_name = self.next_temp_identifier("__jump_arg");
             self.emit_line(&format!(
-                "const {captured_name} = __bs_read({source_name});"
+                "const {captured_name} = __moth_read({source_name});"
             ));
             captured_values.push(captured_name);
         }
@@ -412,10 +412,10 @@ impl<'hir> JsEmitter<'hir> {
         for (destination_local, captured_name) in destination_locals.iter().zip(captured_values) {
             let destination_name = self.local_name(*destination_local)?.to_owned();
             if self.local_is_alias_only_at_block_entry(target, *destination_local) {
-                self.emit_line(&format!("__bs_write({destination_name}, {captured_name});"));
+                self.emit_line(&format!("__moth_write({destination_name}, {captured_name});"));
             } else {
                 self.emit_line(&format!(
-                    "__bs_assign_value({destination_name}, {captured_name});"
+                    "__moth_assign_value({destination_name}, {captured_name});"
                 ));
             }
         }

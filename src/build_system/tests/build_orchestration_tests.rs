@@ -67,7 +67,7 @@ fn assert_invalid_project_setting(
 fn build_project_returns_result_without_writing_files() {
     let root = temp_dir("build_only");
     fs::create_dir_all(&root).expect("should create temp root");
-    let entry_file = root.join("main.bst");
+    let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
@@ -93,14 +93,14 @@ fn build_project_returns_result_without_writing_files() {
 fn build_project_preserves_builder_warnings_in_build_result() {
     let root = temp_dir("warnings");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("main.bst"), "value = 1\n").expect("should write source file");
+    fs::write(root.join("main.moth"), "value = 1\n").expect("should write source file");
 
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
         let result = build_project(
             &ProjectBuilder::new(Box::new(WarningBuilder)),
-            "main.bst",
+            "main.moth",
             &[],
         )
         .expect("build should succeed");
@@ -118,7 +118,7 @@ fn build_project_preserves_builder_warnings_in_build_result() {
 fn build_project_calls_validate_project_config() {
     let root = temp_dir("validation_tracking");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("main.bst"), "value = 1\n").expect("should write source file");
+    fs::write(root.join("main.moth"), "value = 1\n").expect("should write source file");
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
@@ -130,7 +130,7 @@ fn build_project_calls_validate_project_config() {
             built: built.clone(),
         }));
 
-        build_project(&builder, "main.bst", &[]).expect("build should succeed");
+        build_project(&builder, "main.moth", &[]).expect("build should succeed");
 
         assert!(
             validated.load(std::sync::atomic::Ordering::SeqCst),
@@ -334,7 +334,7 @@ fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
     let root = temp_dir("frontend_signature_diagnostics");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(
-        root.join("main.bst"),
+        root.join("main.moth"),
         "use_missing |value Missing|:\n    return value\n;\n",
     )
     .expect("should write source file");
@@ -342,7 +342,7 @@ fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
         let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-        let Err(messages) = build_project(&builder, "main.bst", &[]) else {
+        let Err(messages) = build_project(&builder, "main.moth", &[]) else {
             panic!("build should fail with a frontend signature diagnostic");
         };
         let errors = messages.error_diagnostics().collect::<Vec<_>>();
@@ -356,7 +356,7 @@ fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
         assert_eq!(
             resolve_source_file_path(&errors[0].primary_location.scope, &messages.string_table),
             normalize_path(
-                &fs::canonicalize(root.join("main.bst")).expect("main file should canonicalize")
+                &fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize")
             )
         );
     }
@@ -369,12 +369,12 @@ fn config_validation_failure_returns_config_error_before_compilation() {
     let root = temp_dir("failing_validation");
     fs::create_dir_all(&root).expect("should create temp root");
     // Invalid frontend syntax to prove it fails BEFORE frontend compilation
-    fs::write(root.join("main.bst"), "invalid syntax;;;;;").expect("should write source file");
+    fs::write(root.join("main.moth"), "invalid syntax;;;;;").expect("should write source file");
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
         let builder = ProjectBuilder::new(Box::new(FailingValidationBuilder));
-        let result = build_project(&builder, "main.bst", &[]);
+        let result = build_project(&builder, "main.moth", &[]);
 
         let Err(messages) = result else {
             panic!("build_project should fail when config validation fails");
@@ -441,11 +441,11 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
     fs::create_dir_all(src.join("about")).expect("should create about folder");
 
     fs::write(
-        root.join("config.bst"),
+        root.join("config.moth"),
         "entry_root #= \"src\"\noutput_folder #= \"release\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("about").join("#page.bst"), "#[:<h1>About</h1>]\n")
+    fs::write(src.join("about").join("#page.moth"), "#[:<h1>About</h1>]\n")
         .expect("should write about");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
@@ -472,11 +472,11 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
-        root.join("config.bst"),
+        root.join("config.moth"),
         "entry_root #= \"src\"\noutput_folder #= \"release\"\npage_url_style #= \"slashy\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.bst"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("#page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let result = build_project(

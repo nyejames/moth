@@ -23,7 +23,7 @@ use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_hash_root_file, file_name_is_module_root_file, file_name_is_support_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::{BEANSTALK_FILE_EXTENSION, Config};
+use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
@@ -220,21 +220,21 @@ pub(crate) struct SourceTreeIndex {
 impl SourceTreeIndex {
     /// Build the index with one deterministic traversal of the configured entry root.
     ///
-    /// The traversal also owns entry-root sibling `.bst` file/folder import-name collisions and
+    /// The traversal also owns entry-root sibling `.moth` file/folder import-name collisions and
     /// entry-root folder/source-backed package-prefix collisions, using the same sorted directory
     /// entries it already reads. Skipped directories neither contribute collision facts nor get
     /// recursively scanned. Source-backed package-tree collision validation remains separate because
     /// registered source-backed package traversal lives outside entry-root indexing.
     ///
-    /// Each source directory may contain one `#*.bst` normal root or one `+*.bst` support root.
+    /// Each source directory may contain one `#*.moth` normal root or one `+*.moth` support root.
     /// Multiple or mixed roots in one directory are rejected through the existing structured config
     /// diagnostic lane. Normal roots carry the `Normal` role used by the project module graph to
     /// classify entry modules; the graph, not this index, owns entry selection. The optional
-    /// project-root `+*.bst` facade beside `config.bst` is discovered as a separate
+    /// project-root `+*.moth` facade beside `config.moth` is discovered as a separate
     /// `ProjectPackageFacade` node outside the entry-root containment tree and is never an entry.
     ///
-    /// The same traversal inventories every builder-supported source candidate (`.bst` always,
-    /// plus the `.bd`/`.md` kinds the selected builder registered). Unknown extensions and
+    /// The same traversal inventories every builder-supported source candidate (`.moth` always,
+    /// plus the `.mtf`/`.md` kinds the selected builder registered). Unknown extensions and
     /// known-but-unselected kinds never enter owned source sets. After deterministic
     /// `ModuleIdentityTable` construction, each supported candidate is classified under its
     /// nearest containing normal or support root into one [`OwnedSourceSet`] per module; the
@@ -285,7 +285,7 @@ impl SourceTreeIndex {
             entries.sort_by_key(|entry| entry.path());
 
             let mut subdirectories = Vec::new();
-            let mut bst_file_stems: BTreeSet<String> = BTreeSet::new();
+            let mut source_file_stems: BTreeSet<String> = BTreeSet::new();
             let mut importable_folder_names: BTreeSet<String> = BTreeSet::new();
             let mut directory_roots: Vec<DiscoveredDirectoryRoot> = Vec::new();
 
@@ -329,8 +329,8 @@ impl SourceTreeIndex {
                             )
                         })?;
 
-                if let Some(stem) = bst_stem_from_file_name(file_name) {
-                    bst_file_stems.insert(stem.to_owned());
+                if let Some(stem) = source_stem_from_file_name(file_name) {
+                    source_file_stems.insert(stem.to_owned());
                 }
 
                 let is_module_root = file_name_is_module_root_file(file_name);
@@ -374,7 +374,7 @@ impl SourceTreeIndex {
                     continue;
                 }
 
-                // The project package facade is discovered beside config.bst at the project root
+                // The project package facade is discovered beside config.moth at the project root
                 // and classified as a separate node. Skip it here so a directory shared with the
                 // facade does not also classify it as a support root or trigger mixed-root
                 // rejection. This also prevents the facade file from entering directory root
@@ -399,15 +399,15 @@ impl SourceTreeIndex {
                 });
             }
 
-            // Check sibling .bst file/folder import-name collisions from the same sorted
+            // Check sibling source file/folder import-name collisions from the same sorted
             // entries. Skipped folders are absent from importable_folder_names so they cannot
             // create false collisions.
-            for stem in &bst_file_stems {
+            for stem in &source_file_stems {
                 if importable_folder_names.contains(stem) {
                     return Err(project_structure_messages(
                         &directory,
                         InvalidConfigReason::BstFileFolderCollision {
-                            file_name: string_table.intern(&format!("{stem}.bst")),
+                            file_name: string_table.intern(&format!("{stem}.moth")),
                             folder_name: string_table.intern(stem),
                             directory: path_id(&directory, string_table),
                         },
@@ -626,9 +626,9 @@ impl SourceTreeIndex {
     }
 }
 
-/// Discover the optional project package facade beside `config.bst` at the project root.
+/// Discover the optional project package facade beside `config.moth` at the project root.
 ///
-/// WHAT: scans the project root for one direct-child `+*.bst` file.
+/// WHAT: scans the project root for one direct-child `+*.moth` file.
 /// WHY: the facade is a node outside the entry-root containment tree. Discovering it here keeps it
 ///      out of the per-directory root classification so a shared directory does not classify it as
 ///      a support root or trigger mixed-root rejection.
@@ -781,14 +781,14 @@ fn logical_module_path_from(
         })
 }
 
-/// Extract the import-name stem from a validated `.bst` file name, or `None` for other extensions.
+/// Extract the import-name stem from a validated source file name, or `None` for other extensions.
 ///
 /// The caller must have already validated `file_name` as UTF-8 so that extension and stem
 /// extraction can never silently skip a non-UTF-8 component.
-fn bst_stem_from_file_name(file_name: &str) -> Option<&str> {
+fn source_stem_from_file_name(file_name: &str) -> Option<&str> {
     let path = Path::new(file_name);
     let extension = path.extension().and_then(|extension| extension.to_str())?;
-    if extension != BEANSTALK_FILE_EXTENSION {
+    if extension != LANGUAGE_SOURCE_EXTENSION {
         return None;
     }
     path.file_stem().and_then(|stem| stem.to_str())
@@ -796,11 +796,11 @@ fn bst_stem_from_file_name(file_name: &str) -> Option<&str> {
 
 /// Resolve the builder-supported source kind for one validated UTF-8 file name.
 ///
-/// `.bst` is always the compiler-owned `Beanstalk` kind. Other extensions enter the inventory
+/// `.moth` is always the compiler-owned `Moth` kind. Other extensions enter the inventory
 /// only when they are compiler-recognized (via `SourceFileKind::from_extension`) and the selected
 /// builder registered them with the correct extension-to-kind mapping (via
 /// `supports_recognized_extension`). An arbitrary registered unknown extension (for example
-/// `txt -> Beandown`) and a mismatched known mapping (for example `bd -> PlainMarkdown`) both
+/// `txt -> Moth template`) and a mismatched known mapping (for example `bd -> PlainMarkdown`) both
 /// return `None` and stay out of owned source sets, so Stage 0 never duplicates the registry's
 /// recognition policy.
 fn source_kind_for_file(
@@ -929,7 +929,7 @@ fn classify_owned_sources(
         });
     }
 
-    // The optional project package facade root file lives beside config.bst, outside entry-root
+    // The optional project package facade root file lives beside config.moth, outside entry-root
     // containment. When the project root equals the entry root (the current compatibility case)
     // the facade file is reached by the traversal but excluded from the supported-candidate list
     // so it appears exactly once, owned only by the facade module. Assign it directly to the
@@ -959,7 +959,7 @@ fn classify_owned_sources(
 
         owned_buckets[facade_module_id.index()].push(OwnedSourceEntry {
             canonical_path: facade_file,
-            kind: SourceFileKind::Beanstalk,
+            kind: SourceFileKind::Moth,
             stable_identity,
         });
     }

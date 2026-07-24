@@ -258,7 +258,7 @@ fn validate_wasm_checked_numeric_ops(
 
 /// Reports the first reachable Float formatting or validation statement for the Wasm target.
 ///
-/// WHAT: Beanstalk Float formatting and external-Float boundary validation are valid HIR, but
+/// WHAT: Moth Float formatting and external-Float boundary validation are valid HIR, but
 ///       HTML-Wasm does not yet implement the helper and trap/recoverability contract for
 ///       `HirStatementKind::FormatFloat` or `HirStatementKind::ValidateFloat`.
 /// WHY: reject early with a structured unsupported-backend diagnostic instead of letting Wasm LIR

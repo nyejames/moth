@@ -1,10 +1,10 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0054"]
+diagnostic_codes = ["MOTH-RULE-0054"]
 
 message_contains = ["Known parameters: [a, b]"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0054"
+code = "MOTH-RULE-0054"
 reason = "invalid_call_shape.named_argument_not_found"

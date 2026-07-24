@@ -31,7 +31,7 @@ fn parser_accepts_valid_overrides() {
     let mut config = project_config();
     set_setting(&mut config, "html_lang", "en-GB");
     set_setting(&mut config, "html_title_prefix", "Docs | ");
-    set_setting(&mut config, "html_title_postfix", " | Beanstalk");
+    set_setting(&mut config, "html_title_postfix", " | Moth");
     set_setting(&mut config, "html_favicon", "/assets/favicon.ico");
     set_setting(&mut config, "html_inject_charset", "false");
     set_setting(&mut config, "html_inject_viewport", "false");
@@ -44,7 +44,7 @@ fn parser_accepts_valid_overrides() {
         .expect("valid settings should parse");
     assert_eq!(parsed.lang, "en-GB");
     assert_eq!(parsed.title_prefix, "Docs | ");
-    assert_eq!(parsed.title_postfix, " | Beanstalk");
+    assert_eq!(parsed.title_postfix, " | Moth");
     assert_eq!(parsed.favicon, Some(String::from("/assets/favicon.ico")));
     assert!(!parsed.inject_charset);
     assert!(!parsed.inject_viewport);
@@ -96,7 +96,7 @@ fn parser_uses_precise_location_from_setting_locations() {
     let mut string_table = StringTable::new();
     let precise_location = SourceLocation::new(
         InternedPath::try_from_filesystem_path(
-            PathBuf::from("project/config.bst").as_path(),
+            PathBuf::from("project/config.moth").as_path(),
             &mut string_table,
         )
         .expect("test path should be UTF-8"),
@@ -124,6 +124,6 @@ fn parser_falls_back_to_config_file_location() {
     let diagnostic = error.diagnostic().expect("config error should be typed");
     assert_eq!(
         diagnostic.primary_location.scope.to_path_buf(&string_table),
-        PathBuf::from("project/config.bst")
+        PathBuf::from("project/config.moth")
     );
 }

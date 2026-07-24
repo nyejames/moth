@@ -1,0 +1,31 @@
+A `.mtf` file sees compile-time constants from its module root and `@html` helpers.
+
+### A constant capture
+
+[codeblock, $code("moth"):
+    -- docs/#docs.moth
+    export:
+        site_name #= "Moth"
+    ;
+]
+
+[codeblock, $code("text"):
+    -- docs/intro.mtf
+    # Welcome to [site_name]
+]
+
+The compile-time constant is inserted into the Markdown at that position.
+
+### A nested $raw override
+
+[codeblock, $code("text"):
+    [$raw: <div>Raw HTML here</div>]
+]
+
+Nested templates default to `$md`, but an explicit directive overrides that.
+
+### Remember
+
+- Only compile-time constants are visible.
+- Runtime values are not visible.
+- Nested templates default to `$md`.

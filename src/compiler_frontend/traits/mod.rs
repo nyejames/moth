@@ -1,4 +1,4 @@
-//! Trait syntax, identity, and metadata for the Beanstalk trait subsystem.
+//! Trait syntax, identity, and metadata for the Moth trait subsystem.
 //!
 //! WHAT: parse-only shells plus resolved compile-time trait metadata.
 //! WHY: trait syntax is discovered at the header stage along with other top-level declarations;

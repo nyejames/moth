@@ -14,7 +14,7 @@ must_contain = [
     "globalThis.performance.now()",
 ]
 must_not_contain = [
-    "function __bs_time_mark_now(",
-    "function __bs_time_elapsed_since(",
-    "function __bs_time_duration_between(",
+    "function __moth_time_mark_now(",
+    "function __moth_time_elapsed_since(",
+    "function __moth_time_duration_between(",
 ]

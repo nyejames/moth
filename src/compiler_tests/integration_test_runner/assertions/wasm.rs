@@ -60,8 +60,8 @@ pub(super) fn validate_html_wasm_baseline_contract(build_result: &BuildResult) -
     };
 
     for required_fragment in [
-        "__bst_instantiate_wasm",
-        "instance.exports.bst_start()",
+        "__moth_instantiate_wasm",
+        "instance.exports.moth_start()",
         "\"./page.wasm\"",
     ] {
         if !js.contains(required_fragment) {
@@ -99,7 +99,7 @@ pub(super) fn validate_html_wasm_baseline_contract(build_result: &BuildResult) -
         }
     };
 
-    for required_export in ["memory", "bst_str_ptr", "bst_str_len", "bst_release"] {
+    for required_export in ["memory", "moth_str_ptr", "moth_str_len", "moth_release"] {
         if !exports.contains(&required_export.to_string()) {
             return Some(format!(
                 "html_wasm baseline contract missing required export '{required_export}'. Available exports: {exports:?}."
@@ -146,7 +146,7 @@ pub(super) fn collect_wasm_imports(bytes: &[u8]) -> Result<Vec<String>, String> 
                         Imports::Compact1 { module, .. } | Imports::Compact2 { module, .. } => {
                             return Err(format!(
                                 "collect_wasm_imports: compact import group for module '{module}' \
-                                 is not supported; Beanstalk does not emit compact imports"
+                                 is not supported; Moth does not emit compact imports"
                             ));
                         }
                     },

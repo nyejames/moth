@@ -3,33 +3,33 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-BORROW-0007"]
+diagnostic_codes = ["MOTH-BORROW-0007"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-BORROW-0007"
+code = "MOTH-BORROW-0007"
 reason = "invalid_mutable_access.aliased_value_requires_exclusive_access"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 5
 count = 1
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 4
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-BORROW-0007"]
+diagnostic_codes = ["MOTH-BORROW-0007"]
 
 [[backends.html_wasm.diagnostic_assertions]]
-code = "BST-BORROW-0007"
+code = "MOTH-BORROW-0007"
 reason = "invalid_mutable_access.aliased_value_requires_exclusive_access"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 5
 count = 1
 
 [[backends.html_wasm.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 4

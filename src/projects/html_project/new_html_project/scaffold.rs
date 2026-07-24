@@ -11,9 +11,9 @@ use crate::projects::html_project::new_html_project::{
 };
 use crate::projects::settings::CONFIG_FILE_NAME;
 
-const PAGE_FILE: &str = "src/#page.bst";
-const DEV_MANIFEST: &str = "dev/.beanstalk_manifest";
-const RELEASE_MANIFEST: &str = "release/.beanstalk_manifest";
+const PAGE_FILE: &str = "src/#page.moth";
+const DEV_MANIFEST: &str = "dev/.moth_manifest";
+const RELEASE_MANIFEST: &str = "release/.moth_manifest";
 const GITIGNORE_FILE: &str = ".gitignore";
 
 /// Relative paths of all scaffold-owned files.
@@ -54,7 +54,7 @@ pub(crate) fn run_preflight_checks(
             .collect::<Vec<_>>()
             .join("\n");
         let message = format!(
-            "WARNING: --force will overwrite existing Beanstalk scaffold files in:\n\
+            "WARNING: --force will overwrite existing Moth scaffold files in:\n\
              {}\n\n\
              Files that may be replaced:\n\
              {file_list}\n\n\
@@ -201,7 +201,7 @@ fn handle_gitignore(
 
     if !gitignore_path.exists() {
         let should_create =
-            prompt.confirm("Add a .gitignore with Beanstalk defaults? [Y/n]: ", true)?;
+            prompt.confirm("Add a .gitignore with Moth defaults? [Y/n]: ", true)?;
         if should_create {
             fs::write(
                 &gitignore_path,
@@ -227,7 +227,7 @@ fn handle_gitignore(
         });
     }
 
-    // Existing .gitignore — check whether it already contains the Beanstalk block.
+    // Existing .gitignore — check whether it already contains the Moth block.
     let existing = fs::read_to_string(&gitignore_path).map_err(|e| {
         format!(
             "Project creation failed while reading existing .gitignore: {e}.\n\
@@ -245,7 +245,7 @@ fn handle_gitignore(
     }
 
     let should_append = prompt.confirm(
-        ".gitignore already exists.\nAdd missing Beanstalk defaults to it? [Y/n]: ",
+        ".gitignore already exists.\nAdd missing Moth defaults to it? [Y/n]: ",
         true,
     )?;
     if should_append {
@@ -275,7 +275,7 @@ fn handle_gitignore(
     })
 }
 
-/// Check whether an existing `.gitignore` already contains the Beanstalk `/dev` rule.
+/// Check whether an existing `.gitignore` already contains the Moth `/dev` rule.
 ///
 /// Recognizes a trimmed line equal to `/dev` or `/dev/` so that a trailing
 /// slash does not cause a duplicate append. Uses exact line equality after

@@ -1,0 +1,27 @@
+Declarations are private to their module by default. The `export:` block marks what other modules can see.
+
+### A compact export block
+
+[codeblock, $code("moth"):
+    private_helper || -> String:
+        return "private"
+    ;
+
+    export:
+        public_name #= "Moth"
+
+        render || -> String:
+            return private_helper()
+        ;
+    ;
+]
+
+### Private by default
+
+Files in the same module can see each other's declarations. Other modules can only see what the `export:` block makes public.
+
+### Remember
+
+- `export:` is only valid in the module root file.
+- One `export:` block per root.
+- `#` means compile-time constant, not public.

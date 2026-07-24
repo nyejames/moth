@@ -1,0 +1,22 @@
+import @./what-a-compiler-does {content as reference_content}
+import @styles/docs {navbar, section, theme_head}
+
+page_title #= "01. What a compiler does"
+page_description #= "How compiler responsibilities and intermediate representations fit together."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Compiler design) / 01. What a compiler does
+
+    # What a compiler does
+
+    Between source text and a finished page sits a ladder of representations. This article names the jobs on that ladder and the owners who hold them.
+]
+
+#[section, reference_content]
+
+#[section, $md:
+    @../ (Compiler design) / @../moth-design-choices (Next)
+]

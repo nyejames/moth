@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["error_location_name_user_available file=test.bst line=42"]
+rendered_output_contains = ["error_location_name_user_available file=test.moth line=42"]

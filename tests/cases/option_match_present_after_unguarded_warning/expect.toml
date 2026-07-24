@@ -1,5 +1,5 @@
 [backends.html]
 mode = "success"
 warnings = "exact"
-warning_codes = ["BST-RULE-0022"]
+warning_codes = ["MOTH-RULE-0022"]
 rendered_output_contains = ["option_match_present_after_unguarded_warning result=present=5"]

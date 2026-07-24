@@ -6,8 +6,8 @@
 //!
 //! Collection representations:
 //! - Growable collections are plain JS arrays.
-//! - Fixed collections are branded `{ __bst_kind, items, fixedCapacity }` wrappers created by
-//!   `__bs_fixed_collection`.
+//! - Fixed collections are branded `{ __moth_kind, items, fixedCapacity }` wrappers created by
+//!   `__moth_fixed_collection`.
 //!
 //! Semantic policy:
 //! - `get`, `set`, and `remove` return `{ tag: "ok", value: ... }` or `{ tag: "err", value: ... }`.
@@ -38,11 +38,11 @@ impl<'hir> JsEmitter<'hir> {
 
         // Fixed collections use a small branded wrapper so runtime helpers can
         // distinguish them from arbitrary objects with `items` fields.
-        self.emit_line("function __bs_fixed_collection(items, fixedCapacity) {");
+        self.emit_line("function __moth_fixed_collection(items, fixedCapacity) {");
         self.with_indent(|emitter| {
             emitter.emit_line("return {");
             emitter.with_indent(|em| {
-                em.emit_line("__bst_kind: \"fixed_collection\",");
+                em.emit_line("__moth_kind: \"fixed_collection\",");
                 em.emit_line("items: items,");
                 em.emit_line("fixedCapacity: fixedCapacity,");
             });
@@ -53,7 +53,7 @@ impl<'hir> JsEmitter<'hir> {
 
         // Collection helpers share this accessor so fixed wrappers keep dense
         // array semantics for get, set, push, remove, and length.
-        self.emit_line("function __bs_collection_items(collection) {");
+        self.emit_line("function __moth_collection_items(collection) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (Array.isArray(collection)) {");
             emitter.with_indent(|em| {
@@ -66,7 +66,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Returns the fixed capacity for fixed collections, or null for growable.
-        self.emit_line("function __bs_collection_fixed_capacity(collection) {");
+        self.emit_line("function __moth_collection_fixed_capacity(collection) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (Array.isArray(collection)) {");
             emitter.with_indent(|em| {
@@ -81,7 +81,7 @@ impl<'hir> JsEmitter<'hir> {
         // Fixed-wrapper validation is intentionally stricter than duck typing:
         // malformed external values should use the existing invalid-collection
         // error path instead of corrupting collection semantics.
-        self.emit_line("function __bs_collection_is_valid(collection) {");
+        self.emit_line("function __moth_collection_is_valid(collection) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (Array.isArray(collection)) {");
             emitter.with_indent(|em| {
@@ -93,7 +93,7 @@ impl<'hir> JsEmitter<'hir> {
                 em.emit_line("return false;");
             });
             emitter.emit_line("}");
-            emitter.emit_line("if (collection.__bst_kind !== \"fixed_collection\") {");
+            emitter.emit_line("if (collection.__moth_kind !== \"fixed_collection\") {");
             emitter.with_indent(|em| {
                 em.emit_line("return false;");
             });
@@ -115,76 +115,76 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Validates that `index` is an integer within the logical item bounds.
-        // Works with both growable arrays and fixed wrappers via `__bs_collection_items`.
-        self.emit_line("function __bs_collection_index_is_valid(collection, index) {");
+        // Works with both growable arrays and fixed wrappers via `__moth_collection_items`.
+        self.emit_line("function __moth_collection_index_is_valid(collection, index) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("const items = __bs_collection_items(collection);");
+            emitter.emit_line("const items = __moth_collection_items(collection);");
             emitter
                 .emit_line("return Number.isInteger(index) && index >= 0 && index < items.length;");
         });
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_collection_get(collection, index) {");
+        self.emit_line("function __moth_collection_get(collection, index) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__bs_collection_is_valid(collection)) {");
+            emitter.emit_line("if (!__moth_collection_is_valid(collection)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
+                    "return __moth_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line("if (!__bs_collection_index_is_valid(collection, index)) {");
+            emitter.emit_line("if (!__moth_collection_index_is_valid(collection, index)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{out_of_bounds_message}\", {out_of_bounds_code});",
+                    "return __moth_error_result(\"{out_of_bounds_message}\", {out_of_bounds_code});",
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line("const items = __bs_collection_items(collection);");
+            emitter.emit_line("const items = __moth_collection_items(collection);");
             emitter.emit_line("return { tag: \"ok\", value: items[index] };");
         });
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_collection_set(collection, index, value) {");
+        self.emit_line("function __moth_collection_set(collection, index, value) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__bs_collection_is_valid(collection)) {");
+            emitter.emit_line("if (!__moth_collection_is_valid(collection)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
+                    "return __moth_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line("if (!__bs_collection_index_is_valid(collection, index)) {");
+            emitter.emit_line("if (!__moth_collection_index_is_valid(collection, index)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{out_of_bounds_message}\", {out_of_bounds_code});",
+                    "return __moth_error_result(\"{out_of_bounds_message}\", {out_of_bounds_code});",
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line("const items = __bs_collection_items(collection);");
+            emitter.emit_line("const items = __moth_collection_items(collection);");
             emitter.emit_line("items[index] = value;");
             emitter.emit_line("return { tag: \"ok\", value: null };");
         });
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_collection_push(collection, value) {");
+        self.emit_line("function __moth_collection_push(collection, value) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__bs_collection_is_valid(collection)) {");
+            emitter.emit_line("if (!__moth_collection_is_valid(collection)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
+                    "return __moth_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line("const items = __bs_collection_items(collection);");
-            emitter.emit_line("const fixedCapacity = __bs_collection_fixed_capacity(collection);");
+            emitter.emit_line("const items = __moth_collection_items(collection);");
+            emitter.emit_line("const fixedCapacity = __moth_collection_fixed_capacity(collection);");
             emitter.emit_line("if (fixedCapacity !== null && items.length >= fixedCapacity) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{capacity_exceeded_message}\", {capacity_exceeded_code});",
+                    "return __moth_error_result(\"{capacity_exceeded_message}\", {capacity_exceeded_code});",
                 ));
             });
             emitter.emit_line("}");
@@ -194,23 +194,23 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_collection_remove(collection, index) {");
+        self.emit_line("function __moth_collection_remove(collection, index) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__bs_collection_is_valid(collection)) {");
+            emitter.emit_line("if (!__moth_collection_is_valid(collection)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
+                    "return __moth_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line("if (!__bs_collection_index_is_valid(collection, index)) {");
+            emitter.emit_line("if (!__moth_collection_index_is_valid(collection, index)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{out_of_bounds_message}\", {out_of_bounds_code});",
+                    "return __moth_error_result(\"{out_of_bounds_message}\", {out_of_bounds_code});",
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line("const items = __bs_collection_items(collection);");
+            emitter.emit_line("const items = __moth_collection_items(collection);");
             emitter.emit_line("const removed = items.splice(index, 1)[0];");
             emitter.emit_line("return { tag: \"ok\", value: removed };");
         });
@@ -218,9 +218,9 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Returns the logical item count, not the fixed capacity.
-        self.emit_line("function __bs_collection_length(collection) {");
+        self.emit_line("function __moth_collection_length(collection) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("const items = __bs_collection_items(collection);");
+            emitter.emit_line("const items = __moth_collection_items(collection);");
             emitter.emit_line("return items.length;");
         });
         self.emit_line("}");

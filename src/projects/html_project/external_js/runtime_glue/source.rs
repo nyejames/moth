@@ -3,7 +3,7 @@
 //! WHAT: generates ES module source that imports raw JS exports and re-exports stable wrapper
 //!       functions, including fallible result-shape validation.
 //! WHY: the JS backend calls wrappers by stable names; wrappers adapt raw JS return shapes
-//!      to Beanstalk's internal conventions.
+//!      to Moth's internal conventions.
 
 use crate::backends::js::{
     builtin_error_code_js_field_name, builtin_error_message_js_field_name,
@@ -88,10 +88,10 @@ pub(super) fn generate_infallible_wrapper(wrapper_name: &str, export_name: &str)
 }
 
 /// Generates a fallible wrapper that validates the external result shape and converts it to
-/// Beanstalk's internal fallible carrier.
+/// Moth's internal fallible carrier.
 ///
 /// WHAT: calls the raw JS export, expects `{ ok: boolean, value? }` or `{ ok: false, error }`,
-///       and returns `{ tag: "ok", value: ... }` or an internal Beanstalk `Error` struct value.
+///       and returns `{ tag: "ok", value: ... }` or an internal Moth `Error` struct value.
 /// WHY: the JS backend HIR lowering assumes all fallible calls return this carrier shape.
 pub(super) fn generate_fallible_wrapper(
     wrapper_name: &str,

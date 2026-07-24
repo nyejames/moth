@@ -3,6 +3,6 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0085"]
+diagnostic_codes = ["MOTH-RULE-0085"]
 diagnostic_match = "contains"
 diagnostic_match_reason = "Current pre-canonical directory frontend compiles the imported child module as both a root candidate and a reachable dependency."

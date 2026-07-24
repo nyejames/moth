@@ -8,4 +8,4 @@ rendered_output_contains = ["adversarial_match_result_control_flow_chain sum=101
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_result_fallback", "while (true)", "switch (", "&&"]
+must_contain = ["__moth_result_fallback", "while (true)", "switch (", "&&"]

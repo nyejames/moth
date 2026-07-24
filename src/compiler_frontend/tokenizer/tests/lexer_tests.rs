@@ -36,7 +36,7 @@ fn tokenize_html_source(source: &str) -> (FileTokens, StringTable) {
 fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let diagnostic = tokenize(
         source,
         &source_path,
@@ -54,7 +54,7 @@ fn tokenize_source_with_registry(
     style_directives: &StyleDirectiveRegistry,
 ) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let file_tokens = tokenize(
         source,
         &source_path,
@@ -72,7 +72,7 @@ fn tokenize_source_with_directives(
     directives: &[StyleDirectiveSpec],
 ) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
     let file_tokens = tokenize(
@@ -87,37 +87,37 @@ fn tokenize_source_with_directives(
     (file_tokens, string_table)
 }
 
-fn tokenize_beandown_source(source: &str) -> (FileTokens, StringTable) {
+fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = frontend_test_style_directives();
-    let source_path = InternedPath::from_single_str("test.bd", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
     let file_tokens = tokenize(
         source,
         &source_path,
-        TokenizerEntryMode::for_source_file_kind(SourceFileKind::Beandown)
-            .expect("Beandown should tokenize"),
+        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+            .expect("Moth template should tokenize"),
         &style_directives,
         &mut string_table,
         None,
     )
-    .expect("Beandown tokenization should succeed");
+    .expect("Moth template tokenization should succeed");
     (file_tokens, string_table)
 }
 
-fn tokenize_beandown_error(source: &str) -> (CompilerDiagnostic, StringTable) {
+fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = frontend_test_style_directives();
-    let source_path = InternedPath::from_single_str("test.bd", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
     let diagnostic = tokenize(
         source,
         &source_path,
-        TokenizerEntryMode::for_source_file_kind(SourceFileKind::Beandown)
-            .expect("Beandown should tokenize"),
+        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+            .expect("Moth template should tokenize"),
         &style_directives,
         &mut string_table,
         None,
     )
-    .expect_err("Beandown tokenization should fail");
+    .expect_err("Moth template tokenization should fail");
     (*diagnostic, string_table)
 }
 
@@ -300,7 +300,7 @@ fn assert_invalid_string_escape(source: &str, expected_reason: InvalidStringEsca
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStringEscape)
     );
-    assert_eq!(diagnostic.kind.code(), "BST-SYNTAX-0034");
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0034");
     assert_eq!(
         diagnostic.primary_location.start_pos.line_number,
         diagnostic.primary_location.end_pos.line_number
@@ -393,8 +393,8 @@ fn raw_string_preserves_backslashes_and_newlines_without_escape_decoding() {
 }
 
 #[test]
-fn beandown_entry_body_rejects_unescaped_outer_template_close() {
-    let (diagnostic, string_table) = tokenize_beandown_error("]");
+fn moth_template_entry_body_rejects_unescaped_outer_template_close() {
+    let (diagnostic, string_table) = tokenize_moth_template_error("]");
 
     assert_eq!(
         diagnostic.kind,
@@ -403,7 +403,7 @@ fn beandown_entry_body_rejects_unescaped_outer_template_close() {
     assert!(matches!(
         &diagnostic.payload,
         DiagnosticPayload::UnescapedImplicitTemplateClose {
-            source_kind: SourceFileKind::Beandown
+            source_kind: SourceFileKind::MothTemplate
         }
     ));
     assert_eq!(
@@ -411,7 +411,7 @@ fn beandown_entry_body_rejects_unescaped_outer_template_close() {
             .primary_location
             .scope
             .to_portable_string(&string_table),
-        "test.bd"
+        "test.mtf"
     );
 
     let guidance = format_payload_guidance(
@@ -419,21 +419,21 @@ fn beandown_entry_body_rejects_unescaped_outer_template_close() {
         DiagnosticRenderContext::new(&string_table),
     )
     .join("\n");
-    assert!(guidance.contains("Beandown `.bd` source"));
+    assert!(guidance.contains("Moth template `.mtf` source"));
     assert!(guidance.contains(r#"["]"]"#));
 }
 
 #[test]
-fn beandown_entry_body_preserves_backslash_as_literal_text() {
-    let (file_tokens, string_table) = tokenize_beandown_source("\\n");
+fn moth_template_entry_body_preserves_backslash_as_literal_text() {
+    let (file_tokens, string_table) = tokenize_moth_template_source("\\n");
     let texts = collect_literal_texts(&file_tokens, &string_table);
 
     assert_eq!(texts, vec!["\\n"]);
 }
 
 #[test]
-fn beandown_entry_body_allows_nested_template_close() {
-    let (file_tokens, string_table) = tokenize_beandown_source("before [:inner] after");
+fn moth_template_entry_body_allows_nested_template_close() {
+    let (file_tokens, string_table) = tokenize_moth_template_source("before [:inner] after");
     let template_closes = file_tokens
         .tokens
         .iter()
@@ -446,8 +446,8 @@ fn beandown_entry_body_allows_nested_template_close() {
 }
 
 #[test]
-fn beandown_entry_body_keeps_double_dash_as_text() {
-    let (file_tokens, string_table) = tokenize_beandown_source("alpha -- still text\nbeta");
+fn moth_template_entry_body_keeps_double_dash_as_text() {
+    let (file_tokens, string_table) = tokenize_moth_template_source("alpha -- still text\nbeta");
     let texts = collect_literal_texts(&file_tokens, &string_table);
 
     assert_eq!(texts, vec!["alpha -- still text\nbeta"]);
@@ -1350,7 +1350,7 @@ fn tokenizes_style_directives_inside_template_heads() {
 fn rejects_legacy_reset_style_directive_name() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let error = tokenize(
         "[$reset: body]",
         &source_path,
@@ -1450,7 +1450,7 @@ fn tokenizes_children_directive_with_template_argument() {
 fn rejects_legacy_style_child_template_prefix_syntax() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "[$[:prefix], $md:\nhello\n]",
@@ -1511,7 +1511,7 @@ fn tokenizes_template_reactive_subscription_marker() {
 fn unknown_style_directives_fail_under_strict_registry() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "[$unknown: value]",
@@ -1562,7 +1562,7 @@ fn tokenizes_slot_and_insert_directives_inside_template_heads() {
 fn rejects_numeric_slot_directive_prefixes() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "[wrapper: [$1: first]]",
@@ -1877,7 +1877,7 @@ fn assert_import_path_missing_at_prefix(
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::CommonSyntaxMistake)
     );
-    assert_eq!(diagnostic.kind.code(), "BST-SYNTAX-0031");
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0031");
 
     match &diagnostic.payload {
         DiagnosticPayload::CommonSyntaxMistake { reason } => match reason {

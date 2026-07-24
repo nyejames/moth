@@ -6,7 +6,7 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = [
-    "<div id=\"bst-slot-0\"></div>",
+    "<div id=\"moth-slot-0\"></div>",
     "template_imported_style_wrapper_nested_helpers_runtime",
     "border-collapse: collapse;",
     "<td>",

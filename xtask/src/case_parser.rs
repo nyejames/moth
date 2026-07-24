@@ -19,7 +19,7 @@ use std::path::Path;
 
 /// A single benchmark case parsed from cases.txt
 ///
-/// Each case represents a command to execute against the bean binary,
+/// Each case represents a command to execute against the moth binary,
 /// along with its arguments and a sanitized name for use in filenames.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BenchmarkCase {

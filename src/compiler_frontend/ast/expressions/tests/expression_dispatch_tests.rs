@@ -42,7 +42,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 fn test_scope(string_table: &mut StringTable) -> (InternedPath, ScopeContext) {
-    let scope = InternedPath::from_single_str("test.bst", string_table);
+    let scope = InternedPath::from_single_str("test.moth", string_table);
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope.clone(),
@@ -220,7 +220,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
 fn hash_from_tokenized_source_rejected() {
     let mut string_table = StringTable::default();
     let source = "result = 1 # 2";
-    let file_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let file_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let file_tokens = tokenize(
         source,
         &file_path,
@@ -243,7 +243,7 @@ fn hash_from_tokenized_source_rejected() {
 
     // Slice from after Assign to end
     let expr_tokens: Vec<Token> = file_tokens.tokens[index..].to_vec();
-    let scope = InternedPath::from_single_str("test.bst", &mut string_table);
+    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
     let mut stream = FileTokens::new(scope.clone(), expr_tokens);
 
     let context = ScopeContext::new_for_tests(
@@ -294,7 +294,7 @@ fn full_frontend_stray_hash_error() {
 #[test]
 fn constant_identifier_uses_module_store_tir() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("test.bst", &mut string_table);
+    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
     let constant_name = string_table.intern("wrapper");
 
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));

@@ -1,0 +1,13 @@
+The compiler must finish a constant before runtime code begins.
+
+[codeblock, $code("moth"):
+    base #Int = 4
+    larger #Int = base + 2
+]
+
+A constant can use another constant that is already available.
+
+It cannot use a runtime variable or call a runtime function.
+
+When a constant expression is invalid, the compiler reports it during the
+build instead of leaving the failure for runtime.

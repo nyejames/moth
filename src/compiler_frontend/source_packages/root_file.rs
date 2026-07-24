@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::CONFIG_FILE_NAME;
+use crate::projects::settings::{CONFIG_FILE_NAME, LANGUAGE_SOURCE_SUFFIX};
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -79,38 +79,38 @@ impl PreparedSourcePackageRoots {
     }
 }
 
-/// Whether a filesystem filename is a non-config Beanstalk module root.
+/// Whether a filesystem filename is a non-config Moth module root.
 pub(crate) fn file_name_is_hash_root_file(file_name: &str) -> bool {
     let Some(root_name) = file_name.strip_prefix('#') else {
         return false;
     };
-    let Some(root_name) = root_name.strip_suffix(".bst") else {
+    let Some(root_name) = root_name.strip_suffix(LANGUAGE_SOURCE_SUFFIX) else {
         return false;
     };
 
     !root_name.is_empty()
 }
 
-/// Whether a filesystem filename is a `+*.bst` support root file.
+/// Whether a filesystem filename is a `+*.moth` support root file.
 pub(crate) fn file_name_is_support_root_file(file_name: &str) -> bool {
     let Some(root_name) = file_name.strip_prefix('+') else {
         return false;
     };
-    let Some(root_name) = root_name.strip_suffix(".bst") else {
+    let Some(root_name) = root_name.strip_suffix(LANGUAGE_SOURCE_SUFFIX) else {
         return false;
     };
 
     !root_name.is_empty()
 }
 
-/// Whether a filesystem filename is any canonical Beanstalk module root (`#*.bst` or `+*.bst`).
+/// Whether a filesystem filename is any canonical Moth module root (`#*.moth` or `+*.moth`).
 pub(crate) fn file_name_is_module_root_file(file_name: &str) -> bool {
     file_name_is_hash_root_file(file_name) || file_name_is_support_root_file(file_name)
 }
 
-/// Discover direct-child Beanstalk hash roots without assigning a semantic filename role.
+/// Discover direct-child Moth hash roots without assigning a semantic filename role.
 ///
-/// WHAT: applies the generic `#*.bst` filename policy to one source-backed package directory.
+/// WHAT: applies the generic `#*.moth` filename policy to one source-backed package directory.
 /// WHY: source-backed package preflight and path resolution must inspect the same filesystem candidates
 ///      while keeping missing or ambiguous roots available for typed Stage 0 diagnostics.
 pub(crate) fn discover_hash_root_file(
@@ -161,7 +161,8 @@ pub(crate) fn hash_root_file_name_from_import_component(component: &str) -> Opti
         return Some(component.to_owned());
     }
 
-    import_component_is_hash_root_file(component).then(|| format!("{component}.bst"))
+    import_component_is_hash_root_file(component)
+        .then(|| format!("{component}{LANGUAGE_SOURCE_SUFFIX}"))
 }
 
 /// Whether an import component identifies the canonical project config file.

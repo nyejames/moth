@@ -2,12 +2,12 @@
 //!
 //! WHAT: renders raw plain Markdown text to HTML.
 //!
-//! WHY: `.md` files are plain content assets and must not enter Beanstalk tokenization. This
+//! WHY: `.md` files are plain content assets and must not enter Moth tokenization. This
 //! module centralizes the small CommonMark/GFM-compatible rendering step so later stages can treat
 //! Markdown as a generated `content #String` without duplicating parser configuration.
 //!
 //! MUST NOT: own import resolution, source-kind registration, diagnostics, asset emission, route
-//! rewriting, Beandown behavior, or any compiler stage beyond raw-text-to-HTML conversion.
+//! rewriting, Moth template behavior, or any compiler stage beyond raw-text-to-HTML conversion.
 
 use pulldown_cmark::{Options, Parser, html};
 

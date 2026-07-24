@@ -31,7 +31,7 @@ use crate::bench_types::{
 };
 use crate::case_parser::{BenchmarkCase, parse_cases};
 use crate::compiler_binary::build_release_compiler_with_timers;
-use crate::process_runner::run_bean_command;
+use crate::process_runner::run_moth_command;
 use std::path::{Path, PathBuf};
 
 const BENCHMARK_CASES_PATH: &str = "benchmarks/cases.txt";
@@ -80,7 +80,7 @@ pub struct BenchOptions {
 pub fn run_benchmarks(options: BenchOptions) -> Result<(), String> {
     println!("Building release compiler...");
     let compiler = build_release_compiler_with_timers()?;
-    let bean_path = compiler.as_path();
+    let moth_path = compiler.as_path();
 
     let thread_count = effective_thread_count()?;
 
@@ -93,7 +93,7 @@ pub fn run_benchmarks(options: BenchOptions) -> Result<(), String> {
         options.measured_iterations
     );
 
-    let case_results = run_benchmark_cases(bean_path, &cases, &options)?;
+    let case_results = run_benchmark_cases(moth_path, &cases, &options)?;
 
     let groups = calculate_group_stats(&case_results);
     debug_assert_eq!(
@@ -200,7 +200,7 @@ fn load_benchmark_cases() -> Result<Vec<BenchmarkCase>, String> {
 
 /// Run all benchmark cases, returning per-case results.
 fn run_benchmark_cases(
-    bean_path: &Path,
+    moth_path: &Path,
     cases: &[BenchmarkCase],
     options: &BenchOptions,
 ) -> Result<Vec<BenchmarkCaseResult>, String> {
@@ -209,10 +209,10 @@ fn run_benchmark_cases(
     for case in cases {
         print!("{} ", case.name);
 
-        run_case_warmups(bean_path, case, options.warmup_runs)?;
+        run_case_warmups(moth_path, case, options.warmup_runs)?;
 
         let (durations, observations) =
-            run_case_measurements(bean_path, case, options.measured_iterations)?;
+            run_case_measurements(moth_path, case, options.measured_iterations)?;
 
         println!();
 
@@ -225,12 +225,12 @@ fn run_benchmark_cases(
 
 /// Execute warmup runs for a single case, failing fast on error.
 fn run_case_warmups(
-    bean_path: &Path,
+    moth_path: &Path,
     case: &BenchmarkCase,
     warmup_runs: usize,
 ) -> Result<(), String> {
     for _ in 0..warmup_runs {
-        let run = run_bean_command(bean_path, &case.command, &case.args)?;
+        let run = run_moth_command(moth_path, &case.command, &case.args)?;
         if !run.success {
             println!();
             return Err(format!(
@@ -247,7 +247,7 @@ fn run_case_warmups(
 ///
 /// Returns the collected durations and raw observations.
 fn run_case_measurements(
-    bean_path: &Path,
+    moth_path: &Path,
     case: &BenchmarkCase,
     measured_iterations: usize,
 ) -> Result<(Vec<f64>, Vec<BenchmarkCaseObservations>), String> {
@@ -255,7 +255,7 @@ fn run_case_measurements(
     let mut detailed_observations = Vec::new();
 
     for _ in 0..measured_iterations {
-        let run = run_bean_command(bean_path, &case.command, &case.args)?;
+        let run = run_moth_command(moth_path, &case.command, &case.args)?;
         if !run.success {
             println!();
             return Err(format!(

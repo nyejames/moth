@@ -1,0 +1,153 @@
+import @html {table, th, td}
+import @styles/docs {navbar, section, theme_head, codeblock}
+
+page_title #= "Design scope"
+page_description #= "Accepted language mechanisms, design constraints and intentionally excluded complexity."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Codebase) / Design scope
+
+    # Design scope
+
+    Moth is deliberately small. The compiler is allowed to be clever
+    only when the source model stays simple and explicit.
+]
+
+#[section, $md:
+    ## The central bias
+
+    - Keep the source language small, explicit and statically inspectable.
+    - Compiler complexity is acceptable when it makes source code simpler.
+    - Prefer constrained built-in mechanisms over general metaprogramming.
+    - Prefer static resolution over runtime dynamism.
+    - Keep backend optimisations hidden behind stable source semantics.
+    - Avoid features that need pervasive solver-heavy reasoning.
+]
+
+#[section, $md:
+    ## Deferred implementation versus outside scope
+
+    A surface can be unimplemented for two different reasons.
+
+    **Deferred implementation** fits the accepted design but has not landed
+    yet or is incomplete. The progress matrix reports whether a deferred
+    surface works today.
+
+    **Outside scope** conflicts with the intended language model. It needs an
+    explicit design change before it can be implemented.
+
+    This page explains whether a surface belongs in the language at all.
+]
+
+#[section, $md:
+    ## Preferred constrained mechanisms
+
+    [table:
+        [th:
+            [$md: **Need**]
+            [$md: **Preferred Moth mechanism**]
+        ]
+
+        [td:
+            [$md: Compile-time generation]
+            [$md: Templates, constants and builder directives]
+        ]
+
+        [td:
+            [$md: Static reuse]
+            [$md: Generic functions and explicit trait bounds]
+        ]
+
+        [td:
+            [$md: Runtime heterogeneity]
+            [$md: Choices]
+        ]
+
+        [td:
+            [$md: Expected failure]
+            [$md: `Error!`, postfix propagation and `catch`]
+        ]
+
+        [td:
+            [$md: Platform integration]
+            [$md: Builder packages, external packages and source-backed packages]
+        ]
+
+        [td:
+            [$md: Memory safety]
+            [$md: GC baseline plus mandatory borrow validation]
+        ]
+
+        [td:
+            [$md: Mutation]
+            [$md: Explicit exclusive access rather than implicit mutation]
+        ]
+
+        [td:
+            [$md: Ownership]
+            [$md: Compiler-inferred transfer rather than source-visible move or lifetime syntax]
+        ]
+
+        [td:
+            [$md: Performance]
+            [$md: Hidden compiler and backend optimisation]
+        ]
+    ]
+]
+
+#[section, $md:
+    ## Static reuse
+
+    Use generic trait bounds when code should be reused statically across
+    types.
+
+    [codeblock, $code("moth"):
+        render type Item is DISPLAY_TEXT |item Item| -> String:
+            return item.display()
+        ;
+    ]
+
+    Generic trait bounds are compile-time static reuse, not dynamic trait values.
+]
+
+#[section, $md:
+    ## Runtime heterogeneity
+
+    Use choices when a value should carry one of several concrete runtime
+    shapes.
+
+    [codeblock, $code("moth"):
+        Renderable ::
+            LabelItem | value Label |,
+            ButtonItem | value Button |,
+        ;
+    ]
+
+    Choices are the intended runtime heterogeneous value mechanism.
+]
+
+#[section, $md:
+    ## Questions to ask during design review
+
+    - Does this add a new source-language category when an existing constrained
+      mechanism is sufficient?
+    - Does it make behaviour more implicit?
+    - Does it need whole-program or solver-heavy reasoning?
+    - Does it introduce runtime type or erased-dispatch machinery?
+    - Does it leak backend representation into source semantics?
+    - Does it expose optimisation mechanics through source syntax?
+    - Is it merely unimplemented, or explicitly outside scope?
+    - Would the feature make code harder to inspect locally?
+]
+
+#[section, $md:
+    ## Related reading
+
+    - @../memory-management (Memory management): ownership, access and aliasing
+    - @../compiler-design (Compiler design): how the compiler implements the accepted design
+    - @../language (Compiler-facing language bridge): the route to the language overview
+    - @../../progress (Progress matrix): current implementation status
+]

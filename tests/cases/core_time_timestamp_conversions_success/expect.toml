@@ -14,7 +14,7 @@ must_contain = [
     "toISOString()",
 ]
 must_not_contain = [
-    "function __bs_time_timestamp_from_unix_seconds(",
-    "function __bs_time_timestamp_from_unix_milliseconds(",
-    "function __bs_time_to_iso_string(",
+    "function __moth_time_timestamp_from_unix_seconds(",
+    "function __moth_time_timestamp_from_unix_milliseconds(",
+    "function __moth_time_to_iso_string(",
 ]

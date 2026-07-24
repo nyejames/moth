@@ -7,20 +7,20 @@ rendered_output_contains = ["strict_contract first=99 removed=20 len=3"]
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_collection_get(",
-    "function __bs_collection_set(",
-    "function __bs_collection_push(",
-    "function __bs_collection_remove(",
-    "function __bs_collection_length(",
+    "function __moth_collection_get(",
+    "function __moth_collection_set(",
+    "function __moth_collection_push(",
+    "function __moth_collection_remove(",
+    "function __moth_collection_length(",
 ]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
 must_not_contain = [
-    "__bs_result_propagate(__bs_collection_push(",
-    "__bs_result_propagate(__bs_collection_remove(",
-    "__bs_result_propagate(__bs_collection_length(",
+    "__moth_result_propagate(__moth_collection_push(",
+    "__moth_result_propagate(__moth_collection_remove(",
+    "__moth_result_propagate(__moth_collection_length(",
 ]
 
 [[backends.html.artifact_assertions]]

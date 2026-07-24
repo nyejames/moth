@@ -41,7 +41,7 @@ fn label(kind: &TokenKind) -> &'static str {
 /// Parses the initializer token slice for a top-level `value = ...` declaration.
 fn parse_shell(source: &str) -> Vec<&'static str> {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut token_stream = tokenize(
         source,
@@ -234,7 +234,7 @@ fn non_control_flow_initializer_is_unchanged() {
 /// location the shell must point at.
 fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId, Option<usize>) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let token_stream = tokenize(
         source,
@@ -309,7 +309,7 @@ fn assert_missing_initializer_expression(
     );
     assert_eq!(
         diagnostic.kind.code(),
-        "BST-RULE-0043",
+        "MOTH-RULE-0043",
         "{case}: authored `=` with no initializer must keep the InvalidDeclaration stable code",
     );
     match &diagnostic.payload {
@@ -348,8 +348,8 @@ fn assert_missing_declaration_initializer(
     );
     assert_eq!(
         diagnostic.kind.code(),
-        "BST-RULE-0031",
-        "{case}: a declaration that omits `=` must keep the BST-RULE-0031 stable code",
+        "MOTH-RULE-0031",
+        "{case}: a declaration that omits `=` must keep the MOTH-RULE-0031 stable code",
     );
     match &diagnostic.payload {
         DiagnosticPayload::MissingDeclarationInitializer { name } => {

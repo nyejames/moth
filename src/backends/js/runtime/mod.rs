@@ -1,6 +1,6 @@
 //! JS runtime helper emission.
 //!
-//! This module emits the JS helper functions that implement Beanstalk's runtime
+//! This module emits the JS helper functions that implement Moth's runtime
 //! semantics. All helper groups are declared as JS `function` declarations, which means
 //! JS hoisting guarantees correct behaviour regardless of emission order.
 //!
@@ -31,7 +31,7 @@ use crate::backends::js::JsEmitter;
 /// Describes which checked numeric runtime helper families are required by emitted JS.
 ///
 /// WHY: arithmetic helpers, Float formatting, and Float boundary validation share the same
-/// `__bs_numeric_trap` carrier wrapper, but the helper bodies themselves should stay
+/// `__moth_numeric_trap` carrier wrapper, but the helper bodies themselves should stay
 /// demand-driven so unrelated programs do not grow extra runtime surface.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct NumericRuntimeHelperUsage {
@@ -49,7 +49,7 @@ impl NumericRuntimeHelperUsage {
 impl<'hir> JsEmitter<'hir> {
     /// Emits the full JS runtime prelude.
     ///
-    /// The JS backend preserves Beanstalk's aliasing semantics by modeling locals and computed
+    /// The JS backend preserves Moth's aliasing semantics by modeling locals and computed
     /// places as explicit reference records. The prelude is the concrete JS model for those
     /// semantics — it is not incidental helper code.
     ///

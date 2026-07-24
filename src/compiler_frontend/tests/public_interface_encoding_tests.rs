@@ -207,7 +207,7 @@ fn fixture_draft() -> PublicInterfaceDraft {
                 fields: vec![PublicFieldTypeSlot {
                     name: "name".to_owned(),
                     type_identity: builtin(CanonicalBuiltinType::String),
-                    folded_default: Some(PublicFoldedValue::String("bean".to_owned())),
+                    folded_default: Some(PublicFoldedValue::String("moth".to_owned())),
                 }],
                 receiver_methods,
             }),

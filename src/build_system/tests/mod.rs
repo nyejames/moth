@@ -309,11 +309,11 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
     ) -> Result<Project, CompilerMessages> {
         let homepage = modules
             .iter()
-            .find(|module| module.metadata.entry_point.ends_with("src/#page.bst"))
+            .find(|module| module.metadata.entry_point.ends_with("src/#page.moth"))
             .expect("directory build should discover homepage module");
         let docs_page = modules
             .iter()
-            .find(|module| module.metadata.entry_point.ends_with("src/docs/#page.bst"))
+            .find(|module| module.metadata.entry_point.ends_with("src/docs/#page.moth"))
             .expect("directory build should discover docs module");
 
         let warning = unused_variable_warning(

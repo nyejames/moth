@@ -31,7 +31,7 @@ pub struct ParsedNumericLiteral {
 ///      whole provided text rather than scanning a larger buffer.
 ///
 /// `source` must start with a digit. Leading signs are handled by callers because
-/// Beanstalk tokenizes `-` as a separate operator in this phase.
+/// Moth tokenizes `-` as a separate operator in this phase.
 pub fn parse_numeric_literal(
     source: &str,
 ) -> Result<ParsedNumericLiteral, NumberLiteralErrorReason> {
@@ -224,7 +224,7 @@ pub fn parse_numeric_literal(
 
 /// Materialize a whole-number token to a signed `i32`.
 ///
-/// WHY: Beanstalk Alpha `Int` is a signed 32-bit integer. Source numeric literals must
+/// WHY: Moth Alpha `Int` is a signed 32-bit integer. Source numeric literals must
 ///      fit that range at materialization time, before they are widened into the
 ///      `ExpressionKind::Int(i32)` carrier used elsewhere.
 ///
@@ -286,7 +286,7 @@ fn materialize_i32_text_with_sign(
     }
 }
 
-/// Parse signed numeric text into an `i32` using the Beanstalk whole-number grammar.
+/// Parse signed numeric text into an `i32` using the Moth whole-number grammar.
 ///
 /// WHAT: applies the shared numeric text grammar to an entire input string, including
 ///       an optional leading `-`, rejects non-whole-number forms, then materializes
@@ -342,7 +342,7 @@ pub fn materialize_f64(
 
 /// Parse a signed numeric text string into a finite `f64`.
 ///
-/// WHAT: applies the shared Beanstalk numeric text grammar to an entire input
+/// WHAT: applies the shared Moth numeric text grammar to an entire input
 ///       string, including an optional leading `-`, then checks that the
 ///       resulting `f64` is finite.
 /// WHY: `String -> Float` casts must agree with source numeric literals on

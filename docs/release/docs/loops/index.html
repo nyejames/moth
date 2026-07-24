@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Loops | Beanstalk</title>
-    <meta name="description" content="Conditional, collection and range loops with break and continue in Beanstalk.">
+    <title>Loops | Moth</title>
+    <meta name="description" content="Conditional, collection and range loops with break and continue in Moth.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -668,7 +668,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Loops</p><h1>Loops</h1><p>Loops repeat work without hiding what kind of repetition is happening. Beanstalk uses one <code>loop</code> keyword for conditions, collections and numeric ranges. The header tells you which form you are looking at.</p><p>Each section starts with a practical explanation. Switch only that section to Advanced when you need the exact rules and edge cases.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Loops</p><h1>Loops</h1><p>Loops repeat work without hiding what kind of repetition is happening. Moth uses one <code>loop</code> keyword for conditions, collections and numeric ranges. The header tells you which form you are looking at.</p><p>Each section starts with a practical explanation. Switch only that section to Advanced when you need the exact rules and edge cases.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Conditional loops
@@ -719,32 +719,32 @@ body {
 
 
             <p>A conditional loop keeps repeating while a condition is <code>true</code>.</p><p>The condition is checked before each trip through the loop. This means the body might not run at all.</p><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>~</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+    count <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    <span class='bst-code-keyword'>loop</span> count <span class='bst-code-operator'>&lt;</span> <span class='bst-code-number'>3</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Count</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>count<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
-        count <span class='bst-code-operator'>+</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
+    <span class='moth-code-keyword'>loop</span> count <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>3</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>count<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
+        count <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
     ;
     </code></pre><p>This prints three lines. Once <code>count &lt; 3</code> becomes <code>false</code>, the loop ends and the program continues after it.</p><h3>Make sure the condition can change</h3><p>A condition that never becomes <code>false</code> keeps the loop running forever.</p><pre style=""><code class='codeblock'>
-    running <span class='bst-code-operator'>~</span><span class='bst-code-operator'>=</span> true
+    running <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> true
 
-    <span class='bst-code-keyword'>loop</span> running<span class='bst-code-operator'>:</span>
-        do_some_work<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> running<span class='moth-code-operator'>:</span>
+        do_some_work<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
 
-        <span class='bst-code-keyword'>if</span> work_is_finished<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>:</span>
-            running <span class='bst-code-operator'>=</span> false
+        <span class='moth-code-keyword'>if</span> work_is_finished<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span>
+            running <span class='moth-code-operator'>=</span> false
         ;
     ;
     </code></pre><p>Use a conditional loop when repetition depends on a changing state rather than a collection or a known numeric range.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Beanstalk uses one <code>loop</code> keyword for conditional loops, collection iteration and numeric ranges.</p><p>A conditional loop evaluates a <code>Bool</code> condition before each iteration and runs its body while that condition remains <code>true</code>.</p><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>~</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+        <p>Moth uses one <code>loop</code> keyword for conditional loops, collection iteration and numeric ranges.</p><p>A conditional loop evaluates a <code>Bool</code> condition before each iteration and runs its body while that condition remains <code>true</code>.</p><pre style=""><code class='codeblock'>
+    count <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    <span class='bst-code-keyword'>loop</span> count <span class='bst-code-operator'>&lt;</span> <span class='bst-code-number'>3</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>count<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
-        count <span class='bst-code-operator'>+</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
+    <span class='moth-code-keyword'>loop</span> count <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>3</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>count<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
+        count <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
     ;
     </code></pre><h3>Contract</h3><ul><li>The form is <code>loop condition: ... ;</code>.</li><li>The condition must resolve to <code>Bool</code>.</li><li>The condition is checked before the first iteration, so the body may run zero times.</li><li>It is checked again after each completed iteration.</li><li>Conditional loops do not declare item or index bindings.</li><li>There is no separate <code>while</code> keyword.</li><li><code>break</code> exits the nearest active loop.</li><li><code>continue</code> skips the rest of the current body and starts the next condition check.</li></ul><h3>Header classification</h3><p>A top-level <code>to</code> marker makes the header a range loop.</p><p>Without a range marker, an explicit <code>|...|</code> suffix makes the header a collection loop. Without bindings, a collection-typed header is still a collection loop. Every other header must type-check as a <code>Bool</code> condition.</p><h3>Scope</h3><p>The body is a child scope. Names declared inside it are not visible after the loop.</p>
     </div>
@@ -799,53 +799,53 @@ body {
 
 
             <p>A collection loop visits each value in a collection, from the first item to the last.</p><pre style=""><code class='codeblock'>
-    names <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-string'>&quot;Priya&quot;</span>, <span class='bst-code-string'>&quot;Grace&quot;</span>, <span class='bst-code-string'>&quot;Linus&quot;</span><span class='bst-code-parenthesis'>}</span>
+    names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span>, <span class='moth-code-string'>&quot;Linus&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-    <span class='bst-code-keyword'>loop</span> names <span class='bst-code-operator'>|</span>name<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Hello,</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> names <span class='moth-code-operator'>|</span>name<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>The name inside <code>|...|</code> is created for the loop body. On each iteration it refers to the current item.</p><h3>Add an index when you need one</h3><p>A second name receives the zero-based position of the item.</p><pre style=""><code class='codeblock'>
-    names <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-string'>&quot;Priya&quot;</span>, <span class='bst-code-string'>&quot;Grace&quot;</span>, <span class='bst-code-string'>&quot;Linus&quot;</span><span class='bst-code-parenthesis'>}</span>
+    names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span>, <span class='moth-code-string'>&quot;Linus&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-    <span class='bst-code-keyword'>loop</span> names <span class='bst-code-operator'>|</span>name, index<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>index<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> names <span class='moth-code-operator'>|</span>name, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>index<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>The first item has index <code>0</code>.</p><h3>Ignore the item when only the repetition matters</h3><p>Bindings are optional.</p><pre style=""><code class='codeblock'>
-    items <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-number'>10</span>, <span class='bst-code-number'>20</span>, <span class='bst-code-number'>30</span><span class='bst-code-parenthesis'>}</span>
-    count <span class='bst-code-operator'>~</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>0</span>
+    items <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span>, <span class='moth-code-number'>30</span><span class='moth-code-parenthesis'>}</span>
+    count <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
-    <span class='bst-code-keyword'>loop</span> items<span class='bst-code-operator'>:</span>
-        count <span class='bst-code-operator'>+</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
+    <span class='moth-code-keyword'>loop</span> items<span class='moth-code-operator'>:</span>
+        count <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
     ;
     </code></pre><p>After this loop, <code>count</code> is <code>3</code>.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A collection loop visits the values in a Beanstalk collection in collection order.</p><pre style=""><code class='codeblock'>
-    names <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-string'>&quot;Priya&quot;</span>, <span class='bst-code-string'>&quot;Grace&quot;</span>, <span class='bst-code-string'>&quot;Linus&quot;</span><span class='bst-code-parenthesis'>}</span>
+        <p>A collection loop visits the values in a Moth collection in collection order.</p><pre style=""><code class='codeblock'>
+    names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span>, <span class='moth-code-string'>&quot;Linus&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-    <span class='bst-code-keyword'>loop</span> names <span class='bst-code-operator'>|</span>name, index<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>index<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> names <span class='moth-code-operator'>|</span>name, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>index<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Forms</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> items<span class='bst-code-operator'>:</span>
-        count <span class='bst-code-operator'>+</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
+    <span class='moth-code-keyword'>loop</span> items<span class='moth-code-operator'>:</span>
+        count <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
     ;
 
-    <span class='bst-code-keyword'>loop</span> items <span class='bst-code-operator'>|</span>item<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        inspect<span class='bst-code-parenthesis'>(</span>item<span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> items <span class='moth-code-operator'>|</span>item<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        inspect<span class='moth-code-parenthesis'>(</span>item<span class='moth-code-parenthesis'>)</span>
     ;
 
-    <span class='bst-code-keyword'>loop</span> items <span class='bst-code-operator'>|</span>item, index<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        inspect<span class='bst-code-parenthesis'>(</span>item<span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> items <span class='moth-code-operator'>|</span>item, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        inspect<span class='moth-code-parenthesis'>(</span>item<span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Contract</h3><ul><li>The source expression must have a collection type.</li><li>Collection loops do not use a general iterable protocol.</li><li>Hash maps are not collection-loop sources.</li><li>Bindings are optional.</li><li>The first binding receives the current item and has the collection&#39;s element type.</li><li>The optional second binding receives the zero-based iteration index and has type <code>Int</code>.</li><li>Binding names are written inside one <code>|...|</code> suffix.</li><li>A binding list may contain one or two names.</li><li>An empty binding list, a third binding or duplicate binding names are invalid.</li><li>Loop bindings are immutable body-local names.</li><li>A binding name must not collide with another visible name.</li><li>An empty collection runs the body zero times.</li></ul><h3>Evaluation</h3><p>The source expression is evaluated once before iteration begins. The collection length is captured at the same point.</p><p>The loop then visits zero-based indexes from <code>0</code> up to, but not including, that captured length.</p><h3>Removed syntax</h3><p>The old <code>in</code> form is not valid.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> item <span class='bst-code-keyword'>in</span> items<span class='bst-code-operator'>:</span>
-        inspect<span class='bst-code-parenthesis'>(</span>item<span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> item <span class='moth-code-keyword'>in</span> items<span class='moth-code-operator'>:</span>
+        inspect<span class='moth-code-parenthesis'>(</span>item<span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>Write the collection source first, then place bindings after it:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> items <span class='bst-code-operator'>|</span>item<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        inspect<span class='bst-code-parenthesis'>(</span>item<span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> items <span class='moth-code-operator'>|</span>item<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        inspect<span class='moth-code-parenthesis'>(</span>item<span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre>
     </div>
@@ -900,60 +900,60 @@ body {
 
 
             <p>A range loop counts through numbers.</p><p><code>to</code> stops before the end value:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>5</span> <span class='bst-code-operator'>|</span>number<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>number<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>|</span>number<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>number<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>This produces <code>0</code>, <code>1</code>, <code>2</code>, <code>3</code> and <code>4</code>.</p><p>Use <code>to &amp;</code> when the end value should be included:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-operator'>&amp;</span> <span class='bst-code-number'>5</span> <span class='bst-code-operator'>|</span>number<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>number<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-operator'>&amp;</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>|</span>number<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>number<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>This also produces <code>5</code>.</p><h3>Start from zero</h3><p>You can leave out the first <code>0</code>.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>5</span> <span class='bst-code-operator'>|</span>number<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>number<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>|</span>number<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>number<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Change the step</h3><p>Use <code>by</code> to skip between values:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>10</span> <span class='bst-code-keyword'>by</span> <span class='bst-code-number'>2</span> <span class='bst-code-operator'>|</span>number<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>number<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-keyword'>by</span> <span class='moth-code-number'>2</span> <span class='moth-code-operator'>|</span>number<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>number<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>This produces <code>0</code>, <code>2</code>, <code>4</code>, <code>6</code> and <code>8</code>.</p><h3>Count downward</h3><p>The direction comes from the bounds. You do not need a <code>reverse</code> keyword.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>5</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>0</span> <span class='bst-code-operator'>|</span>number<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>number<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>5</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>0</span> <span class='moth-code-operator'>|</span>number<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>number<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>Float ranges need an explicit step:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0.0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>1.0</span> <span class='bst-code-keyword'>by</span> <span class='bst-code-number'>0.1</span> <span class='bst-code-operator'>|</span>amount<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>amount<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0.0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>1.0</span> <span class='moth-code-keyword'>by</span> <span class='moth-code-number'>0.1</span> <span class='moth-code-operator'>|</span>amount<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>amount<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>A range loop generates numeric values directly from its loop header.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>10</span> <span class='bst-code-keyword'>by</span> <span class='bst-code-number'>2</span> <span class='bst-code-operator'>|</span>value, index<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>index<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>value<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-keyword'>by</span> <span class='moth-code-number'>2</span> <span class='moth-code-operator'>|</span>value, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>index<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>value<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Forms</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> start <span class='bst-code-keyword'>to</span> end<span class='bst-code-operator'>:</span>
+    <span class='moth-code-keyword'>loop</span> start <span class='moth-code-keyword'>to</span> end<span class='moth-code-operator'>:</span>
         ...
     ;
 
-    <span class='bst-code-keyword'>loop</span> start <span class='bst-code-keyword'>to</span> <span class='bst-code-operator'>&amp;</span> end <span class='bst-code-operator'>|</span>value<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
+    <span class='moth-code-keyword'>loop</span> start <span class='moth-code-keyword'>to</span> <span class='moth-code-operator'>&amp;</span> end <span class='moth-code-operator'>|</span>value<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
         ...
     ;
 
-    <span class='bst-code-keyword'>loop</span> start <span class='bst-code-keyword'>to</span> end <span class='bst-code-keyword'>by</span> step <span class='bst-code-operator'>|</span>value, index<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
+    <span class='moth-code-keyword'>loop</span> start <span class='moth-code-keyword'>to</span> end <span class='moth-code-keyword'>by</span> step <span class='moth-code-operator'>|</span>value, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
         ...
     ;
 
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-keyword'>to</span> end <span class='bst-code-operator'>|</span>value<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-keyword'>to</span> end <span class='moth-code-operator'>|</span>value<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
         ...
     ;
 
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-operator'>&amp;</span> end <span class='bst-code-operator'>|</span>value<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-operator'>&amp;</span> end <span class='moth-code-operator'>|</span>value<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
         ...
     ;
     </code></pre><h3>Bounds</h3><ul><li><code>to</code> uses an exclusive end bound.</li><li><code>to &amp;</code> uses an inclusive end bound.</li><li><code>loop to end</code> starts at <code>0</code>.</li><li><code>loop to &amp; end</code> starts at <code>0</code> and includes the end value.</li><li>Ascending bounds count upward.</li><li>Descending bounds count downward.</li><li>There is no <code>reverse</code> keyword.</li><li>When start and end are equal, an exclusive range has no iterations and an inclusive range has one.</li></ul><h3>Step</h3><ul><li>Without <code>by</code>, integer ranges use a step magnitude of <code>1</code>.</li><li><code>by</code> supplies a magnitude. The compiler applies the direction implied by the bounds.</li><li>A literal zero step is rejected during compilation.</li><li>A non-literal step is checked before the first iteration. A value of zero fails at runtime.</li><li>Any range using <code>Float</code> requires an explicit <code>by</code> step.</li><li>Start, end and step expressions must have numeric types.</li></ul><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0.0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>1.0</span> <span class='bst-code-keyword'>by</span> <span class='bst-code-number'>0.1</span> <span class='bst-code-operator'>|</span>amount<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>amount<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0.0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>1.0</span> <span class='moth-code-keyword'>by</span> <span class='moth-code-number'>0.1</span> <span class='moth-code-operator'>|</span>amount<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>amount<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Evaluation</h3><p>Start, end and explicit step expressions are evaluated once, from left to right, before the first bounds check.</p><p>The loop keeps those evaluated values for the complete iteration.</p><h3>Bindings</h3><p>Bindings are optional.</p><p>The first binding receives the current range value. It has type <code>Float</code> when any range operand is <code>Float</code>. Otherwise it has type <code>Int</code>.</p><p>The optional second binding receives the zero-based iteration index and always has type <code>Int</code>.</p><p>Bindings use the same one-or-two-name <code>|...|</code> rules as collection loops.</p><h3>Checked updates</h3><p>Runtime range counter updates use checked numeric operations. Their failures follow the numeric failure mode of the enclosing function or active-root code.</p><p>Const range loops diagnose statically known counter failures while folding.</p>
     </div>
@@ -1008,25 +1008,25 @@ body {
 
 
             <p>Use <code>break</code> when a loop should end early.</p><p>Use <code>continue</code> when the current iteration should stop but the loop itself should keep going.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>10</span> <span class='bst-code-operator'>|</span>number<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>if</span> number is <span class='bst-code-number'>2</span><span class='bst-code-operator'>:</span>
-            <span class='bst-code-keyword'>continue</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-operator'>|</span>number<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>if</span> number is <span class='moth-code-number'>2</span><span class='moth-code-operator'>:</span>
+            <span class='moth-code-keyword'>continue</span>
         ;
 
-        <span class='bst-code-keyword'>if</span> number is <span class='bst-code-number'>7</span><span class='bst-code-operator'>:</span>
-            <span class='bst-code-keyword'>break</span>
+        <span class='moth-code-keyword'>if</span> number is <span class='moth-code-number'>7</span><span class='moth-code-operator'>:</span>
+            <span class='moth-code-keyword'>break</span>
         ;
 
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>number<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>number<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>The loop skips <code>2</code>. It ends when it reaches <code>7</code>, so <code>7</code> and the later numbers are not printed.</p><h3>Nested loops</h3><p><code>break</code> and <code>continue</code> affect the closest loop around them.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>3</span> <span class='bst-code-operator'>|</span>row<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>3</span> <span class='bst-code-operator'>|</span>column<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-            <span class='bst-code-keyword'>if</span> column is <span class='bst-code-number'>1</span><span class='bst-code-operator'>:</span>
-                <span class='bst-code-keyword'>continue</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>3</span> <span class='moth-code-operator'>|</span>row<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>3</span> <span class='moth-code-operator'>|</span>column<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+            <span class='moth-code-keyword'>if</span> column is <span class='moth-code-number'>1</span><span class='moth-code-operator'>:</span>
+                <span class='moth-code-keyword'>continue</span>
             ;
 
-            io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> row <span class='bst-code-parenthesis'>[</span>row<span class='bst-code-parenthesis'>]</span>, column <span class='bst-code-parenthesis'>[</span>column<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+            io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> row <span class='moth-code-parenthesis'>[</span>row<span class='moth-code-parenthesis'>]</span>, column <span class='moth-code-parenthesis'>[</span>column<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
         ;
     ;
     </code></pre><p>In this example, <code>continue</code> skips one column. The outer row loop keeps running.</p>
@@ -1034,18 +1034,18 @@ body {
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p><code>break</code> and <code>continue</code> are statement-only controls for the nearest active loop.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>10</span> <span class='bst-code-operator'>|</span>number<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>if</span> number is <span class='bst-code-number'>2</span><span class='bst-code-operator'>:</span>
-            <span class='bst-code-keyword'>continue</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-operator'>|</span>number<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>if</span> number is <span class='moth-code-number'>2</span><span class='moth-code-operator'>:</span>
+            <span class='moth-code-keyword'>continue</span>
         ;
 
-        <span class='bst-code-keyword'>if</span> number is <span class='bst-code-number'>7</span><span class='bst-code-operator'>:</span>
-            <span class='bst-code-keyword'>break</span>
+        <span class='moth-code-keyword'>if</span> number is <span class='moth-code-number'>7</span><span class='moth-code-operator'>:</span>
+            <span class='moth-code-keyword'>break</span>
         ;
 
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>number<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>number<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
-    </code></pre><h3><code>break</code></h3><p><code>break</code> exits the nearest active loop immediately. Statements later in that loop body do not run for the current iteration.</p><h3><code>continue</code></h3><p><code>continue</code> skips the rest of the nearest active loop body.</p><p>The next action depends on the loop form:</p><ul><li>a conditional loop checks its condition again</li><li>a collection loop advances to its next item</li><li>a range loop advances its counter, then checks the next bound</li></ul><h3>Rules</h3><ul><li><code>break</code> and <code>continue</code> are valid only inside a loop.</li><li>They may appear inside a branch or nested block that is itself inside a loop.</li><li>They target the nearest enclosing loop.</li><li>Beanstalk does not have labelled loop control.</li><li>Neither statement produces a value.</li><li><code>return</code> and <code>return!</code> leave the function rather than only leaving the loop.</li></ul><p>Template loops use structural template forms for loop control. Those are specified by the Templates documentation rather than this statement-loop reference.</p>
+    </code></pre><h3><code>break</code></h3><p><code>break</code> exits the nearest active loop immediately. Statements later in that loop body do not run for the current iteration.</p><h3><code>continue</code></h3><p><code>continue</code> skips the rest of the nearest active loop body.</p><p>The next action depends on the loop form:</p><ul><li>a conditional loop checks its condition again</li><li>a collection loop advances to its next item</li><li>a range loop advances its counter, then checks the next bound</li></ul><h3>Rules</h3><ul><li><code>break</code> and <code>continue</code> are valid only inside a loop.</li><li>They may appear inside a branch or nested block that is itself inside a loop.</li><li>They target the nearest enclosing loop.</li><li>Moth does not have labelled loop control.</li><li>Neither statement produces a value.</li><li><code>return</code> and <code>return!</code> leave the function rather than only leaving the loop.</li></ul><p>Template loops use structural template forms for loop control. Those are specified by the Templates documentation rather than this statement-loop reference.</p>
     </div>
     </fieldset></section>
     <section class="container"><nav class="doc-pager" aria-label="Language documentation">
@@ -1073,109 +1073,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1190,63 +1190,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1256,36 +1256,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1298,65 +1298,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1364,10 +1364,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

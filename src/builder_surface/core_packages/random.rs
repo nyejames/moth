@@ -51,7 +51,7 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__bs_random_int".to_owned(),
+                        "__moth_random_int".to_owned(),
                     )),
                     wasm: None,
                 },

@@ -62,7 +62,7 @@ pub fn register_parsed_js_module(
     if let Some(receiver_method) = parsed.receiver_methods.first() {
         return Err(CompilerError::compiler_error(format!(
             "JS package registration reached receiver-style signature '{}'. External packages must expose free functions and opaque types only.",
-            receiver_method.beanstalk_name
+            receiver_method.moth_name
         )));
     }
 
@@ -137,7 +137,7 @@ fn convert_parsed_function_to_spec(
     }
 
     Ok(ExternalFunctionSpec {
-        name: function.beanstalk_name.clone(),
+        name: function.moth_name.clone(),
         parameters,
         returns,
         error_return_type,

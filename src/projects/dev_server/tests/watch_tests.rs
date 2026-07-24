@@ -16,8 +16,8 @@ use std::time::{Duration, SystemTime};
 fn detects_added_and_removed_files() {
     let mut previous = HashMap::new();
     let mut current = HashMap::new();
-    let path_a = PathBuf::from("a.bst");
-    let path_b = PathBuf::from("b.bst");
+    let path_a = PathBuf::from("a.moth");
+    let path_b = PathBuf::from("b.moth");
 
     previous.insert(
         path_a.clone(),
@@ -46,7 +46,7 @@ fn detects_added_and_removed_files() {
 
 #[test]
 fn detects_modified_file_fingerprints() {
-    let path = PathBuf::from("test.bst");
+    let path = PathBuf::from("test.moth");
     let mut previous = HashMap::new();
     let mut current = HashMap::new();
 
@@ -90,7 +90,7 @@ fn directory_scope_watches_config_entry_root_and_package_folders() {
     let scope = WatchScope::derive(&root, Some(&config), &output_dir);
 
     assert!(scope.watches_path(&canonical_root.join(CONFIG_FILE_NAME)));
-    assert!(scope.watches_path(&canonical_root.join("src/main.bst")));
+    assert!(scope.watches_path(&canonical_root.join("src/main.moth")));
     assert!(scope.watches_path(&canonical_root.join("src/helper.js")));
     assert!(scope.watches_path(&canonical_root.join("assets/logo.png")));
     assert!(scope.watches_path(&canonical_root.join("assets/vendor/lib.js")));
@@ -110,7 +110,7 @@ fn directory_scope_without_config_watches_entry_directory() {
 
     let scope = WatchScope::derive(&root, None, &output_dir);
 
-    assert!(scope.watches_path(&canonical_root.join("src/main.bst")));
+    assert!(scope.watches_path(&canonical_root.join("src/main.moth")));
     assert!(!scope.watches_path(&canonical_root.join("dev/main.html")));
 
     fs::remove_dir_all(&root).expect("should remove temp test dir");
@@ -126,7 +126,7 @@ fn scanner_only_scans_declared_watch_targets() {
     fs::create_dir_all(&src_dir).expect("should create source dir");
     fs::create_dir_all(&unrelated_dir).expect("should create unrelated dir");
 
-    fs::write(src_dir.join("main.bst"), "main").expect("should write source file");
+    fs::write(src_dir.join("main.moth"), "main").expect("should write source file");
     fs::write(output_dir.join("bundle.js"), "js").expect("should write output file");
     fs::write(unrelated_dir.join("debug.txt"), "ignore me").expect("should write unrelated file");
 
@@ -141,7 +141,7 @@ fn scanner_only_scans_declared_watch_targets() {
 
     let fingerprints = collect_fingerprints(&scope).expect("scanner should complete");
     assert!(fingerprints.keys().all(|path| path.starts_with(&src_dir)));
-    assert!(fingerprints.keys().any(|path| path.ends_with("main.bst")));
+    assert!(fingerprints.keys().any(|path| path.ends_with("main.moth")));
     assert!(
         fingerprints
             .keys()
@@ -181,14 +181,17 @@ fn ignore_rules_cover_git_output_and_editor_temp_files() {
     assert!(should_ignore_path(&root.join(".git/index"), &output_dir));
     assert!(should_ignore_path(&root.join("dev/main.js"), &output_dir));
     assert!(should_ignore_path(
-        &root.join("src/main.bst.swp"),
+        &root.join("src/main.moth.swp"),
         &output_dir
     ));
     assert!(should_ignore_path(
-        &root.join("src/#main.bst#"),
+        &root.join("src/#main.moth#"),
         &output_dir
     ));
-    assert!(!should_ignore_path(&root.join("src/main.bst"), &output_dir));
+    assert!(!should_ignore_path(
+        &root.join("src/main.moth"),
+        &output_dir
+    ));
 }
 
 #[test]
@@ -196,7 +199,7 @@ fn exact_file_target_collects_single_fingerprint() {
     let root = temp_dir("watch_exact_file");
     let output_dir = root.join("dev");
     fs::create_dir_all(&root).expect("should create temp test dir");
-    let source_file = root.join("page.bst");
+    let source_file = root.join("page.moth");
     fs::write(&source_file, "hello").expect("should write source file");
 
     let scope = WatchScope {
@@ -229,8 +232,8 @@ fn recursive_directory_target_collects_nested_files() {
     let src_dir = root.join("src");
     let nested_dir = src_dir.join("pages");
     fs::create_dir_all(&nested_dir).expect("should create nested dirs");
-    fs::write(src_dir.join("main.bst"), "main").expect("should write main");
-    fs::write(nested_dir.join("about.bst"), "about").expect("should write nested file");
+    fs::write(src_dir.join("main.moth"), "main").expect("should write main");
+    fs::write(nested_dir.join("about.moth"), "about").expect("should write nested file");
 
     let scope = WatchScope {
         output_dir: output_dir.clone(),
@@ -247,15 +250,15 @@ fn recursive_directory_target_collects_nested_files() {
         2,
         "recursive target should collect nested files"
     );
-    assert!(fingerprints.keys().any(|path| path.ends_with("main.bst")));
-    assert!(fingerprints.keys().any(|path| path.ends_with("about.bst")));
+    assert!(fingerprints.keys().any(|path| path.ends_with("main.moth")));
+    assert!(fingerprints.keys().any(|path| path.ends_with("about.moth")));
 
     fs::remove_dir_all(&root).expect("should remove temp test dir");
 }
 
 #[test]
 fn timestamp_failure_propagates_with_path_context() {
-    let path = PathBuf::from("unreachable.bst");
+    let path = PathBuf::from("unreachable.moth");
     let result = fingerprint_from_modified(
         Err(io::Error::from(io::ErrorKind::PermissionDenied)),
         12,
@@ -265,7 +268,7 @@ fn timestamp_failure_propagates_with_path_context() {
     let error = result.expect_err("modified-time failure should propagate");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     assert!(
-        error.to_string().contains("unreachable.bst"),
+        error.to_string().contains("unreachable.moth"),
         "error should name the affected path: {error}"
     );
 }
@@ -275,7 +278,7 @@ fn same_length_edit_detected_via_timestamp_change() {
     let root = temp_dir("watch_same_length_edit");
     let output_dir = root.join("dev");
     fs::create_dir_all(&root).expect("should create temp test dir");
-    let source_file = root.join("page.bst");
+    let source_file = root.join("page.moth");
     fs::write(&source_file, "first value").expect("should write initial content");
 
     let scope = WatchScope {

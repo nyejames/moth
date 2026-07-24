@@ -1,0 +1,48 @@
+The plain Markdown renderer uses a CommonMark-compatible parser with GFM extensions. This is a different renderer from Moth's md renderer.
+
+### Supported features
+
+- Headings: `#`, `##`, `###` and deeper render as `<h1>`, `<h2>`, `<h3>` etc.
+- Paragraphs: separated by blank lines, rendered as `<p>`.
+- Emphasis: `*italic*` renders as `<em>`, `**bold**` renders as `<strong>`.
+- Links: standard Markdown link syntax renders as `<a href="...">`.
+- Unordered lists: `- item` renders as `<ul><li>`.
+- Ordered lists: `1. item` renders as `<ol><li>`.
+- Nested lists: indentation creates nested `<ul>` or `<ol>`.
+- Inline code: single backticks render as `<code>`.
+- Fenced code blocks: triple backticks render as pre and code elements. A language tag adds a class attribute.
+- Tables: pipe table syntax renders as `<table>` with `<thead>`, `<th>`, `<tbody>` and `<td>`.
+- Task lists: bracketed checkbox syntax renders as disabled checkboxes.
+- Strikethrough: `~~text~~` renders as `<del>`.
+- Footnotes: caret-bracketed syntax renders footnote anchors and text.
+- Raw HTML: HTML tags in the source are preserved in the output.
+
+### Unsupported extensions
+
+- Moth template syntax is not interpreted. Dollar-prefixed directives, double-bracket template bodies and single-bracket insertions are literal text.
+- Smart punctuation is disabled. `--` remains `--`, not an em dash.
+- There is no sanitizer or raw-HTML policy key. Raw HTML is preserved as-is.
+
+### Ordinary Markdown links versus Moth md links
+
+In plain Markdown, links use ordinary Markdown syntax. The href and src values are rendered literally. They are not rewritten or tracked as assets.
+
+In Moth's md renderer (used by moth template files), at-path link syntax creates Moth-aware links. This syntax is not available in plain Markdown.
+
+### Renderer configuration
+
+The renderer uses `pulldown-cmark` with the following options enabled:
+
+- `ENABLE_TABLES`
+- `ENABLE_TASKLISTS`
+- `ENABLE_STRIKETHROUGH`
+- `ENABLE_FOOTNOTES`
+- `ENABLE_GFM`
+
+Smart punctuation is not enabled. The renderer is registered by the HTML builder.
+
+### Related concepts
+
+- For moth template md rendering see @../moth-templates/#implicit-markdown (Implicit Markdown).
+- For choosing between formats see @#choosing-a-content-format (Choosing a content format).
+- For Markdown file structure see @#markdown-files (Markdown files).

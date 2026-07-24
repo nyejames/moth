@@ -77,7 +77,7 @@ define_stable_reason_keys! {
         &InvalidConfigReason::NoRootModuleEntries { .. } => "invalid_config.no_root_module_entries",
         &InvalidConfigReason::MultipleModuleRootFiles { .. } => "invalid_config.multiple_module_root_files",
         &InvalidConfigReason::ConfigImportRootViolation => "invalid_config.config_import_root_violation",
-        &InvalidConfigReason::BstFileFolderCollision { .. } => "invalid_config.bst_file_folder_collision",
+        &InvalidConfigReason::BstFileFolderCollision { .. } => "invalid_config.moth_file_folder_collision",
     },
 
     InvalidPackageFolderReason => {

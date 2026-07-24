@@ -8,11 +8,11 @@ rendered_output_exact = "map_explicit_copy_independent_after_mutation observed=t
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0064"]
+diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
-code = "BST-RULE-0064"
+code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.hashmap_construction"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 7
 count = 1

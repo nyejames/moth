@@ -70,7 +70,7 @@ fn template_tokens_from_source_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
 ) -> FileTokens {
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
     let mut tokens = tokenize(
         source,
         &scope,
@@ -337,7 +337,7 @@ fn template_parse_rendered_error_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
 ) -> String {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let mut token_stream = match tokenize(
         source,
         &scope,

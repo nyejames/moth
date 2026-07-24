@@ -326,7 +326,7 @@ pub(super) fn create_header(
         }
 
         // `=` only creates a declaration header for struct shells. Runtime top-level
-        // `name = value` stays in the entry start body outside `config.bst`.
+        // `name = value` stays in the entry start body outside `config.moth`.
         TokenKind::Assign => {
             if let Some(TokenKind::TypeParameterBracket) = token_stream.peek_next_token() {
                 ensure_not_keyword_shadow_identifier(

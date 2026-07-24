@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Traits | Beanstalk</title>
-    <meta name="description" content="Static trait contracts, explicit conformance and generic bounds in Beanstalk.">
+    <title>Traits | Moth</title>
+    <meta name="description" content="Static trait contracts, explicit conformance and generic bounds in Moth.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -719,22 +719,22 @@ body {
 
 
             <p>A trait names a behaviour that a type can promise to provide.</p><h3>A trait with one requirement</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>DISPLAY_TEXT</span> must<span class='bst-code-operator'>:</span>
-        display <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
     </code></pre><p>This says: any type that claims to be <code>DISPLAY_TEXT</code> must provide a <code>display</code> method that returns a <code>String</code>.</p><h3>A marker trait</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>SERIALIZABLE</span> must<span class='bst-code-operator'>:</span>
+    <span class='moth-code-struct'>SERIALIZABLE</span> must<span class='moth-code-operator'>:</span>
     ;
     </code></pre><p>A marker trait has no methods. It is still a real contract that a type can explicitly adopt.</p><h3>Remember</h3><ul><li>Trait names are all caps.</li><li>A trait lists method signatures, not bodies.</li><li>A trait is a static contract, not a runtime value or type.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>A trait is an explicit nominal method contract. A type satisfies a trait only when source declares conformance.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>DISPLAY_TEXT</span> must<span class='bst-code-operator'>:</span>
-        display <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
     </code></pre><h3>Exact contract</h3><ul><li>A trait is an explicit nominal method contract.</li><li>Trait names use all-caps identifiers.</li><li>Trait declarations are top-level.</li><li><code>TRAIT must:</code> opens a trait declaration.</li><li>One final semicolon closes the declaration.</li><li>Requirements are method signatures only.</li><li>Marker traits with no requirements are valid.</li><li>Traits are compile-time static contracts.</li><li>Traits are not runtime values.</li><li>Static non-method requirements are deferred.</li><li>Generic traits and generic trait methods are outside scope.</li></ul><h3>Marker traits</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>SERIALIZABLE</span> must<span class='bst-code-operator'>:</span>
+    <span class='moth-code-struct'>SERIALIZABLE</span> must<span class='moth-code-operator'>:</span>
     ;
     </code></pre><p>A marker trait carries no requirements but still represents a deliberate contract that a type may declare.</p><h3>Traits are not value types</h3><p>A trait name may appear in trait declarations, conformance declarations and generic bounds. It is invalid as an ordinary variable, parameter, field, return, collection element, choice payload or alias target type.</p><h3>Related concepts</h3><ul><li>For requirement syntax see <a href="#trait-requirements">Trait requirements</a>.</li><li>For conformance see <a href="#conformance">Conformance</a>.</li></ul>
     </div>
@@ -789,38 +789,38 @@ body {
 
 
             <p>Trait requirements describe the methods a conforming type must have. The receiver has a special name.</p><h3><code>This</code> means the implementing type</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>DISPLAY_TEXT</span> must<span class='bst-code-operator'>:</span>
-        display <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
     </code></pre><p><code>This</code> is a placeholder for whatever type later declares conformance.</p><h3>Mutable receiver</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>RESETTABLE</span> must<span class='bst-code-operator'>:</span>
-        reset <span class='bst-code-operator'>|</span><span class='bst-code-operator'>~</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>RESETTABLE</span> must<span class='moth-code-operator'>:</span>
+        reset <span class='moth-code-operator'>|</span><span class='moth-code-operator'>~</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span>
     ;
     </code></pre><p><code>~This</code> means the method may mutate the receiver.</p><h3>Named <code>This</code> parameters</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>SAME</span> must<span class='bst-code-operator'>:</span>
-        equals <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This,</span> other <span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>Bool</span>
+    <span class='moth-code-struct'>SAME</span> must<span class='moth-code-operator'>:</span>
+        equals <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This,</span> other <span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Bool</span>
     ;
     </code></pre><p>When <code>This</code> is not the receiver, it must have a parameter name like <code>other This</code>.</p><h3>Remember</h3><ul><li>Use <code>This</code> for the receiver in trait requirements.</li><li>Use lowercase <code>this</code> only in concrete method implementations.</li><li>Requirements have no body. They only declare the method shape.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Trait requirements describe the method shapes a conforming type must provide. The receiver is always <code>This</code> or <code>~This</code>.</p><h3>Receiver syntax</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>RESETTABLE</span> must<span class='bst-code-operator'>:</span>
-        reset <span class='bst-code-operator'>|</span><span class='bst-code-operator'>~</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>RESETTABLE</span> must<span class='moth-code-operator'>:</span>
+        reset <span class='moth-code-operator'>|</span><span class='moth-code-operator'>~</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span>
     ;
 
-    <span class='bst-code-struct'>COMPARABLE_WITH_SELF</span> must<span class='bst-code-operator'>:</span>
-        same <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This,</span> other <span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>Bool</span>
-        clone_value <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>This</span>
+    <span class='moth-code-struct'>COMPARABLE_WITH_SELF</span> must<span class='moth-code-operator'>:</span>
+        same <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This,</span> other <span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Bool</span>
+        clone_value <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>This</span>
     ;
     </code></pre><h3>Exact contract</h3><ul><li>Requirement receivers use <code>This</code> or <code>~This</code>.</li><li>Lowercase <code>this</code> is source-method syntax and invalid in a requirement.</li><li>Bare <code>This</code> and <code>~This</code> are valid only as the first receiver parameter.</li><li><code>This</code> is a shared receiver.</li><li><code>~This</code> is a mutable receiver.</li><li>Direct non-receiver <code>This</code> parameters must be named, such as <code>other This</code>.</li><li>Direct return <code>This</code> is supported.</li><li>Composed <code>This</code> forms such as <code>This?</code>, <code>{This}</code> and <code>Box of This</code> are rejected in the Alpha surface.</li><li><code>This</code> is trait-local and invalid outside trait declarations.</li><li>Requirements have no body.</li><li>Parameter names are not part of the later conformance shape.</li><li>Parameter access modes, types, return types and return channels are part of the shape.</li></ul><h3>Multiple requirements</h3><p>Multiple method requirements may appear in one trait. The current separator between requirements is a newline. Each requirement has no body and no standalone semicolon. The trait itself closes with a final semicolon.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>NAMED</span> must<span class='bst-code-operator'>:</span>
-        name <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
-        id <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>Int</span>
+    <span class='moth-code-struct'>NAMED</span> must<span class='moth-code-operator'>:</span>
+        name <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
+        id <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span>
     ;
     </code></pre><h3>Non-receiver <code>This</code></h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>SAME</span> must<span class='bst-code-operator'>:</span>
-        equals <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This,</span> other <span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>Bool</span>
+    <span class='moth-code-struct'>SAME</span> must<span class='moth-code-operator'>:</span>
+        equals <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This,</span> other <span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Bool</span>
     ;
     </code></pre><p><code>This</code> as a non-receiver parameter must carry a name.</p><h3>Related concepts</h3><ul><li>For trait declarations see <a href="#trait-declarations">Trait declarations</a>.</li><li>For conformance matching see <a href="#conformance">Conformance</a>.</li></ul>
     </div>
@@ -875,52 +875,52 @@ body {
 
 
             <p>A type does not satisfy a trait just because it happens to have the right methods. It must say so explicitly.</p><h3>Method plus conformance</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>DISPLAY_TEXT</span> must<span class='bst-code-operator'>:</span>
-        display <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
 
-    <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        text <span class='bst-code-struct'>String,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        text <span class='moth-code-struct'>String,</span>
+    <span class='moth-code-operator'>|</span>
 
-    display <span class='bst-code-operator'>|</span>this <span class='bst-code-struct'>Label</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> this.text
+    display <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> this.text
     ;
 
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>DISPLAY_TEXT</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span>
     </code></pre><p><code>Label must DISPLAY_TEXT</code> is the explicit promise. Without it, the compiler does not treat <code>Label</code> as <code>DISPLAY_TEXT</code>.</p><h3>Shape must match exactly</h3><p>The method must have the same receiver mutability, parameter types, return type and return channel. Parameter names do not matter.</p><h3>Only same-file nominal types</h3><p>You can conform structs, choices and aligned generic constructors declared in the same file. You cannot conform builtins, imported types or types from another file.</p><h3>Remember</h3><ul><li>Conformance is explicit.</li><li>It has no body and no semicolon.</li><li>Multiple traits can be listed with commas.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>A conformance declaration states that a type implements one or more traits. Matching method shapes alone are not conformance.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        text <span class='bst-code-struct'>String,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        text <span class='moth-code-struct'>String,</span>
+    <span class='moth-code-operator'>|</span>
 
-    display <span class='bst-code-operator'>|</span>this <span class='bst-code-struct'>Label</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> this.text
+    display <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> this.text
     ;
 
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>DISPLAY_TEXT</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span>
     </code></pre><h3>Exact contract</h3><ul><li>Conformance is explicit.</li><li>A matching method without <code>Type must TRAIT</code> is not conformance.</li><li>A conformance declaration is top-level.</li><li>It is bodyless.</li><li>It is newline-terminated and has no semicolon.</li><li>Several traits may be listed with commas.</li><li>Every requirement must resolve to a method with exact:<ul><li>receiver mutability</li><li>non-receiver parameter access mode</li><li>parameter types</li><li>return types</li><li>return channels</li></ul></li><li>Parameter names do not affect conformance.</li><li>Accepted user-authored targets are same-file structs, choices and aligned generic constructors.</li><li>Rejected targets include builtins, imported types, dependency package types, external opaque types and nominal types declared in another file.</li><li>Canonical evidence is reusable wherever both target type and trait are visible.</li><li>Conformance does not independently import receiver methods.</li><li>Concrete values use ordinary visible receiver methods.</li><li>Specialise-by-concrete-instance conformance is outside scope.</li></ul><h3>Multiple traits</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>DISPLAY_TEXT,</span> <span class='bst-code-struct'>SERIALIZABLE</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT,</span> <span class='moth-code-struct'>SERIALIZABLE</span>
     </code></pre><h3>Aligned generic constructor conformance</h3><p>A generic type declared in the same file may declare conformance. The trait requirements use <code>This</code>. The source implementation uses the concrete receiver type and lowercase <code>this</code>.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Box</span> type <span class='bst-code-struct'>A</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        value <span class='bst-code-struct'>A,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        value <span class='moth-code-struct'>A,</span>
+    <span class='moth-code-operator'>|</span>
 
-    <span class='bst-code-struct'>DISPLAY_TEXT</span> must<span class='bst-code-operator'>:</span>
-        display <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
 
-    display type <span class='bst-code-struct'>A</span> <span class='bst-code-operator'>|</span>this <span class='bst-code-struct'>Box</span> of <span class='bst-code-struct'>A</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> box<span class='bst-code-parenthesis'>]</span>
+    display type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> box<span class='moth-code-parenthesis'>]</span>
     ;
 
-    <span class='bst-code-struct'>Box</span> must <span class='bst-code-struct'>DISPLAY_TEXT</span>
+    <span class='moth-code-struct'>Box</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span>
     </code></pre><h3>Rejected targets</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- Error: builtin types cannot declare user-authored conformance</span>
-    <span class='bst-code-type'>Int</span> must <span class='bst-code-struct'>CASTABLE_TO_STRING</span>
+    <span class='moth-code-comment'>-- Error: builtin types cannot declare user-authored conformance</span>
+    <span class='moth-code-type'>Int</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
     </code></pre><p>Use a local wrapper choice or struct when adapting a value owned by another file or package.</p><h3>Related concepts</h3><ul><li>For trait declarations see <a href="#trait-declarations">Trait declarations</a>.</li><li>For generic bounds see <a href="#generic-trait-bounds">Generic trait bounds</a>.</li><li>For receiver methods see <a href="../structs/#receiver-methods">Receiver methods</a>.</li></ul>
     </div>
     </fieldset></section>
@@ -974,57 +974,57 @@ body {
 
 
             <p>A generic bound says: this placeholder type must provide a specific trait.</p><h3>One bound</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>DISPLAY_TEXT</span> must<span class='bst-code-operator'>:</span>
-        display <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
 
-    render type <span class='bst-code-struct'>Item</span> is <span class='bst-code-struct'>DISPLAY_TEXT</span> <span class='bst-code-operator'>|</span>item <span class='bst-code-struct'>Item</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> item.display<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>Inside <code>render</code>, <code>Item</code> is known to have a <code>display</code> method.</p><h3>Several bounds</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>NAMED</span> must<span class='bst-code-operator'>:</span>
-        name <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>NAMED</span> must<span class='moth-code-operator'>:</span>
+        name <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
 
-    render_named type <span class='bst-code-struct'>Item</span> is <span class='bst-code-struct'>DISPLAY_TEXT</span> and <span class='bst-code-struct'>NAMED</span> <span class='bst-code-operator'>|</span>item <span class='bst-code-struct'>Item</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> item.display<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    render_named type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> and <span class='moth-code-struct'>NAMED</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p><code>and</code> adds another bound to the same parameter.</p><h3>Remember</h3><ul><li>Bounds use <code>is</code>, not <code>must</code>.</li><li><code>and</code> combines bounds on one parameter.</li><li>Commas still separate different parameters.</li><li>The concrete type must have visible evidence for every bound.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Generic bounds use traits to promise that a generic parameter provides certain behaviour inside the generic declaration.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>DISPLAY_TEXT</span> must<span class='bst-code-operator'>:</span>
-        display <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
 
-    render type <span class='bst-code-struct'>Item</span> is <span class='bst-code-struct'>DISPLAY_TEXT</span> <span class='bst-code-operator'>|</span>item <span class='bst-code-struct'>Item</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> item.display<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Exact contract</h3><ul><li>Generic bounds use <code>is</code>, not <code>must</code>.</li><li><code>and</code> adds bounds to one parameter.</li><li>Commas separate generic parameters.</li><li>Bounds apply to generic functions, structs and choices.</li><li>Each concrete argument requires visible reusable evidence.</li><li>Trait names are static contracts, not concrete type arguments.</li><li>A bound may enable a unique required receiver call inside the generic declaration.</li><li>Bound calls resolve statically to concrete source methods.</li><li>Concrete values still use ordinary visible methods.</li><li>Conformance does not import methods into scope.</li><li>Backends do not receive trait objects or runtime evidence tables.</li><li><code>where</code> syntax is rejected.</li><li>File-local evidence-backed dispatch outside reusable conformance is outside scope.</li></ul><h3>Multiple bounds on one parameter</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>NAMED</span> must<span class='bst-code-operator'>:</span>
-        name <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>NAMED</span> must<span class='moth-code-operator'>:</span>
+        name <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
 
-    render_named type <span class='bst-code-struct'>Item</span> is <span class='bst-code-struct'>DISPLAY_TEXT</span> and <span class='bst-code-struct'>NAMED</span> <span class='bst-code-operator'>|</span>item <span class='bst-code-struct'>Item</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> item.display<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    render_named type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> and <span class='moth-code-struct'>NAMED</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Multiple parameters with bounds</h3><pre style=""><code class='codeblock'>
-    render_pair type <span class='bst-code-struct'>A</span> is <span class='bst-code-struct'>DISPLAY_TEXT,</span> <span class='bst-code-struct'>B</span> is <span class='bst-code-struct'>DISPLAY_TEXT</span> <span class='bst-code-operator'>|</span>left <span class='bst-code-struct'>A,</span> right <span class='bst-code-struct'>B</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> left.display<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span> <span class='bst-code-operator'>+</span> right.display<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    render_pair type <span class='moth-code-struct'>A</span> is <span class='moth-code-struct'>DISPLAY_TEXT,</span> <span class='moth-code-struct'>B</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>left <span class='moth-code-struct'>A,</span> right <span class='moth-code-struct'>B</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> left.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span> <span class='moth-code-operator'>+</span> right.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Evidence must be visible</h3><p>Concrete calls and instantiations require reusable evidence. User-authored reusable evidence originates from the canonical conformance declared with the same-file target type. Callers may reuse that evidence wherever both the type and trait are visible.</p><p>Compiler-owned evidence also exists for the builtin cast table.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        text <span class='bst-code-struct'>String,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        text <span class='moth-code-struct'>String,</span>
+    <span class='moth-code-operator'>|</span>
 
-    display <span class='bst-code-operator'>|</span>this <span class='bst-code-struct'>Label</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> this.text
+    display <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> this.text
     ;
 
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>DISPLAY_TEXT</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span>
 
-    value <span class='bst-code-operator'>=</span> render<span class='bst-code-parenthesis'>(</span><span class='bst-code-struct'>Label</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;ok&quot;</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>)</span>
+    value <span class='moth-code-operator'>=</span> render<span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;ok&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><h3>Related concepts</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For generics see <a href="../generics">Generics</a>.</li></ul>
     </div>
     </fieldset></section>
@@ -1078,29 +1078,29 @@ body {
 
 
             <p>Some trait contracts are mutually exclusive. A type cannot claim both.</p><h3>Two ways to produce text</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>TEXT</span> must<span class='bst-code-operator'>:</span>
-        text <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>TEXT</span> must<span class='moth-code-operator'>:</span>
+        text <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
 
-    <span class='bst-code-struct'>FALLIBLE_TEXT</span> must<span class='bst-code-operator'>:</span>
-        try_text <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>String,</span> <span class='bst-code-struct'>Error</span><span class='bst-code-operator'>!</span>
+    <span class='moth-code-struct'>FALLIBLE_TEXT</span> must<span class='moth-code-operator'>:</span>
+        try_text <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span>
     ;
 
-    <span class='bst-code-struct'>TEXT</span> must not <span class='bst-code-struct'>FALLIBLE_TEXT</span>
+    <span class='moth-code-struct'>TEXT</span> must not <span class='moth-code-struct'>FALLIBLE_TEXT</span>
     </code></pre><p><code>TEXT</code> promises a <code>String</code> directly. <code>FALLIBLE_TEXT</code> promises a <code>String</code> or an error. A type cannot be both at once.</p><h3>Symmetric</h3><p>The relation goes both ways. Saying <code>A must not B</code> also means <code>B must not A</code> in effect.</p><h3>Remember</h3><ul><li>Incompatibility only affects conformance validation.</li><li>It does not create inheritance, composition or runtime dispatch.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Trait incompatibility records that two traits cannot both be claimed by the same concrete type.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>TEXT</span> must<span class='bst-code-operator'>:</span>
-        text <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+    <span class='moth-code-struct'>TEXT</span> must<span class='moth-code-operator'>:</span>
+        text <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
 
-    <span class='bst-code-struct'>FALLIBLE_TEXT</span> must<span class='bst-code-operator'>:</span>
-        try_text <span class='bst-code-operator'>|</span><span class='bst-code-struct'>This</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>String,</span> <span class='bst-code-struct'>Error</span><span class='bst-code-operator'>!</span>
+    <span class='moth-code-struct'>FALLIBLE_TEXT</span> must<span class='moth-code-operator'>:</span>
+        try_text <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span>
     ;
 
-    <span class='bst-code-struct'>TEXT</span> must not <span class='bst-code-struct'>FALLIBLE_TEXT</span>
+    <span class='moth-code-struct'>TEXT</span> must not <span class='moth-code-struct'>FALLIBLE_TEXT</span>
     </code></pre><h3>Exact contract</h3><ul><li>Incompatibility is trait metadata.</li><li>It is symmetric.</li><li>A concrete type cannot explicitly conform to both sides.</li><li>Several incompatible traits may be listed.</li><li>It affects conformance validation only.</li><li>It does not:<ul><li>add requirements</li><li>imply negative conformance</li><li>create trait composition</li><li>create inheritance</li><li>affect runtime dispatch</li></ul></li></ul><h3>Compiler-owned pairs</h3><p>The compiler uses <code>must not</code> for incompatible core cast trait pairs. For example, <code>CASTABLE_TO_STRING</code> and <code>TRY_CASTABLE_TO_STRING</code> cannot both be claimed for the same source type. The conforming type is the cast source type; the trait name identifies the cast target.</p><h3>Related concepts</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For core cast traits see <a href="#core-cast-traits">Core cast traits</a>.</li></ul>
     </div>
     </fieldset></section>
@@ -1154,73 +1154,73 @@ body {
 
 
             <p>The compiler owns a fixed set of traits that let user types work with <code>cast</code>.</p><h3>String conversion</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        text <span class='bst-code-struct'>String,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        text <span class='moth-code-struct'>String,</span>
+    <span class='moth-code-operator'>|</span>
 
-    to_string <span class='bst-code-operator'>|</span>this <span class='bst-code-struct'>Label</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> this.text
+    to_string <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> this.text
     ;
 
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>CASTABLE_TO_STRING</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
 
-    value <span class='bst-code-type'>String</span> <span class='bst-code-operator'>=</span> cast <span class='bst-code-struct'>Label</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;docs&quot;</span><span class='bst-code-parenthesis'>)</span>
+    value <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;docs&quot;</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><p><code>CASTABLE_TO_STRING</code> means: this type can become a <code>String</code> without failing.</p><h3>Fallible conversion</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        text <span class='bst-code-struct'>String,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        text <span class='moth-code-struct'>String,</span>
+    <span class='moth-code-operator'>|</span>
 
-    try_to_int <span class='bst-code-operator'>|</span>this <span class='bst-code-struct'>Label</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>Int,</span> <span class='bst-code-struct'>Error</span><span class='bst-code-operator'>!</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span><span class='bst-code-operator'>!</span> <span class='bst-code-struct'>Error</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;not a number&quot;</span><span class='bst-code-parenthesis'>)</span>
+    try_to_int <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;not a number&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
 
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>TRY_CASTABLE_TO_INT</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>TRY_CASTABLE_TO_INT</span>
 
-    number <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> cast <span class='bst-code-struct'>Label</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;42&quot;</span><span class='bst-code-parenthesis'>)</span> catch <span class='bst-code-operator'>|</span>err<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        then <span class='bst-code-number'>0</span>
+    number <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;42&quot;</span><span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        then <span class='moth-code-number'>0</span>
     ;
     </code></pre><p><code>TRY_CASTABLE_TO_INT</code> means: this type may become an <code>Int</code>, but it can also fail. The method signals failure with <code>return!</code> and the caller recovers with <code>cast ... catch</code>.</p><h3>Remember</h3><ul><li>Core cast trait names are owned by the compiler.</li><li>You cannot redefine, import, export or alias them.</li><li>You declare conformance the same way as for user traits.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>The compiler owns a closed set of static cast traits. They provide source evidence for explicit <code>cast</code> and <code>cast!</code> conversions.</p><h3>Trait table</h3><p>Each trait requires one receiver method:</p><ul><li><code>CASTABLE_TO_INT</code> requires <code>to_int |This| -&gt; Int</code></li><li><code>TRY_CASTABLE_TO_INT</code> requires <code>try_to_int |This| -&gt; Int, Error!</code></li><li><code>CASTABLE_TO_FLOAT</code> requires <code>to_float |This| -&gt; Float</code></li><li><code>TRY_CASTABLE_TO_FLOAT</code> requires <code>try_to_float |This| -&gt; Float, Error!</code></li><li><code>CASTABLE_TO_BOOL</code> requires <code>to_bool |This| -&gt; Bool</code></li><li><code>TRY_CASTABLE_TO_BOOL</code> requires <code>try_to_bool |This| -&gt; Bool, Error!</code></li><li><code>CASTABLE_TO_STRING</code> requires <code>to_string |This| -&gt; String</code></li><li><code>TRY_CASTABLE_TO_STRING</code> requires <code>try_to_string |This| -&gt; String, Error!</code></li><li><code>CASTABLE_TO_CHAR</code> requires <code>to_char |This| -&gt; Char</code></li><li><code>TRY_CASTABLE_TO_CHAR</code> requires <code>try_to_char |This| -&gt; Char, Error!</code></li><li><code>CASTABLE_TO_ERROR</code> requires <code>to_error |This| -&gt; Error</code></li><li><code>TRY_CASTABLE_TO_ERROR</code> requires <code>try_to_error |This| -&gt; Error, Error!</code></li></ul><h3>Contract</h3><ul><li>These traits resolve without imports.</li><li>They cannot be redeclared, imported, exported, aliased or shadowed.</li><li>They cannot be used as values.</li><li>The compiler registers builtin evidence for the builtin cast table.</li><li>Same-file nominal source types and aligned generic constructors may provide evidence.</li><li>Source method implementations use lowercase <code>this</code> and the concrete receiver type.</li><li>Explicit conformance is required.</li><li>Infallible and fallible pairs for one target are incompatible.</li><li>Evidence resolves before HIR.</li><li>The traits prove source evidence only.</li><li>They do not create user-defined target types or a general conversion framework.</li></ul><h3>Example</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        text <span class='bst-code-struct'>String,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        text <span class='moth-code-struct'>String,</span>
+    <span class='moth-code-operator'>|</span>
 
-    to_string <span class='bst-code-operator'>|</span>this <span class='bst-code-struct'>Label</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> this.text
+    to_string <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> this.text
     ;
 
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>CASTABLE_TO_STRING</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
 
-    value <span class='bst-code-type'>String</span> <span class='bst-code-operator'>=</span> cast <span class='bst-code-struct'>Label</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;docs&quot;</span><span class='bst-code-parenthesis'>)</span>
+    value <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;docs&quot;</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><h3>Infallible versus fallible</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- Infallible: source always produces the target</span>
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>CASTABLE_TO_STRING</span>
+    <span class='moth-code-comment'>-- Infallible: source always produces the target</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
 
-    <span class='bst-code-comment'>-- Fallible: source may produce the target or an error</span>
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>TRY_CASTABLE_TO_INT</span>
+    <span class='moth-code-comment'>-- Fallible: source may produce the target or an error</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>TRY_CASTABLE_TO_INT</span>
     </code></pre><p>A fallible conformance requires the matching <code>try_to_*</code> method. The method returns success with <code>return</code> and failure with <code>return!</code>:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        text <span class='bst-code-struct'>String,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        text <span class='moth-code-struct'>String,</span>
+    <span class='moth-code-operator'>|</span>
 
-    try_to_int <span class='bst-code-operator'>|</span>this <span class='bst-code-struct'>Label</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>Int,</span> <span class='bst-code-struct'>Error</span><span class='bst-code-operator'>!</span><span class='bst-code-operator'>:</span>
-        value <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> cast<span class='bst-code-operator'>!</span> this.text
-        <span class='bst-code-keyword'>return</span> value
+    try_to_int <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+        value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast<span class='moth-code-operator'>!</span> this.text
+        <span class='moth-code-keyword'>return</span> value
     ;
 
-    <span class='bst-code-struct'>Label</span> must <span class='bst-code-struct'>TRY_CASTABLE_TO_INT</span>
+    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>TRY_CASTABLE_TO_INT</span>
 
-    <span class='bst-code-comment'>-- Local recovery with `cast ... catch`.</span>
-    number <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> cast <span class='bst-code-struct'>Label</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;42&quot;</span><span class='bst-code-parenthesis'>)</span> catch <span class='bst-code-operator'>|</span>err<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        then <span class='bst-code-number'>0</span>
+    <span class='moth-code-comment'>-- Local recovery with `cast ... catch`.</span>
+    number <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;42&quot;</span><span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        then <span class='moth-code-number'>0</span>
     ;
     </code></pre><p>Propagation through a compatible <code>Error!</code> function uses <code>cast!</code>:</p><pre style=""><code class='codeblock'>
-    parse_label <span class='bst-code-operator'>|</span>label <span class='bst-code-struct'>Label</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>Int,</span> <span class='bst-code-struct'>Error</span><span class='bst-code-operator'>!</span><span class='bst-code-operator'>:</span>
-        value <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> cast<span class='bst-code-operator'>!</span> label
-        <span class='bst-code-keyword'>return</span> value
+    parse_label <span class='moth-code-operator'>|</span>label <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+        value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast<span class='moth-code-operator'>!</span> label
+        <span class='moth-code-keyword'>return</span> value
     ;
     </code></pre><p><code>cast!</code> and <code>catch</code> are mutually exclusive. <code>cast! ... catch</code> is rejected.</p><h3>Related concepts</h3><ul><li>For cast target selection and fallible handling see <a href="../casts">Casts</a>.</li><li>For trait incompatibility see <a href="#trait-incompatibility">Trait incompatibility</a>.</li></ul>
     </div>
@@ -1275,26 +1275,26 @@ body {
 
 
             <p>Traits are for static reuse, not runtime flexibility.</p><h3>Static reuse</h3><pre style=""><code class='codeblock'>
-    render type <span class='bst-code-struct'>Item</span> is <span class='bst-code-struct'>DISPLAY_TEXT</span> <span class='bst-code-operator'>|</span>item <span class='bst-code-struct'>Item</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> item.display<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>The compiler knows at compile time which concrete <code>display</code> method to call.</p><h3>Runtime heterogeneity with choices</h3><p>When you need different types at runtime, use a choice instead.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>Renderable</span> <span class='bst-code-operator'>:</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>LabelItem</span> <span class='bst-code-operator'>|</span> value <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>|</span>,
-        <span class='bst-code-struct'>ButtonItem</span> <span class='bst-code-operator'>|</span> value <span class='bst-code-struct'>Button</span> <span class='bst-code-operator'>|</span>,
+    <span class='moth-code-struct'>Renderable</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>LabelItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>|</span>,
+        <span class='moth-code-struct'>ButtonItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Button</span> <span class='moth-code-operator'>|</span>,
     ;
     </code></pre><p>A choice is a tagged union. The variant tag decides which code to run.</p><h3>Remember</h3><ul><li>Traits are static contracts, not runtime values.</li><li>A trait name cannot be used as a type annotation for a variable, parameter or field.</li><li>Use a bound for compile-time reuse.</li><li>Use a choice for runtime alternatives.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Beanstalk traits are deliberately static. They name behaviour before runtime begins and stay out of the type system as runtime values.</p><h3>Static model</h3><p>Trait names are valid in:</p><ul><li>trait declarations</li><li>conformance declarations</li><li>generic bounds</li></ul><p>Trait names are invalid as ordinary:</p><ul><li>variables</li><li>parameters</li><li>fields</li><li>returns</li><li>collection elements</li><li>map types</li><li>choice payloads</li><li>alias targets</li></ul><p>Use a generic bound for static reuse. Use a choice for runtime heterogeneity.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- Static reuse</span>
-    render type <span class='bst-code-struct'>Item</span> is <span class='bst-code-struct'>DISPLAY_TEXT</span> <span class='bst-code-operator'>|</span>item <span class='bst-code-struct'>Item</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span>
+        <p>Moth traits are deliberately static. They name behaviour before runtime begins and stay out of the type system as runtime values.</p><h3>Static model</h3><p>Trait names are valid in:</p><ul><li>trait declarations</li><li>conformance declarations</li><li>generic bounds</li></ul><p>Trait names are invalid as ordinary:</p><ul><li>variables</li><li>parameters</li><li>fields</li><li>returns</li><li>collection elements</li><li>map types</li><li>choice payloads</li><li>alias targets</li></ul><p>Use a generic bound for static reuse. Use a choice for runtime heterogeneity.</p><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- Static reuse</span>
+    render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
 
-    <span class='bst-code-comment'>-- Runtime heterogeneity</span>
-    <span class='bst-code-struct'>Renderable</span> <span class='bst-code-operator'>:</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>LabelItem</span> <span class='bst-code-operator'>|</span> value <span class='bst-code-struct'>Label</span> <span class='bst-code-operator'>|</span>,
-        <span class='bst-code-struct'>ButtonItem</span> <span class='bst-code-operator'>|</span> value <span class='bst-code-struct'>Button</span> <span class='bst-code-operator'>|</span>,
+    <span class='moth-code-comment'>-- Runtime heterogeneity</span>
+    <span class='moth-code-struct'>Renderable</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>LabelItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>|</span>,
+        <span class='moth-code-struct'>ButtonItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Button</span> <span class='moth-code-operator'>|</span>,
     ;
     </code></pre><p>Static traits are backend-independent. Backends do not receive trait objects, erased dispatch or runtime evidence tables.</p><h3>Deferred</h3><ul><li>static non-method requirements</li><li>additional compiler-owned builtin conformance families beyond the current closed core-cast evidence table</li><li>broader standard trait taxonomy that does not create runtime trait values</li></ul><h3>Outside scope</h3><ul><li>default methods</li><li>associated types and constants</li><li>inheritance</li><li>trait aliases and composition</li><li>generic traits and generic methods</li><li>blanket, conditional, negative or specialised conformance</li><li>structural conformance</li><li>dynamic trait values and trait objects</li><li>downcasting and reflection</li><li>output coercion</li><li>operator integration</li><li>automatic primitive conformance</li><li>derive-style hashing, ordering, formatting, iteration or serialization families</li></ul><p>Do not treat compiler-owned test-only or scaffold traits as public language features.</p><h3>Related concepts</h3><ul><li>For runtime heterogeneity see <a href="../choices">Choices</a>.</li><li>For generic bounds see <a href="#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
     </div>
@@ -1324,109 +1324,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1441,63 +1441,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1507,36 +1507,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1549,65 +1549,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1615,10 +1615,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

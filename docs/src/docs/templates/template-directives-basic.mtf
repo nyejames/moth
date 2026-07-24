@@ -1,0 +1,23 @@
+Directives change how a template is interpreted.
+
+They begin with `$`.
+
+[codeblock, $code("moth"):
+    content = [$md:
+        # A heading
+
+        This body is Markdown.
+    ]
+]
+
+Common directives include:
+
+- `$md` for Moth Markdown
+- `$raw` for unformatted text
+- `$note` and `$todo` for ignored template notes
+- `$html`, `$css` and `$code` in HTML projects
+
+Builders can add their own directives.
+
+A formatter applies only to the template that declares it. Nested child
+templates choose their own formatter.

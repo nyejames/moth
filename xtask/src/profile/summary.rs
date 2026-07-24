@@ -752,7 +752,7 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
     if top_func.bucket.label == "alloc" && top_func.self_pct > 10.0 {
         return format!(
             "Allocation (`{}`) dominates self time at {:.1}%; \
-             check clone/collect/allocation churn in the calling Beanstalk code.",
+             check clone/collect/allocation churn in the calling Moth code.",
             truncate_function_name(&top_func.name, 48),
             top_func.self_pct
         );
@@ -765,16 +765,16 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
             .to_string();
     }
 
-    // Check for mostly non-Beanstalk functions.
-    let beanstalk_count = hotspots
+    // Check for mostly non-Moth functions.
+    let moth_count = hotspots
         .functions
         .iter()
-        .filter(|f| is_beanstalk_owned(f))
+        .filter(|f| is_moth_owned(f))
         .count();
 
-    if beanstalk_count == 0 && !hotspots.functions.is_empty() {
-        return "Profile is dominated by non-Beanstalk functions; \
-                look for the Beanstalk caller edges in the profile to find \
+    if moth_count == 0 && !hotspots.functions.is_empty() {
+        return "Profile is dominated by non-Moth functions; \
+                look for the Moth caller edges in the profile to find \
                 which compiler code triggers the hot external path."
             .to_string();
     }
@@ -845,8 +845,8 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
         }
     }
 
-    // Fallback: top function is Beanstalk-owned but no specific stage pattern matched.
-    if is_beanstalk_owned(top_func) {
+    // Fallback: top function is Moth-owned but no specific stage pattern matched.
+    if is_moth_owned(top_func) {
         let paths = format_paths(&top_func.bucket.suggested_paths);
         return format!(
             "Hottest function is `{}` in {} bucket.{}",
@@ -859,8 +859,8 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
     "Inspect the profile with `samply load` for detailed call stacks.".to_string()
 }
 
-/// Check whether a hot function is Beanstalk-owned (not std/alloc/rayon/unknown).
-fn is_beanstalk_owned(func: &super::hotspots::ProfileHotFunction) -> bool {
+/// Check whether a hot function is Moth-owned (not std/alloc/rayon/unknown).
+fn is_moth_owned(func: &super::hotspots::ProfileHotFunction) -> bool {
     !matches!(
         func.bucket.label.as_str(),
         "unknown" | "other" | "std" | "core" | "alloc" | "rayon" | "samply/profiler"
@@ -893,11 +893,11 @@ fn truncate_function_name(name: &str, max_len: usize) -> String {
 /// Compute a combined signal score for ranking cases in the root summary.
 ///
 /// WHAT: Combines normalized wall time, top stage timing, and hottest
-/// Beanstalk-owned function inclusive percentage into a single score.
+/// Moth-owned function inclusive percentage into a single score.
 ///
 /// WHY: A simple weighted sum gives a reasonable ranking that prioritizes
 /// cases where profiling is most actionable: slow cases with clear
-/// Beanstalk-owned hotspots.
+/// Moth-owned hotspots.
 fn combined_signal_score(data: &CaseSummaryData<'_>) -> f64 {
     let wall = data.observation.wall_ms;
 
@@ -909,17 +909,17 @@ fn combined_signal_score(data: &CaseSummaryData<'_>) -> f64 {
         .map(|m| m.value)
         .fold(0.0_f64, f64::max);
 
-    let top_beanstalk_inclusive_pct = data
+    let top_moth_inclusive_pct = data
         .hotspots
         .functions
         .iter()
-        .filter(|f| is_beanstalk_owned(f))
+        .filter(|f| is_moth_owned(f))
         .map(|f| f.inclusive_pct)
         .fold(0.0_f64, f64::max);
 
     // Weighted sum: wall time and stage timing in milliseconds,
     // inclusive percent weighted to give it reasonable influence.
-    wall + top_stage_ms + (top_beanstalk_inclusive_pct * 10.0)
+    wall + top_stage_ms + (top_moth_inclusive_pct * 10.0)
 }
 
 // ---------------------------------------------------------------------------

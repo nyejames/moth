@@ -1,7 +1,7 @@
 //! Source-backed package registry.
 //!
 //! WHAT: tracks builder-provided and project-local source-backed package roots.
-//! WHY: source-backed package imports resolve to actual `.bst` files, not binding-backed
+//! WHY: source-backed package imports resolve to actual `.moth` files, not binding-backed
 //!      packages, so the path resolver needs to know where each package prefix lives.
 
 //! Roots are stored in a `BTreeMap` so that iteration surfaces one canonical

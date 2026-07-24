@@ -1,0 +1,5 @@
+site_name #= "Moth"
+version #= "v4"
+
+#[site_name, " ", version]
+[:[site_name] [version]]

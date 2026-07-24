@@ -1,8 +1,8 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0019"]
+diagnostic_codes = ["MOTH-SYNTAX-0019"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-SYNTAX-0019"
+code = "MOTH-SYNTAX-0019"
 reason = "invalid_import_clause.expected_alias_name"

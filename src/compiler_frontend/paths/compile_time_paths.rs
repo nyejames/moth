@@ -1,6 +1,6 @@
 //! Compile-time path literal value contracts and resolution errors.
 //!
-//! Beanstalk path literals are source-level values, not plain strings. These types carry the
+//! Moth path literals are source-level values, not plain strings. These types carry the
 //! resolved filesystem target, public rendering path, source spelling, and file/directory kind so
 //! AST folding and backend rendering can share one representation.
 
@@ -35,14 +35,14 @@ pub enum CompileTimePathBase {
 /// A fully resolved compile-time path value.
 ///
 /// WHAT: carries all semantic metadata the compiler needs for validation, typed representation,
-/// and later string coercion of Beanstalk path literals.
+/// and later string coercion of Moth path literals.
 ///
 /// WHY: path literals must be first-class compile-time values so that origin prefix application,
 /// file/directory distinction, and public-path formatting can be handled consistently in one
 /// place.
 #[derive(Clone, Debug)]
 pub struct CompileTimePath {
-    /// The original syntactic path as written in source, normalized to Beanstalk components.
+    /// The original syntactic path as written in source, normalized to Moth components.
     /// Preserved for diagnostics and future path manipulation.
     pub source_path: InternedPath,
 

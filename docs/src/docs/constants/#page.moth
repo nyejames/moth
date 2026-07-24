@@ -1,0 +1,104 @@
+import @./constant-bindings {
+    content as constant_bindings,
+}
+
+import @./constant-bindings-basic {
+    content as constant_bindings_basic,
+}
+
+import @./constant-folding {
+    content as constant_folding,
+}
+
+import @./constant-folding-basic {
+    content as constant_folding_basic,
+}
+
+import @./const-records {
+    content as const_records,
+}
+
+import @./const-records-basic {
+    content as const_records_basic,
+}
+
+import @./const-templates {
+    content as const_templates,
+}
+
+import @./const-templates-basic {
+    content as const_templates_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Constants and compile-time behaviour"
+page_description #= "Compile-time bindings, folding, const records and const templates in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Constants and compile-time behaviour
+
+    # Constants and compile-time behaviour
+
+    Constants move work out of runtime and into the compiler. They are strict on purpose: the value must be known, stable and finished before the program starts.
+
+    Templates can join in too. A const page fragment is just a template with nowhere left to hide.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):constant-bindings]
+        [$insert("title"):Constant bindings]
+        [$insert("advanced"):[constant_bindings]]
+
+        [constant_bindings_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):constant-folding]
+        [$insert("title"):Constant folding]
+        [$insert("advanced"):[constant_folding]]
+
+        [constant_folding_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):const-records]
+        [$insert("title"):Const records]
+        [$insert("advanced"):[const_records]]
+
+        [const_records_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):const-templates]
+        [$insert("title"):Const templates]
+        [$insert("advanced"):[const_templates]]
+
+        [const_templates_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../templates/]
+        [$insert("previous_title"):Templates]
+        [$insert("next_path"):../aliases/]
+        [$insert("next_title"):Aliases]
+    ]
+]

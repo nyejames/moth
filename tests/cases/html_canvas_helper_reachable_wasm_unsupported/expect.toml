@@ -6,8 +6,8 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = [
-    "_beanstalk/js/glue/module-",
-    "_beanstalk/js/runtime/beanstalk-runtime",
+    "_moth/js/glue/module-",
+    "_moth/js/runtime/moth-runtime",
     "<script type=\"importmap\">",
     "canvas_context_ready",
 ]
@@ -15,4 +15,4 @@ must_contain = [
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

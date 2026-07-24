@@ -2,7 +2,7 @@
 //!
 //! WHAT: owns construction and slot queries for the temporary carrier used to move
 //! fallible-operation results between AST, HIR, and backend lowering.
-//! WHY: public Beanstalk has fallible control flow, not first-class `Result`
+//! WHY: public Moth has fallible control flow, not first-class `Result`
 //! values. Keeping carrier construction here makes each remaining use explicit
 //! implementation machinery rather than a public type surface.
 
@@ -31,7 +31,7 @@ impl TypeEnvironment {
 
     /// Returns true if the type is the temporary internal fallible carrier.
     ///
-    /// Public Beanstalk does not expose first-class `Result` values. This query is retained only
+    /// Public Moth does not expose first-class `Result` values. This query is retained only
     /// for fallible-operation validation and HIR lowering while those operations are immediately
     /// consumed by postfix `!` or boundary `catch`.
     pub fn is_fallible_carrier(&self, id: TypeId) -> bool {

@@ -7,4 +7,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_assign_borrow", "__bs_write", "__bs_read", "write_through"]
+must_contain = ["__moth_assign_borrow", "__moth_write", "__moth_read", "write_through"]

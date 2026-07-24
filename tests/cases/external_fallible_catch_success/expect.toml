@@ -6,4 +6,4 @@ rendered_output_contains = ["external_fallible_catch_success value=kept"]
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_result_fallback"]
+must_contain = ["__moth_result_fallback"]

@@ -1,0 +1,14 @@
+SITE_TITLE #= "Moth"
+
+badFunc |value Int|:
+    BadLocal = value
+    io.line([: [BadLocal]])
+;
+
+person_record = |
+    name String,
+|
+
+status_value :: Ok, not_ok;
+
+badFunc(3)

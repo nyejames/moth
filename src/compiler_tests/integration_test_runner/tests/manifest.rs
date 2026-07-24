@@ -27,7 +27,7 @@ fn write_success_fixture(root: &Path, case_name: &str) {
     let case_root = root.join(case_name);
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n",

@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Borrow validation | Beanstalk</title>
-    <meta name="description" content="How Beanstalk checks exclusivity, aliasing and optional transfer safety.">
+    <title>Borrow validation | Moth</title>
+    <meta name="description" content="How Moth checks exclusivity, aliasing and optional transfer safety.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -318,15 +318,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -335,13 +335,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -352,9 +352,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -364,15 +364,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -396,111 +396,111 @@ body {
         </div>
     </nav>
     <section class="container"><p><a href="../">Memory management</a> / Borrow validation</p><h1>Borrow validation</h1><p>Borrow validation runs after HIR generation. It writes analysis facts beside HIR without changing it. Lifetime topology is a separate later analysis.</p></section>
-    <section class="container"><h2>Design contract</h2><p>Borrow validation runs after HIR generation. It reads coherent, validated HIR, enforces source-language access safety and optional transfer safety, and writes analysis facts beside HIR.</p><p>Recoverable numeric, cast and fallible-operation paths are already explicit HIR branches, locals and exits before borrow validation.</p><p>It doesn&#39;t rewrite HIR, choose the final allocation strategy, perform backend ownership lowering, or decide lifetime topology. Lifetime owners, retained edges, escapes and cycles belong to <a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>.</p><h2>Main compiler paths</h2><ul><li><code>src/compiler_frontend/analysis/borrow_checker/mod.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/engine.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/state.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/transfer.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/transfer/</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/types.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/diagnostics.rs</code></li></ul><h2>Inputs</h2><ul><li>Validated <code>HirModule</code>.</li><li>Explicit functions, blocks, regions, locals, places and terminators.</li><li>Access and effect metadata.</li><li>External package registry and boundary classifications.</li><li>External call parameter access rules.</li><li>Return-alias metadata.</li><li>Source locations and string table for diagnostics.</li></ul><p>Borrow validation doesn&#39;t reparse source syntax, solve generics or traits, or see AST-only generic or trait state.</p><h2>Analysis model</h2><p>Accepted abstract states:</p><ul><li><strong>uninitialized:</strong> local has no valid value.</li><li><strong>slot:</strong> local may own independent storage.</li><li><strong>alias:</strong> local observes roots owned elsewhere.</li><li><strong>slot + alias:</strong> conservative control-flow result where either shape may arrive.</li></ul><p>These are analysis lattice states. They are not Beanstalk source types and do not directly prescribe one backend runtime representation.</p><h2>Access roots and aliases</h2><p>Every analysed place resolves to one or more storage roots. Fields and indexes currently resolve conservatively through their base roots. Alias bindings carry root sets. Merged control flow can union root sets. Shared and mutable conflicts are checked against overlapping roots.</p><p>Root tracking is analysis metadata, not source-visible reference identity.</p><h2>Alias activity</h2><p>Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.</p><ul><li>A shared alias blocks overlapping mutation only until its last potential use on the relevant path.</li><li>An unused shared alias does not block later mutation.</li><li>Branches are analysed independently.</li><li>Joins conservatively retain activity when any incoming path may still use the alias.</li><li>Loops use fixed-point future-use reasoning.</li></ul><h2>Exclusivity validation</h2><ul><li>Many shared accesses can coexist.</li><li>Exclusive access conflicts with overlapping active shared access.</li><li>Exclusive access conflicts with another overlapping exclusive access.</li><li>Mutation of an alias writes through to the referent where source semantics permit it.</li><li>Invalid immutable mutation is rejected before backend lowering.</li><li>GC doesn&#39;t relax exclusivity rules.</li><li>Map alias rules use the same conflict machinery.</li></ul><h2>Future-use and optional transfer safety</h2><p>Future-use analysis answers whether a root is required again after the current program point. It is a sufficient basis for optional transfer eligibility, not a source-visible lifetime system.</p><p>Semantic classification:</p><ul><li><strong>no future use on every relevant path:</strong> transfer is eligible as an optimisation.</li><li><strong>future use:</strong> the operation remains a borrow.</li><li><strong>path-dependent or imprecise:</strong> the operation remains a borrow conservatively.</li></ul><p>Inferred transfer is optional. When safe transfer is not proven on every relevant path, the operation remains a borrow. Failure to prove an ownership optimisation must not make an otherwise valid source program invalid.</p><p>Transfer proof failure is not a source diagnostic. Path-dependent optional transfer always backs off to borrowing in the accepted design.</p><p>The current checker precomputes per-block may/must future-use facts and runs a forward fixed-point transfer over reachable HIR blocks. Current path-dependent rejection behaviour is implementation drift tracked for a later compiler plan.</p><h2>No ordinary mandatory-consuming operation</h2><p>Current source syntax has no mandatory-consuming ordinary-value operation. There is no move keyword, consuming parameter spelling or owned signature variant.</p><p>A user-facing use-after-consumption diagnostic is reserved for a future accepted mandatory-consuming surface. It is not valid for ordinary optional transfer.</p><p>Internal inconsistent-analysis or impossible metadata uses <code>CompilerError</code>.</p><h2>Control flow and joins</h2><ul><li>Branches are analysed independently.</li><li>Loops participate in fixed-point analysis.</li><li>Joins conservatively combine possible states and roots.</li><li>Branch-local aliases are removed when they leave visibility.</li><li>Returns, breaks and region exits inform advisory destruction planning.</li><li>Infinite paths without exits don&#39;t require an exit drop merely because they loop.</li></ul><h2>Function and external-call summaries</h2><p>Borrow validation consumes and produces:</p><ul><li>parameter access mode</li><li>mutation effects</li><li>transfer eligibility / effect category</li><li>return-alias summaries</li><li>fresh result roots</li><li>alias of one or more parameters</li><li>unknown or imprecise alias result</li><li>reactive effects</li><li>external function access rules</li><li>external return-alias metadata</li></ul><p>Lifetime constraints are produced and validated by the separate lifetime-region analysis.</p><p>All runtime value parameters, immutable or mutable, may be eligible for inferred responsibility transfer. Parameter access mode remains separate from optional ownership effect. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.</p><p>Closed external boundary profiles override this general rule. WIT value-only calls are non-consuming. Restricted host-value crossings are non-consuming, and mutable opaque-handle access does not transfer Beanstalk storage through the ordinary Beanstalk ownership ABI.</p><p><code>MayConsume</code>, <code>NeverConsumes</code> and <code>AlwaysConsumes</code> are analysis/lowering categories, not source-visible signature categories.</p><p>A <code>MayConsume</code> summary means the call path can receive responsibility when the caller proves a safe transfer. It does not let a callee unpredictably invalidate a borrowed argument.</p><p><code>AlwaysConsumes</code> may describe a specialised already-proven call path. It must not turn a source function into a mandatory-consuming API.</p><p>Call transfer uses resolved metadata, not source imports or runtime names.</p><h2>Side-table outputs</h2><ul><li>function summaries</li><li>block-entry states</li><li>block-exit states</li><li>statement-entry states</li><li>source access facts</li><li>transfer eligibility facts</li><li>return alias facts</li><li>reactive invalidation facts</li><li>advisory drop candidates</li><li>aggregate statistics where useful for tooling</li></ul><p>These facts are read-only outputs keyed by HIR identity. They don&#39;t become a second semantic IR and must not mutate HIR.</p><p>Advisory drop candidates are not lifetime topology and not exact release permission.</p><h2>Reactive subscriptions and invalidation</h2><ul><li>A subscription is a read-only dependency.</li><li>A subscription isn&#39;t an active borrow.</li><li>A subscription doesn&#39;t grant mutation.</li><li>A subscription doesn&#39;t extend a source-language lifetime category.</li><li>Writes, place mutations, map mutations and mutable arguments can create invalidation facts.</li><li>Ordinary alias and exclusivity checks still apply.</li><li>Ownership-aware lowering must not destroy an observable source or mounted state too early.</li></ul><p>Reactivity V1 precision:</p><ul><li>invalidation is source-level today</li><li>field, item and path granularity is future precision</li><li>subscription observability is consumed by lifetime validation</li></ul><p>Reactive invalidation facts are distinct from builder-owned page/mount lifetime roots.</p><h2>Handoff to lifetime validation</h2><p>Borrow validation supplies the next analysis with:</p><ul><li>validated access and alias facts</li><li>optional-transfer eligibility facts</li><li>return-alias and projection facts</li><li>reactive invalidation and observability facts</li><li>external boundary classifications already resolved for access</li></ul><p>Lifetime-region and escape validation then decides one lifetime owner, retained-edge legality, escapes, cycles and outlives constraints. See <a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>.</p><h2>Conservative precision and extension points</h2><p>Borrow validation may be conservative. Stronger field-, projection-, region- or path-level analysis may accept more programs or unlock more optimisation, but it must not change the semantics of already-valid programs.</p><p>The accepted design permits conservative analysis. The current analysis shape includes:</p><ul><li>Projections may share their base root conservatively.</li><li>Map lookup aliases the map conservatively.</li><li>Joined control flow may retain mixed slot/alias state.</li><li>Advisory drop sites are candidates, not exact source lifetimes.</li><li>Exact region destruction may be refined later.</li></ul><p>These are precision choices, not permanent source-language restrictions.</p><h2>Diagnostics</h2><ul><li>Access conflicts remain user-facing <code>CompilerDiagnostic</code> values.</li><li>Diagnostics carry source locations and structured reasons.</li><li>Lack of optional move/transfer proof is not a diagnostic.</li><li>Internal malformed-HIR or impossible-analysis state uses <code>CompilerError</code>.</li><li>Conflicting mutable/shared access, duplicate exclusive access and invalid place access need distinct reasons.</li><li>Diagnostics must not be stored as analysis state.</li></ul><h2>What borrow validation must not do</h2><ul><li>Mutate HIR.</li><li>Repair malformed HIR.</li><li>Decide lifetime topology, escapes or region owners.</li><li>Reject a program merely because optional transfer is unavailable.</li><li>Restrict transfer eligibility to mutable parameters.</li><li>Choose GC versus ownership allocation.</li><li>Emit runtime drops or frees.</li><li>Decide pointer tagging.</li><li>Solve generics or traits.</li><li>Parse source syntax.</li><li>Introduce source lifetimes.</li><li>Treat reactive subscriptions as active borrow lifetimes.</li><li>Skip validation because the target uses GC.</li></ul><h2>Common mistakes</h2><ul><li>Equating analysis slot state with guaranteed runtime ownership.</li><li>Treating aliases as independent copies.</li><li>Allowing GC to bypass invalid aliasing.</li><li>Using diagnostics as transfer state.</li><li>Mutating HIR to insert drops.</li><li>Deciding runtime ABI inside the checker.</li><li>Assuming <code>May</code> future use is always safe to consume.</li><li>Treating advisory drop sites as exact lifetimes or validated release permission.</li><li>Rejecting path-dependent optional transfer instead of borrowing.</li><li>Folding lifetime topology into borrow validation.</li></ul><h2>Related reading</h2><ul><li><a href="../">Memory management</a>: core memory contract</li><li><a href="../access-and-aliasing">Access and aliasing</a>: source access semantics</li><li><a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: retained edges and region topology</li><li><a href="../ownership-and-drops">Ownership and drops</a>: consumers of transfer and drop facts</li><li><a href="https://github.com/nyejames/beanstalk/blob/main/docs/compiler-design-overview.md">Compiler HIR generation</a>: validated HIR input</li><li><a href="https://github.com/nyejames/beanstalk/blob/main/docs/compiler-design-overview.md">Compiler borrow validation</a>: module ownership and exported call effects</li></ul></section>
+    <section class="container"><h2>Design contract</h2><p>Borrow validation runs after HIR generation. It reads coherent, validated HIR, enforces source-language access safety and optional transfer safety, and writes analysis facts beside HIR.</p><p>Recoverable numeric, cast and fallible-operation paths are already explicit HIR branches, locals and exits before borrow validation.</p><p>It doesn&#39;t rewrite HIR, choose the final allocation strategy, perform backend ownership lowering, or decide lifetime topology. Lifetime owners, retained edges, escapes and cycles belong to <a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>.</p><h2>Main compiler paths</h2><ul><li><code>src/compiler_frontend/analysis/borrow_checker/mod.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/engine.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/state.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/transfer.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/transfer/</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/types.rs</code></li><li><code>src/compiler_frontend/analysis/borrow_checker/diagnostics.rs</code></li></ul><h2>Inputs</h2><ul><li>Validated <code>HirModule</code>.</li><li>Explicit functions, blocks, regions, locals, places and terminators.</li><li>Access and effect metadata.</li><li>External package registry and boundary classifications.</li><li>External call parameter access rules.</li><li>Return-alias metadata.</li><li>Source locations and string table for diagnostics.</li></ul><p>Borrow validation doesn&#39;t reparse source syntax, solve generics or traits, or see AST-only generic or trait state.</p><h2>Analysis model</h2><p>Accepted abstract states:</p><ul><li><strong>uninitialized:</strong> local has no valid value.</li><li><strong>slot:</strong> local may own independent storage.</li><li><strong>alias:</strong> local observes roots owned elsewhere.</li><li><strong>slot + alias:</strong> conservative control-flow result where either shape may arrive.</li></ul><p>These are analysis lattice states. They are not Moth source types and do not directly prescribe one backend runtime representation.</p><h2>Access roots and aliases</h2><p>Every analysed place resolves to one or more storage roots. Fields and indexes currently resolve conservatively through their base roots. Alias bindings carry root sets. Merged control flow can union root sets. Shared and mutable conflicts are checked against overlapping roots.</p><p>Root tracking is analysis metadata, not source-visible reference identity.</p><h2>Alias activity</h2><p>Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.</p><ul><li>A shared alias blocks overlapping mutation only until its last potential use on the relevant path.</li><li>An unused shared alias does not block later mutation.</li><li>Branches are analysed independently.</li><li>Joins conservatively retain activity when any incoming path may still use the alias.</li><li>Loops use fixed-point future-use reasoning.</li></ul><h2>Exclusivity validation</h2><ul><li>Many shared accesses can coexist.</li><li>Exclusive access conflicts with overlapping active shared access.</li><li>Exclusive access conflicts with another overlapping exclusive access.</li><li>Mutation of an alias writes through to the referent where source semantics permit it.</li><li>Invalid immutable mutation is rejected before backend lowering.</li><li>GC doesn&#39;t relax exclusivity rules.</li><li>Map alias rules use the same conflict machinery.</li></ul><h2>Future-use and optional transfer safety</h2><p>Future-use analysis answers whether a root is required again after the current program point. It is a sufficient basis for optional transfer eligibility, not a source-visible lifetime system.</p><p>Semantic classification:</p><ul><li><strong>no future use on every relevant path:</strong> transfer is eligible as an optimisation.</li><li><strong>future use:</strong> the operation remains a borrow.</li><li><strong>path-dependent or imprecise:</strong> the operation remains a borrow conservatively.</li></ul><p>Inferred transfer is optional. When safe transfer is not proven on every relevant path, the operation remains a borrow. Failure to prove an ownership optimisation must not make an otherwise valid source program invalid.</p><p>Transfer proof failure is not a source diagnostic. Path-dependent optional transfer always backs off to borrowing in the accepted design.</p><p>The current checker precomputes per-block may/must future-use facts and runs a forward fixed-point transfer over reachable HIR blocks. Current path-dependent rejection behaviour is implementation drift tracked for a later compiler plan.</p><h2>No ordinary mandatory-consuming operation</h2><p>Current source syntax has no mandatory-consuming ordinary-value operation. There is no move keyword, consuming parameter spelling or owned signature variant.</p><p>A user-facing use-after-consumption diagnostic is reserved for a future accepted mandatory-consuming surface. It is not valid for ordinary optional transfer.</p><p>Internal inconsistent-analysis or impossible metadata uses <code>CompilerError</code>.</p><h2>Control flow and joins</h2><ul><li>Branches are analysed independently.</li><li>Loops participate in fixed-point analysis.</li><li>Joins conservatively combine possible states and roots.</li><li>Branch-local aliases are removed when they leave visibility.</li><li>Returns, breaks and region exits inform advisory destruction planning.</li><li>Infinite paths without exits don&#39;t require an exit drop merely because they loop.</li></ul><h2>Function and external-call summaries</h2><p>Borrow validation consumes and produces:</p><ul><li>parameter access mode</li><li>mutation effects</li><li>transfer eligibility / effect category</li><li>return-alias summaries</li><li>fresh result roots</li><li>alias of one or more parameters</li><li>unknown or imprecise alias result</li><li>reactive effects</li><li>external function access rules</li><li>external return-alias metadata</li></ul><p>Lifetime constraints are produced and validated by the separate lifetime-region analysis.</p><p>All runtime value parameters, immutable or mutable, may be eligible for inferred responsibility transfer. Parameter access mode remains separate from optional ownership effect. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.</p><p>Closed external boundary profiles override this general rule. WIT value-only calls are non-consuming. Restricted host-value crossings are non-consuming, and mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.</p><p><code>MayConsume</code>, <code>NeverConsumes</code> and <code>AlwaysConsumes</code> are analysis/lowering categories, not source-visible signature categories.</p><p>A <code>MayConsume</code> summary means the call path can receive responsibility when the caller proves a safe transfer. It does not let a callee unpredictably invalidate a borrowed argument.</p><p><code>AlwaysConsumes</code> may describe a specialised already-proven call path. It must not turn a source function into a mandatory-consuming API.</p><p>Call transfer uses resolved metadata, not source imports or runtime names.</p><h2>Side-table outputs</h2><ul><li>function summaries</li><li>block-entry states</li><li>block-exit states</li><li>statement-entry states</li><li>source access facts</li><li>transfer eligibility facts</li><li>return alias facts</li><li>reactive invalidation facts</li><li>advisory drop candidates</li><li>aggregate statistics where useful for tooling</li></ul><p>These facts are read-only outputs keyed by HIR identity. They don&#39;t become a second semantic IR and must not mutate HIR.</p><p>Advisory drop candidates are not lifetime topology and not exact release permission.</p><h2>Reactive subscriptions and invalidation</h2><ul><li>A subscription is a read-only dependency.</li><li>A subscription isn&#39;t an active borrow.</li><li>A subscription doesn&#39;t grant mutation.</li><li>A subscription doesn&#39;t extend a source-language lifetime category.</li><li>Writes, place mutations, map mutations and mutable arguments can create invalidation facts.</li><li>Ordinary alias and exclusivity checks still apply.</li><li>Ownership-aware lowering must not destroy an observable source or mounted state too early.</li></ul><p>Reactivity V1 precision:</p><ul><li>invalidation is source-level today</li><li>field, item and path granularity is future precision</li><li>subscription observability is consumed by lifetime validation</li></ul><p>Reactive invalidation facts are distinct from builder-owned page/mount lifetime roots.</p><h2>Handoff to lifetime validation</h2><p>Borrow validation supplies the next analysis with:</p><ul><li>validated access and alias facts</li><li>optional-transfer eligibility facts</li><li>return-alias and projection facts</li><li>reactive invalidation and observability facts</li><li>external boundary classifications already resolved for access</li></ul><p>Lifetime-region and escape validation then decides one lifetime owner, retained-edge legality, escapes, cycles and outlives constraints. See <a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>.</p><h2>Conservative precision and extension points</h2><p>Borrow validation may be conservative. Stronger field-, projection-, region- or path-level analysis may accept more programs or unlock more optimisation, but it must not change the semantics of already-valid programs.</p><p>The accepted design permits conservative analysis. The current analysis shape includes:</p><ul><li>Projections may share their base root conservatively.</li><li>Map lookup aliases the map conservatively.</li><li>Joined control flow may retain mixed slot/alias state.</li><li>Advisory drop sites are candidates, not exact source lifetimes.</li><li>Exact region destruction may be refined later.</li></ul><p>These are precision choices, not permanent source-language restrictions.</p><h2>Diagnostics</h2><ul><li>Access conflicts remain user-facing <code>CompilerDiagnostic</code> values.</li><li>Diagnostics carry source locations and structured reasons.</li><li>Lack of optional move/transfer proof is not a diagnostic.</li><li>Internal malformed-HIR or impossible-analysis state uses <code>CompilerError</code>.</li><li>Conflicting mutable/shared access, duplicate exclusive access and invalid place access need distinct reasons.</li><li>Diagnostics must not be stored as analysis state.</li></ul><h2>What borrow validation must not do</h2><ul><li>Mutate HIR.</li><li>Repair malformed HIR.</li><li>Decide lifetime topology, escapes or region owners.</li><li>Reject a program merely because optional transfer is unavailable.</li><li>Restrict transfer eligibility to mutable parameters.</li><li>Choose GC versus ownership allocation.</li><li>Emit runtime drops or frees.</li><li>Decide pointer tagging.</li><li>Solve generics or traits.</li><li>Parse source syntax.</li><li>Introduce source lifetimes.</li><li>Treat reactive subscriptions as active borrow lifetimes.</li><li>Skip validation because the target uses GC.</li></ul><h2>Common mistakes</h2><ul><li>Equating analysis slot state with guaranteed runtime ownership.</li><li>Treating aliases as independent copies.</li><li>Allowing GC to bypass invalid aliasing.</li><li>Using diagnostics as transfer state.</li><li>Mutating HIR to insert drops.</li><li>Deciding runtime ABI inside the checker.</li><li>Assuming <code>May</code> future use is always safe to consume.</li><li>Treating advisory drop sites as exact lifetimes or validated release permission.</li><li>Rejecting path-dependent optional transfer instead of borrowing.</li><li>Folding lifetime topology into borrow validation.</li></ul><h2>Related reading</h2><ul><li><a href="../">Memory management</a>: core memory contract</li><li><a href="../access-and-aliasing">Access and aliasing</a>: source access semantics</li><li><a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: retained edges and region topology</li><li><a href="../ownership-and-drops">Ownership and drops</a>: consumers of transfer and drop facts</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md">Compiler HIR generation</a>: validated HIR input</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md">Compiler borrow validation</a>: module ownership and exported call effects</li></ul></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -515,63 +515,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -581,36 +581,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -623,65 +623,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -689,10 +689,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

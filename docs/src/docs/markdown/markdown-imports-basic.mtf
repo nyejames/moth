@@ -1,0 +1,21 @@
+Import a `.md` file the same way as any other source file.
+
+### Import and use
+
+[codeblock, $code("moth"):
+    import @docs/intro {content as intro_html}
+
+    [: [intro_html] ]
+]
+
+The `content` constant is the rendered HTML string.
+
+### Do not include the extension
+
+`import @docs/intro.md` is rejected. Use `import @docs/intro`.
+
+### Remember
+
+- `content` is the only exported name.
+- The result is compile-time HTML, not a runtime value.
+- Links and images are literal, not tracked assets.

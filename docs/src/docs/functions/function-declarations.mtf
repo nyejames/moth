@@ -1,0 +1,57 @@
+A source function is a named top-level declaration.
+
+[codeblock, $code("moth"):
+    greet |name String|:
+        io.line([: Hello, [name]])
+    ;
+
+    double |value Int| -> Int:
+        return value * 2
+    ;
+]
+
+### Declaration shape
+
+[codeblock, $code("moth"):
+    name |parameters|:
+        body
+    ;
+
+    name |parameters| -> ReturnType:
+        body
+    ;
+]
+
+- The function name comes first.
+- Parameters are enclosed by `|...|`.
+- `||` declares a function with no parameters.
+- `->` introduces one or more return slots.
+- Omit the arrow only when the function has no return slots at all.
+- A function with only an error slot still writes `-> Error!`.
+- `Void` is not written as a return type.
+- `:` opens the body and `;` closes it.
+- Function names use `regular_snake_case`.
+
+Functions with required success values must return or otherwise terminate on
+every reachable path. Terminality is validated before HIR lowering.
+
+### Generic functions
+
+Declaration-site generic parameters appear after the function name.
+
+[codeblock, $code("moth"):
+    identity type A |value A| -> A:
+        return value
+    ;
+]
+
+Generic inference and bounds are documented by @../generics (Generics).
+
+### Function values
+
+Source functions are declarations, not ordinary values.
+
+General closures, anonymous function values, generic function values and
+higher-order polymorphism are outside the current language design scope.
+Reactivity is the constrained UI-oriented mechanism for many template cases
+that would otherwise lean on closures.

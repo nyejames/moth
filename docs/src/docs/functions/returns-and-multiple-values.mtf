@@ -1,0 +1,56 @@
+`return` produces the success values declared by a function.
+
+[codeblock, $code("moth"):
+    double |value Int| -> Int:
+        return value * 2
+    ;
+]
+
+### Success returns
+
+- Return values must match the declared success-slot count.
+- Each return value must be compatible with its corresponding slot type.
+- A function with required success values must return or otherwise terminate on every reachable path.
+- A function with no success slots may reach the end of its body.
+- `return` with no values can leave a no-success function early.
+- `Void` is not an explicit return-slot type.
+
+### Multiple success values
+
+A function may declare and return more than one success value.
+
+[codeblock, $code("moth"):
+    pair || -> String, Int:
+        return "Ana", 2
+    ;
+
+    name, count = pair()
+]
+
+The receiving multi-bind must match the success arity.
+
+Multiple return values are not a user-visible tuple value. A normal
+single-target declaration cannot receive a multi-return call.
+
+Value-producing `if`, full matches and `catch` blocks can also satisfy
+multi-value receiving sites when every producing path has the required arity.
+
+### Error slot shape
+
+A function signature may contain at most one error-channel slot marked with
+`!`.
+
+That slot must be last.
+
+[codeblock, $code("moth"):
+    load |id String| -> String, Error!:
+        if id.is_empty():
+            return! Error("Missing id")
+        ;
+
+        return "value"
+    ;
+]
+
+`return!`, postfix propagation and `catch` are documented by
+@../errors (Errors, options and assertions).

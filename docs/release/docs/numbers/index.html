@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Numbers | Beanstalk</title>
-    <meta name="description" content="Numeric types, literals, operators and checked arithmetic in Beanstalk.">
+    <title>Numbers | Moth</title>
+    <meta name="description" content="Numeric types, literals, operators and checked arithmetic in Moth.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -668,7 +668,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Numbers</p><h1>Numbers</h1><p>Beanstalk has two numeric types. That sounds small because it is. The rules around literals, spacing and failure are strict so a number behaves consistently across compiler stages and backends.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Numbers</p><h1>Numbers</h1><p>Moth has two numeric types. That sounds small because it is. The rules around literals, spacing and failure are strict so a number behaves consistently across compiler stages and backends.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Numeric types
@@ -718,21 +718,21 @@ body {
 
 
 
-            <p>Beanstalk uses <code>Int</code> for whole numbers and <code>Float</code> for decimal numbers.</p><pre style=""><code class='codeblock'>
-    lives <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>3</span>
-    progress <span class='bst-code-type'>Float</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0.75</span>
+            <p>Moth uses <code>Int</code> for whole numbers and <code>Float</code> for decimal numbers.</p><pre style=""><code class='codeblock'>
+    lives <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
+    progress <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.75</span>
     </code></pre><p>An <code>Int</code> can be used where a <code>Float</code> is expected:</p><pre style=""><code class='codeblock'>
-    lives <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>3</span>
-    display_value <span class='bst-code-type'>Float</span> <span class='bst-code-operator'>=</span> lives
+    lives <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
+    display_value <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> lives
     </code></pre><p>A <code>Float</code> never silently becomes an <code>Int</code>. That conversion can lose information, so it needs an explicit cast.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Beanstalk has two core numeric types.</p><h3><code>Int</code></h3><p><code>Int</code> is a signed 32-bit integer.</p><p>Its range is:</p><pre style=""><code class='codeblock'>
+        <p>Moth has two core numeric types.</p><h3><code>Int</code></h3><p><code>Int</code> is a signed 32-bit integer.</p><p>Its range is:</p><pre style=""><code class='codeblock'>
         -2147483648 through 2147483647
-    </code></pre><h3><code>Float</code></h3><p><code>Float</code> is a finite <code>f64</code>.</p><p><code>NaN</code>, positive infinity and negative infinity are not valid Beanstalk <code>Float</code> values. Boundaries that can introduce a non-finite result must reject it.</p><h3>Promotion</h3><p><code>Int</code> may promote to <code>Float</code> at a contextual numeric boundary.</p><pre style=""><code class='codeblock'>
-    count <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>3</span>
-    ratio <span class='bst-code-type'>Float</span> <span class='bst-code-operator'>=</span> count
+    </code></pre><h3><code>Float</code></h3><p><code>Float</code> is a finite <code>f64</code>.</p><p><code>NaN</code>, positive infinity and negative infinity are not valid Moth <code>Float</code> values. Boundaries that can introduce a non-finite result must reject it.</p><h3>Promotion</h3><p><code>Int</code> may promote to <code>Float</code> at a contextual numeric boundary.</p><pre style=""><code class='codeblock'>
+    count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
+    ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> count
     </code></pre><p>Mixed <code>Int</code> and <code>Float</code> arithmetic produces <code>Float</code>.</p><p>There is no implicit <code>Float -&gt; Int</code> conversion. Use a fallible explicit cast at an <code>Int</code> target.</p><p><code>Bool</code> and <code>Char</code> are not numeric types.</p>
     </div>
     </fieldset></section>
@@ -786,32 +786,32 @@ body {
 
 
             <p>Whole numbers are <code>Int</code> values:</p><pre style=""><code class='codeblock'>
-    score <span class='bst-code-operator'>=</span> <span class='bst-code-number'>42</span>
+    score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
     </code></pre><p>Numbers with a decimal point are <code>Float</code> values:</p><pre style=""><code class='codeblock'>
-    progress <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0.5</span>
+    progress <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
     </code></pre><p>Large and tiny values can use lowercase <code>e</code> notation:</p><pre style=""><code class='codeblock'>
-    population <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>e<span class='bst-code-number'>6</span>
-    tolerance <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>e<span class='bst-code-operator'>-</span><span class='bst-code-number'>6</span>
+    population <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>e<span class='moth-code-number'>6</span>
+    tolerance <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>e<span class='moth-code-operator'>-</span><span class='moth-code-number'>6</span>
     </code></pre><p>Keep a minus sign attached to the value:</p><pre style=""><code class='codeblock'>
-    temperature <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>-</span><span class='bst-code-number'>5</span>
-    opposite <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>-</span>count
+    temperature <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span><span class='moth-code-number'>5</span>
+    opposite <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span>count
     </code></pre><p><code>1E6</code>, <code>+1</code> and <code>- count</code> are not valid numeric forms.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>The source spelling of a number determines its natural type.</p><pre style=""><code class='codeblock'>
-    whole <span class='bst-code-operator'>=</span> <span class='bst-code-number'>42</span>
-    decimal <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0.5</span>
-    large <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>e<span class='bst-code-number'>6</span>
-    small <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>e<span class='bst-code-operator'>-</span><span class='bst-code-number'>6</span>
-    precise <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1.0</span>e<span class='bst-code-operator'>+</span><span class='bst-code-number'>21</span>
+    whole <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+    decimal <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
+    large <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>e<span class='moth-code-number'>6</span>
+    small <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>e<span class='moth-code-operator'>-</span><span class='moth-code-number'>6</span>
+    precise <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1.0</span>e<span class='moth-code-operator'>+</span><span class='moth-code-number'>21</span>
     </code></pre><h3>Contract</h3><ul><li>A whole-number literal is naturally <code>Int</code>.</li><li>A decimal-point literal is naturally <code>Float</code>.</li><li>Exponents use lowercase <code>e</code>.</li><li>Uppercase <code>E</code> is rejected.</li><li>Unary <code>+</code> is rejected.</li><li>A leading <code>-</code> must be attached to the literal or expression it negates.</li><li><code>-1</code>, <code>-1e6</code> and <code>-count</code> are valid prefix forms.</li><li><code>- count</code> is invalid.</li><li>Integer literals must fit the <code>Int</code> range.</li><li>Float literals must materialize to a finite <code>Float</code>.</li></ul><pre style=""><code class='codeblock'>
-    valid_literal <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>-</span><span class='bst-code-number'>42</span>
-    valid_expression <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>-</span>count
+    valid_literal <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span><span class='moth-code-number'>42</span>
+    valid_expression <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span>count
 
-    invalid_exponent <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span><span class='bst-code-struct'>E</span><span class='bst-code-number'>6</span>
-    invalid_plus <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>+</span><span class='bst-code-number'>1</span>
-    invalid_spacing <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>-</span> count
+    invalid_exponent <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span><span class='moth-code-struct'>E</span><span class='moth-code-number'>6</span>
+    invalid_plus <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>+</span><span class='moth-code-number'>1</span>
+    invalid_spacing <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span> count
     </code></pre><p>The invalid lines above demonstrate rejected syntax. They are not valid program forms.</p>
     </div>
     </fieldset></section>
@@ -865,45 +865,45 @@ body {
 
 
             <p>Put spaces around symbolic operators.</p><pre style=""><code class='codeblock'>
-    total <span class='bst-code-operator'>=</span> left <span class='bst-code-operator'>+</span> right
-    count <span class='bst-code-operator'>+</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
-    </code></pre><p>Beanstalk uses words for equality and logic:</p><pre style=""><code class='codeblock'>
-    same <span class='bst-code-operator'>=</span> left is right
-    different <span class='bst-code-operator'>=</span> left is not right
-    ready <span class='bst-code-operator'>=</span> loaded and valid
-    retry <span class='bst-code-operator'>=</span> timed_out or disconnected
-    blocked <span class='bst-code-operator'>=</span> not ready
+    total <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
+    count <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
+    </code></pre><p>Moth uses words for equality and logic:</p><pre style=""><code class='codeblock'>
+    same <span class='moth-code-operator'>=</span> left is right
+    different <span class='moth-code-operator'>=</span> left is not right
+    ready <span class='moth-code-operator'>=</span> loaded and valid
+    retry <span class='moth-code-operator'>=</span> timed_out or disconnected
+    blocked <span class='moth-code-operator'>=</span> not ready
     </code></pre><p>Division has two forms:</p><pre style=""><code class='codeblock'>
-    real_result <span class='bst-code-operator'>=</span> <span class='bst-code-number'>5</span> <span class='bst-code-operator'>/</span> <span class='bst-code-number'>2</span>
-    whole_result <span class='bst-code-operator'>=</span> <span class='bst-code-number'>5</span> <span class='bst-code-operator'>/</span><span class='bst-code-operator'>/</span> <span class='bst-code-number'>2</span>
+    real_result <span class='moth-code-operator'>=</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>/</span> <span class='moth-code-number'>2</span>
+    whole_result <span class='moth-code-operator'>=</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>/</span><span class='moth-code-operator'>/</span> <span class='moth-code-number'>2</span>
     </code></pre><p><code>/</code> produces a real <code>Float</code> result. <code>//</code> performs integer division and produces an <code>Int</code>.</p><p>Use templates to join text:</p><pre style=""><code class='codeblock'>
-    greeting <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-string'>&quot;Hello, &quot;</span>, <span class='bst-code-string'>&quot;Priya&quot;</span><span class='bst-code-parenthesis'>]</span>
+    greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-string'>&quot;Hello, &quot;</span>, <span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Templates handle all string joining and interpolation. <code>+</code> is for numbers only.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Beanstalk keeps equality and logical operators readable.</p><pre style=""><code class='codeblock'>
-    same <span class='bst-code-operator'>=</span> left is right
-    different <span class='bst-code-operator'>=</span> left is not right
-    ready <span class='bst-code-operator'>=</span> has_input and is_valid
-    should_retry <span class='bst-code-operator'>=</span> timed_out or disconnected
-    blocked <span class='bst-code-operator'>=</span> not ready
+        <p>Moth keeps equality and logical operators readable.</p><pre style=""><code class='codeblock'>
+    same <span class='moth-code-operator'>=</span> left is right
+    different <span class='moth-code-operator'>=</span> left is not right
+    ready <span class='moth-code-operator'>=</span> has_input and is_valid
+    should_retry <span class='moth-code-operator'>=</span> timed_out or disconnected
+    blocked <span class='moth-code-operator'>=</span> not ready
     </code></pre><ul><li><code>and</code> and <code>or</code> require <code>Bool</code> operands.</li><li><code>not</code> requires one <code>Bool</code> operand.</li><li>Symbolic equality and symbolic logical-not forms are not language operators.</li></ul><h3>Arithmetic results</h3><ul><li><code>Int</code>, <code>Int</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>%</code>, <code>^</code>, <code>//</code> produces <code>Int</code></li><li><code>Int</code>, <code>Int</code> with <code>/</code> produces <code>Float</code></li><li><code>Float</code>, <code>Float</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code> produces <code>Float</code></li><li>mixed <code>Int</code> and <code>Float</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code> produces <code>Float</code></li></ul><p><code>//</code> is integer division and is valid only for two <code>Int</code> operands.</p><h3>Plain string concatenation</h3><p>Two plain string slices can use <code>+</code>.</p><pre style=""><code class='codeblock'>
-    prefix <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Hello, &quot;</span>
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Priya&quot;</span>
-    greeting <span class='bst-code-operator'>=</span> prefix <span class='bst-code-operator'>+</span> name
+    prefix <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+    greeting <span class='moth-code-operator'>=</span> prefix <span class='moth-code-operator'>+</span> name
     </code></pre><p>This is the narrow plain-string operator surface. Templates remain the general tool for interpolation and structured string construction.</p><h3>Comparisons</h3><ul><li><code>Int</code> and <code>Float</code> support equality and ordering, including mixed numeric comparisons.</li><li><code>Char</code> supports equality and ordering.</li><li><code>Bool</code> supports equality only.</li><li>Plain string slices support <code>is</code> and <code>is not</code>.</li><li>Choices and options have additional equality rules in their own references.</li></ul><h3>Precedence and associativity</h3><p>From highest to lowest:</p><ul><li>level 6: unary <code>not</code>, unary <code>-</code></li><li>level 5: <code>^</code></li><li>level 4: <code>*</code>, <code>/</code>, <code>//</code>, <code>%</code></li><li>level 3: <code>+</code>, <code>-</code></li><li>level 2: <code>is</code>, <code>is not</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code></li><li>level 1: <code>and</code></li><li>level 0: <code>or</code></li></ul><p><code>^</code> is right-associative. Other binary operators are left-associative.</p><p>Parentheses override normal precedence.</p><h3>Spacing</h3><p>Symbolic binary operators require spaces on both sides. Assignment <code>=</code> follows the same outer-spacing rule, but it is not a binary operator.</p><pre style=""><code class='codeblock'>
-    total <span class='bst-code-operator'>=</span> left <span class='bst-code-operator'>+</span> right
-    count <span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
+    total <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
+    count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
     </code></pre><p>These forms are invalid:</p><pre style=""><code class='codeblock'>
-    total<span class='bst-code-operator'>=</span>left<span class='bst-code-operator'>+</span>right
-    count<span class='bst-code-operator'>=</span><span class='bst-code-number'>1</span>
+    total<span class='moth-code-operator'>=</span>left<span class='moth-code-operator'>+</span>right
+    count<span class='moth-code-operator'>=</span><span class='moth-code-number'>1</span>
     </code></pre><p>Compound assignments follow the same rule:</p><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>+</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
-    count <span class='bst-code-operator'>/</span><span class='bst-code-operator'>/</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>2</span>
+    count <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
+    count <span class='moth-code-operator'>/</span><span class='moth-code-operator'>/</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>2</span>
     </code></pre><p><code>count+=1</code>, <code>count +=1</code> and <code>count+= 1</code> are invalid.</p><p>The mutable declaration spelling <code>~=</code> stays adjacent. It needs whitespace before <code>~</code> and after <code>=</code>:</p><pre style=""><code class='codeblock'>
-    count <span class='bst-code-operator'>~</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>1</span>
-    </code></pre><p><code>count~= 1</code>, <code>count ~=1</code> and <code>count ~ = 1</code> are invalid.</p><p>Operator overloading is outside Beanstalk&#39;s language design. Operators remain compiler-owned and predictable.</p>
+    count <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
+    </code></pre><p><code>count~= 1</code>, <code>count ~=1</code> and <code>count ~ = 1</code> are invalid.</p><p>Operator overloading is outside Moth&#39;s language design. Operators remain compiler-owned and predictable.</p>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -955,21 +955,21 @@ body {
 
 
 
-            <p>Beanstalk checks arithmetic instead of quietly wrapping or producing invalid floating-point values.</p><p>These operations can fail:</p><ul><li>overflowing an <code>Int</code></li><li>dividing by zero</li><li>using an invalid integer exponent</li><li>producing <code>NaN</code> or infinity</li></ul><p>A function with an <code>Error!</code> return can pass that failure through its normal error path:</p><pre style=""><code class='codeblock'>
-    divide <span class='bst-code-operator'>|</span>left <span class='bst-code-struct'>Int,</span> right <span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>Float,</span> <span class='bst-code-struct'>Error</span><span class='bst-code-operator'>!</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> left <span class='bst-code-operator'>/</span> right
+            <p>Moth checks arithmetic instead of quietly wrapping or producing invalid floating-point values.</p><p>These operations can fail:</p><ul><li>overflowing an <code>Int</code></li><li>dividing by zero</li><li>using an invalid integer exponent</li><li>producing <code>NaN</code> or infinity</li></ul><p>A function with an <code>Error!</code> return can pass that failure through its normal error path:</p><pre style=""><code class='codeblock'>
+    divide <span class='moth-code-operator'>|</span>left <span class='moth-code-struct'>Int,</span> right <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Float,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> left <span class='moth-code-operator'>/</span> right
     ;
     </code></pre><p>Outside that kind of function, an unexpected runtime numeric failure stops the current program path.</p><p>A failure the compiler can prove in advance is reported during compilation.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Runtime numeric operations are checked.</p><p>Failures include:</p><ul><li>integer overflow</li><li>division or modulo by zero</li><li>invalid integer exponents</li><li>non-finite <code>Float</code> results</li></ul><h3>Failure mode</h3><p>When the enclosing function has builtin <code>Error!</code> as its error return slot, checked numeric failures use that error channel.</p><pre style=""><code class='codeblock'>
-    divide <span class='bst-code-operator'>|</span>left <span class='bst-code-struct'>Int,</span> right <span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>Float,</span> <span class='bst-code-struct'>Error</span><span class='bst-code-operator'>!</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> left <span class='bst-code-operator'>/</span> right
+    divide <span class='moth-code-operator'>|</span>left <span class='moth-code-struct'>Int,</span> right <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Float,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> left <span class='moth-code-operator'>/</span> right
     ;
 
-    ratio <span class='bst-code-operator'>=</span> divide<span class='bst-code-parenthesis'>(</span><span class='bst-code-number'>10</span>, <span class='bst-code-number'>0</span><span class='bst-code-parenthesis'>)</span> catch<span class='bst-code-operator'>:</span>
-        then <span class='bst-code-number'>0.0</span>
+    ratio <span class='moth-code-operator'>=</span> divide<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+        then <span class='moth-code-number'>0.0</span>
     ;
     </code></pre><p>Custom fallible channels, non-fallible functions and active-root top-level runtime code use trap mode for checked numeric failure.</p><p>Numeric operators remain ordinary source expressions. The compiler lowers their failure path. They are not source-visible <code>Error!</code> values that can be handled in the middle of an arbitrary expression.</p><h3>Compile-time failures</h3><p>A statically known numeric failure is a compile-time diagnostic.</p><p>This remains true inside a function with builtin <code>Error!</code>.</p><h3>Related behaviour</h3><p>Range-loop counter updates use the same checked numeric operations.</p><p>Conversions that may lose information, such as <code>Float -&gt; Int</code>, belong to the Casts documentation rather than implicit arithmetic coercion.</p>
     </div>
@@ -999,109 +999,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1116,63 +1116,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1182,36 +1182,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1224,65 +1224,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1290,10 +1290,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

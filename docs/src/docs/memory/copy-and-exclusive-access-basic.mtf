@@ -1,0 +1,35 @@
+Copies in Moth are always explicit. Ordinary assignment doesn't clone data.
+
+### Making an independent copy
+
+Use `copy` when you need a separate version of a value:
+
+[codeblock, $code("moth"):
+    original ~= {1, 2, 3}
+    independent = copy original
+
+    ~independent.push(4)
+    -- original still has 3 items
+]
+
+Without `copy`, both names point at the same collection.
+
+### Mutating existing values with `~`
+
+To change an existing value, use `~` before the value name:
+
+[codeblock, $code("moth"):
+    items ~= {1, 2, 3}
+    ~items.push(4)
+]
+
+The `~` tells the compiler you want exclusive access to mutate the value.
+
+### Fresh values don't need `~`
+
+When you create a new value from scratch, it doesn't need `~`:
+
+[codeblock, $code("moth"):
+    fresh = {1, 2, 3}   -- new collection, no ~ needed
+    fresh_with_type ~{Int} = {1, 2, 3}  -- mutable binding, no ~ on the initializer
+]

@@ -1,0 +1,63 @@
+Cast availability is proven by compiler-owned static traits.
+
+Every builtin target has one infallible trait and one fallible trait.
+
+- `Int`: `CASTABLE_TO_INT` requires `to_int |This| -> Int`; `TRY_CASTABLE_TO_INT` requires `try_to_int |This| -> Int, Error!`
+- `Float`: `CASTABLE_TO_FLOAT` requires `to_float |This| -> Float`; `TRY_CASTABLE_TO_FLOAT` requires `try_to_float |This| -> Float, Error!`
+- `Bool`: `CASTABLE_TO_BOOL` requires `to_bool |This| -> Bool`; `TRY_CASTABLE_TO_BOOL` requires `try_to_bool |This| -> Bool, Error!`
+- `String`: `CASTABLE_TO_STRING` requires `to_string |This| -> String`; `TRY_CASTABLE_TO_STRING` requires `try_to_string |This| -> String, Error!`
+- `Char`: `CASTABLE_TO_CHAR` requires `to_char |This| -> Char`; `TRY_CASTABLE_TO_CHAR` requires `try_to_char |This| -> Char, Error!`
+- `Error`: `CASTABLE_TO_ERROR` requires `to_error |This| -> Error`; `TRY_CASTABLE_TO_ERROR` requires `try_to_error |This| -> Error, Error!`
+
+The table shows trait requirement signatures. A source-authored implementation
+uses an ordinary lowercase `this` receiver of the concrete type.
+
+### Builtin evidence
+
+The compiler registers evidence for the supported builtin source-target table.
+
+### Source-authored evidence
+
+A same-file nominal struct, choice or aligned generic nominal constructor may
+add evidence for a supported builtin target.
+
+It must provide the required receiver method and declare explicit conformance.
+
+[codeblock, $code("moth"):
+    Label = |
+        text String,
+    |
+
+    to_string |this Label| -> String:
+        return this.text
+    ;
+
+    Label must CASTABLE_TO_STRING
+
+    label = Label("hello")
+    text String = cast label
+]
+
+### Contract
+
+- Core cast traits resolve without imports.
+- They cannot be redeclared.
+- They cannot be imported, exported, aliased or shadowed.
+- They are static contracts, not ordinary value types.
+- Matching method shape alone is not evidence. Explicit conformance is required.
+- Same-file nominal source types may provide explicit evidence.
+- Aligned generic nominal constructors may provide evidence for their concrete instances.
+- Infallible and fallible trait pairs for the same target are incompatible through compiler-owned `must not` metadata.
+- Evidence is resolved before HIR and backend lowering.
+
+### Outside cast design scope
+
+- user-defined cast target types
+- generic cast target parameters
+- external opaque cast targets
+- generic cast traits
+- broad return-type-directed conversion
+- implicit conversion chosen from distant context
+
+Cast traits prove source evidence only. They do not create a general user
+conversion framework.

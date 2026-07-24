@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0041"]
+diagnostic_codes = ["MOTH-RULE-0041"]
 message_contains = ["Receiver methods on instantiated generic receiver types are not supported", "using the receiver type's own parameters"]

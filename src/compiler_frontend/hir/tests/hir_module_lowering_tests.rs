@@ -94,7 +94,7 @@ fn lowers_module_constants_into_hir_const_pool() {
     ast.module_constants.push(make_test_variable(
         const_name,
         Expression::string_slice(
-            string_table.intern("Beanstalk"),
+            string_table.intern("Moth"),
             test_location(1),
             ValueMode::ImmutableOwned,
         ),
@@ -108,7 +108,7 @@ fn lowers_module_constants_into_hir_const_pool() {
     assert_eq!(constant.name, "SITE_NAME");
     assert!(matches!(
         constant.value,
-        HirConstValue::String(ref value) if value == "Beanstalk"
+        HirConstValue::String(ref value) if value == "Moth"
     ));
 }
 

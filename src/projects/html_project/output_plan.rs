@@ -65,7 +65,7 @@ pub(crate) fn plan_wasm_output_from_logical_html_path(
 
 /// Derive the logical HTML output path from an entry file.
 ///
-/// WHAT: maps Beanstalk entry conventions to HTML paths:
+/// WHAT: maps Moth entry conventions to HTML paths:
 /// - Directory builds use only the module root directory relative to `entry_root`, so a root
 ///   module emits `index.html` and a nested module emits `<directory>/index.html`.
 /// - Single-file builds strip `#` prefix and use legacy `.html` extension.
@@ -125,7 +125,7 @@ fn derive_single_file_logical_html_path(
         CompilerError::file_error(
             entry_point,
             format!(
-                "HTML single-file entry {entry_point:?} has no file stem; Beanstalk routes need a non-empty UTF-8 stem."
+                "HTML single-file entry {entry_point:?} has no file stem; Moth routes need a non-empty UTF-8 stem."
             ),
             string_table,
         )
@@ -134,7 +134,7 @@ fn derive_single_file_logical_html_path(
     let file_stem = raw_stem.to_str().ok_or_else(|| {
         CompilerError::file_error(
             entry_point,
-            "HTML single-file entry stem is not valid UTF-8; Beanstalk routes require UTF-8 stems."
+            "HTML single-file entry stem is not valid UTF-8; Moth routes require UTF-8 stems."
                 .to_string(),
             string_table,
         )
@@ -143,7 +143,7 @@ fn derive_single_file_logical_html_path(
     if file_stem.is_empty() {
         return Err(CompilerError::file_error(
             entry_point,
-            "HTML single-file entry has an empty stem; Beanstalk routes require a non-empty UTF-8 stem.".to_string(),
+            "HTML single-file entry has an empty stem; Moth routes require a non-empty UTF-8 stem.".to_string(),
             string_table,
         ));
     }
@@ -157,7 +157,7 @@ fn derive_single_file_logical_html_path(
     if route_name.is_empty() {
         return Err(CompilerError::file_error(
             entry_point,
-            "HTML single-file entry stem is empty after stripping the cosmetic '#' prefix; Beanstalk routes require a non-empty route name.".to_string(),
+            "HTML single-file entry stem is empty after stripping the cosmetic '#' prefix; Moth routes require a non-empty route name.".to_string(),
             string_table,
         ));
     }

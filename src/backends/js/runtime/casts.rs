@@ -2,7 +2,7 @@
 //!
 //! WHAT: implements the runtime side of the builtin cast policy table for the JavaScript backend.
 //! WHY: explicit cast operations must return structured carriers (`{{ tag: "ok"/"err", value }}`)
-//!      for fallible policies and plain values for infallible ones, so Beanstalk's `Error!` and
+//!      for fallible policies and plain values for infallible ones, so Moth's `Error!` and
 //!      `cast ... catch:` semantics work uniformly.
 
 use crate::backends::js::JsEmitter;
@@ -67,19 +67,19 @@ impl<'hir> JsEmitter<'hir> {
 
     /// Emits the shared signed i32 cast range constants and predicate.
     ///
-    /// WHAT: `__bs_cast_int_in_range` and the `__BS_INT_CAST_MIN`/`__BS_INT_CAST_MAX`
+    /// WHAT: `__moth_cast_int_in_range` and the `__BS_INT_CAST_MIN`/`__BS_INT_CAST_MAX`
     ///      constants are derived from the Rust `numeric_limits` owner so the JS
     ///      runtime cannot drift from the Rust-side fold policy.
     /// WHY: keeping one source of truth for the i32 bounds prevents the runtime from
     ///      accepting or rejecting values that the compiler already folded differently.
     fn emit_cast_int_range_helpers(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_int_in_range") {
+        if !emitted.insert("__moth_cast_int_in_range") {
             return;
         }
 
         self.emit_line(&format!("const __BS_INT_CAST_MIN = {I32_MIN};"));
         self.emit_line(&format!("const __BS_INT_CAST_MAX = {I32_MAX};"));
-        self.emit_line("function __bs_cast_int_in_range(value) {");
+        self.emit_line("function __moth_cast_int_in_range(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line(
                 "return Number.isInteger(value) && value >= __BS_INT_CAST_MIN && value <= __BS_INT_CAST_MAX;",
@@ -90,7 +90,7 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_int(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_int") {
+        if !emitted.insert("__moth_cast_int") {
             return;
         }
 
@@ -104,14 +104,14 @@ impl<'hir> JsEmitter<'hir> {
 
         self.emit_cast_int_range_helpers(emitted);
 
-        self.emit_line("function __bs_cast_int(value) {");
+        self.emit_line("function __moth_cast_int(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (typeof value === \"number\") {");
             emitter.with_indent(|em| {
-                em.emit_line("if (!Number.isFinite(value) || !__bs_cast_int_in_range(value)) {");
+                em.emit_line("if (!Number.isFinite(value) || !__moth_cast_int_in_range(value)) {");
                 em.with_indent(|inner| {
                     inner.emit_line(&format!(
-                        "return {{ tag: \"err\", value: __bs_make_error(\"{int_out_of_range_message}\", {int_out_of_range_code}, null, null) }};",
+                        "return {{ tag: \"err\", value: __moth_make_error(\"{int_out_of_range_message}\", {int_out_of_range_code}, null, null) }};",
                     ));
                 });
                 em.emit_line("}");
@@ -119,7 +119,7 @@ impl<'hir> JsEmitter<'hir> {
                 em.with_indent(|inner| inner.emit_line("return { tag: \"ok\", value };"));
                 em.emit_line("}");
                 em.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __bs_make_error(\"Float value is not an exact integer\", {int_invalid_format_code}, null, null) }};",
+                    "return {{ tag: \"err\", value: __moth_make_error(\"Float value is not an exact integer\", {int_invalid_format_code}, null, null) }};",
                 ));
             });
             emitter.emit_line("}");
@@ -129,10 +129,10 @@ impl<'hir> JsEmitter<'hir> {
                 em.emit_line("if (/^-?(?:\\d+(?:_\\d+)*)$/.test(value)) {");
                 em.with_indent(|inner| {
                     inner.emit_line("const parsed = Number.parseInt(value.replace(/_/g, ''), 10);");
-                    inner.emit_line("if (!__bs_cast_int_in_range(parsed)) {");
+                    inner.emit_line("if (!__moth_cast_int_in_range(parsed)) {");
                     inner.with_indent(|deep| {
                         deep.emit_line(&format!(
-                            "return {{ tag: \"err\", value: __bs_make_error(\"{int_out_of_range_message}\", {int_out_of_range_code}, null, null) }};",
+                            "return {{ tag: \"err\", value: __moth_make_error(\"{int_out_of_range_message}\", {int_out_of_range_code}, null, null) }};",
                         ));
                     });
                     inner.emit_line("}");
@@ -140,13 +140,13 @@ impl<'hir> JsEmitter<'hir> {
                 });
                 em.emit_line("}");
                 em.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __bs_make_error(\"{int_invalid_format_message}\", {int_invalid_format_code}, null, null) }};",
+                    "return {{ tag: \"err\", value: __moth_make_error(\"{int_invalid_format_message}\", {int_invalid_format_code}, null, null) }};",
                 ));
             });
             emitter.emit_line("}");
 
             emitter.emit_line(&format!(
-                "return {{ tag: \"err\", value: __bs_make_error(\"Cast to Int only accepts Int, Float, or string values\", {int_invalid_format_code}, null, null) }};",
+                "return {{ tag: \"err\", value: __moth_make_error(\"Cast to Int only accepts Int, Float, or string values\", {int_invalid_format_code}, null, null) }};",
             ));
         });
         self.emit_line("}");
@@ -154,7 +154,7 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_float(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_float") {
+        if !emitted.insert("__moth_cast_float") {
             return;
         }
 
@@ -166,14 +166,14 @@ impl<'hir> JsEmitter<'hir> {
         let float_out_of_range_code = float_out_of_range.as_i32();
         let float_out_of_range_message = float_out_of_range.default_message();
 
-        self.emit_line("function __bs_cast_float(value) {");
+        self.emit_line("function __moth_cast_float(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (typeof value === \"number\") {");
             emitter.with_indent(|em| {
                 em.emit_line("if (!Number.isFinite(value)) {");
                 em.with_indent(|inner| {
                     inner.emit_line(&format!(
-                        "return {{ tag: \"err\", value: __bs_make_error(\"{float_out_of_range_message}\", {float_out_of_range_code}, null, null) }};",
+                        "return {{ tag: \"err\", value: __moth_make_error(\"{float_out_of_range_message}\", {float_out_of_range_code}, null, null) }};",
                     ));
                 });
                 em.emit_line("}");
@@ -189,7 +189,7 @@ impl<'hir> JsEmitter<'hir> {
                     inner.emit_line("if (!Number.isFinite(parsed)) {");
                     inner.with_indent(|deep| {
                         deep.emit_line(&format!(
-                            "return {{ tag: \"err\", value: __bs_make_error(\"{float_out_of_range_message}\", {float_out_of_range_code}, null, null) }};",
+                            "return {{ tag: \"err\", value: __moth_make_error(\"{float_out_of_range_message}\", {float_out_of_range_code}, null, null) }};",
                         ));
                     });
                     inner.emit_line("}");
@@ -197,13 +197,13 @@ impl<'hir> JsEmitter<'hir> {
                 });
                 em.emit_line("}");
                 em.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __bs_make_error(\"{float_invalid_format_message}\", {float_invalid_format_code}, null, null) }};",
+                    "return {{ tag: \"err\", value: __moth_make_error(\"{float_invalid_format_message}\", {float_invalid_format_code}, null, null) }};",
                 ));
             });
             emitter.emit_line("}");
 
             emitter.emit_line(&format!(
-                "return {{ tag: \"err\", value: __bs_make_error(\"Cast to Float only accepts Int, Float, or string values\", {float_invalid_format_code}, null, null) }};",
+                "return {{ tag: \"err\", value: __moth_make_error(\"Cast to Float only accepts Int, Float, or string values\", {float_invalid_format_code}, null, null) }};",
             ));
         });
         self.emit_line("}");
@@ -211,7 +211,7 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_float_to_int(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_float_to_int") {
+        if !emitted.insert("__moth_cast_float_to_int") {
             return;
         }
 
@@ -225,20 +225,20 @@ impl<'hir> JsEmitter<'hir> {
 
         self.emit_cast_int_range_helpers(emitted);
 
-        self.emit_line("function __bs_cast_float_to_int(value) {");
+        self.emit_line("function __moth_cast_float_to_int(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (typeof value !== \"number\" || !Number.isFinite(value)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __bs_make_error(\"{invalid_value_message}\", {invalid_value_code}, null, null) }};",
+                    "return {{ tag: \"err\", value: __moth_make_error(\"{invalid_value_message}\", {invalid_value_code}, null, null) }};",
                 ));
             });
             emitter.emit_line("}");
             emitter.emit_line("const truncated = Math.trunc(value);");
-            emitter.emit_line("if (!__bs_cast_int_in_range(truncated)) {");
+            emitter.emit_line("if (!__moth_cast_int_in_range(truncated)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __bs_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};",
+                    "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};",
                 ));
             });
             emitter.emit_line("}");
@@ -249,11 +249,11 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_int_to_string(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_int_to_string") {
+        if !emitted.insert("__moth_cast_int_to_string") {
             return;
         }
 
-        self.emit_line("function __bs_cast_int_to_string(value) {");
+        self.emit_line("function __moth_cast_int_to_string(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("return String(value);");
         });
@@ -262,24 +262,24 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_float_to_string(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_float_to_string") {
+        if !emitted.insert("__moth_cast_float_to_string") {
             return;
         }
 
-        self.emit_line("function __bs_cast_float_to_string(value) {");
+        self.emit_line("function __moth_cast_float_to_string(value) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("return __bs_numeric_trap(__bs_format_float(value));");
+            emitter.emit_line("return __moth_numeric_trap(__moth_format_float(value));");
         });
         self.emit_line("}");
         self.emit_line("");
     }
 
     fn emit_cast_bool_to_string(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_bool_to_string") {
+        if !emitted.insert("__moth_cast_bool_to_string") {
             return;
         }
 
-        self.emit_line("function __bs_cast_bool_to_string(value) {");
+        self.emit_line("function __moth_cast_bool_to_string(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("return value ? \"true\" : \"false\";");
         });
@@ -288,11 +288,11 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_char_to_string(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_char_to_string") {
+        if !emitted.insert("__moth_cast_char_to_string") {
             return;
         }
 
-        self.emit_line("function __bs_cast_char_to_string(value) {");
+        self.emit_line("function __moth_cast_char_to_string(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("return value;");
         });
@@ -301,11 +301,11 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_char_to_int(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_char_to_int") {
+        if !emitted.insert("__moth_cast_char_to_int") {
             return;
         }
 
-        self.emit_line("function __bs_cast_char_to_int(value) {");
+        self.emit_line("function __moth_cast_char_to_int(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("return value.codePointAt(0);");
         });
@@ -314,16 +314,16 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_string_to_error(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_string_to_error") {
+        if !emitted.insert("__moth_cast_string_to_error") {
             return;
         }
 
         let unknown_code = BuiltinErrorCode::UnknownOrUnassigned.as_i32();
 
-        self.emit_line("function __bs_cast_string_to_error(value) {");
+        self.emit_line("function __moth_cast_string_to_error(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line(&format!(
-                "return __bs_make_error(value, {unknown_code}, null, null);",
+                "return __moth_make_error(value, {unknown_code}, null, null);",
             ));
         });
         self.emit_line("}");
@@ -331,20 +331,20 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_error_to_string(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_error_to_string") {
+        if !emitted.insert("__moth_cast_error_to_string") {
             return;
         }
 
-        self.emit_line("function __bs_cast_error_to_string(value) {");
+        self.emit_line("function __moth_cast_error_to_string(value) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("return __bs_error_message(value);");
+            emitter.emit_line("return __moth_error_message(value);");
         });
         self.emit_line("}");
         self.emit_line("");
     }
 
     fn emit_cast_int_to_char(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_int_to_char") {
+        if !emitted.insert("__moth_cast_int_to_char") {
             return;
         }
 
@@ -352,12 +352,12 @@ impl<'hir> JsEmitter<'hir> {
         let invalid_codepoint_code = invalid_codepoint.as_i32();
         let invalid_codepoint_message = invalid_codepoint.default_message();
 
-        self.emit_line("function __bs_cast_int_to_char(value) {");
+        self.emit_line("function __moth_cast_int_to_char(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (!Number.isInteger(value) || value < 0 || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __bs_make_error(\"{invalid_codepoint_message}\", {invalid_codepoint_code}, null, null) }};",
+                    "return {{ tag: \"err\", value: __moth_make_error(\"{invalid_codepoint_message}\", {invalid_codepoint_code}, null, null) }};",
                 ));
             });
             emitter.emit_line("}");
@@ -368,7 +368,7 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_string_to_bool(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_string_to_bool") {
+        if !emitted.insert("__moth_cast_string_to_bool") {
             return;
         }
 
@@ -376,7 +376,7 @@ impl<'hir> JsEmitter<'hir> {
         let invalid_format_code = invalid_format.as_i32();
         let invalid_format_message = invalid_format.default_message();
 
-        self.emit_line("function __bs_cast_string_to_bool(value) {");
+        self.emit_line("function __moth_cast_string_to_bool(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("const normalized = value.trim();");
             emitter.emit_line("if (normalized === \"true\") {");
@@ -386,7 +386,7 @@ impl<'hir> JsEmitter<'hir> {
             emitter.with_indent(|em| em.emit_line("return { tag: \"ok\", value: false };"));
             emitter.emit_line("}");
             emitter.emit_line(&format!(
-                "return {{ tag: \"err\", value: __bs_make_error(\"{invalid_format_message}\", {invalid_format_code}, null, null) }};",
+                "return {{ tag: \"err\", value: __moth_make_error(\"{invalid_format_message}\", {invalid_format_code}, null, null) }};",
             ));
         });
         self.emit_line("}");
@@ -394,7 +394,7 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_cast_string_to_char(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__bs_cast_string_to_char") {
+        if !emitted.insert("__moth_cast_string_to_char") {
             return;
         }
 
@@ -402,14 +402,14 @@ impl<'hir> JsEmitter<'hir> {
         let invalid_format_code = invalid_format.as_i32();
         let invalid_format_message = invalid_format.default_message();
 
-        self.emit_line("function __bs_cast_string_to_char(value) {");
+        self.emit_line("function __moth_cast_string_to_char(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line("const codePoints = Array.from(value);");
             emitter.emit_line("if (codePoints.length === 1) {");
             emitter.with_indent(|em| em.emit_line("return { tag: \"ok\", value: codePoints[0] };"));
             emitter.emit_line("}");
             emitter.emit_line(&format!(
-                "return {{ tag: \"err\", value: __bs_make_error(\"{invalid_format_message}\", {invalid_format_code}, null, null) }};",
+                "return {{ tag: \"err\", value: __moth_make_error(\"{invalid_format_message}\", {invalid_format_code}, null, null) }};",
             ));
         });
         self.emit_line("}");

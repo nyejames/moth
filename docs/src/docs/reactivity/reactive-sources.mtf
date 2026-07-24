@@ -1,0 +1,54 @@
+A reactive source is stable mutation-capable runtime storage declared with `$Type` or `$=`.
+
+### Syntax
+
+[codeblock, $code("moth"):
+    count $Int = 0
+    enabled $= true
+    names ${String} = {"Priya"}
+    scores ${String = Int} = {}
+]
+
+### Exact contract
+
+- `$Type` declares a reactive source with an explicit underlying type.
+- `$=` infers the underlying type from the initializer.
+- Reactive syntax is access and storage metadata, not a first-class wrapper type.
+- Semantic type identity remains the underlying ordinary type.
+- The declaration owns stable mutation-capable storage in its runtime scope.
+- Source identity belongs to the binding.
+- Ordinary reads snapshot the current value.
+- A reactive declaration is runtime storage, not a compile-time constant.
+- Normal no-shadowing and type compatibility rules apply.
+- Collection and map source values retain their ordinary collection and map semantics.
+
+### Explicit and inferred types
+
+[codeblock, $code("moth"):
+    count $Int = 0
+    enabled $= true
+]
+
+Both forms create the same kind of source. `$=` is convenient when the initializer makes the type obvious.
+
+### Snapshot reads
+
+[codeblock, $code("moth"):
+    count $Int = 0
+    snapshot = count
+]
+
+A plain read of a reactive source evaluates to its current value. It is a snapshot, not a live dependency.
+
+### Reactive values are not a second type system
+
+A `$Int` source stores an `Int`. You can pass its current value anywhere an `Int` is expected. The `$` only marks the binding as reactive storage.
+
+### Invalid positions
+
+Reactive syntax is not valid in struct fields, choice payloads, return slots or type aliases unless another accepted surface explicitly defines it. Function parameters are the only other accepted position. See @#reactive-parameters (Reactive parameters).
+
+### Related concepts
+
+- For live template subscriptions see @#subscriptions (Subscriptions).
+- For function boundaries see @#reactive-parameters (Reactive parameters).

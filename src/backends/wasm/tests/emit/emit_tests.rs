@@ -81,10 +81,10 @@ fn emits_requested_helper_exports_and_valid_section_order() {
 
     let exports = collect_export_names(&emit_result.wasm_bytes);
     assert!(exports.contains(&"memory".to_owned()));
-    assert!(exports.contains(&"bst_str_ptr".to_owned()));
-    assert!(exports.contains(&"bst_str_len".to_owned()));
-    assert!(exports.contains(&"bst_release".to_owned()));
-    assert!(exports.contains(&"bst_call_0".to_owned()));
+    assert!(exports.contains(&"moth_str_ptr".to_owned()));
+    assert!(exports.contains(&"moth_str_len".to_owned()));
+    assert!(exports.contains(&"moth_release".to_owned()));
+    assert!(exports.contains(&"moth_call_0".to_owned()));
 
     let order = collect_section_order(&emit_result.wasm_bytes);
     assert_order(&order, "type", "import");
@@ -149,7 +149,7 @@ fn rejects_invalid_helper_export_policy() {
         error_type,
         &ErrorType::Backend(BackendErrorType::WasmGeneration)
     );
-    assert!(message.contains("bst_str_ptr"));
+    assert!(message.contains("moth_str_ptr"));
 }
 
 #[test]
@@ -604,7 +604,7 @@ fn build_manual_lir_module() -> WasmLirModule {
             }),
         }],
         exports: vec![WasmExport {
-            export_name: "bst_call_0".to_owned(),
+            export_name: "moth_call_0".to_owned(),
             kind: WasmExportKind::Function(WasmLirFunctionId(1)),
         }],
         static_data: vec![WasmStaticData {

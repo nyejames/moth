@@ -330,7 +330,7 @@ fn constant_record_owns_folded_template_string_value() {
     let mut string_table = StringTable::new();
     let env = TypeEnvironment::new();
 
-    let folded_text = string_table.intern("Hello, Beanstalk!");
+    let folded_text = string_table.intern("Hello, Moth!");
     let value_path = InternedPath::from_single_str("heading", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path.clone(),
@@ -360,7 +360,7 @@ fn constant_record_owns_folded_template_string_value() {
     };
     assert_eq!(
         semantics.folded_value,
-        PublicFoldedValue::String("Hello, Beanstalk!".to_owned())
+        PublicFoldedValue::String("Hello, Moth!".to_owned())
     );
 }
 
@@ -393,7 +393,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
         None,
     );
 
-    let title_text = string_table.intern("Beanstalk");
+    let title_text = string_table.intern("Moth");
     let fields = vec![
         Declaration {
             id: InternedPath::from_single_str("title", &mut string_table),
@@ -453,7 +453,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     assert_eq!(fields[0].name, "title");
     assert_eq!(
         fields[0].value,
-        PublicFoldedValue::String("Beanstalk".to_owned())
+        PublicFoldedValue::String("Moth".to_owned())
     );
     assert_eq!(fields[1].name, "year");
     assert_eq!(fields[1].value, PublicFoldedValue::Int(2026));

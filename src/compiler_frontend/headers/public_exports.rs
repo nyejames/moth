@@ -63,7 +63,7 @@ fn intern_public_surface_path(
             Box::new(compiler_error_to_diagnostic(&CompilerError::file_error(
                 &path,
                 format!(
-                    "{path_role} {path:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths."
+                    "{path_role} {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                 ),
                 string_table,
             )))

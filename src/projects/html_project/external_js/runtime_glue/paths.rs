@@ -12,13 +12,13 @@ use std::path::{Path, PathBuf};
 /// Deterministic output path for a module's glue ES module.
 pub(super) fn glue_module_output_path(module: &Module) -> PathBuf {
     let entry_hash = stable_path_hash_hex(&module.metadata.entry_point);
-    PathBuf::from("_beanstalk/js/glue").join(format!("module-{entry_hash}.js"))
+    PathBuf::from("_moth/js/glue").join(format!("module-{entry_hash}.js"))
 }
 
 /// Deterministic output path for a core runtime module.
 pub(super) fn runtime_module_output_path(specifier: &str) -> PathBuf {
     let safe_name = runtime_module_safe_name(specifier);
-    PathBuf::from("_beanstalk/js/runtime").join(format!("{safe_name}.js"))
+    PathBuf::from("_moth/js/runtime").join(format!("{safe_name}.js"))
 }
 
 /// Sanitize a runtime module specifier into a safe file name.

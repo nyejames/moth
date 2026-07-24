@@ -13,7 +13,7 @@ fn test_observation() -> ProfileObservation {
         case_name: "test_case_bst".to_string(),
         group_name: "stress".to_string(),
         command: "check".to_string(),
-        command_args: vec!["test.bst".to_string()],
+        command_args: vec!["test.moth".to_string()],
         wall_ms: 1234.5,
         observations: BenchmarkCaseObservations {
             stage_timings: vec![
@@ -142,7 +142,7 @@ fn format_run_manifest_json_with_cases() {
         case_name: "check_foo_bst".to_string(),
         group_name: "core".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         observation_wall_ms: 500.0,
         profile_path: "cases/check_foo_bst/profile.json.gz".to_string(),
         stdout_path: "cases/check_foo_bst/stdout.log".to_string(),
@@ -175,7 +175,7 @@ fn format_observations_json_matches_plan_schema() {
     assert!(json.contains(r#""group": "stress""#));
     assert!(json.contains(r#""wall_ms": 1234.5"#));
     // Command array uses no space after comma in manual JSON.
-    assert!(json.contains(r#""command": ["check","test.bst"]"#));
+    assert!(json.contains(r#""command": ["check","test.moth"]"#));
 
     // Stage timings and counters must be present.
     assert!(json.contains(r#""name": "ast_ms""#));
@@ -190,7 +190,7 @@ fn format_index_md_lists_cases() {
         case_name: "check_foo_bst".to_string(),
         group_name: "core".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         observation_wall_ms: 500.0,
         profile_path: "profile.json.gz".to_string(),
         stdout_path: "stdout.log".to_string(),
@@ -236,10 +236,10 @@ fn format_profile_shape_dump_lists_symbolication_diagnostics() {
         meta_version: "0.13.1".to_string(),
         thread_count: 1,
         first_thread_func_table_keys: vec!["name".to_string(), "resource".to_string()],
-        first_20_func_names: vec!["0x1000".to_string(), "beanstalk::ast::emit".to_string()],
+        first_20_func_names: vec!["0x1000".to_string(), "moth::ast::emit".to_string()],
         resource_table_keys: vec!["lib".to_string()],
         libs_count: Some(2),
-        first_10_libs: vec!["bean".to_string(), "libsystem_kernel.dylib".to_string()],
+        first_10_libs: vec!["moth".to_string(), "libsystem_kernel.dylib".to_string()],
         native_symbols_present: true,
     };
 
@@ -250,7 +250,7 @@ fn format_profile_shape_dump_lists_symbolication_diagnostics() {
     assert!(text.contains("threads: 1"));
     assert!(text.contains("first thread funcTable keys: name, resource"));
     assert!(text.contains("  - 0x1000"));
-    assert!(text.contains("  - beanstalk::ast::emit"));
+    assert!(text.contains("  - moth::ast::emit"));
     assert!(text.contains("resourceTable keys: lib"));
     assert!(text.contains("libs count: 2"));
     assert!(text.contains("nativeSymbols present: yes"));
@@ -369,7 +369,7 @@ fn write_run_manifest_creates_valid_file() {
         case_name: "test_case".to_string(),
         group_name: "core".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         observation_wall_ms: 100.0,
         profile_path: "cases/test_case/profile.json.gz".to_string(),
         stdout_path: "cases/test_case/stdout.log".to_string(),

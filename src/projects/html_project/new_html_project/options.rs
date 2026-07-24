@@ -1,4 +1,4 @@
-//! CLI options for `bean new html`.
+//! CLI options for `moth new html`.
 
 /// Parsed command-line options for the HTML project scaffold command.
 #[derive(Debug, PartialEq, Eq)]

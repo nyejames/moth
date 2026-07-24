@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0034"]
+diagnostic_codes = ["MOTH-SYNTAX-0034"]
 message_contains = ["Unsupported string escape '\\q'"]

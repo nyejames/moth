@@ -1,0 +1,15 @@
+Use `assert` for a condition that must already be true.
+
+[codeblock, $code("moth"):
+    assert(index < items.length())
+    assert(index < items.length(), "index must be in bounds")
+]
+
+The message is optional. When you add one it must be a quoted string literal.
+
+A failed assertion stops the current program path.
+
+It is not a recoverable error and cannot be caught.
+
+Use `Error!` for failures callers are expected to handle. Use `assert` for
+broken assumptions and impossible states.

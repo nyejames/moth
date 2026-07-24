@@ -132,14 +132,14 @@ impl<'a> HirBuilder<'a> {
         self.emit_statement_to_current_block(statement, location)
     }
 
-    /// Formats a `Float` expression into a `String` using Beanstalk's formatting contract.
+    /// Formats a `Float` expression into a `String` using Moth's formatting contract.
     ///
     /// WHAT: allocates a result local, emits `HirStatementKind::FormatFloat`, and, in
     ///       `ReturnError` mode, branches on the internal fallible carrier before returning the
     ///       unwrapped formatted string. In `Trap` mode the result local receives the scalar `String`
     ///       success value and a local load is returned.
     /// WHY: `Float -> String` casts and runtime Float template interpolation must share one
-    ///      Beanstalk-owned formatter instead of relying on target-native stringification.
+    ///      Moth-owned formatter instead of relying on target-native stringification.
     pub(crate) fn emit_formatted_float_value(
         &mut self,
         source: HirExpression,
@@ -209,13 +209,13 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Validates a `Float` value from an external/backend boundary before exposing it as an
-    /// ordinary Beanstalk `Float`.
+    /// ordinary Moth `Float`.
     ///
     /// WHAT: allocates a result local, emits `HirStatementKind::ValidateFloat`, and, in
     ///       `ReturnError` mode, branches on the internal fallible carrier before returning the
     ///       unwrapped finite `Float`. In `Trap` mode the result local receives the scalar `Float`
     ///       success value and a local load is returned.
-    /// WHY: external functions and backend boundaries may return non-finite `f64` values; Beanstalk
+    /// WHY: external functions and backend boundaries may return non-finite `f64` values; Moth
     ///      `Float` is finite `f64`, so every entering Float must be checked explicitly.
     pub(crate) fn emit_validated_float_value(
         &mut self,

@@ -1,6 +1,6 @@
 //! HTML project scaffolding orchestration.
 //!
-//! WHAT: Coordinates target resolution, user prompting, and file creation for `bean new html`.
+//! WHAT: Coordinates target resolution, user prompting, and file creation for `moth new html`.
 //! WHY: Keeps CLI dispatch thin and makes the scaffold flow testable without stdin.
 
 pub mod options;
@@ -56,12 +56,12 @@ pub fn create_html_project_template_with_prompt(
 ///
 /// WHAT: builds the user-facing text that explains exactly what was created,
 /// updated, skipped, or replaced, plus the next steps.
-/// WHY: `new` is often a user's first interaction with `bean`; the output must
+/// WHY: `new` is often a user's first interaction with `moth`; the output must
 /// be explicit, calm, and actionable.
 pub fn render_summary(report: &CreateProjectReport, current_dir: Option<&Path>) -> String {
     let mut lines = Vec::new();
 
-    lines.push(String::from("Created Beanstalk HTML project:"));
+    lines.push(String::from("Created Moth HTML project:"));
     lines.push(format!("  Project path: {}", report.project_path.display()));
     lines.push(format!("  Project name: {}", report.project_name));
 
@@ -114,8 +114,8 @@ pub fn render_summary(report: &CreateProjectReport, current_dir: Option<&Path>) 
     if !is_current_dir {
         lines.push(format!("  cd {}", report.project_path.display()));
     }
-    lines.push(String::from("  bean check ."));
-    lines.push(String::from("  bean dev ."));
+    lines.push(String::from("  moth check ."));
+    lines.push(String::from("  moth dev ."));
 
     lines.join("\n")
 }

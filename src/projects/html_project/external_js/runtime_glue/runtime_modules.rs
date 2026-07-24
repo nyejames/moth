@@ -1,7 +1,7 @@
 //! Build-level runtime module emission for HTML JS.
 //!
 //! WHAT: emits each unique JS runtime module once per build from a pre-built emission plan.
-//! WHY: runtime modules are builder-owned assets such as `@beanstalk/runtime`; deduplicating
+//! WHY: runtime modules are builder-owned assets such as `@moth/runtime`; deduplicating
 //!      them at the build level avoids redundant output.
 
 use crate::build_system::build::{FileKind, OutputFile};

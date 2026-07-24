@@ -3,11 +3,11 @@ entry = "intro.md"
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-IMPORT-0026"]
+diagnostic_codes = ["MOTH-IMPORT-0026"]
 message_contains = ["source assets cannot be compiled as page or module entries"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-IMPORT-0026"]
+diagnostic_codes = ["MOTH-IMPORT-0026"]
 message_contains = ["source assets cannot be compiled as page or module entries"]

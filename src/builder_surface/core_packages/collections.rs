@@ -43,7 +43,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__bs_collection_get".to_owned(),
+                        "__moth_collection_get".to_owned(),
                     )),
                     wasm: None,
                 },
@@ -78,7 +78,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__bs_collection_set".to_owned(),
+                        "__moth_collection_set".to_owned(),
                     )),
                     wasm: None,
                 },
@@ -109,7 +109,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__bs_collection_push".to_owned(),
+                        "__moth_collection_push".to_owned(),
                     )),
                     wasm: None,
                 },
@@ -140,7 +140,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__bs_collection_remove".to_owned(),
+                        "__moth_collection_remove".to_owned(),
                     )),
                     wasm: None,
                 },
@@ -164,7 +164,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__bs_collection_length".to_owned(),
+                        "__moth_collection_length".to_owned(),
                     )),
                     wasm: None,
                 },

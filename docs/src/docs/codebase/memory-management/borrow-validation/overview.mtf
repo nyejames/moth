@@ -1,0 +1,22 @@
+# Borrow validation
+
+Roots, joins, optional transfer safety and facts.
+
+## Contract
+
+- Input: validated HIR, access/effect metadata, and external boundary classifications
+- Output: read-only access, alias, optional-transfer, reactivity, and advisory-drop facts
+- Decides: shared/exclusive conflicts and whether transfer is safe as an optimisation
+- Must not decide: lifetime topology, physical ownership, final allocation, or backend lowering
+- Invariant: borrow validation reads HIR and writes side tables; it doesn't rewrite HIR
+
+## Main paths
+
+- `src/compiler_frontend/analysis/borrow_checker/`
+
+## Read next
+
+- `docs/src/docs/codebase/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/src/docs/codebase/memory-management/ownership-and-drops/overview.mtf`
+- `docs/compiler-design-overview.md`, especially Stage 5 and Stage 6

@@ -27,14 +27,14 @@ pub enum PackageOrigin {
 
 /// How the compiler obtains a package's implementation.
 ///
-/// WHAT: distinguishes Beanstalk-source packages from binding-backed packages.
-/// WHY: source-backed packages contain Beanstalk modules resolved through
+/// WHAT: distinguishes Moth-source packages from binding-backed packages.
+/// WHY: source-backed packages contain Moth modules resolved through
 /// `SourcePackageRegistry`; binding-backed packages expose typed external
 /// symbols resolved through `ExternalPackageRegistry`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PackageBacking {
-    /// Package backed by Beanstalk source files.
-    BeanstalkSource,
+    /// Package backed by Moth source files.
+    MothSource,
     /// Package backed by external bindings (JS, Wasm, host operations).
     ExternalBinding,
 }
@@ -44,7 +44,7 @@ pub enum PackageBacking {
 /// WHAT: bundles the two orthogonal package axes so every registration site
 /// carries both pieces of information.
 /// WHY: callers should not be able to construct invalid combinations such as
-/// a `BeanstalkSource` backing inside `ExternalPackageRegistry`.
+/// a `MothSource` backing inside `ExternalPackageRegistry`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PackageMetadata {
     pub origin: PackageOrigin,
@@ -56,7 +56,7 @@ impl PackageMetadata {
     pub const fn source(origin: PackageOrigin) -> Self {
         Self {
             origin,
-            backing: PackageBacking::BeanstalkSource,
+            backing: PackageBacking::MothSource,
         }
     }
 

@@ -1,5 +1,5 @@
 [package]
-name = "beanstalk"
+name = "moth"
 version = "0.1.12"
 edition = "2024"
 
@@ -23,7 +23,7 @@ checked_blocks = []
 async_blocks = []
 
 [[bin]]
-name = "bean"
+name = "moth"
 path = "src/main.rs"
 
 [dependencies]

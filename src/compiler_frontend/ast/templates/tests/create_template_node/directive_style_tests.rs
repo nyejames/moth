@@ -21,7 +21,7 @@ use std::sync::Arc;
 type DirectiveStyleTestResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
 fn directive_tokens(source: &str, string_table: &mut StringTable) -> FileTokens {
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
     let style_directives = frontend_test_style_directives();
     let mut tokens = tokenize(
         source,
@@ -703,40 +703,40 @@ fn code_without_argument_uses_generic_highlighting() {
     let rendered = folded_template_output("[$code:\nloop(x + 1)\n]");
 
     assert!(rendered.contains("<code class='codeblock'>"));
-    assert!(rendered.contains("<span class='bst-code-parenthesis'>(</span>"));
-    assert!(!rendered.contains("bst-code-keyword"));
+    assert!(rendered.contains("<span class='moth-code-parenthesis'>(</span>"));
+    assert!(!rendered.contains("moth-code-keyword"));
 }
 
 #[test]
-fn code_bst_argument_highlights_beanstalk_rules() {
-    let rendered = folded_template_output("[$code(\"bst\"):\nloop x\n-- hi\n]");
+fn code_moth_argument_highlights_moth_rules() {
+    let rendered = folded_template_output("[$code(\"moth\"):\nloop x\n-- hi\n]");
 
-    assert!(rendered.contains("<span class='bst-code-keyword'>loop</span>"));
-    assert!(rendered.contains("<span class='bst-code-comment'>-- hi</span>"));
+    assert!(rendered.contains("<span class='moth-code-keyword'>loop</span>"));
+    assert!(rendered.contains("<span class='moth-code-comment'>-- hi</span>"));
 }
 
 #[test]
 fn code_javascript_argument_highlights_js_comments() {
     let rendered = folded_template_output("[$code(\"js\"):\nconst x = 1\n// hi\n]");
 
-    assert!(rendered.contains("<span class='bst-code-keyword'>const</span>"));
-    assert!(rendered.contains("<span class='bst-code-comment'>// hi</span>"));
+    assert!(rendered.contains("<span class='moth-code-keyword'>const</span>"));
+    assert!(rendered.contains("<span class='moth-code-comment'>// hi</span>"));
 }
 
 #[test]
 fn code_python_argument_highlights_python_comments() {
     let rendered = folded_template_output("[$code(\"py\"):\ndef run():\n# hi\n]");
 
-    assert!(rendered.contains("<span class='bst-code-keyword'>def</span>"));
-    assert!(rendered.contains("<span class='bst-code-comment'># hi</span>"));
+    assert!(rendered.contains("<span class='moth-code-keyword'>def</span>"));
+    assert!(rendered.contains("<span class='moth-code-comment'># hi</span>"));
 }
 
 #[test]
 fn code_typescript_argument_highlights_typescript_types() {
     let rendered = folded_template_output("[$code(\"ts\"):\ntype Name = string\n]");
 
-    assert!(rendered.contains("<span class='bst-code-keyword'>type</span>"));
-    assert!(rendered.contains("<span class='bst-code-type'>string</span>"));
+    assert!(rendered.contains("<span class='moth-code-keyword'>type</span>"));
+    assert!(rendered.contains("<span class='moth-code-type'>string</span>"));
 }
 
 #[test]
@@ -758,7 +758,7 @@ fn code_rejects_unknown_language_aliases() {
 
 #[test]
 fn code_rejects_multiple_language_arguments() {
-    let error = template_parse_error("[$code(\"bst\", \"js\"): body]");
+    let error = template_parse_error("[$code(\"moth\", \"js\"): body]");
 
     assert!(
         error.contains("Unexpected token `,`."),
@@ -770,7 +770,7 @@ fn code_rejects_multiple_language_arguments() {
 fn runtime_templates_with_code_format_only_static_body_strings() {
     let mut string_table = StringTable::new();
     let mut token_stream =
-        template_tokens_from_source("[value, $code(\"bst\"):\nloop x\n]", &mut string_table);
+        template_tokens_from_source("[value, $code(\"moth\"):\nloop x\n]", &mut string_table);
     let context = runtime_template_context(&token_stream.src_path, &mut string_table);
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -797,7 +797,7 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
     assert!(
         body_texts
             .iter()
-            .any(|text| text.contains("<span class='bst-code-keyword'>loop</span>")),
+            .any(|text| text.contains("<span class='moth-code-keyword'>loop</span>")),
         "expected highlighted keyword span in formatted body text"
     );
 }
@@ -805,13 +805,13 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
 #[test]
 fn code_templates_keep_nested_square_brackets_as_literal_body_text() {
     let rendered = folded_template_output(
-        "[$code(\"bst\"):\nconcatenated_strings = [string_slice, a_mutable_string]\n]",
+        "[$code(\"moth\"):\nconcatenated_strings = [string_slice, a_mutable_string]\n]",
     );
 
     assert!(rendered.contains("<code class='codeblock'>"));
     assert!(rendered.contains("concatenated_strings"));
     assert!(rendered.contains("string_slice"));
     assert!(rendered.contains("a_mutable_string"));
-    assert!(rendered.contains("<span class='bst-code-parenthesis'>[</span>"));
-    assert!(rendered.contains("<span class='bst-code-parenthesis'>]</span>"));
+    assert!(rendered.contains("<span class='moth-code-parenthesis'>[</span>"));
+    assert!(rendered.contains("<span class='moth-code-parenthesis'>]</span>"));
 }

@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-TYPE-0001"]
+diagnostic_codes = ["MOTH-TYPE-0001"]
 message_contains = ["String", "{String = Int}"]

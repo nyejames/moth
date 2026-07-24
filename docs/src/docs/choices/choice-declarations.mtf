@@ -1,0 +1,56 @@
+A choice is a nominal tagged union.
+
+Each value contains one declared variant.
+
+[codeblock, $code("moth"):
+    Status ::
+        Ready,
+        Waiting,
+        Failed | message String |,
+    ;
+]
+
+### Variant forms
+
+A unit variant has no payload:
+
+[codeblock, $code("moth"):
+    Ready
+]
+
+A payload variant uses a record body:
+
+[codeblock, $code("moth"):
+    Failed | message String |
+]
+
+### Contract
+
+- The declaration form is `Name :: variants ;`.
+- Choice and variant names use `PascalCase`.
+- A choice must declare at least one variant.
+- Variant names must be unique.
+- A payload record must contain at least one field.
+- Payload field names must be unique.
+- Payload fields require explicit types.
+- Payload fields are immutable.
+- Payload fields do not support defaults.
+- Mutable payload field declarations are invalid.
+- Shorthand payload declarations such as `Failed String` are invalid.
+- Constructor-style declarations such as `Failed(String)` are invalid.
+- Recursive choice declarations are deferred.
+- A choice has nominal identity. Matching variants and payload shapes do not make two choices interchangeable.
+
+### Generic choices
+
+Choices may introduce declaration-site generic parameters.
+
+[codeblock, $code("moth"):
+    Maybe type A ::
+        Some | value A |,
+        None,
+    ;
+]
+
+Generic inference and instance restrictions are documented by
+@../generics (Generics).

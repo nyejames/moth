@@ -1,11 +1,11 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0016"]
+diagnostic_codes = ["MOTH-SYNTAX-0016"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-SYNTAX-0016"
+code = "MOTH-SYNTAX-0016"
 reason = "invalid_collection_type.zero_capacity"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 2
 count = 1

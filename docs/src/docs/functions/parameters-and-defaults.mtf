@@ -1,0 +1,68 @@
+Every function parameter has a name and an explicit type.
+
+[codeblock, $code("moth"):
+    describe |prefix String, subject String| -> String:
+        return [prefix, ": ", subject]
+    ;
+]
+
+### Parameter forms
+
+[codeblock, $code("moth"):
+    name Type
+    name ~Type
+    name Type = default
+]
+
+- `name Type` declares a shared parameter.
+- `name ~Type` declares a mutable or exclusive parameter.
+- `= default` provides a value when the caller omits that slot.
+- Parameter names follow the no-shadowing rule.
+- Each parameter name must be unique in the signature.
+
+Reactive parameters use `$Type` and are documented by
+@../reactivity (Reactivity).
+
+### Defaults
+
+A default belongs to the declaration.
+
+[codeblock, $code("moth"):
+    describe |prefix String = "item", subject String| -> String:
+        return [prefix, ": ", subject]
+    ;
+]
+
+A caller can omit a defaulted parameter.
+
+Named arguments can skip an earlier default:
+
+[codeblock, $code("moth"):
+    label = describe(subject = "apple")
+]
+
+A positional call cannot skip a slot in the middle. Use a named argument when
+the call needs to reach a later parameter.
+
+### Default value constraints
+
+A parameter default must be a compile-time value.
+
+Accepted:
+
+[codeblock, $code("moth"):
+    DEFAULT_PREFIX #= "item"
+
+    describe |prefix String = DEFAULT_PREFIX, subject String| -> String:
+        return [prefix, ": ", subject]
+    ;
+]
+
+Rejected:
+
+- runtime bindings
+- runtime function calls
+- references to other parameters
+
+Struct fields share the same `= default` syntax, but struct defaults have their
+own compile-time rule. Choice payload fields do not support defaults.

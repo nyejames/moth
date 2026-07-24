@@ -1,8 +1,8 @@
-# Beanstalk TIR Deep Audit, Corrections and Simplification Plan
+# Moth TIR Deep Audit, Corrections and Simplification Plan
 
 ## Audit scope
 
-This revision audits the completed TIR implementation on the current connected `nyejames/beanstalk` default branch, including `src/compiler_frontend/ast/templates/tir/**`, template construction, slot planning, AST finalization, reactive-template metadata, the neutral AST-to-HIR handoff and the HIR template entry points. The review is governed by `docs/compiler-design-overview.md`, `docs/language-overview.md`, `docs/src/docs/codebase/style-guide/style-guide.bd`, `docs/src/docs/codebase/style-guide/testing.bd` and the profile-gated `docs/roadmap/plans/post-tir-template-parser-optimization-plan.md`. The architecture is fundamentally good: TIR is AST-local, exact views are established and HIR consumes neutral owned data. The remaining work is a substantial consolidation pass with several confirmed invariant defects, two probable user-visible slot/wrapper bugs, repeated semantic walks and migration-era scaffolding. This was a static source audit through the read-only GitHub connector, so findings marked **probable** must begin with a failing regression test before implementation.
+This revision audits the completed TIR implementation on the current connected `nyejames/moth` default branch, including `src/compiler_frontend/ast/templates/tir/**`, template construction, slot planning, AST finalization, reactive-template metadata, the neutral AST-to-HIR handoff and the HIR template entry points. The review is governed by `docs/compiler-design-overview.md`, `docs/language-overview.md`, `docs/src/docs/codebase/style-guide/style-guide.bd`, `docs/src/docs/codebase/style-guide/testing.bd` and the profile-gated `docs/roadmap/plans/post-tir-template-parser-optimization-plan.md`. The architecture is fundamentally good: TIR is AST-local, exact views are established and HIR consumes neutral owned data. The remaining work is a substantial consolidation pass with several confirmed invariant defects, two probable user-visible slot/wrapper bugs, repeated semantic walks and migration-era scaffolding. This was a static source audit through the read-only GitHub connector, so findings marked **probable** must begin with a failing regression test before implementation.
 
 The target end state remains:
 
@@ -1536,7 +1536,7 @@ Create or extend canonical `tests/cases/` scenarios for:
 - doc comments with nested foldable templates
 - a deep but legal template tree that compiles without recursion failure
 
-Each scenario should be self-contained and use real Beanstalk source.
+Each scenario should be self-contained and use real Moth source.
 
 ### Artifact assertions
 
@@ -1707,7 +1707,7 @@ Use a fixed targeted benchmark set covering:
 - expression overlays
 - reactive templates
 - custom `$md`
-- Beandown and docs
+- Moth Templates and docs
 
 Record benchmark history only when repository policy calls for an intentional recorded comparison.
 

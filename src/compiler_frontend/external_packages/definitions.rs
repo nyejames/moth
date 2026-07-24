@@ -46,7 +46,7 @@ pub struct ExternalFunctionDef {
     /// only needs its leaf identity.
     pub name: String,
     pub parameters: Vec<ExternalParameter>,
-    /// Success-channel return slots exposed to Beanstalk callers.
+    /// Success-channel return slots exposed to Moth callers.
     ///
     /// WHAT: external functions use the same success/error signature shape as source
     /// functions, but the signature is supplied by builder metadata rather than parsed

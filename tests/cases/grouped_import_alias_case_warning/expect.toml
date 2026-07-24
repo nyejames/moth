@@ -1,5 +1,5 @@
 [backends.html]
 mode = "success"
 warnings = "exact"
-warning_codes = ["BST-IMPORT-0003", "BST-IMPORT-0003"]
+warning_codes = ["MOTH-IMPORT-0003", "MOTH-IMPORT-0003"]
 rendered_output_contains = ["0", "3.141592653589793"]

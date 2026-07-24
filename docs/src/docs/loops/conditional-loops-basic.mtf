@@ -1,0 +1,35 @@
+A conditional loop keeps repeating while a condition is `true`.
+
+The condition is checked before each trip through the loop. This means the body
+might not run at all.
+
+[codeblock, $code("moth"):
+    count ~= 0
+
+    loop count < 3:
+        io.line([: Count: [count]])
+        count += 1
+    ;
+]
+
+This prints three lines. Once `count < 3` becomes `false`, the loop ends and the
+program continues after it.
+
+### Make sure the condition can change
+
+A condition that never becomes `false` keeps the loop running forever.
+
+[codeblock, $code("moth"):
+    running ~= true
+
+    loop running:
+        do_some_work()
+
+        if work_is_finished():
+            running = false
+        ;
+    ;
+]
+
+Use a conditional loop when repetition depends on a changing state rather than
+a collection or a known numeric range.

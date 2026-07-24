@@ -227,19 +227,19 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
     assert!(
         output
             .source
-            .contains(&format!("((__bs_read({middle_result})).tag === \"ok\")")),
+            .contains(&format!("((__moth_read({middle_result})).tag === \"ok\")")),
         "middle function should branch on the explicit fallible carrier local"
     );
     assert!(
         output
             .source
-            .contains(&format!("((__bs_read({outer_result})).tag === \"ok\")")),
+            .contains(&format!("((__moth_read({outer_result})).tag === \"ok\")")),
         "outer function should branch on the explicit fallible carrier local"
     );
     assert!(
         !output
             .source
-            .contains("return { tag: \"ok\", value: __bs_result_propagate("),
+            .contains("return { tag: \"ok\", value: __moth_result_propagate("),
         "nested fallible functions should not return through the old expression-level propagation helper"
     );
 }
@@ -553,13 +553,13 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_assign_value({result_name}, {callee_name}(")),
+            .contains(&format!("__moth_assign_value({result_name}, {callee_name}(")),
         "fallible call result carriers must be stored as fresh values"
     );
     assert!(
         !output
             .source
-            .contains(&format!("__bs_assign_borrow({result_name}, {callee_name}(")),
+            .contains(&format!("__moth_assign_borrow({result_name}, {callee_name}(")),
         "fallible call result carriers must not inherit the success payload alias mode"
     );
 }

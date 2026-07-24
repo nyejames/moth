@@ -1,0 +1,47 @@
+Moth template files use Moth's `$md` Markdown flavour. This is intentionally smaller than full CommonMark.
+
+### Supported Markdown
+
+- Headings: `#`, `##`, `###` and deeper
+- Paragraphs: separated by blank lines
+- Emphasis: `*italic*` and `**bold**`
+- Moth-aware links: `@path (label)`
+- Unordered lists: `- item`
+- Ordered lists: `1. item`
+- Inline code: paired isolated single backticks on the same line
+
+### HTML escaping
+
+Moth template files escape HTML characters in Markdown text. Raw HTML tags such as `<div>` are escaped as `&lt;div&gt;` in the output. Use `$raw` or `$html` directives when raw HTML output is needed.
+
+### Not supported
+
+- Fenced code blocks (triple backtick blocks) are not rendered as `<pre><code>`. They appear as literal text. Use a `codeblock` helper with a `$code(...)` directive instead.
+- Markdown pipe tables are not rendered as `<table>`. They appear as literal text. Use a structured list or a page-owned table component instead.
+- Full CommonMark is not claimed. Moth's `$md` is a small, deliberate subset.
+
+### Backticks are inline-code delimiters
+
+In `$md`, backticks delimit inline code, not raw strings. Empty spans, repeated backtick runs, unmatched backticks, multiline spans, variable-length delimiters and fenced code blocks are not part of the `$md` flavour.
+
+### Links use Moth-aware syntax
+
+Use `@/docs/packages (Packages)` for internal routes or `@https://example.com (Example)` for external links. Ordinary ["[label](path)"] Markdown links belong to Plain Markdown and aren't parsed as links by a moth template's `$md` formatter.
+
+### `--` is content
+
+Because the file body is a template body, `--` is body text, not a Moth comment. It renders as literal `--` in the output.
+
+### Backslashes follow body behavior
+
+Backslashes in the template body follow formatter behavior. They are not escape characters in the same sense as normal Moth source.
+
+### Code examples
+
+Use `codeblock` and `$code(...)` where the helper is available through the content environment. See @#template-scope (Template scope) for what is visible inside a `.mtf` file.
+
+### Related concepts
+
+- For the full `$md` formatting rules see @../templates/#markdown-formatting (Markdown formatting).
+- For what is visible inside `.mtf` see @#template-scope (Template scope).
+- For plain Markdown with a different renderer see @../markdown/#rendering-contract (Rendering contract).

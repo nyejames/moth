@@ -440,7 +440,7 @@ fn float_to_string_uses_stable_decimal() {
 }
 
 #[test]
-fn float_to_string_follows_beanstalk_contract() {
+fn float_to_string_follows_moth_contract() {
     let cases: &[(f64, &str)] = &[
         (1.0, "1"),
         (1.5, "1.5"),

@@ -3,7 +3,7 @@
 //! WHAT: produces a `<script type="importmap">` that maps bare runtime module specifiers to
 //!       their emitted relative paths.
 //! WHY: provider-created JS assets and emitted runtime modules use bare imports like
-//!      `@beanstalk/runtime`; the import map lets the browser resolve them.
+//!      `@moth/runtime`; the import map lets the browser resolve them.
 
 use crate::build_system::build::Module;
 use crate::projects::html_project::external_js::runtime_glue::paths::{
@@ -16,7 +16,7 @@ use std::path::Path;
 /// WHAT: produces a `<script type="importmap">` that maps registered core module specifiers
 ///       to their emitted relative paths.
 /// WHY: provider-created JS assets use bare imports like
-///      `import {{ bstOk }} from "@beanstalk/runtime";`;
+///      `import {{ mothOk }} from "@moth/runtime";`;
 ///      the import map lets the browser resolve those without rewriting user files.
 pub(super) fn build_import_map_html(module: &Module, html_output_path: &Path) -> Option<String> {
     let mut entries: Vec<(String, String)> = Vec::new();

@@ -6,21 +6,21 @@
 # Other comment lines are ignored
 
 # group: core
-frontend benchmarks/type-stress.bst
+frontend benchmarks/type-stress.moth
 
 # group: docs
 frontend docs
 
 # group: stress
-frontend benchmarks/collection-stress.bst
-frontend benchmarks/environment-stress.bst
-frontend benchmarks/adversarial/one-module-kitchen-sink.bst
-frontend benchmarks/adversarial/deep-scope-churn.bst
-frontend benchmarks/adversarial/template-render-plan-churn.bst
-frontend benchmarks/adversarial/constant-dag-churn.bst
-frontend benchmarks/adversarial/expression-rpn-churn.bst
-frontend benchmarks/adversarial/generic-trait-churn.bst
-frontend benchmarks/adversarial/collection-map-borrow-churn.bst
+frontend benchmarks/collection-stress.moth
+frontend benchmarks/environment-stress.moth
+frontend benchmarks/adversarial/one-module-kitchen-sink.moth
+frontend benchmarks/adversarial/deep-scope-churn.moth
+frontend benchmarks/adversarial/template-render-plan-churn.moth
+frontend benchmarks/adversarial/constant-dag-churn.moth
+frontend benchmarks/adversarial/expression-rpn-churn.moth
+frontend benchmarks/adversarial/generic-trait-churn.moth
+frontend benchmarks/adversarial/collection-map-borrow-churn.moth
 
 # group: module
 frontend benchmarks/module-graph
@@ -42,4 +42,4 @@ frontend benchmarks/parallelism/many-modules-one-file-each
 frontend benchmarks/parallelism/few-modules-many-files-each
 
 # group: borrow
-frontend benchmarks/borrow-stress.bst
+frontend benchmarks/borrow-stress.moth

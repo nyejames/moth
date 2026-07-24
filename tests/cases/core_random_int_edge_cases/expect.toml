@@ -9,12 +9,12 @@ rendered_output_contains = ["same=5"]
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_random_int(min, max) { if (min > max) { var t = min; min = max; max = t; } if (min === max) return min; return Math.floor(Math.random() * (max - min + 1)) + min; }",
-    "__bs_random_int(5, 5)",
-    "__bs_random_int(10, 1)",
+    "function __moth_random_int(min, max) { if (min > max) { var t = min; min = max; max = t; } if (min === max) return min; return Math.floor(Math.random() * (max - min + 1)) + min; }",
+    "__moth_random_int(5, 5)",
+    "__moth_random_int(10, 1)",
 ]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

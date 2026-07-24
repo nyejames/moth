@@ -81,9 +81,9 @@ Options:
 #[test]
 fn build_samply_command_has_required_flags() {
     let input = SamplyRunInput {
-        bean_path: PathBuf::from("/usr/bin/bean"),
+        moth_path: PathBuf::from("/usr/bin/moth"),
         command: "check".to_string(),
-        args: vec!["test.bst".to_string()],
+        args: vec!["test.moth".to_string()],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
         samply_rate_hz: None,
         presymbolicate: false,
@@ -100,17 +100,17 @@ fn build_samply_command_has_required_flags() {
     assert_eq!(args[2].to_str().unwrap(), "-o");
     assert_eq!(args[3].to_str().unwrap(), "/tmp/profile.json.gz");
 
-    // Then `--` separator, bean path, command, and args.
+    // Then `--` separator, moth path, command, and args.
     assert_eq!(args[4].to_str().unwrap(), "--");
-    assert_eq!(args[5].to_str().unwrap(), "/usr/bin/bean");
+    assert_eq!(args[5].to_str().unwrap(), "/usr/bin/moth");
     assert_eq!(args[6].to_str().unwrap(), "check");
-    assert_eq!(args[7].to_str().unwrap(), "test.bst");
+    assert_eq!(args[7].to_str().unwrap(), "test.moth");
 }
 
 #[test]
 fn build_samply_command_with_rate() {
     let input = SamplyRunInput {
-        bean_path: PathBuf::from("/usr/bin/bean"),
+        moth_path: PathBuf::from("/usr/bin/moth"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -140,7 +140,7 @@ fn build_samply_command_with_rate() {
 #[test]
 fn build_samply_command_with_presymbolicate() {
     let input = SamplyRunInput {
-        bean_path: PathBuf::from("/usr/bin/bean"),
+        moth_path: PathBuf::from("/usr/bin/moth"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -159,7 +159,7 @@ fn build_samply_command_with_presymbolicate() {
 #[test]
 fn build_samply_command_with_unstable_presymbolicate() {
     let input = SamplyRunInput {
-        bean_path: PathBuf::from("/usr/bin/bean"),
+        moth_path: PathBuf::from("/usr/bin/moth"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -181,9 +181,9 @@ fn build_samply_command_with_unstable_presymbolicate() {
 #[test]
 fn build_samply_command_with_rate_and_presymbolicate() {
     let input = SamplyRunInput {
-        bean_path: PathBuf::from("/usr/bin/bean"),
+        moth_path: PathBuf::from("/usr/bin/moth"),
         command: "build".to_string(),
-        args: vec!["foo.bst".to_string(), "bar.bst".to_string()],
+        args: vec!["foo.moth".to_string(), "bar.moth".to_string()],
         output_path: PathBuf::from("/tmp/out/profile.json.gz"),
         samply_rate_hz: Some(1000.0),
         presymbolicate: true,
@@ -203,16 +203,16 @@ fn build_samply_command_with_rate_and_presymbolicate() {
         .iter()
         .position(|a| a.to_str() == Some("--"))
         .expect("-- separator present");
-    assert_eq!(args[separator_pos + 1].to_str().unwrap(), "/usr/bin/bean");
+    assert_eq!(args[separator_pos + 1].to_str().unwrap(), "/usr/bin/moth");
     assert_eq!(args[separator_pos + 2].to_str().unwrap(), "build");
-    assert_eq!(args[separator_pos + 3].to_str().unwrap(), "foo.bst");
-    assert_eq!(args[separator_pos + 4].to_str().unwrap(), "bar.bst");
+    assert_eq!(args[separator_pos + 3].to_str().unwrap(), "foo.moth");
+    assert_eq!(args[separator_pos + 4].to_str().unwrap(), "bar.moth");
 }
 
 #[test]
 fn build_samply_command_with_symbol_dirs() {
     let input = SamplyRunInput {
-        bean_path: PathBuf::from("/usr/bin/bean"),
+        moth_path: PathBuf::from("/usr/bin/moth"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -221,7 +221,7 @@ fn build_samply_command_with_symbol_dirs() {
         presymbolication_flag: PresymbolicationFlag::Unstable,
         symbol_dirs: vec![
             PathBuf::from("/tmp/target/profiling"),
-            PathBuf::from("/tmp/target/profiling/bean.dSYM"),
+            PathBuf::from("/tmp/target/profiling/moth.dSYM"),
         ],
     };
 
@@ -247,15 +247,15 @@ fn build_samply_command_with_symbol_dirs() {
     assert_eq!(args[first_symbol_pos + 2].to_str().unwrap(), "--symbol-dir");
     assert_eq!(
         args[first_symbol_pos + 3].to_str().unwrap(),
-        "/tmp/target/profiling/bean.dSYM"
+        "/tmp/target/profiling/moth.dSYM"
     );
 }
 
 #[test]
 fn build_samply_command_rate_appears_before_separator() {
-    // Verify flag ordering: --save-only, -o, [--rate], [--unstable-presymbolicate], --, bean, ...
+    // Verify flag ordering: --save-only, -o, [--rate], [--unstable-presymbolicate], --, moth, ...
     let input = SamplyRunInput {
-        bean_path: PathBuf::from("/usr/bin/bean"),
+        moth_path: PathBuf::from("/usr/bin/moth"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/p.json.gz"),
@@ -451,9 +451,9 @@ fn profile_process_run_struct_fields() {
 #[test]
 fn samply_run_input_struct_fields() {
     let input = SamplyRunInput {
-        bean_path: PathBuf::from("/usr/bin/bean"),
+        moth_path: PathBuf::from("/usr/bin/moth"),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
         samply_rate_hz: Some(500.0),
         presymbolicate: true,
@@ -461,9 +461,9 @@ fn samply_run_input_struct_fields() {
         symbol_dirs: vec![PathBuf::from("/tmp/target/profiling")],
     };
 
-    assert_eq!(input.bean_path, PathBuf::from("/usr/bin/bean"));
+    assert_eq!(input.moth_path, PathBuf::from("/usr/bin/moth"));
     assert_eq!(input.command, "check");
-    assert_eq!(input.args, vec!["foo.bst"]);
+    assert_eq!(input.args, vec!["foo.moth"]);
     assert_eq!(input.output_path, PathBuf::from("/tmp/profile.json.gz"));
     assert_eq!(input.samply_rate_hz, Some(500.0));
     assert!(input.presymbolicate);

@@ -1,0 +1,123 @@
+import @./moth-template-files {
+    content as moth_template_files,
+}
+
+import @./moth-template-files-basic {
+    content as moth_template_files_basic,
+}
+
+import @./implicit-markdown {
+    content as implicit_markdown,
+}
+
+import @./implicit-markdown-basic {
+    content as implicit_markdown_basic,
+}
+
+import @./content-imports {
+    content as content_imports,
+}
+
+import @./content-imports-basic {
+    content as content_imports_basic,
+}
+
+import @./template-scope {
+    content as template_scope,
+}
+
+import @./template-scope-basic {
+    content as template_scope_basic,
+}
+
+import @./moth-template-limits {
+    content as moth_template_limits,
+}
+
+import @./moth-template-limits-basic {
+    content as moth_template_limits_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "moth-template-files"
+page_description #= "Moth-aware Markdown content files for HTML projects."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / moth-template-files
+
+    # moth-template-files
+
+    moth-template-files is Markdown that already lives inside Moth's template world.
+
+    Write the content directly. Import the folded result as `content`. Reach for a
+    normal `.moth` file when the job stops being content-shaped.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):moth-template-files-files]
+        [$insert("title"):moth-template-files files]
+        [$insert("advanced"):[moth_template_files]]
+
+        [moth_template_files_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):implicit-markdown]
+        [$insert("title"):Implicit Markdown]
+        [$insert("advanced"):[implicit_markdown]]
+
+        [implicit_markdown_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):content-imports]
+        [$insert("title"):Content imports]
+        [$insert("advanced"):[content_imports]]
+
+        [content_imports_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):template-scope]
+        [$insert("title"):Template scope]
+        [$insert("advanced"):[template_scope]]
+
+        [template_scope_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):moth-template-files-limits]
+        [$insert("title"):moth-template-files limits]
+        [$insert("advanced"):[moth_template_limits]]
+
+        [moth_template_limits_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../packages/]
+        [$insert("previous_title"):Packages and imports]
+        [$insert("next_path"):../markdown/]
+        [$insert("next_title"):Plain Markdown]
+    ]
+]

@@ -1,0 +1,46 @@
+Moth separates future work into two categories.
+
+### Deferred
+
+Deferred features fit Moth's language design but aren't implemented yet or
+aren't part of the current source surface. The compiler rejects deferred syntax
+with structured diagnostics pointing to the feature's status.
+
+Examples of deferred features:
+
+- declared memory groups (`group` / `into`)
+- choice payload field access without pattern matching
+- nested choice payload patterns
+- recursive choice types
+- generic external package functions
+- package manager, versions and lockfiles
+- broader standard trait taxonomy
+- field/path reactive subscriptions
+
+### Outside scope
+
+Outside-scope features conflict with the intended language model. They need an
+explicit design change before implementation. The compiler rejects these forms
+with ordinary diagnostics.
+
+Outside-scope features aren't "not yet implemented." They're intentionally
+excluded because they would make the language broader, more implicit, more
+solver-heavy or harder to reason about.
+
+See @#excluded-language-families (Excluded language families) for the exact
+list.
+
+### How to tell the difference
+
+If a feature could be added without changing Moth's core design, it's
+deferred. If adding it would require rethinking the language model, it's
+outside scope.
+
+The progress matrix at @../../progress (Progress matrix) reports whether a
+deferred surface is implemented today. This page explains whether the surface
+belongs in the language at all.
+
+### Read next
+
+- @#design-principles (Design principles)
+- @#excluded-language-families (Excluded language families)

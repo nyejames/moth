@@ -30,7 +30,7 @@ fn make_path_token_item(
         .collect();
     let path = InternedPath::from_components(components);
     let alias = alias.map(|a| string_table.intern(a));
-    let path_scope = InternedPath::from_single_str("test.bst", string_table);
+    let path_scope = InternedPath::from_single_str("test.moth", string_table);
 
     PathTokenItem {
         path,
@@ -125,7 +125,7 @@ fn path_token_item_remaps_all_fields() {
         .iter()
         .map(|id| global_table.resolve(*id))
         .collect();
-    assert_eq!(path_scope_strings, vec!["test.bst"]);
+    assert_eq!(path_scope_strings, vec!["test.moth"]);
 
     let alias_location = remapped_item
         .alias_location
@@ -136,7 +136,7 @@ fn path_token_item_remaps_all_fields() {
         .iter()
         .map(|id| global_table.resolve(*id))
         .collect();
-    assert_eq!(alias_scope_strings, vec!["test.bst"]);
+    assert_eq!(alias_scope_strings, vec!["test.moth"]);
 
     assert_eq!(remapped_item.from_grouped, item.from_grouped);
 }
@@ -146,8 +146,8 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
     let mut local_table = StringTable::new();
     let mut global_table = StringTable::new();
 
-    let src_path_local = InternedPath::from_single_str("local.bst", &mut local_table);
-    let token_scope_local = InternedPath::from_single_str("local.bst", &mut local_table);
+    let src_path_local = InternedPath::from_single_str("local.moth", &mut local_table);
+    let token_scope_local = InternedPath::from_single_str("local.moth", &mut local_table);
 
     let symbol_local = local_table.intern("my_symbol");
 
@@ -159,7 +159,7 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
         ),
     ];
 
-    let canonical_path = std::path::PathBuf::from("/absolute/local.bst");
+    let canonical_path = std::path::PathBuf::from("/absolute/local.moth");
     let mut file_tokens = FileTokens::new_with_identity(
         src_path_local.clone(),
         None,
@@ -179,7 +179,7 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
         .iter()
         .map(|id| global_table.resolve(*id))
         .collect();
-    assert_eq!(src_path_strings, vec!["local.bst"]);
+    assert_eq!(src_path_strings, vec!["local.moth"]);
 
     assert_eq!(
         file_tokens.canonical_os_path,
@@ -203,7 +203,7 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
         .iter()
         .map(|id| global_table.resolve(*id))
         .collect();
-    assert_eq!(first_location_strings, vec!["local.bst"]);
+    assert_eq!(first_location_strings, vec!["local.moth"]);
 
     let second_token = file_tokens
         .tokens
@@ -220,8 +220,8 @@ fn file_tokens_with_path_tokens_remaps_nested_items() {
     let mut local_table = StringTable::new();
     let mut global_table = StringTable::new();
 
-    let src_path_local = InternedPath::from_single_str("module.bst", &mut local_table);
-    let token_scope_local = InternedPath::from_single_str("module.bst", &mut local_table);
+    let src_path_local = InternedPath::from_single_str("module.moth", &mut local_table);
+    let token_scope_local = InternedPath::from_single_str("module.moth", &mut local_table);
 
     let path_items = vec![
         make_path_token_item(&["ui", "Button"], Some("Btn"), &mut local_table),
@@ -273,8 +273,8 @@ fn file_tokens_with_path_tokens_remaps_nested_items() {
 fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
     let mut table = StringTable::new();
 
-    let original_scope = InternedPath::from_single_str("stage0_absolute.bst", &mut table);
-    let logical_scope = InternedPath::from_single_str("module/logical.bst", &mut table);
+    let original_scope = InternedPath::from_single_str("stage0_absolute.moth", &mut table);
+    let logical_scope = InternedPath::from_single_str("module/logical.moth", &mut table);
 
     let path_item = make_path_token_item(&["helper", "util"], Some("u"), &mut table);
     let tokens = vec![
@@ -285,7 +285,7 @@ fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
         make_token(TokenKind::Path(vec![path_item]), original_scope.clone()),
     ];
 
-    let canonical = std::path::PathBuf::from("/canonical/logical.bst");
+    let canonical = std::path::PathBuf::from("/canonical/logical.moth");
     let mut file_tokens = FileTokens::new_with_identity(original_scope.clone(), None, None, tokens);
 
     let file_id = crate::compiler_frontend::symbols::identity::FileId(7);

@@ -1,0 +1,56 @@
+`copy` requests an independent value from an existing place.
+
+[codeblock, $code("moth"):
+    items ~= {"a", "b"}
+    independent_items ~= copy items
+
+    ~items.push("c") catch:
+    ;
+
+    io.line([: original length: [items.length()]])
+    io.line([: copied length: [independent_items.length()]])
+]
+
+### Copy targets
+
+The operand must be a place with stable storage:
+
+- a visible value binding
+- a field projection such as `copy config.title`
+- a parenthesized place such as `copy (items)`
+
+Literals, templates, constructor calls, function calls and computed
+expressions are not copy targets.
+
+[codeblock, $code("moth"):
+    copied_title = copy config.title
+    copied_items = copy (items)
+]
+
+These forms are invalid:
+
+[codeblock, $code("moth"):
+    copied_number = copy 42
+    copied_result = copy make_value()
+    copied_template = copy [: text]
+]
+
+Fresh expressions already create their own result values.
+
+### Contract
+
+- Source code does not silently copy an existing value when another name is created.
+- When a stored value is copyable and an independent value is required, write `copy`.
+- The copied value keeps the same semantic type.
+- The receiving binding chooses its own mutability.
+- Copying is separate from ownership transfer and separate from exclusive access.
+
+Expressions that construct a new result from existing inputs are not implicit
+copies of one input.
+
+[codeblock, $code("moth"):
+    total = left + right
+    label = [: [first_name] [last_name]]
+]
+
+Those expressions create new result values through their own language rules.

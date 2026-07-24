@@ -23,7 +23,7 @@ ship:
 
 release version:
     just validate
-    git tag -a v{{version}} -m "Beanstalk v{{version}}"
+    git tag -a v{{version}} -m "Moth v{{version}}"
     git push origin v{{version}}
 
 bench:
@@ -54,7 +54,7 @@ profile-case-symbolicated case filter="terse":
     cargo run --package xtask --bin xtask -- bench-profile --case {{case}} --filter {{filter}} --presymbolicate
 
 profile-build:
-    RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling --features detailed_timers --bin bean
+    RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling --features detailed_timers --bin moth
 
 ci-clippy:
     rustc +1.95.0 -vV

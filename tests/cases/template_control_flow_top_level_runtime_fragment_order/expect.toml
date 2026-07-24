@@ -7,4 +7,4 @@ rendered_output_contains_exactly_once = ["ORDER_RUNTIME_IF", "ORDER_RUNTIME_LOOP
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain_in_order = ["ORDER_CONST_BEFORE", "bst-slot-0", "ORDER_CONST_AFTER"]
+must_contain_in_order = ["ORDER_CONST_BEFORE", "moth-slot-0", "ORDER_CONST_AFTER"]

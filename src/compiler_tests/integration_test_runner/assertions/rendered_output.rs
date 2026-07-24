@@ -202,7 +202,7 @@ fn execute_html_in_node(html: &str) -> Result<RenderedOutput, String> {
         .unwrap_or(0);
     let sequence = RENDER_HARNESS_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_path = std::env::temp_dir().join(format!(
-        "bst_render_harness_{}_{}_{}.js",
+        "moth_render_harness_{}_{}_{}.js",
         std::process::id(),
         unique,
         sequence
@@ -263,32 +263,32 @@ fn remove_temp_harness_file_with_retry(path: &Path) -> Result<(), std::io::Error
 }
 
 fn build_node_harness(scripts: &[String]) -> String {
-    let prefix = r#"const __bst_events = [];
-const __bst_slot_by_id = new Map();
-console.log = (...args) => __bst_events.push({ type: 'console', text: args.map(String).join(' ') });
-function __bst_get_slot(id) {
-    if (!__bst_slot_by_id.has(id)) {
+    let prefix = r#"const __moth_events = [];
+const __moth_slot_by_id = new Map();
+console.log = (...args) => __moth_events.push({ type: 'console', text: args.map(String).join(' ') });
+function __moth_get_slot(id) {
+    if (!__moth_slot_by_id.has(id)) {
         const slot = {
             id,
             innerHTML: "",
             insertAdjacentHTML: (_, html) => {
                 const text = String(html);
                 slot.innerHTML += text;
-                __bst_events.push({ type: 'fragment_insert', id: String(id), html: text });
+                __moth_events.push({ type: 'fragment_insert', id: String(id), html: text });
             }
         };
-        __bst_slot_by_id.set(id, slot);
+        __moth_slot_by_id.set(id, slot);
     }
-    return __bst_slot_by_id.get(id);
+    return __moth_slot_by_id.get(id);
 }
 const document = {
-    getElementById: __bst_get_slot
+    getElementById: __moth_get_slot
 };
 "#;
 
     let suffix = r#"
 Promise.resolve().then(() => {
-    process.stdout.write(JSON.stringify({ events: __bst_events }) + '\n');
+    process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n');
 });
 "#;
 

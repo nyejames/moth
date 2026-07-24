@@ -65,7 +65,7 @@ pub(crate) fn invalid_number_literal_message(
         }
         NumberLiteralErrorReason::UppercaseExponentMarker => {
             format!(
-                "Numeric literal '{literal}' uses `E`; Beanstalk exponent literals use lowercase `e`."
+                "Numeric literal '{literal}' uses `E`; Moth exponent literals use lowercase `e`."
             )
         }
         NumberLiteralErrorReason::MissingExponentDigits => {
@@ -123,7 +123,7 @@ pub(crate) fn invalid_type_annotation_message(
             "`as` is not valid here. It is only supported in type aliases, import clauses, and choice payload patterns.".to_string()
         }
         InvalidTypeAnnotationReason::UnexpectedColon => {
-            "Unexpected ':' after declaration name. Beanstalk does not support bare labeled blocks or `name: Type` declarations. Use `block:` for a scoped block, or write declarations as `name Type = value`.".to_string()
+            "Unexpected ':' after declaration name. Moth does not support bare labeled blocks or `name: Type` declarations. Use `block:` for a scoped block, or write declarations as `name Type = value`.".to_string()
         }
         InvalidTypeAnnotationReason::ReactiveAccessNotAllowed => {
             "`$Type` is reactive access syntax, not a standalone type annotation. Use it only on reactive declarations such as `name $Type = value` or function parameters such as `param $Type`."
@@ -158,25 +158,25 @@ pub(crate) fn common_syntax_mistake_message(
 ) -> String {
     match reason {
         CommonSyntaxMistakeReason::EqualityOperator => {
-            "Beanstalk uses the word `is` for equality, not `==`.".to_string()
+            "Moth uses the word `is` for equality, not `==`.".to_string()
         }
         CommonSyntaxMistakeReason::InequalityOperator => {
-            "Beanstalk uses `is not` for inequality, not `!=`.".to_string()
+            "Moth uses `is not` for inequality, not `!=`.".to_string()
         }
         CommonSyntaxMistakeReason::LogicalAndOperator => {
-            "Beanstalk uses the word `and` for logical conjunction, not `&&`.".to_string()
+            "Moth uses the word `and` for logical conjunction, not `&&`.".to_string()
         }
         CommonSyntaxMistakeReason::LogicalOrOperator => {
-            "Beanstalk uses the word `or` for logical disjunction, not `||`.".to_string()
+            "Moth uses the word `or` for logical disjunction, not `||`.".to_string()
         }
         CommonSyntaxMistakeReason::BooleanBangNegation => {
-            "Beanstalk uses the word `not` for boolean negation, not `!`.".to_string()
+            "Moth uses the word `not` for boolean negation, not `!`.".to_string()
         }
         CommonSyntaxMistakeReason::ExpressionAssignment => {
             "Use `is` for comparison. `=` is for declarations and assignments.".to_string()
         }
         CommonSyntaxMistakeReason::RustBorrowPrefix => {
-            "`&` marks inclusive ranges in Beanstalk. Borrowing is implicit; use `~` at call sites for mutation.".to_string()
+            "`&` marks inclusive ranges in Moth. Borrowing is implicit; use `~` at call sites for mutation.".to_string()
         }
         CommonSyntaxMistakeReason::InvalidAsOperator => {
             "`as` is not a cast operator. It is only valid in type aliases, import clauses, and choice payload patterns.".to_string()
@@ -186,13 +186,13 @@ pub(crate) fn common_syntax_mistake_message(
         }
         CommonSyntaxMistakeReason::FunctionKeyword { keyword } => {
             let keyword = string_table.resolve(*keyword);
-            format!("Functions don't use a keyword prefix like '{keyword}' in Beanstalk.")
+            format!("Functions don't use a keyword prefix like '{keyword}' in Moth.")
         }
         CommonSyntaxMistakeReason::LetOrVarKeyword => {
-            "Declarations don't use `let` or `var` in Beanstalk.".to_string()
+            "Declarations don't use `let` or `var` in Moth.".to_string()
         }
         CommonSyntaxMistakeReason::ConstKeyword => {
-            "Constants don't use `const` in Beanstalk.".to_string()
+            "Constants don't use `const` in Moth.".to_string()
         }
         CommonSyntaxMistakeReason::MatchKeyword => {
             "Use `if value is:` for pattern matching, not `match`.".to_string()
@@ -200,7 +200,7 @@ pub(crate) fn common_syntax_mistake_message(
         CommonSyntaxMistakeReason::StructKeyword { keyword } => {
             let keyword = string_table.resolve(*keyword);
             format!(
-                "Structs are declared with `Name = | fields |` in Beanstalk, not with `{keyword}`."
+                "Structs are declared with `Name = | fields |` in Moth, not with `{keyword}`."
             )
         }
         CommonSyntaxMistakeReason::SignatureParenthesisDelimiter => {
@@ -226,7 +226,7 @@ pub(crate) fn common_syntax_mistake_message(
                 .to_string()
         }
         CommonSyntaxMistakeReason::UnsupportedUnaryPlus => {
-            "Unary plus is not supported in Beanstalk.".to_string()
+            "Unary plus is not supported in Moth.".to_string()
         }
         CommonSyntaxMistakeReason::ImportPathMissingAtPrefix { authored_path } => {
             let authored_path = string_table.resolve(*authored_path);

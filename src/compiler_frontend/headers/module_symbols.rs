@@ -150,7 +150,7 @@ pub(crate) struct ModuleSymbols {
     pub(crate) declared_paths_by_file: FxHashMap<InternedPath, FxHashSet<InternedPath>>,
     pub(crate) declared_names_by_file: FxHashMap<InternedPath, FxHashSet<StringId>>,
     // Source constants detected during header symbol collection.
-    // WHY: Beandown's implicit body scope is header-stage visibility over source constants only.
+    // WHY: Moth template's implicit body scope is header-stage visibility over source constants only.
     // AST later decides whether those constants actually fold to plain values or const records.
     pub(crate) constant_paths: FxHashSet<InternedPath>,
     pub(crate) type_alias_paths: FxHashSet<InternedPath>,

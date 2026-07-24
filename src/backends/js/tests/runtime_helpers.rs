@@ -13,34 +13,34 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 // Runtime helper contract tests
 // ---------------------------------------------------------------------------
 
-/// Verifies that `__bs_result_propagate` unwraps ok values and throws a structured
+/// Verifies that `__moth_result_propagate` unwraps ok values and throws a structured
 /// sentinel for err values. [result]
 #[test]
 fn result_propagate_unwraps_ok_and_throws_sentinel_for_err() {
     let source = lower_minimal_module("main");
-    let propagate = helper_source(&source, "__bs_result_propagate");
+    let propagate = helper_source(&source, "__moth_result_propagate");
 
     assert!(
         propagate.contains("result.tag === \"ok\"") && propagate.contains("return result.value;"),
-        "__bs_result_propagate must return the ok value"
+        "__moth_result_propagate must return the ok value"
     );
     assert!(
-        propagate.contains("throw { __bs_result_propagate: true, value: result.value }")
-            || propagate.contains("throw { __bs_result_propagate: true, value: result.value };"),
-        "__bs_result_propagate must throw a structured sentinel for err"
+        propagate.contains("throw { __moth_result_propagate: true, value: result.value }")
+            || propagate.contains("throw { __moth_result_propagate: true, value: result.value };"),
+        "__moth_result_propagate must throw a structured sentinel for err"
     );
 }
 
-/// Verifies that `__bs_result_fallback` returns the ok value directly without calling
+/// Verifies that `__moth_result_fallback` returns the ok value directly without calling
 /// the fallback function. [result]
 #[test]
 fn result_fallback_returns_ok_value_without_calling_fallback() {
     let source = lower_minimal_module("main");
-    let fallback = helper_source(&source, "__bs_result_fallback");
+    let fallback = helper_source(&source, "__moth_result_fallback");
 
     assert!(
         fallback.contains("result.tag === \"ok\"") && fallback.contains("return result.value;"),
-        "__bs_result_fallback must return the ok value directly"
+        "__moth_result_fallback must return the ok value directly"
     );
     // The fallback callback should only be invoked in the err branch.
     let ok_pos = fallback
@@ -57,53 +57,53 @@ fn result_fallback_returns_ok_value_without_calling_fallback() {
     );
 }
 
-/// Verifies that `__bs_result_fallback` invokes the fallback callback for err carriers. [result]
+/// Verifies that `__moth_result_fallback` invokes the fallback callback for err carriers. [result]
 #[test]
 fn result_fallback_invokes_callback_for_err() {
     let source = lower_minimal_module("main");
-    let fallback = helper_source(&source, "__bs_result_fallback");
+    let fallback = helper_source(&source, "__moth_result_fallback");
 
     assert!(
         fallback.contains("result.tag === \"err\"") && fallback.contains("return fallback();"),
-        "__bs_result_fallback must invoke fallback() for err carriers"
+        "__moth_result_fallback must invoke fallback() for err carriers"
     );
 }
 
-/// Verifies that `__bs_clone_value` deep-copies arrays via `.map(__bs_clone_value)`. [clone]
+/// Verifies that `__moth_clone_value` deep-copies arrays via `.map(__moth_clone_value)`. [clone]
 #[test]
 fn clone_value_uses_map_for_arrays() {
     let source = lower_minimal_module("main");
-    let clone = helper_source(&source, "__bs_clone_value");
+    let clone = helper_source(&source, "__moth_clone_value");
 
     assert!(
-        clone.contains("Array.isArray(value)") && clone.contains("value.map(__bs_clone_value)"),
-        "__bs_clone_value must deep-copy arrays using .map(__bs_clone_value)"
+        clone.contains("Array.isArray(value)") && clone.contains("value.map(__moth_clone_value)"),
+        "__moth_clone_value must deep-copy arrays using .map(__moth_clone_value)"
     );
 }
 
-/// Verifies that `__bs_clone_value` deep-copies plain objects key-by-key. [clone]
+/// Verifies that `__moth_clone_value` deep-copies plain objects key-by-key. [clone]
 #[test]
 fn clone_value_iterates_object_keys() {
     let source = lower_minimal_module("main");
-    let clone = helper_source(&source, "__bs_clone_value");
+    let clone = helper_source(&source, "__moth_clone_value");
 
     assert!(
         clone.contains("Object.keys(value)")
-            && clone.contains("result[key] = __bs_clone_value(value[key])"),
-        "__bs_clone_value must deep-copy objects by iterating Object.keys"
+            && clone.contains("result[key] = __moth_clone_value(value[key])"),
+        "__moth_clone_value must deep-copy objects by iterating Object.keys"
     );
 }
 
-/// Verifies that `__bs_error_result` wraps `__bs_make_error` in an err carrier. [error]
+/// Verifies that `__moth_error_result` wraps `__moth_make_error` in an err carrier. [error]
 #[test]
 fn error_result_helper_wraps_make_error_in_err_carrier() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_error_result");
+    let helper = helper_source(&source, "__moth_error_result");
 
     assert!(
-        helper.contains("__bs_make_error(message, code, null, null)")
+        helper.contains("__moth_make_error(message, code, null, null)")
             && helper.contains("tag: \"err\""),
-        "__bs_error_result must wrap __bs_make_error in an err result carrier"
+        "__moth_error_result must wrap __moth_make_error in an err result carrier"
     );
 }
 
@@ -112,7 +112,7 @@ fn error_result_helper_wraps_make_error_in_err_carrier() {
 #[test]
 fn make_error_uses_builtin_error_field_symbols() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_make_error");
+    let helper = helper_source(&source, "__moth_make_error");
 
     let message_field = expected_dev_field_name("message", 0);
     let code_field = expected_dev_field_name("code", 1);
@@ -120,11 +120,11 @@ fn make_error_uses_builtin_error_field_symbols() {
     assert!(
         helper.contains(&format!("{message_field}: message"))
             && helper.contains(&format!("{code_field}: code")),
-        "__bs_make_error must construct the lowered builtin Error fields"
+        "__moth_make_error must construct the lowered builtin Error fields"
     );
     assert!(
         !helper.contains("\n        message,") && !helper.contains("\n        code,"),
-        "__bs_make_error must not construct a parallel plain JS error shape"
+        "__moth_make_error must not construct a parallel plain JS error shape"
     );
 }
 
@@ -133,14 +133,14 @@ fn make_error_uses_builtin_error_field_symbols() {
 #[test]
 fn error_context_helpers_read_canonical_error_fields() {
     let source = lower_minimal_module("main");
-    let with_location = helper_source(&source, "__bs_error_with_location");
-    let push_trace = helper_source(&source, "__bs_error_push_trace");
+    let with_location = helper_source(&source, "__moth_error_with_location");
+    let push_trace = helper_source(&source, "__moth_error_push_trace");
 
     assert!(
-        with_location.contains("__bs_error_message(error)")
-            && with_location.contains("__bs_error_code(error)")
-            && push_trace.contains("__bs_error_message(error)")
-            && push_trace.contains("__bs_error_code(error)"),
+        with_location.contains("__moth_error_message(error)")
+            && with_location.contains("__moth_error_code(error)")
+            && push_trace.contains("__moth_error_message(error)")
+            && push_trace.contains("__moth_error_code(error)"),
         "runtime error context helpers must preserve canonical Error.message/Error.code fields"
     );
 }
@@ -150,26 +150,26 @@ fn error_context_helpers_read_canonical_error_fields() {
 #[test]
 fn value_to_string_uses_deterministic_map_placeholder() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_value_to_string");
+    let helper = helper_source(&source, "__moth_value_to_string");
 
     assert!(
-        helper.contains("__bs_map_is_valid(value)")
+        helper.contains("__moth_map_is_valid(value)")
             && helper.contains("return \"[map display unavailable]\";"),
-        "__bs_value_to_string must avoid JS fallback object output for maps"
+        "__moth_value_to_string must avoid JS fallback object output for maps"
     );
 }
 
-/// Verifies that `__bs_collection_index_is_valid` checks integer, bounds, and item length. [collection]
+/// Verifies that `__moth_collection_index_is_valid` checks integer, bounds, and item length. [collection]
 #[test]
 fn collection_index_is_valid_checks_integer_bounds_and_length() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_collection_index_is_valid");
+    let helper = helper_source(&source, "__moth_collection_index_is_valid");
 
     assert!(
         helper.contains("Number.isInteger(index)")
             && helper.contains("index >= 0")
             && helper.contains("items.length"),
-        "__bs_collection_index_is_valid must validate integer, non-negative, and in-bounds via items"
+        "__moth_collection_index_is_valid must validate integer, non-negative, and in-bounds via items"
     );
 }
 
@@ -177,15 +177,15 @@ fn collection_index_is_valid_checks_integer_bounds_and_length() {
 #[test]
 fn collection_helpers_use_expected_error_code_for_invalid_receiver() {
     let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__bs_collection_get");
-    let set = helper_source(&source, "__bs_collection_set");
-    let push = helper_source(&source, "__bs_collection_push");
-    let remove = helper_source(&source, "__bs_collection_remove");
+    let get = helper_source(&source, "__moth_collection_get");
+    let set = helper_source(&source, "__moth_collection_set");
+    let push = helper_source(&source, "__moth_collection_push");
+    let remove = helper_source(&source, "__moth_collection_remove");
 
     let expected_error = BuiltinErrorCode::CollectionExpectedOrderedCollection;
     let expected_message = expected_error.default_message();
     let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__bs_error_result("{expected_message}", {expected_code})"#);
+    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
 
     assert!(
         get.contains(&expected)
@@ -200,14 +200,14 @@ fn collection_helpers_use_expected_error_code_for_invalid_receiver() {
 #[test]
 fn collection_helpers_use_expected_error_code_for_out_of_bounds() {
     let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__bs_collection_get");
-    let set = helper_source(&source, "__bs_collection_set");
-    let remove = helper_source(&source, "__bs_collection_remove");
+    let get = helper_source(&source, "__moth_collection_get");
+    let set = helper_source(&source, "__moth_collection_set");
+    let remove = helper_source(&source, "__moth_collection_remove");
 
     let expected_error = BuiltinErrorCode::CollectionIndexOutOfBounds;
     let expected_message = expected_error.default_message();
     let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__bs_error_result("{expected_message}", {expected_code})"#);
+    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
 
     assert!(
         get.contains(&expected) && set.contains(&expected) && remove.contains(&expected),
@@ -215,132 +215,132 @@ fn collection_helpers_use_expected_error_code_for_out_of_bounds() {
     );
 }
 
-/// Verifies that `__bs_collection_get` returns an err carrier for invalid collection inputs. [collection]
+/// Verifies that `__moth_collection_get` returns an err carrier for invalid collection inputs. [collection]
 #[test]
 fn collection_get_returns_err_for_invalid_collection() {
     let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__bs_collection_get");
+    let get = helper_source(&source, "__moth_collection_get");
 
     assert!(
-        get.contains("__bs_collection_is_valid(collection)") && get.contains("__bs_error_result"),
-        "__bs_collection_get must return a Result-typed err for invalid collection inputs"
+        get.contains("__moth_collection_is_valid(collection)") && get.contains("__moth_error_result"),
+        "__moth_collection_get must return a Result-typed err for invalid collection inputs"
     );
 }
 
-/// Verifies that `__bs_collection_get` returns an err carrier for out-of-bounds indices. [collection]
+/// Verifies that `__moth_collection_get` returns an err carrier for out-of-bounds indices. [collection]
 #[test]
 fn collection_get_returns_err_for_out_of_bounds() {
     let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__bs_collection_get");
+    let get = helper_source(&source, "__moth_collection_get");
 
     assert!(
-        get.contains("!__bs_collection_index_is_valid(collection, index)")
-            && get.contains("__bs_error_result"),
-        "__bs_collection_get must return a Result-typed err for out-of-bounds indices"
+        get.contains("!__moth_collection_index_is_valid(collection, index)")
+            && get.contains("__moth_error_result"),
+        "__moth_collection_get must return a Result-typed err for out-of-bounds indices"
     );
 }
 
-/// Verifies that `__bs_collection_get` returns an ok carrier for valid inputs. [collection]
+/// Verifies that `__moth_collection_get` returns an ok carrier for valid inputs. [collection]
 #[test]
 fn collection_get_returns_ok_for_valid_index() {
     let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__bs_collection_get");
+    let get = helper_source(&source, "__moth_collection_get");
 
     assert!(
         get.contains("{ tag: \"ok\", value: items[index] }"),
-        "__bs_collection_get must return a Result-typed ok for valid indices"
+        "__moth_collection_get must return a Result-typed ok for valid indices"
     );
 }
 
-/// Verifies that `__bs_collection_set` returns an err carrier for out-of-bounds indices. [collection]
+/// Verifies that `__moth_collection_set` returns an err carrier for out-of-bounds indices. [collection]
 #[test]
 fn collection_set_returns_err_for_out_of_bounds() {
     let source = lower_minimal_module("main");
-    let set = helper_source(&source, "__bs_collection_set");
+    let set = helper_source(&source, "__moth_collection_set");
 
     assert!(
-        set.contains("!__bs_collection_index_is_valid(collection, index)")
-            && set.contains("__bs_error_result"),
-        "__bs_collection_set must return a Result-typed err for out-of-bounds indices"
+        set.contains("!__moth_collection_index_is_valid(collection, index)")
+            && set.contains("__moth_error_result"),
+        "__moth_collection_set must return a Result-typed err for out-of-bounds indices"
     );
 }
 
-/// Verifies that `__bs_collection_set` returns an ok carrier after writing. [collection]
+/// Verifies that `__moth_collection_set` returns an ok carrier after writing. [collection]
 #[test]
 fn collection_set_returns_ok_after_write() {
     let source = lower_minimal_module("main");
-    let set = helper_source(&source, "__bs_collection_set");
+    let set = helper_source(&source, "__moth_collection_set");
 
     assert!(
         set.contains("items[index] = value;") && set.contains("{ tag: \"ok\", value: null }"),
-        "__bs_collection_set must return a fallible-carrier success after writing"
+        "__moth_collection_set must return a fallible-carrier success after writing"
     );
 }
 
-/// Verifies that `__bs_collection_push` returns a fallible carrier on success. [collection]
+/// Verifies that `__moth_collection_push` returns a fallible carrier on success. [collection]
 #[test]
 fn collection_push_returns_ok_after_mutation() {
     let source = lower_minimal_module("main");
-    let push = helper_source(&source, "__bs_collection_push");
+    let push = helper_source(&source, "__moth_collection_push");
 
     assert!(
         push.contains("items.push(value)") && push.contains("{ tag: \"ok\", value: null }"),
-        "__bs_collection_push must return a fallible-carrier success after pushing"
+        "__moth_collection_push must return a fallible-carrier success after pushing"
     );
 }
 
-/// Verifies that `__bs_collection_remove` returns an err carrier for invalid collection inputs. [collection]
+/// Verifies that `__moth_collection_remove` returns an err carrier for invalid collection inputs. [collection]
 #[test]
 fn collection_remove_returns_err_for_invalid_collection() {
     let source = lower_minimal_module("main");
-    let remove = helper_source(&source, "__bs_collection_remove");
+    let remove = helper_source(&source, "__moth_collection_remove");
 
     assert!(
-        remove.contains("__bs_collection_is_valid(collection)")
-            && remove.contains("__bs_error_result"),
-        "__bs_collection_remove must return a Result-typed err for invalid collection inputs"
+        remove.contains("__moth_collection_is_valid(collection)")
+            && remove.contains("__moth_error_result"),
+        "__moth_collection_remove must return a Result-typed err for invalid collection inputs"
     );
 }
 
-/// Verifies that `__bs_collection_remove` returns an err carrier for out-of-bounds indices. [collection]
+/// Verifies that `__moth_collection_remove` returns an err carrier for out-of-bounds indices. [collection]
 #[test]
 fn collection_remove_returns_err_for_out_of_bounds() {
     let source = lower_minimal_module("main");
-    let remove = helper_source(&source, "__bs_collection_remove");
+    let remove = helper_source(&source, "__moth_collection_remove");
 
     assert!(
-        remove.contains("!__bs_collection_index_is_valid(collection, index)")
-            && remove.contains("__bs_error_result"),
-        "__bs_collection_remove must return a Result-typed err for out-of-bounds indices"
+        remove.contains("!__moth_collection_index_is_valid(collection, index)")
+            && remove.contains("__moth_error_result"),
+        "__moth_collection_remove must return a Result-typed err for out-of-bounds indices"
     );
 }
 
-/// Verifies that `__bs_collection_remove` returns an ok carrier for valid inputs. [collection]
+/// Verifies that `__moth_collection_remove` returns an ok carrier for valid inputs. [collection]
 #[test]
 fn collection_remove_returns_ok_for_valid_index() {
     let source = lower_minimal_module("main");
-    let remove = helper_source(&source, "__bs_collection_remove");
+    let remove = helper_source(&source, "__moth_collection_remove");
 
     assert!(
         remove.contains("const removed = items.splice(index, 1)[0];")
             && remove.contains("{ tag: \"ok\", value: removed }"),
-        "__bs_collection_remove must return the removed element in its ok carrier"
+        "__moth_collection_remove must return the removed element in its ok carrier"
     );
 }
 
-/// Verifies that `__bs_collection_length` returns a plain length value. [collection]
+/// Verifies that `__moth_collection_length` returns a plain length value. [collection]
 #[test]
 fn collection_length_is_infallible_runtime_helper() {
     let source = lower_minimal_module("main");
-    let length = helper_source(&source, "__bs_collection_length");
+    let length = helper_source(&source, "__moth_collection_length");
 
     assert!(
         length.contains("return items.length;") && !length.contains("{ tag:"),
-        "__bs_collection_length must return a plain length value"
+        "__moth_collection_length must return a plain length value"
     );
 }
 
-/// Verifies that emitted `__bs_collection_push` calls are plain statements. [collection]
+/// Verifies that emitted `__moth_collection_push` calls are plain statements. [collection]
 #[test]
 fn collection_push_call_is_not_wrapped_with_result_propagate() {
     let mut string_table = StringTable::new();
@@ -395,15 +395,15 @@ fn collection_push_call_is_not_wrapped_with_result_propagate() {
     .expect("JS lowering should succeed");
 
     assert!(
-        output.source.contains("__bs_collection_push(")
+        output.source.contains("__moth_collection_push(")
             && !output
                 .source
-                .contains("__bs_result_propagate(__bs_collection_push("),
-        "__bs_collection_push host call must stay plain"
+                .contains("__moth_result_propagate(__moth_collection_push("),
+        "__moth_collection_push host call must stay plain"
     );
 }
 
-/// Verifies that emitted `__bs_collection_remove` calls are not implicitly propagated. [collection]
+/// Verifies that emitted `__moth_collection_remove` calls are not implicitly propagated. [collection]
 #[test]
 fn collection_remove_call_is_not_wrapped_with_result_propagate() {
     let mut string_table = StringTable::new();
@@ -468,20 +468,20 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
 
     assert!(
         output.source.contains(&format!(
-            "__bs_assign_value({removed_name}, __bs_collection_remove("
+            "__moth_assign_value({removed_name}, __moth_collection_remove("
         )),
         "external fallible call result carriers must be assigned as fresh values"
     );
     assert!(
-        output.source.contains("__bs_collection_remove(")
+        output.source.contains("__moth_collection_remove(")
             && !output
                 .source
-                .contains("__bs_result_propagate(__bs_collection_remove("),
-        "__bs_collection_remove host call must not be auto-propagated by JS statement lowering"
+                .contains("__moth_result_propagate(__moth_collection_remove("),
+        "__moth_collection_remove host call must not be auto-propagated by JS statement lowering"
     );
 }
 
-/// Verifies that emitted `__bs_collection_length` calls are plain value calls. [collection]
+/// Verifies that emitted `__moth_collection_length` calls are plain value calls. [collection]
 #[test]
 fn collection_length_call_is_not_wrapped_with_result_propagate() {
     let mut string_table = StringTable::new();
@@ -540,73 +540,73 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
     .expect("JS lowering should succeed");
 
     assert!(
-        output.source.contains("__bs_collection_length(")
+        output.source.contains("__moth_collection_length(")
             && !output
                 .source
-                .contains("__bs_result_propagate(__bs_collection_length("),
-        "__bs_collection_length host call must stay plain"
+                .contains("__moth_result_propagate(__moth_collection_length("),
+        "__moth_collection_length host call must stay plain"
     );
 }
 
-/// Verifies that `__bs_cast_int` rejects non-numeric strings with a Parse error. [cast]
+/// Verifies that `__moth_cast_int` rejects non-numeric strings with a Parse error. [cast]
 #[test]
 fn cast_int_rejects_non_numeric_string() {
     let source = lower_minimal_module_with_string_int_cast("main");
-    let cast = helper_source(&source, "__bs_cast_int");
+    let cast = helper_source(&source, "__moth_cast_int");
 
     assert!(
         cast.contains("Cannot parse Int from text") && cast.contains("{ tag: \"err\""),
-        "__bs_cast_int must return a Parse err for non-numeric strings"
+        "__moth_cast_int must return a Parse err for non-numeric strings"
     );
 }
 
-/// Verifies that `__bs_cast_int` accepts integer strings via parseInt. [cast]
+/// Verifies that `__moth_cast_int` accepts integer strings via parseInt. [cast]
 #[test]
 fn cast_int_accepts_integer_string() {
     let source = lower_minimal_module_with_string_int_cast("main");
-    let cast = helper_source(&source, "__bs_cast_int");
+    let cast = helper_source(&source, "__moth_cast_int");
 
     assert!(
         cast.contains("Number.parseInt(value.replace(/_/g, ''), 10)")
             && cast.contains("{ tag: \"ok\""),
-        "__bs_cast_int must parse integer strings and return ok"
+        "__moth_cast_int must parse integer strings and return ok"
     );
 }
 
-/// Verifies that `__bs_cast_int` applies numeric grammar to the whole string. [cast]
+/// Verifies that `__moth_cast_int` applies numeric grammar to the whole string. [cast]
 #[test]
 fn cast_int_does_not_trim_string_input() {
     let source = lower_minimal_module_with_string_int_cast("main");
-    let cast = helper_source(&source, "__bs_cast_int");
+    let cast = helper_source(&source, "__moth_cast_int");
 
     assert!(
         cast.contains("/^-?(?:\\d+(?:_\\d+)*)$/.test(value)")
-            && !cast.contains("__bs_normalize_numeric_text(value)"),
-        "__bs_cast_int must reject surrounding whitespace instead of trimming it"
+            && !cast.contains("__moth_normalize_numeric_text(value)"),
+        "__moth_cast_int must reject surrounding whitespace instead of trimming it"
     );
 }
 
-/// Verifies that `__bs_cast_int` uses the shared i32 range helpers. [cast]
+/// Verifies that `__moth_cast_int` uses the shared i32 range helpers. [cast]
 #[test]
 fn cast_int_uses_i32_range_helpers() {
     let source = lower_minimal_module_with_string_int_cast("main");
 
     assert!(
-        source.contains("function __bs_cast_int_in_range(value)")
+        source.contains("function __moth_cast_int_in_range(value)")
             && source.contains("const __BS_INT_CAST_MIN = -2147483648")
             && source.contains("const __BS_INT_CAST_MAX = 2147483647"),
-        "__bs_cast_int must rely on shared Alpha i32 range helpers"
+        "__moth_cast_int must rely on shared Alpha i32 range helpers"
     );
 
-    let cast = helper_source(&source, "__bs_cast_int");
+    let cast = helper_source(&source, "__moth_cast_int");
     assert!(
-        cast.contains("__bs_cast_int_in_range(value)")
-            && cast.contains("__bs_cast_int_in_range(parsed)"),
-        "__bs_cast_int numeric and string branches must use the shared range predicate"
+        cast.contains("__moth_cast_int_in_range(value)")
+            && cast.contains("__moth_cast_int_in_range(parsed)"),
+        "__moth_cast_int numeric and string branches must use the shared range predicate"
     );
 }
 
-/// Verifies that `__bs_cast_float_to_int` uses the shared i32 range helper. [cast]
+/// Verifies that `__moth_cast_float_to_int` uses the shared i32 range helper. [cast]
 #[test]
 fn cast_float_to_int_uses_i32_range_helper() {
     let mut string_table = StringTable::new();
@@ -665,74 +665,74 @@ fn cast_float_to_int_uses_i32_range_helper() {
     )
     .expect("JS lowering should succeed");
 
-    let cast = helper_source(&output.source, "__bs_cast_float_to_int");
+    let cast = helper_source(&output.source, "__moth_cast_float_to_int");
     assert!(
-        cast.contains("!__bs_cast_int_in_range(truncated)"),
-        "__bs_cast_float_to_int must reject truncated values outside the i32 range"
+        cast.contains("!__moth_cast_int_in_range(truncated)"),
+        "__moth_cast_float_to_int must reject truncated values outside the i32 range"
     );
 }
 
-/// Verifies that `__bs_cast_float` rejects invalid strings with a Parse error. [cast]
+/// Verifies that `__moth_cast_float` rejects invalid strings with a Parse error. [cast]
 #[test]
 fn cast_float_rejects_invalid_string() {
     let source = lower_minimal_module_with_string_float_cast("main");
-    let cast = helper_source(&source, "__bs_cast_float");
+    let cast = helper_source(&source, "__moth_cast_float");
 
     assert!(
         cast.contains("Cannot parse Float from text") && cast.contains("{ tag: \"err\""),
-        "__bs_cast_float must return a Parse err for invalid strings"
+        "__moth_cast_float must return a Parse err for invalid strings"
     );
 }
 
-/// Verifies that `__bs_cast_float` applies the shared Beanstalk numeric text grammar to
+/// Verifies that `__moth_cast_float` applies the shared Moth numeric text grammar to
 /// the whole string and does not trim whitespace. [cast]
 #[test]
 fn cast_float_uses_shared_numeric_text_grammar() {
     let source = lower_minimal_module_with_string_float_cast("main");
-    let cast = helper_source(&source, "__bs_cast_float");
+    let cast = helper_source(&source, "__moth_cast_float");
 
     assert!(
         cast.contains("Number.parseFloat(value.replace(/_/g, \"\"))"),
-        "__bs_cast_float must parse the string after removing digit separators"
+        "__moth_cast_float must parse the string after removing digit separators"
     );
     assert!(
         cast.contains("/^-?\\d+(?:_\\d+)*(?:\\.\\d+(?:_\\d+)*)?(?:e[+-]?\\d+(?:_\\d+)*)?$/"),
-        "__bs_cast_float must match the Beanstalk numeric text grammar exactly"
+        "__moth_cast_float must match the Moth numeric text grammar exactly"
     );
     assert!(
-        !cast.contains("__bs_normalize_numeric_text"),
-        "__bs_cast_float must not trim surrounding whitespace"
+        !cast.contains("__moth_normalize_numeric_text"),
+        "__moth_cast_float must not trim surrounding whitespace"
     );
     assert!(
         cast.contains("Number.isFinite(parsed)"),
-        "__bs_cast_float must reject non-finite parsed values"
+        "__moth_cast_float must reject non-finite parsed values"
     );
 }
 
-/// Verifies that `__bs_cast_float` rejects non-finite parsed values with an out-of-range
+/// Verifies that `__moth_cast_float` rejects non-finite parsed values with an out-of-range
 /// error carrier. [cast]
 #[test]
 fn cast_float_rejects_non_finite_parsed_value() {
     let source = lower_minimal_module_with_string_float_cast("main");
-    let cast = helper_source(&source, "__bs_cast_float");
+    let cast = helper_source(&source, "__moth_cast_float");
 
     assert!(
         cast.contains("Float value is out of supported range") && cast.contains("{ tag: \"err\""),
-        "__bs_cast_float must return an out-of-range err when Number.parseFloat yields Infinity"
+        "__moth_cast_float must return an out-of-range err when Number.parseFloat yields Infinity"
     );
 }
 
-/// Verifies that `__bs_error_bubble` normalizes the file path and builds a trace frame. [error]
+/// Verifies that `__moth_error_bubble` normalizes the file path and builds a trace frame. [error]
 #[test]
 fn error_bubble_normalizes_file_and_builds_trace() {
     let source = lower_minimal_module("main");
-    let bubble = helper_source(&source, "__bs_error_bubble");
+    let bubble = helper_source(&source, "__moth_error_bubble");
 
     assert!(
-        bubble.contains("__bs_error_normalize_file(file)")
+        bubble.contains("__moth_error_normalize_file(file)")
             && bubble.contains("const frame = { function: safeFunction, location }")
-            && bubble.contains("__bs_error_push_trace"),
-        "__bs_error_bubble must normalize file paths and push a trace frame"
+            && bubble.contains("__moth_error_push_trace"),
+        "__moth_error_bubble must normalize file paths and push a trace frame"
     );
 }
 
@@ -740,338 +740,338 @@ fn error_bubble_normalizes_file_and_builds_trace() {
 // Fixed collection runtime helper tests [fixed-collection]
 // ---------------------------------------------------------------------------
 
-/// Verifies that `__bs_fixed_collection` creates a wrapper with items and capacity. [fixed-collection]
+/// Verifies that `__moth_fixed_collection` creates a wrapper with items and capacity. [fixed-collection]
 #[test]
 fn fixed_collection_helper_creates_wrapper_with_items_and_capacity() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_fixed_collection");
+    let helper = helper_source(&source, "__moth_fixed_collection");
 
     assert!(
-        helper.contains("__bst_kind: \"fixed_collection\"")
+        helper.contains("__moth_kind: \"fixed_collection\"")
             && helper.contains("items: items")
             && helper.contains("fixedCapacity: fixedCapacity"),
-        "__bs_fixed_collection must create a branded wrapper with items and fixed capacity"
+        "__moth_fixed_collection must create a branded wrapper with items and fixed capacity"
     );
 }
 
-/// Verifies that `__bs_collection_items` returns plain arrays as-is. [fixed-collection]
+/// Verifies that `__moth_collection_items` returns plain arrays as-is. [fixed-collection]
 #[test]
 fn collection_items_returns_array_as_is() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_collection_items");
+    let helper = helper_source(&source, "__moth_collection_items");
 
     assert!(
         helper.contains("Array.isArray(collection)") && helper.contains("return collection;"),
-        "__bs_collection_items must return plain arrays directly"
+        "__moth_collection_items must return plain arrays directly"
     );
 }
 
-/// Verifies that `__bs_collection_items` extracts items from fixed wrappers. [fixed-collection]
+/// Verifies that `__moth_collection_items` extracts items from fixed wrappers. [fixed-collection]
 #[test]
 fn collection_items_extracts_from_fixed_wrapper() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_collection_items");
+    let helper = helper_source(&source, "__moth_collection_items");
 
     assert!(
         helper.contains("return collection.items;"),
-        "__bs_collection_items must extract items from fixed wrappers"
+        "__moth_collection_items must extract items from fixed wrappers"
     );
 }
 
-/// Verifies that `__bs_collection_fixed_capacity` returns null for arrays. [fixed-collection]
+/// Verifies that `__moth_collection_fixed_capacity` returns null for arrays. [fixed-collection]
 #[test]
 fn collection_fixed_capacity_returns_null_for_arrays() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_collection_fixed_capacity");
+    let helper = helper_source(&source, "__moth_collection_fixed_capacity");
 
     assert!(
         helper.contains("Array.isArray(collection)") && helper.contains("return null;"),
-        "__bs_collection_fixed_capacity must return null for growable arrays"
+        "__moth_collection_fixed_capacity must return null for growable arrays"
     );
 }
 
-/// Verifies that `__bs_collection_fixed_capacity` returns capacity for fixed wrappers. [fixed-collection]
+/// Verifies that `__moth_collection_fixed_capacity` returns capacity for fixed wrappers. [fixed-collection]
 #[test]
 fn collection_fixed_capacity_returns_capacity_for_fixed() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_collection_fixed_capacity");
+    let helper = helper_source(&source, "__moth_collection_fixed_capacity");
 
     assert!(
         helper.contains("return collection.fixedCapacity;"),
-        "__bs_collection_fixed_capacity must return capacity for fixed wrappers"
+        "__moth_collection_fixed_capacity must return capacity for fixed wrappers"
     );
 }
 
-/// Verifies that `__bs_collection_is_valid` accepts arrays. [fixed-collection]
+/// Verifies that `__moth_collection_is_valid` accepts arrays. [fixed-collection]
 #[test]
 fn collection_is_valid_accepts_arrays() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_collection_is_valid");
+    let helper = helper_source(&source, "__moth_collection_is_valid");
 
     assert!(
         helper.contains("Array.isArray(collection)") && helper.contains("return true;"),
-        "__bs_collection_is_valid must accept plain arrays"
+        "__moth_collection_is_valid must accept plain arrays"
     );
 }
 
-/// Verifies that `__bs_collection_is_valid` accepts fixed wrappers. [fixed-collection]
+/// Verifies that `__moth_collection_is_valid` accepts fixed wrappers. [fixed-collection]
 #[test]
 fn collection_is_valid_accepts_fixed_wrappers() {
     let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__bs_collection_is_valid");
+    let helper = helper_source(&source, "__moth_collection_is_valid");
 
     assert!(
-        helper.contains("collection.__bst_kind !== \"fixed_collection\"")
+        helper.contains("collection.__moth_kind !== \"fixed_collection\"")
             && helper.contains("Array.isArray(collection.items)")
             && helper.contains("Number.isInteger(collection.fixedCapacity)")
             && helper.contains("collection.items.length <= collection.fixedCapacity"),
-        "__bs_collection_is_valid must validate the branded fixed wrapper shape"
+        "__moth_collection_is_valid must validate the branded fixed wrapper shape"
     );
 }
 
-/// Verifies that `__bs_collection_push` checks fixed capacity before pushing. [fixed-collection]
+/// Verifies that `__moth_collection_push` checks fixed capacity before pushing. [fixed-collection]
 #[test]
 fn collection_push_checks_fixed_capacity() {
     let source = lower_minimal_module("main");
-    let push = helper_source(&source, "__bs_collection_push");
+    let push = helper_source(&source, "__moth_collection_push");
 
     assert!(
-        push.contains("__bs_collection_fixed_capacity(collection)")
+        push.contains("__moth_collection_fixed_capacity(collection)")
             && push.contains("items.length >= fixedCapacity"),
-        "__bs_collection_push must check fixed capacity before pushing"
+        "__moth_collection_push must check fixed capacity before pushing"
     );
 }
 
-/// Verifies that `__bs_collection_push` returns capacity exceeded error for fixed collections. [fixed-collection]
+/// Verifies that `__moth_collection_push` returns capacity exceeded error for fixed collections. [fixed-collection]
 #[test]
 fn collection_push_returns_capacity_exceeded_error() {
     let source = lower_minimal_module("main");
-    let push = helper_source(&source, "__bs_collection_push");
+    let push = helper_source(&source, "__moth_collection_push");
 
     let expected_error = BuiltinErrorCode::CollectionFixedCapacityExceeded;
     let expected_message = expected_error.default_message();
     let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__bs_error_result("{expected_message}", {expected_code})"#);
+    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
 
     assert!(
         push.contains(&expected),
-        "__bs_collection_push must return CollectionFixedCapacityExceeded when full"
+        "__moth_collection_push must return CollectionFixedCapacityExceeded when full"
     );
 }
 
-/// Verifies that `__bs_collection_length` returns logical item count via items.length. [fixed-collection]
+/// Verifies that `__moth_collection_length` returns logical item count via items.length. [fixed-collection]
 #[test]
 fn collection_length_returns_logical_item_count() {
     let source = lower_minimal_module("main");
-    let length = helper_source(&source, "__bs_collection_length");
+    let length = helper_source(&source, "__moth_collection_length");
 
     assert!(
-        length.contains("__bs_collection_items(collection)")
+        length.contains("__moth_collection_items(collection)")
             && length.contains("return items.length;"),
-        "__bs_collection_length must return logical item count, not capacity"
+        "__moth_collection_length must return logical item count, not capacity"
     );
 }
 
-/// Verifies that `__bs_collection_get` uses items from `__bs_collection_items`. [fixed-collection]
+/// Verifies that `__moth_collection_get` uses items from `__moth_collection_items`. [fixed-collection]
 #[test]
 fn collection_get_uses_collection_items() {
     let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__bs_collection_get");
+    let get = helper_source(&source, "__moth_collection_get");
 
     assert!(
-        get.contains("__bs_collection_items(collection)"),
-        "__bs_collection_get must operate on the dense items array"
+        get.contains("__moth_collection_items(collection)"),
+        "__moth_collection_get must operate on the dense items array"
     );
 }
 
-/// Verifies that `__bs_collection_set` uses items from `__bs_collection_items`. [fixed-collection]
+/// Verifies that `__moth_collection_set` uses items from `__moth_collection_items`. [fixed-collection]
 #[test]
 fn collection_set_uses_collection_items() {
     let source = lower_minimal_module("main");
-    let set = helper_source(&source, "__bs_collection_set");
+    let set = helper_source(&source, "__moth_collection_set");
 
     assert!(
-        set.contains("__bs_collection_items(collection)"),
-        "__bs_collection_set must operate on the dense items array"
+        set.contains("__moth_collection_items(collection)"),
+        "__moth_collection_set must operate on the dense items array"
     );
 }
 
-/// Verifies that `__bs_collection_remove` uses items from `__bs_collection_items`. [fixed-collection]
+/// Verifies that `__moth_collection_remove` uses items from `__moth_collection_items`. [fixed-collection]
 #[test]
 fn collection_remove_uses_collection_items() {
     let source = lower_minimal_module("main");
-    let remove = helper_source(&source, "__bs_collection_remove");
+    let remove = helper_source(&source, "__moth_collection_remove");
 
     assert!(
-        remove.contains("__bs_collection_items(collection)"),
-        "__bs_collection_remove must operate on the dense items array"
+        remove.contains("__moth_collection_items(collection)"),
+        "__moth_collection_remove must operate on the dense items array"
     );
 }
 
 // Map helper contract tests
 // ---------------------------------------------------------------------------
 
-/// Verifies that `__bs_map_new` creates a branded wrapper with `new Map()`. [map]
+/// Verifies that `__moth_map_new` creates a branded wrapper with `new Map()`. [map]
 #[test]
 fn map_new_creates_branded_wrapper_with_map() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_new");
+    let helper = helper_source(&source, "__moth_map_new");
 
     assert!(
-        helper.contains("__bst_kind: \"ordered_map\"") && helper.contains("new Map()"),
-        "__bs_map_new must emit a branded ordered_map wrapper using new Map()"
+        helper.contains("__moth_kind: \"ordered_map\"") && helper.contains("new Map()"),
+        "__moth_map_new must emit a branded ordered_map wrapper using new Map()"
     );
 }
 
-/// Verifies that `__bs_map_get` returns ok for present keys. [map]
+/// Verifies that `__moth_map_get` returns ok for present keys. [map]
 #[test]
 fn map_get_returns_ok_for_present_key() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_get");
+    let helper = helper_source(&source, "__moth_map_get");
 
     assert!(
         helper.contains("{ tag: \"ok\", value: map.map.get(key) }"),
-        "__bs_map_get must return an ok carrier for present keys"
+        "__moth_map_get must return an ok carrier for present keys"
     );
 }
 
-/// Verifies that `__bs_map_get` returns MapKeyNotFound for missing keys. [map]
+/// Verifies that `__moth_map_get` returns MapKeyNotFound for missing keys. [map]
 #[test]
 fn map_get_returns_key_not_found_for_missing_key() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_get");
+    let helper = helper_source(&source, "__moth_map_get");
 
     let expected_error = BuiltinErrorCode::MapKeyNotFound;
     let expected_message = expected_error.default_message();
     let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__bs_error_result("{expected_message}", {expected_code})"#);
+    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
 
     assert!(
         helper.contains(&expected),
-        "__bs_map_get must return MapKeyNotFound when key is missing"
+        "__moth_map_get must return MapKeyNotFound when key is missing"
     );
 }
 
-/// Verifies that `__bs_map_get` validates receiver type. [map]
+/// Verifies that `__moth_map_get` validates receiver type. [map]
 #[test]
 fn map_get_validates_receiver() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_get");
+    let helper = helper_source(&source, "__moth_map_get");
 
     let expected_error = BuiltinErrorCode::MapExpectedOrderedMap;
     let expected_message = expected_error.default_message();
     let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__bs_error_result("{expected_message}", {expected_code})"#);
+    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
 
     assert!(
         helper.contains(&expected),
-        "__bs_map_get must validate receiver and return MapExpectedOrderedMap for invalid receivers"
+        "__moth_map_get must validate receiver and return MapExpectedOrderedMap for invalid receivers"
     );
 }
 
-/// Verifies that `__bs_map_set` stores via `map.map.set` and returns ok. [map]
+/// Verifies that `__moth_map_set` stores via `map.map.set` and returns ok. [map]
 #[test]
 fn map_set_stores_and_returns_ok() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_set");
+    let helper = helper_source(&source, "__moth_map_set");
 
     assert!(
         helper.contains("map.map.set(key, value)")
             && helper.contains("{ tag: \"ok\", value: null }"),
-        "__bs_map_set must store via map.map.set and return ok unit carrier"
+        "__moth_map_set must store via map.map.set and return ok unit carrier"
     );
 }
 
-/// Verifies that `__bs_map_remove` returns the removed value and deletes the key. [map]
+/// Verifies that `__moth_map_remove` returns the removed value and deletes the key. [map]
 #[test]
 fn map_remove_returns_removed_and_deletes_key() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_remove");
+    let helper = helper_source(&source, "__moth_map_remove");
 
     assert!(
         helper.contains("const removed = map.map.get(key);")
             && helper.contains("map.map.delete(key);")
             && helper.contains("{ tag: \"ok\", value: removed }"),
-        "__bs_map_remove must return removed value and delete the key"
+        "__moth_map_remove must return removed value and delete the key"
     );
 }
 
-/// Verifies that `__bs_map_remove` returns MapKeyNotFound for missing keys. [map]
+/// Verifies that `__moth_map_remove` returns MapKeyNotFound for missing keys. [map]
 #[test]
 fn map_remove_returns_key_not_found_for_missing_key() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_remove");
+    let helper = helper_source(&source, "__moth_map_remove");
 
     let expected_error = BuiltinErrorCode::MapKeyNotFound;
     let expected_message = expected_error.default_message();
     let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__bs_error_result("{expected_message}", {expected_code})"#);
+    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
 
     assert!(
         helper.contains(&expected),
-        "__bs_map_remove must return MapKeyNotFound when key is missing"
+        "__moth_map_remove must return MapKeyNotFound when key is missing"
     );
 }
 
-/// Verifies that `__bs_map_contains` is an infallible plain helper. [map]
+/// Verifies that `__moth_map_contains` is an infallible plain helper. [map]
 #[test]
 fn map_contains_is_plain_infallible_helper() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_contains");
+    let helper = helper_source(&source, "__moth_map_contains");
 
     assert!(
-        helper.contains("return map.map.has(key);") && !helper.contains("__bs_error_result"),
-        "__bs_map_contains must be a plain infallible helper"
+        helper.contains("return map.map.has(key);") && !helper.contains("__moth_error_result"),
+        "__moth_map_contains must be a plain infallible helper"
     );
 }
 
-/// Verifies that `__bs_map_clear` is an infallible plain helper. [map]
+/// Verifies that `__moth_map_clear` is an infallible plain helper. [map]
 #[test]
 fn map_clear_is_plain_infallible_helper() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_clear");
+    let helper = helper_source(&source, "__moth_map_clear");
 
     assert!(
-        helper.contains("map.map.clear();") && !helper.contains("__bs_error_result"),
-        "__bs_map_clear must be a plain infallible helper"
+        helper.contains("map.map.clear();") && !helper.contains("__moth_error_result"),
+        "__moth_map_clear must be a plain infallible helper"
     );
 }
 
-/// Verifies that `__bs_map_length` is an infallible plain helper. [map]
+/// Verifies that `__moth_map_length` is an infallible plain helper. [map]
 #[test]
 fn map_length_is_plain_infallible_helper() {
     let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__bs_map_length");
+    let helper = helper_source(&source, "__moth_map_length");
 
     assert!(
-        helper.contains("return map.map.size;") && !helper.contains("__bs_error_result"),
-        "__bs_map_length must be a plain infallible helper"
+        helper.contains("return map.map.size;") && !helper.contains("__moth_error_result"),
+        "__moth_map_length must be a plain infallible helper"
     );
 }
 
-/// Verifies that `__bs_clone_value` has a map branch using `__bs_map_is_valid`. [map] [clone]
+/// Verifies that `__moth_clone_value` has a map branch using `__moth_map_is_valid`. [map] [clone]
 #[test]
 fn clone_value_has_map_branch() {
     let source = lower_minimal_map_module("main");
-    let clone = helper_source(&source, "__bs_clone_value");
+    let clone = helper_source(&source, "__moth_clone_value");
 
     assert!(
-        clone.contains("__bs_map_is_valid(value)"),
-        "__bs_clone_value must check for map validity"
+        clone.contains("__moth_map_is_valid(value)"),
+        "__moth_clone_value must check for map validity"
     );
 }
 
-/// Verifies that `__bs_clone_value` deep-copies map entries with recursive clone. [map] [clone]
+/// Verifies that `__moth_clone_value` deep-copies map entries with recursive clone. [map] [clone]
 #[test]
 fn clone_value_deep_copies_map_entries() {
     let source = lower_minimal_map_module("main");
-    let clone = helper_source(&source, "__bs_clone_value");
+    let clone = helper_source(&source, "__moth_clone_value");
 
     assert!(
         clone.contains("Array.from(value.map.entries())")
-            && clone.contains("__bs_clone_value(key)")
-            && clone.contains("__bs_clone_value(item)"),
-        "__bs_clone_value must deep-copy map entries with recursive clone for keys and values"
+            && clone.contains("__moth_clone_value(key)")
+            && clone.contains("__moth_clone_value(item)"),
+        "__moth_clone_value must deep-copy map entries with recursive clone for keys and values"
     );
 }
 
@@ -1161,81 +1161,81 @@ fn lower_minimal_module_with_validate_float(function_name: &str) -> String {
     lower_minimal_module_with_float_helper(function_name, FloatHelperEmission::Validate)
 }
 
-/// Verifies that `__bs_float_validate` returns ok for finite values and rejects non-finite values.
+/// Verifies that `__moth_float_validate` returns ok for finite values and rejects non-finite values.
 #[test]
 fn float_validate_helper_checks_finite() {
     let source = lower_minimal_module_with_validate_float("main");
-    let validate = helper_source(&source, "__bs_float_validate");
+    let validate = helper_source(&source, "__moth_float_validate");
 
     assert!(
         validate.contains("Number.isFinite(value)") && validate.contains("{ tag: \"ok\", value }"),
-        "__bs_float_validate must return an ok carrier for finite values"
+        "__moth_float_validate must return an ok carrier for finite values"
     );
 
     let non_finite = BuiltinErrorCode::FloatBoundaryNonFinite;
     let expected = format!(
-        r#"__bs_error_result("{}", {})"#,
+        r#"__moth_error_result("{}", {})"#,
         non_finite.default_message(),
         non_finite.as_i32()
     );
     assert!(
         validate.contains(&expected),
-        "__bs_float_validate must use FloatBoundaryNonFinite for non-finite values"
+        "__moth_float_validate must use FloatBoundaryNonFinite for non-finite values"
     );
 }
 
-/// Verifies that `__bs_format_float` rejects non-finite inputs defensively.
+/// Verifies that `__moth_format_float` rejects non-finite inputs defensively.
 #[test]
 fn format_float_helper_rejects_non_finite() {
     let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__bs_format_float");
+    let format = helper_source(&source, "__moth_format_float");
 
     let non_finite = BuiltinErrorCode::FloatFormatInvariant;
     let expected = format!(
-        r#"__bs_error_result("{}", {})"#,
+        r#"__moth_error_result("{}", {})"#,
         non_finite.default_message(),
         non_finite.as_i32()
     );
     assert!(
         format.contains(&expected),
-        "__bs_format_float must use FloatFormatInvariant for unexpected non-finite values"
+        "__moth_format_float must use FloatFormatInvariant for unexpected non-finite values"
     );
 }
 
-/// Verifies that `__bs_format_float` normalizes `-0.0` to the string "0".
+/// Verifies that `__moth_format_float` normalizes `-0.0` to the string "0".
 #[test]
 fn format_float_helper_normalizes_negative_zero() {
     let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__bs_format_float");
+    let format = helper_source(&source, "__moth_format_float");
 
     assert!(
         format.contains("Object.is(value, -0)")
             && format.contains(r#"return { tag: "ok", value: "0" };"#),
-        "__bs_format_float must format -0.0 as the string 0"
+        "__moth_format_float must format -0.0 as the string 0"
     );
 }
 
-/// Verifies that `__bs_format_float` uses explicit JS number formatting and normalizes exponent signs.
+/// Verifies that `__moth_format_float` uses explicit JS number formatting and normalizes exponent signs.
 #[test]
 fn format_float_helper_uses_to_string_and_normalizes_exponent() {
     let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__bs_format_float");
+    let format = helper_source(&source, "__moth_format_float");
 
     assert!(
         format.contains("value.toString()"),
-        "__bs_format_float must format via Number.prototype.toString"
+        "__moth_format_float must format via Number.prototype.toString"
     );
     assert!(
         format.contains(r#"replace(/e([+-]?)(\d+)/i"#),
-        "__bs_format_float must normalize exponent case and sign placeholders"
+        "__moth_format_float must normalize exponent case and sign placeholders"
     );
     assert!(
         format.contains(r#"const explicitSign = sign === "-" ? "-" : "+";"#),
-        "__bs_format_float must compute an explicit exponent sign"
+        "__moth_format_float must compute an explicit exponent sign"
     );
     assert!(
         format.contains(r#"return "e" + explicitSign + digits;"#),
-        "__bs_format_float must emit lowercase e with explicit exponent sign"
+        "__moth_format_float must emit lowercase e with explicit exponent sign"
     );
 }
 
@@ -1243,10 +1243,10 @@ fn format_float_helper_uses_to_string_and_normalizes_exponent() {
 #[test]
 fn cast_float_to_string_helper_uses_shared_float_formatter() {
     let source = lower_minimal_module_with_float_string_cast("main");
-    let cast = helper_source(&source, "__bs_cast_float_to_string");
+    let cast = helper_source(&source, "__moth_cast_float_to_string");
 
     assert!(
-        cast.contains("__bs_numeric_trap(__bs_format_float(value))"),
-        "__bs_cast_float_to_string must use the Beanstalk Float formatter contract"
+        cast.contains("__moth_numeric_trap(__moth_format_float(value))"),
+        "__moth_cast_float_to_string must use the Moth Float formatter contract"
     );
 }

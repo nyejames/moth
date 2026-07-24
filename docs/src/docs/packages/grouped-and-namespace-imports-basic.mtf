@@ -1,0 +1,26 @@
+Grouped imports bring multiple symbols. Namespace imports bring a whole surface.
+
+### Two colliding render symbols
+
+[codeblock, $code("moth"):
+    import @blog { render as render_blog }
+    import @docs { render as render_docs }
+]
+
+Two modules both export `render`. Aliases keep them apart.
+
+### A namespace alias
+
+[codeblock, $code("moth"):
+    import @core/math as math
+
+    result = math.sin(1.0)
+]
+
+`math` gives you field access to the whole math package.
+
+### Remember
+
+- Use `as` to rename individual symbols.
+- Namespace imports are field-access-only, not first-class values.
+- An import alias must not hide an existing name.

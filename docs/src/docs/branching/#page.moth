@@ -1,0 +1,104 @@
+import @./statement-if {
+    content as statement_if,
+}
+
+import @./statement-if-basic {
+    content as statement_if_basic,
+}
+
+import @./value-producing-if {
+    content as value_producing_if,
+}
+
+import @./value-producing-if-basic {
+    content as value_producing_if_basic,
+}
+
+import @./pattern-matching {
+    content as pattern_matching,
+}
+
+import @./pattern-matching-basic {
+    content as pattern_matching_basic,
+}
+
+import @./patterns-and-exhaustiveness {
+    content as patterns_and_exhaustiveness,
+}
+
+import @./patterns-and-exhaustiveness-basic {
+    content as patterns_and_exhaustiveness_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Branching"
+page_description #= "If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Branching
+
+    # Branching
+
+    Use a normal `if` for one decision. Use a full match when one value has several meaningful cases. Both forms stay explicit about scope, fallback behaviour and the values they produce.
+
+    No mystery fallthrough. No wildcard punctuation pretending to mean three different things.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):statement-if]
+        [$insert("title"):Statement if]
+        [$insert("advanced"):[statement_if]]
+
+        [statement_if_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):value-producing-if]
+        [$insert("title"):Value-producing if]
+        [$insert("advanced"):[value_producing_if]]
+
+        [value_producing_if_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):pattern-matching]
+        [$insert("title"):Pattern matching]
+        [$insert("advanced"):[pattern_matching]]
+
+        [pattern_matching_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):patterns-and-exhaustiveness]
+        [$insert("title"):Patterns and exhaustiveness]
+        [$insert("advanced"):[patterns_and_exhaustiveness]]
+
+        [patterns_and_exhaustiveness_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../functions/]
+        [$insert("previous_title"):Functions]
+        [$insert("next_path"):../loops/]
+        [$insert("next_title"):Loops]
+    ]
+]

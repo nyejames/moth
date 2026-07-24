@@ -1,6 +1,6 @@
-//! Stage 0 config loading, parsing, and validation for Beanstalk projects.
+//! Stage 0 config loading, parsing, and validation for Moth projects.
 //!
-//! WHAT: owns the public entry points for loading `config.bst` before compilation starts.
+//! WHAT: owns the public entry points for loading `config.moth` before compilation starts.
 //! WHY: callers only need one stable surface while parsing and validation details stay split by
 //! concern in dedicated helpers.
 
@@ -19,7 +19,7 @@ use std::path::Path;
 //  Config Parse Services
 // -------------------------
 
-/// Focused frontend services passed into config parsing so `config.bst` can import from core and
+/// Focused frontend services passed into config parsing so `config.moth` can import from core and
 /// Core or Builder packages.
 ///
 /// WHAT: bundles the style directives and the complete builder surface (external packages,
@@ -36,7 +36,7 @@ pub(crate) struct ProjectConfigParseServices<'a> {
 //  Public API
 // -------------------------
 
-/// Load and validate the project config from `config.bst` before compilation begins (Stage 0).
+/// Load and validate the project config from `config.moth` before compilation begins (Stage 0).
 ///
 /// Config files are optional. When present this delegates to the parser/validator pipeline and
 /// applies all accepted settings directly to `config`.
@@ -70,7 +70,7 @@ pub fn load_project_config(
 ///
 /// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
 ///      observation in the active collection scope and emits the stable
-///      `BST_BENCH timing` line when the output mode permits.
+///      `MOTH_BENCH timing` line when the output mode permits.
 /// WHY:  config loading and parsing use dotted `config.*` metric names through the
 ///      concise `timers` substrate. The start token is zero-sized when `timers`
 ///      is off, so regular builds do not read clocks for instrumentation-only
@@ -83,9 +83,9 @@ fn log_stage_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
 //  Internal Orchestration
 // -------------------------
 
-/// Parse `config.bst` and extract top-level constant declarations into the `Config` struct.
+/// Parse `config.moth` and extract top-level constant declarations into the `Config` struct.
 ///
-/// WHY: config uses normal Beanstalk syntax, so Stage 0 keeps the tokenizer/header parser in the
+/// WHY: config uses normal Moth syntax, so Stage 0 keeps the tokenizer/header parser in the
 /// loop and then applies a dedicated config-only validation pass.
 pub(crate) fn parse_project_config_file(
     config: &mut Config,

@@ -193,7 +193,7 @@ fn resolve_active_module_origin(
             continue;
         }
 
-        // Preparation sets `file_id` on every prepared Beanstalk file's tokens, so a
+        // Preparation sets `file_id` on every prepared Moth file's tokens, so a
         // directly-defined public header without one is an internal invariant violation, not a
         // path-resolution fallback case.
         let file_id = header.tokens.file_id.ok_or_else(|| {

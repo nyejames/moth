@@ -1,4 +1,4 @@
-//! Beanstalk compiler package root.
+//! Moth compiler package root.
 //!
 //! Targeted `#[allow(...)]` attributes are used where needed, each with a justification
 //! comment. Avoid blanket crate-level allowances.

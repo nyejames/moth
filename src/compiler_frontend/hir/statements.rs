@@ -135,12 +135,12 @@ pub enum HirStatementKind {
     // -------------------------
     //  Float Formatting & Validation
     // -------------------------
-    /// Format a finite `Float` into a `String` using Beanstalk's formatting contract.
+    /// Format a finite `Float` into a `String` using Moth's formatting contract.
     ///
-    /// WHAT: evaluates `source` (which must be a valid Beanstalk `Float`) and stores the formatted
+    /// WHAT: evaluates `source` (which must be a valid Moth `Float`) and stores the formatted
     ///      string in `result`.
     /// WHY: `Float -> String` casts and runtime Float template interpolation must share one
-    ///      Beanstalk-owned formatter instead of relying on target-native stringification.
+    ///      Moth-owned formatter instead of relying on target-native stringification.
     ///
     /// Result-local contract:
     /// - In `NumericFailureMode::Trap` the result local receives the scalar `String` success value.
@@ -158,11 +158,11 @@ pub enum HirStatementKind {
         result: LocalId,
     },
 
-    /// Validate that a `Float` value is finite before exposing it as an ordinary Beanstalk `Float`.
+    /// Validate that a `Float` value is finite before exposing it as an ordinary Moth `Float`.
     ///
     /// WHAT: evaluates `source` (a `Float` value coming from an external/backend boundary) and
     ///      stores the validated finite `Float` in `result`.
-    /// WHY: Beanstalk `Float` is finite `f64`; values entering from external functions or backend
+    /// WHY: Moth `Float` is finite `f64`; values entering from external functions or backend
     ///      boundaries must be checked explicitly rather than trusted implicitly.
     ///
     /// Result-local contract:

@@ -1,0 +1,22 @@
+A Moth project has one config file, one source root, and generated output folders.
+
+### Where things live
+
+- `config.moth` at the project root controls build settings.
+- `src/` (or whatever `entry_root` says) holds your source files.
+- `lib/` holds project-local source-backed packages by default. Each direct child becomes a package prefix.
+- `dev/` and `release/` are generated output. Do not edit them.
+
+### One root file per module directory
+
+Each source directory can have one `#*.moth` file that marks it as a module. The `#` filename is just a convention. `#page.moth`, `#api.moth` and `#mod.moth` all mean the same thing to the compiler.
+
+### Outputs are generated
+
+The build command creates output folders. They are not source. The builder cleans up stale artifacts automatically.
+
+### Remember
+
+- `config.moth` is the only config file.
+- `#*.moth` files are module roots.
+- `dev/` and `release/` are generated.

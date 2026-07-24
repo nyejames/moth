@@ -12,7 +12,7 @@
 //! - `extract_hotspots()` entry point
 //! - `ProfileHotFunction` output type with percentages and estimates
 //! - Filter-mode threshold application
-//! - Beanstalk-owned vs non-Beanstalk function prioritization
+//! - Moth-owned vs non-Moth function prioritization
 //!
 //! # What this module does NOT own
 //! - Profile JSON parsing (see `parse.rs`)
@@ -23,13 +23,13 @@ use super::buckets::{ProfileOwnerBucketMatch, match_owner_bucket};
 use super::options::ProfileFilterMode;
 use super::parse::{ParsedProfileSummary, ProfileEdge};
 
-/// Minimum self-sample percent to include a non-Beanstalk function.
+/// Minimum self-sample percent to include a non-Moth function.
 ///
-/// Non-Beanstalk functions (std, alloc, rayon, etc.) must exceed this
+/// Non-Moth functions (std, alloc, rayon, etc.) must exceed this
 /// threshold to appear in hotspot results. This prevents low-level
-/// infrastructure from crowding out actionable Beanstalk-owned functions
+/// infrastructure from crowding out actionable Moth-owned functions
 /// while still surfacing genuinely hot allocation/synchronization paths.
-const NON_BEANSTALK_MIN_SELF_PCT: f64 = 5.0;
+const NON_MOTH_MIN_SELF_PCT: f64 = 5.0;
 
 /// Minimum sample count below which a warning is generated.
 ///
@@ -209,8 +209,8 @@ pub(crate) fn extract_hotspots(
             return true;
         }
 
-        // For Beanstalk-owned functions, also check the normal self threshold.
-        let is_beanstalk = func.bucket.label != "unknown"
+        // For Moth-owned functions, also check the normal self threshold.
+        let is_moth = func.bucket.label != "unknown"
             && func.bucket.label != "other"
             && func.bucket.label != "std"
             && func.bucket.label != "core"
@@ -218,14 +218,14 @@ pub(crate) fn extract_hotspots(
             && func.bucket.label != "rayon"
             && func.bucket.label != "samply/profiler";
 
-        if is_beanstalk && func.self_pct >= min_self {
+        if is_moth && func.self_pct >= min_self {
             return true;
         }
 
-        // For non-Beanstalk functions, require a higher self-time threshold
+        // For non-Moth functions, require a higher self-time threshold
         // so allocation/std/rayon hotspots are not hidden unless they are
         // genuinely significant.
-        if !is_beanstalk && func.self_pct >= NON_BEANSTALK_MIN_SELF_PCT {
+        if !is_moth && func.self_pct >= NON_MOTH_MIN_SELF_PCT {
             return true;
         }
 

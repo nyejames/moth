@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-TYPE-0003"]
-message_contains = ["Operator `+` is not available for generic parameter `U`. Beanstalk operators are compiler-owned"]
+diagnostic_codes = ["MOTH-TYPE-0003"]
+message_contains = ["Operator `+` is not available for generic parameter `U`. Moth operators are compiler-owned"]

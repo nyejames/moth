@@ -1,6 +1,6 @@
-# Beanstalk Language Overview
+# Moth Language Overview
 
-Beanstalk is a programming language and build system for modern UI-driven apps and webpages.
+Moth is a programming language and build system for modern UI-driven apps and webpages.
 
 Keep this file focused on compiler-facing language facts: syntax shape, semantic invariants, edge cases, and deferred surface. Put expanded examples, tutorials, and user-facing explanations in docs-site source files under `docs/src/docs/**`.
 
@@ -13,12 +13,12 @@ Design principles:
 
 ## Language Design Scope
 
-Beanstalk keeps the source language deliberately small. Compiler complexity is allowed when it
+Moth keeps the source language deliberately small. Compiler complexity is allowed when it
 makes the programmer-facing model simpler, safer, and more predictable.
 
 This document separates future work into two categories:
 
-- **Deferred**: fits Beanstalk's language design but is not implemented yet or is not part of the
+- **Deferred**: fits Moth's language design but is not implemented yet or is not part of the
   current source surface.
 - **Outside language design scope**: intentionally not planned because it would make the language
   broader, more implicit, more solver-heavy, or harder to reason about.
@@ -27,12 +27,12 @@ A feature listed outside design scope should not be implemented unless the langu
 explicitly changed first.
 
 A concise maintainer-facing summary is published at
-`docs/src/docs/codebase/design-scope/overview.bd`. This document remains the
+`docs/src/docs/codebase/design-scope/overview.mtf`. This document remains the
 complete compiler-facing authority for the exact language-scope list.
 
 ## Outside the Language Design Scope
 
-The following surfaces are intentionally outside Beanstalk's language design scope.
+The following surfaces are intentionally outside Moth's language design scope.
 
 | Surface | Reason |
 |---|---|
@@ -41,7 +41,7 @@ The following surfaces are intentionally outside Beanstalk's language design sco
 | Dynamic trait values / trait objects | They require erased wrappers, runtime dispatch, dynamic-safety rules, backend-specific runtime support, and a second meaning for trait names. Use choices for runtime heterogeneity and generic trait bounds for static reuse. |
 | Trait inheritance, trait aliases, trait composition, default methods, associated types, and associated constants | These turn traits into a type-level programming system rather than simple method contracts. |
 | Generic traits and generic trait methods | These make trait solving significantly more complex and create Rust-like abstraction patterns. |
-| Blanket, conditional, negative, or specialized conformance | These require coherence and specialization rules outside Beanstalk's simplicity target. |
+| Blanket, conditional, negative, or specialized conformance | These require coherence and specialization rules outside Moth's simplicity target. |
 | Structural conformance | Matching method shapes must not silently imply conformance. `Type must TRAIT` stays explicit. |
 | Type-set constraints, union constraints, underlying-type constraints, and user-defined numeric/operator constraints | Generic bounds name traits only. They are not a constraint sublanguage. |
 | Operator overloading | Operators remain compiler-owned and predictable. |
@@ -55,11 +55,11 @@ The following surfaces are intentionally outside Beanstalk's language design sco
 
 ## Related references
 
-- `docs/src/docs/**` — user-facing docs-site pages and real `.bst` examples
+- `docs/src/docs/**` — user-facing docs-site pages and real `.moth` examples
 - `docs/compiler-design-overview.md`: compiler stage ownership and cross-stage architecture
-- `docs/src/docs/codebase/memory-management/overview.bd` — reference semantics, borrow validation, lifetime regions, ownership and backend lowering
-- `docs/src/docs/codebase/design-scope/overview.bd` — accepted mechanisms, constraints and outside-scope families
-- `docs/src/docs/progress/#page.bst` — current implementation status
+- `docs/src/docs/codebase/memory-management/overview.mtf` — reference semantics, borrow validation, lifetime regions, ownership and backend lowering
+- `docs/src/docs/codebase/design-scope/overview.mtf` — accepted mechanisms, constraints and outside-scope families
+- `docs/src/docs/progress/#page.moth` — current implementation status
 - `docs/roadmap/roadmap.md` — planned work
 
 ## Syntax Summary
@@ -68,10 +68,10 @@ The following surfaces are intentionally outside Beanstalk's language design sco
 |---|---|
 | Blocks | `:` opens a scope; `;` closes it. Semicolons do not terminate statements. |
 | Braced literals/templates | `{}` are collections or hashmaps depending on the type/literal shape. `[]` are string templates only. |
-| Comments | In ordinary code, `--` starts a single-line comment. Template and Beandown bodies treat it as content. |
+| Comments | In ordinary code, `--` starts a single-line comment. Template and Moth template bodies treat it as content. |
 | Operators | Logical/equality forms use words such as `is` and `not`; symbolic equality and logical-not forms are not operators. |
 | Mutability | `~` marks mutable bindings/access. In declarations it appears before the type: `name ~Type = value`. |
-| References | Shared immutable reference semantics are the default. Beanstalk omits explicit reference types and lifetime syntax, not references themselves. |
+| References | Shared immutable reference semantics are the default. Moth omits explicit reference types and lifetime syntax, not references themselves. |
 | Constants | `#` marks compile-time constants: `name #= value`. |
 | Module exports | `export:` is a strict block valid only in a module root file. It contains public declarations and grouped re-exports. |
 | Copies | Copies must be explicit. Constructing a fresh value from shared inputs does not implicitly copy those inputs. |
@@ -91,18 +91,18 @@ The following surfaces are intentionally outside Beanstalk's language design sco
 
 Mutable bindings are reassigned with `=`:
 
-```beanstalk
+```moth
 value ~= 1
 value = 2 -- reassigns the existing mutable binding
 ```
 
 ## Core Syntax Patterns
 
-```beanstalk
+```moth
 count ~= 0
 ratio Float = 1.5
 text_slice = "text"
-letter = '🌱'
+letter = 'ʚĭɞ'
 
 message = [:
     Templates create owned strings.
@@ -154,7 +154,7 @@ newlines, but that tokenizer behaviour does not make raw backticks valid source 
 
 ## Memory semantics
 
-**Beanstalk is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
+**Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
 Canonical detail lives under `docs/src/docs/codebase/memory-management/`. This section records the compiler-facing source rules.
 
@@ -181,7 +181,7 @@ Maps own their entry structure while keys and values follow the same shared/copy
 
 ### Explicit `copy`
 
-`copy place` performs a semantic deep copy of the complete copyable runtime value graph reachable from the place. Internal alias topology is preserved, same-region cycles are preserved, the copied graph shares no mutable allocation with the source, reactive sources are copied as current values, and non-copyable external resources produce diagnostics. Full contract: `docs/src/docs/codebase/memory-management/access-and-aliasing/access-and-aliasing.bd`.
+`copy place` performs a semantic deep copy of the complete copyable runtime value graph reachable from the place. Internal alias topology is preserved, same-region cycles are preserved, the copied graph shares no mutable allocation with the source, reactive sources are copied as current values, and non-copyable external resources produce diagnostics. Full contract: `docs/src/docs/codebase/memory-management/access-and-aliasing/access-and-aliasing.mtf`.
 
 ### Optional inferred transfer
 
@@ -191,9 +191,9 @@ There is no move syntax and no ordinary mandatory-consuming value operation. Inf
 
 - A fresh result root has a new root allocation but may retain legal references.
 - An alias result reuses an existing root or projection.
-- An independent result graph has no retained Beanstalk reference to pre-existing storage.
+- An independent result graph has no retained Moth reference to pre-existing storage.
 
-Canonical detail: `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.bd`.
+Canonical detail: `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`.
 
 ### Accepted but deferred: declared memory groups
 
@@ -210,7 +210,7 @@ Design authority: `docs/src/docs/codebase/memory-management/declared-memory-grou
 
 ### External platform imports
 
-Ordinary values in restricted host bindings cross by value and cannot be retained as references into Beanstalk storage. Mutable host access applies only to opaque foreign handles. General Wasm Components use the separate WIT value-only profile described by the memory authority.
+Ordinary values in restricted host bindings cross by value and cannot be retained as references into Moth storage. Mutable host access applies only to opaque foreign handles. General Wasm Components use the separate WIT value-only profile described by the memory authority.
 
 ### Outside memory-surface scope
 
@@ -220,7 +220,7 @@ Source-visible RC, retain/release, weak ownership, finalizers and unrestricted d
 
 Named arguments use `parameter = value`. Access mode is chosen at the call site.
 
-```beanstalk
+```moth
 sum(values)          -- positional shared
 sum(~values)         -- positional mutable/exclusive
 sum(items = values)  -- named shared
@@ -241,7 +241,7 @@ Rules:
 
 Function parameters and struct fields share default-value syntax:
 
-```beanstalk
+```moth
 describe |prefix String = "item", subject String| -> String:
     return [prefix, ":", subject]
 ;
@@ -312,7 +312,7 @@ Error
 
 Forms:
 
-```beanstalk
+```moth
 value Target = cast expression
 value Target = cast! expression
 value Target = cast expression catch:
@@ -330,9 +330,9 @@ Rules:
 - `T?` receiving contexts cast to the inner builtin `T`, then use ordinary contextual `T -> T?` wrapping. Optional source values are not auto-unwrapped.
 - In `target T? = cast source catch:`, recovery handlers also produce the inner `T`; the compiler wraps the successful or recovered `T` into `T?` after the cast. `then none` is invalid in that handler because `none` is not an inner builtin cast result.
 - `String -> Int` and `Float -> Int` casts materialize signed 32-bit integer values from `-2147483648` through `2147483647`. Values outside that range fail the cast so compile-time folding and runtime lowering agree.
-- `String -> Int` and `String -> Float` casts use Beanstalk numeric text grammar over the whole string. Surrounding whitespace, uppercase exponent markers, unary plus, malformed separators/exponents, `NaN`, and infinity spellings are rejected.
+- `String -> Int` and `String -> Float` casts use Moth numeric text grammar over the whole string. Surrounding whitespace, uppercase exponent markers, unary plus, malformed separators/exponents, `NaN`, and infinity spellings are rejected.
 - `String -> Float` additionally rejects grammar-valid text that materializes to a non-finite `Float`.
-- `Float -> String` uses Beanstalk's formatter, not backend-native display. It normalizes `-0.0` to `0` and uses stable lowercase exponent formatting where exponential notation is required.
+- `Float -> String` uses Moth's formatter, not backend-native display. It normalizes `-0.0` to `0` and uses stable lowercase exponent formatting where exponential notation is required.
 - Same-type casts are invalid. `Int -> Float` contextual promotion remains separate from explicit casts, but `cast` is allowed when the source is naturally `Int` and the target is `Float`.
 - `cast expression` requires infallible evidence. `cast! expression` requires fallible evidence and propagates through the current function's `Error!` return slot. `cast expression catch:` requires fallible evidence and recovers locally.
 - `cast! expression catch:` is invalid. Propagation and local recovery are mutually exclusive.
@@ -340,7 +340,7 @@ Rules:
 
 Scalar constructor-style conversions are removed:
 
-```beanstalk
+```moth
 Int(value)
 Float(value)
 Bool(value)
@@ -350,13 +350,13 @@ Char(value)
 
 `Error(...)` remains a real builtin constructor:
 
-```beanstalk
+```moth
 err = Error("Missing number", 200)
 ```
 
 Use `cast` for conversion to `Error`:
 
-```beanstalk
+```moth
 err Error = cast "Missing number"
 ```
 
@@ -368,7 +368,7 @@ required receiver method, for example `to_string |This| -> String` or
 
 These traits prove source evidence only. User-defined cast targets, generic cast targets, external
 opaque cast targets, generic cast traits, and broad return-type-directed conversion are outside
-Beanstalk's cast design scope.
+Moth's cast design scope.
 
 ### Options, Results, `then`, and Assertions
 
@@ -376,7 +376,7 @@ Beanstalk's cast design scope.
 
 Optional types use `T?`. `none` requires an optional type context.
 
-```beanstalk
+```moth
 name String? = none
 
 find_name |id String| -> String?:
@@ -399,7 +399,7 @@ Rules:
 - Direct fallback syntax such as `maybe else then fallback` is rejected.
 - Postfix `?` unwraps a present value or returns `none` from the current function.
 
-```beanstalk
+```moth
 display_name = if maybe_name is |name| then name else "guest"
 
 get_display_name |id String| -> String?:
@@ -430,7 +430,7 @@ Error-returning functions mark one return slot with `!`. `Error` is builtin and 
 
 Use `return!` to produce the error path, postfix `!` to bubble it, and `catch:` / `catch |err|:` to recover.
 
-```beanstalk
+```moth
 parse_number |text String| -> Int, Error!:
     if text.is_empty():
         return! Error("Missing number", 200)
@@ -473,7 +473,7 @@ Valid receiving sites:
 
 Value-producing blocks are not general expressions and are rejected in function arguments, operator operands, constructor arguments, collection literals, template interpolation, and expression statements.
 
-```beanstalk
+```moth
 value = if condition then 1 else 0
 state = if status is Ready then "ready" else "waiting"
 name = if maybe_name is |name| then name else "guest"
@@ -489,7 +489,7 @@ Multi-value blocks must produce the receiver arity on every producing path. Mult
 
 Inline `if` supports Bool conditions and choice predicates. The block `if ...: then ...` form has a known implementation gap and should not be treated as current-valid syntax.
 
-```beanstalk
+```moth
 pair || -> String, Int:
     return "Ana", 2
 ;
@@ -501,7 +501,7 @@ name, count = pair()
 
 `assert` is a statement-only language intrinsic for invariants.
 
-```beanstalk
+```moth
 assert(index < items.length())
 assert(index < items.length(), "index must be in bounds")
 assert(false, "unimplemented backend path")
@@ -520,7 +520,7 @@ Rules:
 
 Collections are ordered, zero-indexed, homogeneous groups.
 
-```beanstalk
+```moth
 values ~= {'a', 'b', 'c'}  -- {Char}
 empty_values ~{Int} = {}   -- explicit type required
 fixed_values {3 Int} = {10, 20}
@@ -573,7 +573,7 @@ Rules:
 
 Hash maps are insertion-ordered key/value groups. The current source surface targets the HTML JavaScript backend; HTML-Wasm rejects reachable map use before backend lowering.
 
-```beanstalk
+```moth
 scores ~= {"Priya" = 10, "Grace" = 12} -- {String = Int}
 empty_scores ~{String = Int} = {}
 
@@ -633,7 +633,7 @@ Console output functions accept string-compatible content only: escaped string s
 strings, and templates. They reject non-string values directly; wrap values in a template when you
 want debug-style interpolation.
 
-```beanstalk
+```moth
 io.line("Hello, World!")
 io.print("loading...")
 io.debug("checking state")
@@ -648,10 +648,10 @@ io.line([: Hello, [name]])
 file-local namespace alias such as `output.line("Hello")`.
 
 Input polling is available under `io.input.*` on HTML-JS. The handle type
-`io.input.Input` is an opaque external type: Beanstalk code can pass it to the core IO functions
+`io.input.Input` is an opaque external type: Moth code can pass it to the core IO functions
 but cannot construct it with struct syntax or inspect fields.
 
-```beanstalk
+```moth
 input ~= io.input.new()!
 
 io.input.update(~input)
@@ -692,7 +692,7 @@ missing `last_*` values return `none`; closed handles return neutral values.
 HTML-JS maps console helpers to the browser console and input helpers to window/document-level
 keyboard and pointer polling. HTML-Wasm and other targets reject reachable Core IO calls before
 backend lowering until they implement equivalent lowerings. Browser event delivery still depends
-on returning to the host event loop, so a synchronous infinite Beanstalk loop can prevent new
+on returning to the host event loop, so a synchronous infinite Moth loop can prevent new
 input events from being observed. The current source surface does not add callbacks, promises, async tasks, frame/tick
 APIs, targeted DOM/canvas input sources, event queues, filesystem/path IO, fetch/network IO,
 timers, text entry/IME, touch gestures, gamepads, drag/drop, clipboard, wheel scrolling, or file
@@ -704,7 +704,7 @@ Templates use `[]`; collections use `{}`. `""` creates escaped string slices. Ex
 
 Template head/body shape:
 
-```beanstalk
+```moth
 [$md, $children([:<li>[$slot]</li>]):
     # Title
     [: child]
@@ -713,7 +713,7 @@ Template head/body shape:
 
 Core rules:
 - The head and body are separated by `:`.
-- Authored `.bst` templates must close with `]`; truncated heads, bodies, nested child templates, and directive-argument templates produce syntax diagnostics.
+- Authored `.moth` templates must close with `]`; truncated heads, bodies, nested child templates, and directive-argument templates produce syntax diagnostics.
 - Template bodies capture variables from the surrounding scope.
 - Backticks and backslashes inside template bodies are ordinary body text and are preserved for formatters such as `$md`. Regular quoted string literals decode only `\\`, `\"`, `\n`, `\r` and `\t`.
 - Literal template delimiters in output use ordinary string insertion, such as `[: ["[literal]"]]`.
@@ -721,7 +721,7 @@ Core rules:
 - Top-level runtime templates run in active-root `start()` order.
 - Top-level const templates fold at compile time and are merged separately.
 - Templates assigned to variables or returned from functions do not contribute page fragments by themselves.
-- Runtime Float interpolation and `Float -> String` casts use the same Beanstalk formatter as
+- Runtime Float interpolation and `Float -> String` casts use the same Moth formatter as
   compile-time folding, so template output does not depend on host-native Float stringification.
 
 ### Template Directives
@@ -735,7 +735,7 @@ Core rules:
 |---|---|
 | `$slot` / `$insert(...)` | Slot declaration/contribution |
 | `$fresh` | Opt out of the immediate parent’s `$children(...)` wrapper |
-| `$md` | Parse body as Beanstalk Markdown |
+| `$md` | Parse body as Moth Markdown |
 | `$raw` | Preserve authored body whitespace |
 | `$note` / `$todo` | Ignored comments |
 | `$doc` | Documentation comment template |
@@ -747,7 +747,7 @@ Core rules:
 
 `$children(...)` applies only to direct children. `$fresh` is per-child and only affects wrapper application from the immediate parent. Formatting directives do not flow into nested child templates; redeclare them where needed. For `$children(...)` template arguments, the child template must close with `]` before the directive closes with `)`.
 
-```beanstalk
+```moth
 list #= [$children([:<li>[$slot]</li>]):
     <ul>
         [$slot]
@@ -780,7 +780,7 @@ Routing rules:
 - Runtime-capable templates support default, named, positional, and loose contributions from template `if` and `loop` bodies.
 - Runtime slot applications are routed during AST preparation and lower through ordinary runtime string accumulators.
 
-```beanstalk
+```moth
 card = [:
     <h1>[$slot("title")]</h1>
     <section>[$slot]</section>
@@ -842,7 +842,7 @@ Rules:
 
 Templates support `if` and `loop` as final head suffixes before the body colon. If the head already has a value, helper, or directive, put a comma before the suffix.
 
-```beanstalk
+```moth
 [if show:
     Visible
 ]
@@ -900,28 +900,28 @@ Runtime slot applications are valid inside template control flow after normal sl
 
 ### Markdown Formatting
 
-`$md` is Beanstalk's small markdown flavour, not a full CommonMark implementation.
+`$md` is Moth's small markdown flavour, not a full CommonMark implementation.
 
 Inline code uses paired isolated single backticks on the same markdown line and renders as `<code>...</code>`.
-Markdown emphasis and link parsing do not run inside inline code. Empty spans, repeated backtick runs, unmatched backticks, multiline spans, variable-length delimiters, fenced code blocks, and markdown-level backtick escaping are not part of Beanstalk's markdown flavour.
+Markdown emphasis and link parsing do not run inside inline code. Empty spans, repeated backtick runs, unmatched backticks, multiline spans, variable-length delimiters, fenced code blocks, and markdown-level backtick escaping are not part of Moth's markdown flavour.
 
 Dynamic expression anchors may appear inside a parent-authored code span, but `$md` does not inspect their rendered output. Child templates are opaque barriers to the parent formatter and cannot be inside a parent-authored code span or pair delimiters across that child boundary.
 
-### Beandown `.bd` Content Files
+### Moth Template `.mtf` Content Files
 
-Beandown files are HTML-builder content helpers. A `.bd` file is authored as the body of an implicit compile-time markdown template:
+Moth template files are HTML-builder content helpers. A `.mtf` file is authored as the body of an implicit compile-time markdown template:
 
-```beanstalk
+```moth
 content #String = [$md:
-    ...entire .bd file body...
+    ...entire .mtf file body...
 ]
 ```
 
 The compiler builds that structure directly; it does not prepend wrapper source text.
 
-Import `.bd` files with normal extensionless source import syntax:
+Import `.mtf` files with normal extensionless source import syntax:
 
-```beanstalk
+```moth
 import @docs/intro
 import @docs/intro {
     content as intro_content,
@@ -931,25 +931,25 @@ import @docs/intro {
 ```
 
 Rules:
-- A `.bd` file exposes exactly one generated constant, `content #String`.
-- Direct extension imports such as `import @docs/intro.bd` are invalid; use `import @docs/intro`.
-- `.bd` files are never page entries, module roots, config files, or standalone project types.
-- `.bd` files have no imports, declarations, frontmatter, metadata, or raw-source preservation.
-- A `.bd` body must fully fold at compile time. Runtime functions, runtime bindings, and types are not visible.
-- The implicit markdown template means `--` is body text, not a Beanstalk comment.
-- `.bd` bodies follow normal template-body and `$md` semantics. Literal template delimiters use string insertion, such as `["[literal]"]`; nested authored templates still use normal `[...]` syntax and must close explicitly.
-- Nested `.bd` templates with no explicit directive also default to `$md`. Any explicit directive on that nested template, such as `$raw`, `$fresh`, `$html`, `$code`, `$css`, or `$escape_html`, overrides the Beandown Markdown default for that template.
+- A `.mtf` file exposes exactly one generated constant, `content #String`.
+- Direct extension imports such as `import @docs/intro.mtf` are invalid; use `import @docs/intro`.
+- `.mtf` files are never page entries, module roots, config files, or standalone project types.
+- `.mtf` files have no imports, declarations, frontmatter, metadata, or raw-source preservation.
+- A `.mtf` body must fully fold at compile time. Runtime functions, runtime bindings, and types are not visible.
+- The implicit markdown template means `--` is body text, not a Moth comment.
+- `.mtf` bodies follow normal template-body and `$md` semantics. Literal template delimiters use string insertion, such as `["[literal]"]`; nested authored templates still use normal `[...]` syntax and must close explicitly.
+- Nested `.mtf` templates with no explicit directive also default to `$md`. Any explicit directive on that nested template, such as `$raw`, `$fresh`, `$html`, `$code`, `$css`, or `$escape_html`, overrides the Moth template Markdown default for that template.
 
-Inside compiler-integrated HTML project builds, a `.bd` body sees a restricted flat compile-time scope:
+Inside compiler-integrated HTML project builds, a `.mtf` body sees a restricted flat compile-time scope:
 - exported compile-time constants and const records from `@html`, such as `[p: body]`;
 - exported compile-time constants and const records from the same-directory module root, when one exists.
 
-Same-directory module-root constants and `@html` constants don't shadow each other. If both surfaces expose the same visible name, compilation fails with a visible-name collision diagnostic. Authors resolve collisions by renaming the module-root export. Functions, structs, choices, type aliases, traits, methods, external/runtime APIs, and the generated self `content` constant are not visible in the `.bd` body.
+Same-directory module-root constants and `@html` constants don't shadow each other. If both surfaces expose the same visible name, compilation fails with a visible-name collision diagnostic. Authors resolve collisions by renaming the module-root export. Functions, structs, choices, type aliases, traits, methods, external/runtime APIs, and the generated self `content` constant are not visible in the `.mtf` body.
 
-Module roots can re-export Beandown content explicitly:
+Module roots can re-export Moth template content explicitly:
 
-```beanstalk
--- src/#docs.bst
+```moth
+-- src/#docs.moth
 export:
     import @docs/intro {
         content as intro_content,
@@ -957,21 +957,21 @@ export:
 ;
 ```
 
-Use `.bst` files for pages, composition, imports, functions, and richer compile-time setup. Use `.bd` for small markdown-first content fragments consumed by `.bst`.
+Use `.moth` files for pages, composition, imports, functions, and richer compile-time setup. Use `.mtf` for small markdown-first content fragments consumed by `.moth`.
 
 ### Plain Markdown `.md` Content Files
 
 Plain Markdown files are HTML-builder content helpers for raw CommonMark-style Markdown. A `.md`
 file renders to HTML at compile time and exposes exactly one generated constant:
 
-```beanstalk
+```moth
 content #String = "<rendered html>"
 ```
 
-Import `.md` files with the same extensionless source import syntax as Beanstalk and Beandown
+Import `.md` files with the same extensionless source import syntax as Moth and Moth template
 source assets:
 
-```beanstalk
+```moth
 import @docs/intro
 import @docs/intro {
     content as intro_content,
@@ -984,18 +984,18 @@ Rules:
 - A `.md` file exposes exactly one generated constant, `content #String`.
 - Direct extension imports such as `import @docs/intro.md` are invalid; use `import @docs/intro`.
 - `.md` files are never page entries, module roots, config files, or standalone project types.
-- `.md` files have no Beanstalk imports, declarations, interpolation, templates, frontmatter, or metadata.
-- `.md` files do not see same-directory module-root constants or `@html` constants. They have no Beanstalk scope.
+- `.md` files have no Moth imports, declarations, interpolation, templates, frontmatter, or metadata.
+- `.md` files do not see same-directory module-root constants or `@html` constants. They have no Moth scope.
 - Raw HTML is preserved in the current source surface. This feature does not add a sanitizer or raw-HTML policy key.
 - Markdown links and images render literal `href` and `src` values in the current source surface. They are not tracked assets and are not rewritten.
-- `.bd` remains the Beanstalk-aware content format. Use `.bd` when content needs `$md`,
+- `.mtf` remains the Moth-aware content format. Use `.mtf` when content needs `$md`,
   nested templates, or the restricted same-directory module-root constant scope.
 
 ### If Statements and Pattern Matching
 
 Statement `if` is non-exhaustive. It has no statement-level `else if`; use nested `if` or full match.
 
-```beanstalk
+```moth
 if value is true:
     io.line("then")
 else
@@ -1005,7 +1005,7 @@ else
 
 Full pattern matching uses `if <value> is:` and is exhaustive.
 
-```beanstalk
+```moth
 if value is:
     < 0 => io.line("negative")
     0 => io.line("zero")
@@ -1029,7 +1029,7 @@ Rules:
 
 A statement match can use an empty fallback arm to explicitly ignore all remaining cases:
 
-```beanstalk
+```moth
 if value is:
     0 => io.line("zero")
     else =>
@@ -1049,9 +1049,9 @@ Payload capture names must match declared field names unless renamed with `as`. 
 
 ## Loops
 
-Beanstalk has one loop keyword: `loop`.
+Moth has one loop keyword: `loop`.
 
-```beanstalk
+```moth
 loop condition:
     ...
 ;
@@ -1083,7 +1083,7 @@ Range rules:
   folding.
 - Bindings use `|...|` after the loop source and may be omitted when unused.
 
-```beanstalk
+```moth
 loop 0.0 to 1.0 by 0.1 |t|:
     io.line([t])
 ;
@@ -1093,7 +1093,7 @@ loop 0.0 to 1.0 by 0.1 |t|:
 
 Structs are nominal runtime types. Matching field shapes do not make two structs interchangeable. Type aliases to structs are transparent and do not create new struct identity.
 
-```beanstalk
+```moth
 Vector2 = |
     x Float,
     y Float,
@@ -1134,7 +1134,7 @@ Receiver method visibility is tied to receiver type visibility.
 
 Traits are explicit nominal method contracts.
 
-```beanstalk
+```moth
 DISPLAY_TEXT must:
     display |This| -> String
 ;
@@ -1185,7 +1185,7 @@ and fallible cast trait pairs for the same target are incompatible through compi
 
 Use a generic bound for static reuse:
 
-```beanstalk
+```moth
 render type Item is DISPLAY_TEXT |value Item| -> String:
     return value.display()
 ;
@@ -1198,7 +1198,7 @@ show_text type Item is CASTABLE_TO_STRING |item Item| -> String:
 
 Use a choice for runtime heterogeneity:
 
-```beanstalk
+```moth
 Renderable ::
     LabelItem | value Label |,
     ButtonItem | value Button |,
@@ -1220,7 +1220,7 @@ iteration/serialization trait families.
 
 Choices are nominal tagged unions. Variants are either unit variants or record-payload variants.
 
-```beanstalk
+```moth
 Result ::
     Ok,
     Err | message String, code Int |,
@@ -1256,7 +1256,7 @@ Unsupported equality payloads:
 
 Generics are declaration-site type abstractions for top-level structs, choices, and free functions. Generic parameters are introduced with `type` after the declaration name.
 
-```beanstalk
+```moth
 identity type A |value A| -> A:
     return value
 ;
@@ -1280,7 +1280,7 @@ Generic parameter rules:
 
 Generic function calls use normal call syntax only. Type arguments are inferred from immediate call arguments and, at closed receiving sites, the immediate expected result type.
 
-```beanstalk
+```moth
 value = identity(42)
 typed_value Int = identity(42)
 
@@ -1297,7 +1297,7 @@ Unconstrained generic code can pass values through, return them, store them in g
 
 Declaration-site trait bounds use `is`:
 
-```beanstalk
+```moth
 render type Item is DISPLAY_TEXT |item Item| -> String:
     return item.display()
 ;
@@ -1313,13 +1313,13 @@ Operations that require behavior from an unconstrained generic type are rejected
 
 Concrete generic aliases are supported:
 
-```beanstalk
+```moth
 StringBox as Box of String
 ```
 
 Name intermediate concrete aliases instead of writing nested `of` applications:
 
-```beanstalk
+```moth
 Pair type A, B = |
     first A,
     second B,
@@ -1348,7 +1348,7 @@ Outside generic design scope:
 
 Type aliases give another compile-time name to an existing type. They are transparent and do not create nominal identity.
 
-```beanstalk
+```moth
 UserId as Int
 Names as {String}
 MaybeName as String?
@@ -1367,11 +1367,11 @@ Aliases are transparent type spellings, not constructors. Construct a nominal st
 
 ## Module System, Config, and Imports
 
-A module is a directory-scoped set of Beanstalk source files compiled together. A directory becomes a module root when it contains one `#*.bst` or `+*.bst` file. The suffix after either marker is cosmetic. More than one root file in the same directory is rejected. A project contains normal modules, scoped support packages, an optional project package facade and other builder inputs.
+A module is a directory-scoped set of Moth source files compiled together. A directory becomes a module root when it contains one `#*.moth` or `+*.moth` file. The suffix after either marker is cosmetic. More than one root file in the same directory is rejected. A project contains normal modules, scoped support packages, an optional project package facade and other builder inputs.
 
 ### Project config
 
-`config.bst`:
+`config.moth`:
 - lives at the project root;
 - uses normal declaration syntax;
 - is one self-contained compile-time source file with no source imports or package resolution;
@@ -1381,17 +1381,17 @@ A module is a directory-scoped set of Beanstalk source files compiled together. 
 - rejects every source import including relative, project, Core, Builder, dependency and binding-backed imports;
 - rejects runtime declarations, mutable bindings, functions, named support types, traits, conformances, standalone templates, `#[...]` page fragments and `export:`.
 
-The command selects the builder before config schema validation. `config.bst` does not select the builder.
+The command selects the builder before config schema validation. `config.moth` does not select the builder.
 
 Only active sections are schema-validated. Inactive sections are parsed and folded but discarded. The active builder project section is required, even when empty.
 
 Builder sections use backend-neutral folded values and cannot declare `#Import`. Output settings are builder-owned.
 
-```beanstalk
+```moth
 default_channel #= "alpha"
 
 project #= |
-    name = "beanstalk_docs",
+    name = "moth_docs",
     version #Import of String = "0.1.0",
     entry_root = "src",
     metadata = |
@@ -1411,9 +1411,9 @@ See `docs/build-system-design.md` for the full config, `@project` and source `#I
 
 ### Entry-local config blocks
 
-A normal module root may contain one optional `config:` block for root-local builder metadata. It is not an embedded `config.bst` file.
+A normal module root may contain one optional `config:` block for root-local builder metadata. It is not an embedded `config.moth` file.
 
-```beanstalk
+```moth
 config:
     html #= |
         title = "Docs",
@@ -1426,7 +1426,7 @@ config:
 Rules:
 - valid only at the top level of a normal module root
 - at most one block per normal root
-- invalid in normal non-root files, support roots, the project package facade, inside `export:`, inside executable bodies and in `config.bst`
+- invalid in normal non-root files, support roots, the project package facade, inside `export:`, inside executable bodies and in `config.moth`
 - contains section records only: no imports, aliases, helper constants, support types or `#Import` declarations inside the block
 - these live outside the block in the normal root file
 - uses the root file's ordinary compile-time visibility: imported constants, `@project`, same-file constants declared before the block and resolved source `#Import` constants are available through normal visibility
@@ -1441,7 +1441,7 @@ See `docs/build-system-design.md` "Entry-local config: blocks" for the full cont
 
 ### Import syntax and rules
 
-```beanstalk
+```moth
 import @path/to/file
 import @core/math as math
 import @vendor/drawing.js as drawing
@@ -1473,7 +1473,7 @@ Rules:
 - An alias authored inside a grouped re-export in `export:` defines the public API name for that exported symbol.
 - Alias leading-case mismatches warn.
 
-```beanstalk
+```moth
 import @some/path { Symbol as LocalName }
 
 export:
@@ -1484,23 +1484,23 @@ export:
 `LocalName` is file-local. `PublicName` is the exported API name created by the grouped re-export.
 - Grouped imports cannot use a trailing group-level alias.
 - Direct symbol-path imports such as `import @core/math/sin` are invalid.
-- `.bst` source imports are extensionless.
+- `.moth` source imports are extensionless.
 - Direct project/local JavaScript imports require `.js` and a builder `.js` external import provider.
 - Invalid namespace path stems require explicit aliases.
-- Direct imports of any `#*.bst` or `+*.bst` root file and `config.bst` are invalid.
+- Direct imports of any `#*.moth` or `+*.moth` root file and `config.moth` are invalid.
 
 ### Module roots, runtime, public APIs and packages
 
 | File/root | Role |
 |---|---|
-| one `#*.bst` file per normal module directory | Normal module root with a cosmetic filename |
-| one `+*.bst` file per support directory | API-only scoped package root named by its directory |
-| optional project-root `+*.bst` beside `config.bst` | API-only external package facade named by project config |
+| one `#*.moth` file per normal module directory | Normal module root with a cosmetic filename |
+| one `+*.moth` file per support directory | API-only scoped package root named by its directory |
+| optional project-root `+*.moth` beside `config.moth` | API-only external package facade named by project config |
 | entry-selected normal module | Owns active top-level runtime/start code and direct page fragments |
 | imported normal module | Provides only its `export:` public surface and never executes root runtime |
 | implicit `start` | Contains active-root top-level runtime code; build-system-only; not importable |
-| normal `.bst` files | Declarations only; no top-level executable statements |
-| `config.bst` | Not a module and cannot be imported directly; Stage 0 derives the synthetic `@project` interface from its folded `project` record |
+| normal `.moth` files | Declarations only; no top-level executable statements |
+| `config.moth` | Not a module and cannot be imported directly; Stage 0 derives the synthetic `@project` interface from its folded `project` record |
 
 Execution and visibility:
 - An entry assembly activates one normal module's top-level runtime code and page fragments exactly once.
@@ -1527,7 +1527,7 @@ Import resolution:
 - A support root may import files it owns, descendant modules in its private subtree, support packages from a strictly outer scope and registered packages. It may not import its parent, normal sibling consumers or same-scope support siblings.
 - The project package facade is the only assembly exception. It resolves project paths from `entry_root` and receives only descendant public interfaces.
 - `@./...`, parent components and importing-file-relative resolution are unsupported.
-- Extensionless `.bst`, `.bd`, `.md` and directory identities share one strict namespace. Same-name files, directories, modules and visible packages are rejected instead of resolved by precedence.
+- Extensionless `.moth`, `.mtf`, `.md` and directory identities share one strict namespace. Same-name files, directories, modules and visible packages are rejected instead of resolved by precedence.
 - Explicit-extension provider files such as `.js` may coexist with a same-stem directory only when syntax remains unambiguous.
 - Grouped imports expand into individual symbol imports.
 - Same-module file cycles are accepted when declarations resolve through the dependency graph. Circular compile-time constant dependencies are rejected. Cross-module and package visibility still applies.
@@ -1536,24 +1536,24 @@ Package metadata has two orthogonal axes:
 
 | Package | Origin | Backing |
 |---|---|---|
-| `@html` | Builder | BeanstalkSource |
+| `@html` | Builder | MothSource |
 | `@core/collections`, `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time` | Core | ExternalBinding |
 | `@web/canvas` | Builder | ExternalBinding |
-| scoped `+*.bst` package | ProjectLocal | BeanstalkSource |
-| project-root package facade | ProjectLocal | BeanstalkSource |
+| scoped `+*.moth` package | ProjectLocal | MothSource |
+| project-root package facade | ProjectLocal | MothSource |
 | annotated project-local `.js` import | ProjectLocal | ExternalBinding |
 
 `Standard` and `Dependency` are valid origins even when no current package uses them. The prelude is implicit-import policy, not a package origin or backing. It exposes the bare `io` namespace as an alias to `@core/io`.
 
 Core packages require explicit imports unless they are part of the prelude. Unsupported builder packages are rejected with an unsupported-by-builder diagnostic. Source-backed packages expose compiled immutable interfaces backed by support roots, the project package facade or builder-supplied source.
 
-The HTML builder's `@html` source-backed package exposes authored HTML helpers, including `canvas`, `CANVAS_ID`, `get_canvas_context`, `Canvas`, and `get_canvas`. Its cosmetic root filename is currently `packages/html/#mod.bst`, but its public API comes from the root's `export:` block. `Canvas` is a source-owned wrapper around the raw external context, so method-style calls such as `~drawing.fill_rect(...)` come from ordinary Beanstalk receiver methods rather than external package metadata. The raw `@web/canvas` symbols themselves are not re-exported through `@html`. Import raw drawing APIs directly from `@web/canvas` when needed.
+The HTML builder's `@html` source-backed package exposes authored HTML helpers, including `canvas`, `CANVAS_ID`, `get_canvas_context`, `Canvas`, and `get_canvas`. Its cosmetic root filename is currently `packages/html/#mod.moth`, but its public API comes from the root's `export:` block. `Canvas` is a source-owned wrapper around the raw external context, so method-style calls such as `~drawing.fill_rect(...)` come from ordinary Moth receiver methods rather than external package metadata. The raw `@web/canvas` symbols themselves are not re-exported through `@html`. Import raw drawing APIs directly from `@web/canvas` when needed.
 
 ### External platform package imports
 
-Project builders may provide binding-backed packages such as `@core/io`, `@core/math` or `@web/canvas`. These aren't Beanstalk source files. They expose opaque external types, compile-time constants and external free functions only.
+Project builders may provide binding-backed packages such as `@core/io`, `@core/math` or `@web/canvas`. These aren't Moth source files. They expose opaque external types, compile-time constants and external free functions only.
 
-```beanstalk
+```moth
 import @core/math
 import @core/math { sin as sine }
 
@@ -1569,10 +1569,10 @@ Rules:
 - External aliases follow normal file-local collision and case-convention rules.
 - External opaque types can be passed, returned, and used by external functions, but cannot be constructed with struct syntax or field-accessed.
 - External packages do not expose receiver methods. Use free functions for raw external APIs, or a source-owned wrapper type when method-style ergonomics are wanted.
-- Existing Core, Builder and JavaScript-backed bindings use a restricted host-binding profile: ordinary Beanstalk values cross by value, host code may not retain references into ordinary Beanstalk storage, and opaque handles represent foreign identities rather than Beanstalk reference types.
+- Existing Core, Builder and JavaScript-backed bindings use a restricted host-binding profile: ordinary Moth values cross by value, host code may not retain references into ordinary Moth storage, and opaque handles represent foreign identities rather than Moth reference types.
 - Observable external resources require explicit close or teardown. Host finalization timing must not define language behaviour.
-- Future general Wasm library imports use a value-only WIT component profile. Supported arguments lower from shared reads into independent component values and results lift into independent Beanstalk result graphs. No Beanstalk alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary.
-- WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Beanstalk references are deferred beyond the V1 value-only profile.
+- Future general Wasm library imports use a value-only WIT component profile. Supported arguments lower from shared reads into independent component values and results lift into independent Moth result graphs. No Moth alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary.
+- WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references are deferred beyond the V1 value-only profile.
 
 Initial optional core packages:
 - `@core/math`: `PI`, `TAU`, `E`, and `Float` math helpers.
@@ -1586,7 +1586,7 @@ Time package split:
 - Use `Duration` for elapsed amounts.
 - `timestamp_from_iso_string` is fallible and must be handled with postfix `!` or `catch`.
 
-The HTML builder supports annotated single-file `.js` imports through `@bst.opaque` and `@bst.sig`. JavaScript export names are runtime implementation details; Beanstalk names come from annotations. Supported JS export forms are `export function name(...) { ... }` and block-bodied arrow exports. `@bst.sig` annotations expose free functions; `this` receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports. Unsupported JS features include arbitrary dependency graphs, default exports, re-exports, CommonJS, classes, JS constants, property accessors, callbacks, async functions, collections/options in JS signatures, generic external types, receiver methods, and multi-success JS returns.
+The HTML builder supports annotated single-file `.js` imports through `@moth.opaque` and `@moth.sig`. JavaScript export names are runtime implementation details; Moth names come from annotations. Supported JS export forms are `export function name(...) { ... }` and block-bodied arrow exports. `@moth.sig` annotations expose free functions; `this` receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports. Unsupported JS features include arbitrary dependency graphs, default exports, re-exports, CommonJS, classes, JS constants, property accessors, callbacks, async functions, collections/options in JS signatures, generic external types, receiver methods, and multi-success JS returns.
 
 Deferred package-system features:
 - package manager, versions, remote fetching, lockfiles, and override/shadowing rules
@@ -1596,13 +1596,13 @@ Deferred package-system features:
 - automatic docs/API extraction from module-root `export:` blocks
 - seeded random, full date/time/time-zone/calendar APIs, Temporal-backed calendar implementation, locale-aware formatting/parsing, local time-zone lookup, async timers/sleep/intervals, browser animation scheduling packages, and non-JS lowerings for JS-backed core packages
 
-Beanstalk `$md` links use `@path (label)`. Plain Markdown `.md` files use ordinary `[label](path)` links. Plain Markdown href and src values are rendered literally rather than rewritten as tracked assets.
+Moth `$md` links use `@path (label)`. Plain Markdown `.md` files use ordinary `[label](path)` links. Plain Markdown href and src values are rendered literally rather than rewritten as tracked assets.
 
 ### Binding Modes, Top-Level Declarations, and Constants
 
 Binding forms:
 
-```beanstalk
+```moth
 name = value
 name Type = value
 
@@ -1632,15 +1632,15 @@ Constant rules:
 - Same-file constant evaluation follows source order.
 - Cross-file constant dependencies are resolved in dependency order.
 
-```beanstalk
-site_name #String = "Beanstalk"
+```moth
+site_name #String = "Moth"
 major_version #Int = 1
 full_name #= [: [site_name] v[major_version]]
 ```
 
 Struct instances assigned to constants can become data-only const records when all constructor arguments fold. Const records are field-access-only compile-time member groups. They cannot be assigned to runtime values, passed, returned, placed in collections, or used through runtime methods.
 
-```beanstalk
+```moth
 Basic = | defaults String |
 values #= Basic("Only allowed const values here")
 

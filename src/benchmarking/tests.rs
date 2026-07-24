@@ -21,7 +21,7 @@ fn frontend_benchmark_runs_for_simple_file() {
         crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
 
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let file_path = temp_dir.path().join("test.bst");
+    let file_path = temp_dir.path().join("test.moth");
 
     {
         let mut file = std::fs::File::create(&file_path).expect("should create file");
@@ -57,7 +57,7 @@ fn frontend_benchmark_fails_for_missing_file() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
 
     let options = FrontendBenchmarkOptions {
-        entry_path: PathBuf::from("/definitely/does/not/exist.bst"),
+        entry_path: PathBuf::from("/definitely/does/not/exist.moth"),
         build_profile: FrontendBenchmarkBuildProfile::Dev,
     };
 
@@ -70,7 +70,7 @@ fn frontend_benchmark_fails_for_invalid_syntax() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
 
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let file_path = temp_dir.path().join("bad.bst");
+    let file_path = temp_dir.path().join("bad.moth");
 
     {
         let mut file = std::fs::File::create(&file_path).expect("should create file");

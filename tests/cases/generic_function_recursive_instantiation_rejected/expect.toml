@@ -1,26 +1,26 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0057"]
+diagnostic_codes = ["MOTH-RULE-0057"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0057"
+code = "MOTH-RULE-0057"
 reason = "invalid_generic_instantiation.recursive_function_instantiation"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 3
 count = 1
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/helpers.bst"
+path = "input/helpers.moth"
 line = 2
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 2
-path = "input/helpers.bst"
+path = "input/helpers.moth"
 line = 1
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 3
-path = "input/helpers.bst"
+path = "input/helpers.moth"
 line = 1

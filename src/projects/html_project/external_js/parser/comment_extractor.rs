@@ -1,19 +1,19 @@
-//! Extracts Beanstalk annotations from JSDoc-style `/** ... */` comment blocks.
+//! Extracts Moth annotations from JSDoc-style `/** ... */` comment blocks.
 //!
 //! WHAT: scans raw JS source text, locates multi-line comment blocks that start with
-//!       `/**`, and extracts lines that begin with `@bst.`.
-//! WHY: `@bst.opaque` and `@bst.sig` annotations live inside these comment blocks.
+//!       `/**`, and extracts lines that begin with `@moth.`.
+//! WHY: `@moth.opaque` and `@moth.sig` annotations live inside these comment blocks.
 //!      Keeping extraction separate from signature parsing makes each module easier
 //!      to test and reason about.
 //!
 //! Limitations:
 //! - Regular `/* ... */` blocks are ignored.
 //! - Inline `/** ... */` on a single line is supported.
-//! - `//` comments are ignored even if they contain `@bst.`.
+//! - `//` comments are ignored even if they contain `@moth.`.
 
 use super::parsed_js_module::{JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan};
 
-/// A single `@bst.*` annotation extracted from a comment block.
+/// A single `@moth.*` annotation extracted from a comment block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedAnnotation {
     pub kind: AnnotationKind,
@@ -23,11 +23,11 @@ pub struct ExtractedAnnotation {
 /// Classification of extracted annotations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnnotationKind {
-    /// `@bst.opaque TypeName`
+    /// `@moth.opaque TypeName`
     Opaque { type_name: String },
-    /// `@bst.sig beanstalk_name signature_body`
+    /// `@moth.sig moth_name signature_body`
     Sig {
-        beanstalk_name: String,
+        moth_name: String,
         signature_text: String,
     },
 }
@@ -38,7 +38,7 @@ pub struct CommentExtractionResult {
     pub diagnostics: Vec<JsParserDiagnostic>,
 }
 
-/// Scans source text for `/** ... */` blocks and extracts `@bst.*` annotations.
+/// Scans source text for `/** ... */` blocks and extracts `@moth.*` annotations.
 pub fn extract_annotations(source: &str) -> CommentExtractionResult {
     let mut scanner = CommentScanner::new(source);
     scanner.scan()
@@ -137,7 +137,7 @@ impl<'a> CommentScanner<'a> {
                 trimmed
             };
 
-            if after_star.starts_with("@bst.") {
+            if after_star.starts_with("@moth.") {
                 self.parse_annotation_line(
                     after_star,
                     content_byte_offset,
@@ -159,7 +159,7 @@ impl<'a> CommentScanner<'a> {
         let directive = tokens.next().unwrap_or("");
 
         match directive {
-            "@bst.opaque" => {
+            "@moth.opaque" => {
                 if let Some(type_name) = tokens.next() {
                     if tokens.next() == Some("of") {
                         self.diagnostics.push(JsParserDiagnostic {
@@ -178,15 +178,14 @@ impl<'a> CommentScanner<'a> {
                     });
                 }
             }
-            "@bst.sig" => {
-                // The rest of the line after `@bst.sig` is the Beanstalk name + signature body
-                let remainder = line["@bst.sig".len()..].trim_start();
-                if let Some((beanstalk_name, signature_text)) =
-                    Self::split_sig_name_and_body(remainder)
+            "@moth.sig" => {
+                // The rest of the line after `@moth.sig` is the Moth name + signature body
+                let remainder = line["@moth.sig".len()..].trim_start();
+                if let Some((moth_name, signature_text)) = Self::split_sig_name_and_body(remainder)
                 {
                     self.annotations.push(ExtractedAnnotation {
                         kind: AnnotationKind::Sig {
-                            beanstalk_name: beanstalk_name.to_string(),
+                            moth_name: moth_name.to_string(),
                             signature_text: signature_text.to_string(),
                         },
                         span: block_span.clone(),
@@ -194,16 +193,16 @@ impl<'a> CommentScanner<'a> {
                 } else {
                     self.diagnostics.push(JsParserDiagnostic {
                         message:
-                            "`@bst.sig` must be followed by a Beanstalk name and a signature body."
+                            "`@moth.sig` must be followed by a Moth name and a signature body."
                                 .to_string(),
                         span: block_span,
                         kind: JsDiagnosticKind::UnsupportedTypeSyntax,
                     });
                 }
             }
-            "@bst.package" => {
+            "@moth.package" => {
                 self.diagnostics.push(JsParserDiagnostic {
-                    message: "`@bst.package` is not supported in Beanstalk JS module comments."
+                    message: "`@moth.package` is not supported in Moth JS module comments."
                         .to_string(),
                     span: block_span,
                     kind: JsDiagnosticKind::UnsupportedPackageTag,
@@ -212,18 +211,18 @@ impl<'a> CommentScanner<'a> {
             unknown => {
                 self.diagnostics.push(JsParserDiagnostic {
                     message: format!(
-                        "Unknown Beanstalk JS annotation `{unknown}`. Supported annotations are `@bst.opaque` and `@bst.sig`."
+                        "Unknown Moth JS annotation `{unknown}`. Supported annotations are `@moth.opaque` and `@moth.sig`."
                     ),
                     span: block_span,
-                    kind: JsDiagnosticKind::UnknownBstDirective,
+                    kind: JsDiagnosticKind::UnknownMothDirective,
                 });
             }
         }
     }
 
-    /// Splits a `@bst.sig` remainder into `(beanstalk_name, signature_body)`.
+    /// Splits a `@moth.sig` remainder into `(moth_name, signature_body)`.
     ///
-    /// The Beanstalk name is the first identifier token. Everything after it
+    /// The Moth name is the first identifier token. Everything after it
     /// (starting with `|`) is the signature body.
     fn split_sig_name_and_body(remainder: &str) -> Option<(&str, &str)> {
         let trimmed = remainder.trim_start();

@@ -45,7 +45,7 @@ fn user_rule_diagnostic(name_path: InternedPath, name: StringId) -> CompilerDiag
 /// Build one infrastructure `CompilerError` with metadata, mirroring how deeper semantic stages
 /// route internal failures through `CompilerMessages::from_error`.
 fn infrastructure_compiler_error(string_table: &mut StringTable) -> CompilerError {
-    let path = InternedPath::from_single_str("module/#page.bst", string_table);
+    let path = InternedPath::from_single_str("module/#page.moth", string_table);
     let location = SourceLocation::new(
         path,
         CharPosition {
@@ -77,7 +77,7 @@ fn user_diagnostics_become_diagnosed_and_round_trip() {
     //      downgrade them into an infrastructure `CompilerError`.
 
     let mut string_table = StringTable::new();
-    let name_path = InternedPath::from_single_str("src/main.bst", &mut string_table);
+    let name_path = InternedPath::from_single_str("src/main.moth", &mut string_table);
     let name_id = string_table.intern("unknown_name");
     let diagnostic = user_rule_diagnostic(name_path, name_id);
 
@@ -137,7 +137,7 @@ fn diagnosed_render_context_survives_round_trip_and_remap() {
     //      range after the semantic boundary transfers ownership and after string-table merging.
 
     let mut string_table = StringTable::new();
-    let name_path = InternedPath::from_single_str("src/page.bst", &mut string_table);
+    let name_path = InternedPath::from_single_str("src/page.moth", &mut string_table);
     let name_id = string_table.intern("unknown_name");
     let diagnostic = user_rule_diagnostic(name_path, name_id);
 
@@ -217,7 +217,7 @@ fn mixed_user_and_infrastructure_sequence_is_invariant_failure() {
     //      infrastructure failure.
 
     let mut string_table = StringTable::new();
-    let name_path = InternedPath::from_single_str("src/main.bst", &mut string_table);
+    let name_path = InternedPath::from_single_str("src/main.moth", &mut string_table);
     let user_diagnostic = user_rule_diagnostic(name_path, string_table.intern("unknown_name"));
     let infra_error = infrastructure_compiler_error(&mut string_table);
     let infra_diagnostic =
@@ -281,13 +281,13 @@ fn infrastructure_error_preserves_module_local_path_through_aggregation() {
 
     // 1. Non-empty base build table so module-local path IDs land after the inherited prefix.
     let mut base = StringTable::new();
-    base.intern("src/main.bst");
+    base.intern("src/main.moth");
     base.intern("base string");
     let fork_source = base.fork_source();
 
     // 2. Module-local fork; intern the infrastructure path only in the local delta.
     let (mut local_table, base_len) = fork_source.fork_for_module().into_parts();
-    let path = InternedPath::from_single_str("module/#page.bst", &mut local_table);
+    let path = InternedPath::from_single_str("module/#page.moth", &mut local_table);
     let location = SourceLocation::new(
         path,
         CharPosition {
@@ -332,7 +332,7 @@ fn infrastructure_error_preserves_module_local_path_through_aggregation() {
         .to_path_buf(&packaged.string_table);
     assert_eq!(
         resolved_path,
-        std::path::PathBuf::from("module/#page.bst"),
+        std::path::PathBuf::from("module/#page.moth"),
         "the infrastructure path must resolve exactly in the aggregated table"
     );
 }
@@ -351,13 +351,13 @@ fn warning_plus_infrastructure_error_recovers_original_and_preserves_path() {
 
     // 1. Non-empty base build table so module-local path IDs land after the inherited prefix.
     let mut base = StringTable::new();
-    base.intern("src/main.bst");
+    base.intern("src/main.moth");
     base.intern("base string");
     let fork_source = base.fork_source();
 
     // 2. Module-local fork; intern the infrastructure path only in the local delta.
     let (mut local_table, base_len) = fork_source.fork_for_module().into_parts();
-    let path = InternedPath::from_single_str("module/#page.bst", &mut local_table);
+    let path = InternedPath::from_single_str("module/#page.moth", &mut local_table);
     let location = SourceLocation::new(
         path,
         CharPosition {
@@ -377,7 +377,7 @@ fn warning_plus_infrastructure_error_recovers_original_and_preserves_path() {
 
     // 3. A non-error companion warning produced against the same module-local table, mirroring
     //    the AST/HIR `from_error_with_warnings` production shape.
-    let warning_path = InternedPath::from_single_str("src/page.bst", &mut local_table);
+    let warning_path = InternedPath::from_single_str("src/page.moth", &mut local_table);
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(
             crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
@@ -446,7 +446,7 @@ fn warning_plus_infrastructure_error_recovers_original_and_preserves_path() {
         .to_path_buf(&packaged.string_table);
     assert_eq!(
         resolved_path,
-        std::path::PathBuf::from("module/#page.bst"),
+        std::path::PathBuf::from("module/#page.moth"),
         "the infrastructure path must resolve exactly after rewrapping the recovered error"
     );
 }
@@ -460,7 +460,7 @@ fn user_error_plus_warning_becomes_diagnosed_module_preserving_order() {
     //      invariant failure or reorder the diagnostics.
 
     let mut string_table = StringTable::new();
-    let warning_path = InternedPath::from_single_str("src/page.bst", &mut string_table);
+    let warning_path = InternedPath::from_single_str("src/page.moth", &mut string_table);
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(
             crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
@@ -482,7 +482,7 @@ fn user_error_plus_warning_becomes_diagnosed_module_preserving_order() {
             namespace: NameNamespace::Value,
         },
     );
-    let name_path = InternedPath::from_single_str("src/main.bst", &mut string_table);
+    let name_path = InternedPath::from_single_str("src/main.moth", &mut string_table);
     let error = user_rule_diagnostic(name_path, string_table.intern("unknown_name"));
 
     // Production order: warning first, then the user-facing error.
@@ -527,7 +527,7 @@ fn warning_only_failure_is_invariant_failure() {
     //      failure, so the boundary reports it as a malformed sequence.
 
     let mut string_table = StringTable::new();
-    let warning_path = InternedPath::from_single_str("src/page.bst", &mut string_table);
+    let warning_path = InternedPath::from_single_str("src/page.moth", &mut string_table);
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(
             crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,

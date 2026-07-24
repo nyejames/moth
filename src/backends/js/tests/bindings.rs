@@ -15,7 +15,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 // Local binding and assignment tests [binding] [alias]
 // ---------------------------------------------------------------------------
 
-/// Verifies that assigning an integer value to a local emits __bs_assign_value. [binding]
+/// Verifies that assigning an integer value to a local emits __moth_assign_value. [binding]
 #[test]
 fn local_slot_assignment_emits_assign_value() {
     let mut string_table = StringTable::new();
@@ -67,15 +67,15 @@ fn local_slot_assignment_emits_assign_value() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_assign_value({count_name}, 42);")),
-        "assigning an integer to a local must emit __bs_assign_value"
+            .contains(&format!("__moth_assign_value({count_name}, 42);")),
+        "assigning an integer to a local must emit __moth_assign_value"
     );
 }
 
 // Parameter normalization tests [binding]
 // ---------------------------------------------------------------------------
 
-/// Verifies that function parameters emit __bs_param_binding to normalize call arguments. [binding]
+/// Verifies that function parameters emit __moth_param_binding to normalize call arguments. [binding]
 #[test]
 fn function_parameters_emit_param_binding() {
     let mut string_table = StringTable::new();
@@ -118,8 +118,8 @@ fn function_parameters_emit_param_binding() {
     assert!(
         output
             .source
-            .contains(&format!("{arg_name} = __bs_param_binding({arg_name});")),
-        "function parameters must be normalised through __bs_param_binding"
+            .contains(&format!("{arg_name} = __moth_param_binding({arg_name});")),
+        "function parameters must be normalised through __moth_param_binding"
     );
 }
 
@@ -127,7 +127,7 @@ fn function_parameters_emit_param_binding() {
 // Borrow-assignment and alias behavior tests [alias]
 // ---------------------------------------------------------------------------
 
-/// Verifies that assigning a Load (borrow) to a local emits __bs_assign_borrow. [alias]
+/// Verifies that assigning a Load (borrow) to a local emits __moth_assign_borrow. [alias]
 #[test]
 fn borrow_assignment_emits_assign_borrow() {
     let mut string_table = StringTable::new();
@@ -198,12 +198,12 @@ fn borrow_assignment_emits_assign_borrow() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_assign_borrow({alias_name}, {source_name})")),
-        "Load assignment to a fresh local must emit __bs_assign_borrow"
+            .contains(&format!("__moth_assign_borrow({alias_name}, {source_name})")),
+        "Load assignment to a fresh local must emit __moth_assign_borrow"
     );
 }
 
-/// Verifies that an alias local is read through __bs_read in a host io call. [binding]
+/// Verifies that an alias local is read through __moth_read in a host io call. [binding]
 #[test]
 fn alias_local_read_emits_bs_read() {
     let mut string_table = StringTable::new();
@@ -291,12 +291,12 @@ fn alias_local_read_emits_bs_read() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_io_line(__bs_read({alias_name}))")),
-        "reading an alias local in a host call must go through __bs_read"
+            .contains(&format!("__moth_io_line(__moth_read({alias_name}))")),
+        "reading an alias local in a host call must go through __moth_read"
     );
 }
 
-/// Verifies that assigning to an alias-only local emits __bs_write instead of __bs_assign_value. [alias]
+/// Verifies that assigning to an alias-only local emits __moth_write instead of __moth_assign_value. [alias]
 #[test]
 fn alias_only_local_assignment_emits_write() {
     let mut string_table = StringTable::new();
@@ -336,7 +336,7 @@ fn alias_only_local_assignment_emits_write() {
     );
 
     // Mark the local as alias-only at the assignment statement so the emitter takes the
-    // __bs_write path instead of __bs_assign_value.
+    // __moth_write path instead of __moth_assign_value.
     let mut report = BorrowCheckReport::default();
     report.analysis.statement_entry_states.insert(
         HirNodeId(1),
@@ -362,14 +362,14 @@ fn alias_only_local_assignment_emits_write() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_write({target_name}, 42)")),
-        "alias-only local assignment must emit __bs_write, not __bs_assign_value"
+            .contains(&format!("__moth_write({target_name}, 42)")),
+        "alias-only local assignment must emit __moth_write, not __moth_assign_value"
     );
     assert!(
         !output
             .source
-            .contains(&format!("__bs_assign_value({target_name}")),
-        "alias-only local must not use __bs_assign_value"
+            .contains(&format!("__moth_assign_value({target_name}")),
+        "alias-only local must not use __moth_assign_value"
     );
 }
 
@@ -377,7 +377,7 @@ fn alias_only_local_assignment_emits_write() {
 // Computed-place tests [computed]
 // ---------------------------------------------------------------------------
 
-/// Verifies that assigning to a struct field emits __bs_write(__bs_field(...)). [computed]
+/// Verifies that assigning to a struct field emits __moth_write(__moth_field(...)). [computed]
 #[test]
 fn field_place_emits_bs_field() {
     let mut string_table = StringTable::new();
@@ -446,13 +446,13 @@ fn field_place_emits_bs_field() {
 
     assert!(
         output.source.contains(&format!(
-            "__bs_write(__bs_field({struct_name}, \"{field_name}\"), 42)"
+            "__moth_write(__moth_field({struct_name}, \"{field_name}\"), 42)"
         )),
-        "field assignment must route through __bs_field and __bs_write"
+        "field assignment must route through __moth_field and __moth_write"
     );
 }
 
-/// Verifies that assigning to a collection index emits __bs_write(__bs_index(...)). [computed]
+/// Verifies that assigning to a collection index emits __moth_write(__moth_index(...)). [computed]
 #[test]
 fn index_place_emits_bs_index() {
     let mut string_table = StringTable::new();
@@ -507,12 +507,12 @@ fn index_place_emits_bs_index() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_write(__bs_index({array_name}, 0), 42)")),
-        "index assignment must route through __bs_index and __bs_write"
+            .contains(&format!("__moth_write(__moth_index({array_name}, 0), 42)")),
+        "index assignment must route through __moth_index and __moth_write"
     );
 }
 
-/// Verifies that reading a field place composes __bs_read with __bs_field. [computed]
+/// Verifies that reading a field place composes __moth_read with __moth_field. [computed]
 #[test]
 fn computed_place_read_composes_with_bs_read() {
     let mut string_table = StringTable::new();
@@ -589,9 +589,9 @@ fn computed_place_read_composes_with_bs_read() {
 
     assert!(
         output.source.contains(&format!(
-            "__bs_read(__bs_field({struct_name}, \"{field_name}\"))"
+            "__moth_read(__moth_field({struct_name}, \"{field_name}\"))"
         )),
-        "field Load must compose __bs_read around __bs_field"
+        "field Load must compose __moth_read around __moth_field"
     );
 }
 

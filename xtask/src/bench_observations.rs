@@ -1,7 +1,7 @@
 //! Benchmark observation parsing.
 //!
 //! WHAT: extracts stage timings and local performance counters from stable
-//! `BST_BENCH` lines, while still accepting legacy human timer prose from
+//! `MOTH_BENCH` lines, while still accepting legacy human timer prose from
 //! older local benchmark records.
 //! WHY: raw benchmark history should preserve local diagnostic evidence without
 //! making public monthly summaries noisy.
@@ -25,8 +25,8 @@ const STAGE_PREFIXES: [(&str, &str); 10] = [
     ("AST/finalize completed in:", "ast_finalize_ms"),
 ];
 
-const STABLE_BENCH_PREFIX: &str = "BST_BENCH timing";
-const STABLE_COUNTER_PREFIX: &str = "BST_BENCH counter";
+const STABLE_BENCH_PREFIX: &str = "MOTH_BENCH timing";
+const STABLE_COUNTER_PREFIX: &str = "MOTH_BENCH counter";
 
 pub(crate) fn parse_stdout_observations(stdout: &str) -> BenchmarkCaseObservations {
     let mut stable_timings = Vec::new();

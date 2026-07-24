@@ -1,0 +1,29 @@
+A `.mtf` file is Markdown that lives inside Moth's template world.
+
+### Write prose directly
+
+[codeblock, $code("text"):
+    # Getting started
+
+    This is **bold** text.
+
+    [p: This paragraph is styled by the @html builder helper.]
+]
+
+No imports, no declarations, no frontmatter. Just content.
+
+### Import the result
+
+[codeblock, $code("moth"):
+    import @docs/intro {content as intro}
+
+    [: [intro] ]
+]
+
+The `content` constant is the only thing a `.mtf` file exports.
+
+### Remember
+
+- `.mtf` is an implicit compile-time Markdown template.
+- The result is a `#String` constant called `content`.
+- No imports or declarations inside the file.

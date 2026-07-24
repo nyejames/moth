@@ -3,7 +3,7 @@
 //! WHAT: turns raw `.md` source into a private synthetic `content #String` declaration.
 //! WHY: later frontend stages should see an ordinary folded constant, not Markdown-specific AST,
 //!      HIR, borrow-checker, or backend paths.
-//! MUST NOT: tokenize Markdown, inspect it as Beanstalk syntax, scan rendered HTML for imports or
+//! MUST NOT: tokenize Markdown, inspect it as Moth syntax, scan rendered HTML for imports or
 //!           symbols, or produce runtime fragments.
 
 use crate::compiler_frontend::arena::TokenStats;

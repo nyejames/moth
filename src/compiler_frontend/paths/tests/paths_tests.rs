@@ -19,7 +19,7 @@ fn first_path_token_values(source: &str) -> Vec<String> {
 fn first_path_token(source: &str) -> (Vec<PathTokenItem>, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let file_tokens = tokenize(
         source,
         &source_path,
@@ -47,7 +47,7 @@ fn first_path_token(source: &str) -> (Vec<PathTokenItem>, StringTable) {
 fn tokenize_path_error(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     *tokenize(
         source,
@@ -94,7 +94,7 @@ fn assert_import_clause_error(
 fn collect_import_path_values(source: &str) -> Vec<String> {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let file_tokens = tokenize(
         source,
         &source_path,
@@ -150,7 +150,7 @@ fn parse_file_path_rejects_public_root_with_double_slash() {
 fn parse_file_path_rejects_public_root_backslash_variant() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "import @\\\n",
@@ -168,7 +168,7 @@ fn parse_file_path_rejects_public_root_backslash_variant() {
 fn parse_file_path_rejects_parenthesis_wrapper_syntax() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "import @(a/b/c)\n",
@@ -339,12 +339,12 @@ fn parse_file_path_accepts_backslash_separator() {
 
 #[test]
 fn parse_file_path_accepts_hash_prefixed_file_names() {
-    let paths = first_path_token_values("import @docs { #asset.bst, subfolder/#page.bst }\n");
+    let paths = first_path_token_values("import @docs { #asset.moth, subfolder/#page.moth }\n");
     assert_eq!(
         paths,
         vec![
-            "docs/#asset.bst".to_string(),
-            "docs/subfolder/#page.bst".to_string(),
+            "docs/#asset.moth".to_string(),
+            "docs/subfolder/#page.moth".to_string(),
         ]
     );
 }
@@ -370,7 +370,7 @@ fn parse_file_path_rejects_grouped_path_with_empty_block() {
 fn parse_file_path_rejects_grouped_path_with_multiple_commas() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "import @docs { a.md,, b.md }\n",
@@ -416,7 +416,7 @@ fn parse_file_path_rejects_slash_before_group_top_level() {
 fn parse_file_path_rejects_slash_before_group_with_whitespace() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "import @docs/   {a.md}\n",
@@ -437,7 +437,7 @@ fn parse_file_path_rejects_slash_before_group_with_whitespace() {
 fn parse_file_path_rejects_nested_slash_before_group() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "import @docs { subfolder/ { a.md } }\n",
@@ -463,7 +463,7 @@ fn parse_file_path_rejects_grouped_prefix_with_trailing_separator() {
 fn parse_file_path_rejects_empty_path_component_in_grouped_entry() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "import @docs { subfolder//a.md }\n",
@@ -494,7 +494,7 @@ fn parse_file_path_rejects_reserved_device_name_component() {
 fn parse_file_path_rejects_non_leading_dot_segments() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let result = tokenize(
         "import @docs/../content\n",
@@ -573,7 +573,7 @@ fn collect_import_paths_from_tokens_rejects_missing_path() {
     // path token at all, which remains owned by the import-clause collector.
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let file_tokens = tokenize(
         "import\n",
         &source_path,
@@ -600,7 +600,7 @@ fn parse_file_path_stops_at_as_keyword() {
 fn parse_import_clause_items_reads_alias() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let file_tokens = tokenize(
         "import @core/io/io as print",
         &source_path,
@@ -680,7 +680,7 @@ fn parse_nested_grouped_import_entries_with_aliases() {
 fn reject_group_level_alias() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let file_tokens = tokenize(
         "import @components { render, Button } as ui",
@@ -711,7 +711,7 @@ fn reject_group_level_alias() {
 fn reject_per_entry_and_trailing_alias() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let file_tokens = tokenize(
         "import @x { foo as bar } as baz",
@@ -775,7 +775,7 @@ fn parse_grouped_import_mixed_aliased_and_plain() {
 fn reject_grouped_import_alias_that_is_a_keyword() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let diagnostic = tokenize(
         "import @core/math { PI as export }",
@@ -835,7 +835,7 @@ fn collect_provider_references_retains_path_and_source_location() {
     // WHY: the graph boundary needs the location retained across Stage 0 reachable discovery.
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let file_tokens = tokenize(
         "import @docs/guides\n",
         &source_path,

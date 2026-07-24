@@ -69,7 +69,7 @@ fn parent_join_append_and_join_str_preserve_component_order() {
 #[test]
 fn parent_of_single_component_path_is_empty_path() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("beanstalk", &mut string_table);
+    let path = InternedPath::from_single_str("moth", &mut string_table);
 
     let parent = path
         .parent()
@@ -102,7 +102,7 @@ mod non_utf8_filesystem_conversion {
         let mut string_table = StringTable::new();
         let path = std::path::PathBuf::from("src")
             .join("compiler_frontend")
-            .join("main.bst");
+            .join("main.moth");
 
         let interned = InternedPath::try_from_filesystem_path(&path, &mut string_table)
             .expect("valid UTF-8 path should convert");
@@ -110,7 +110,7 @@ mod non_utf8_filesystem_conversion {
         assert_eq!(interned.to_path_buf(&string_table), path);
         assert_eq!(
             interned.to_portable_string(&string_table),
-            "src/compiler_frontend/main.bst"
+            "src/compiler_frontend/main.moth"
         );
     }
 

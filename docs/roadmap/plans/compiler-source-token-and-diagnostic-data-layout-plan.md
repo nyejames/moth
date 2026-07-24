@@ -1,4 +1,4 @@
-# Beanstalk Compiler Source, Token and Diagnostic Data Layout Implementation Plan
+# Moth Compiler Source, Token and Diagnostic Data Layout Implementation Plan
 
 > **Repository path:**
 > `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
@@ -17,7 +17,7 @@
 
 ## Purpose
 
-Replace Beanstalk's allocation-heavy source, path, token, diagnostic and failure representations with
+Replace Moth's allocation-heavy source, path, token, diagnostic and failure representations with
 one compact data-oriented architecture before further user-facing diagnostic work resumes.
 
 This is a compiler-wide representation change, not a narrow Clippy patch. It must remove the root
@@ -223,7 +223,7 @@ fixtures and documentation, not the source/token/diagnostic owners listed below.
 
 Current pressure points:
 
-- Stage 0 import discovery tokenizes Beanstalk files to collect paths, then module file preparation tokenizes and parses them again
+- Stage 0 import discovery tokenizes Moth files to collect paths, then module file preparation tokenizes and parses them again
 - provider-free classification can scan the same source before per-module reachability scans
 - `InputFile` owns `String`, `PathBuf` and source kind, while `SourceFileTable` is rebuilt per module
 - `SourceLocation` owns `InternedPath` plus line/column start and end pairs
@@ -854,7 +854,7 @@ may exist only inside this phase. The exit commit must have one schema, one draf
 
 - [ ] inventory every current stable diagnostic family after the parked diagnostics checkpoint
 - [ ] assign explicit non-zero internal `DiagnosticCode` values; never derive them from enum order
-- [ ] preserve each external `BST-*` code, category, title and default severity
+- [ ] preserve each external `MOTH-*` code, category, title and default severity
 - [ ] declare fact-word meaning, optional codecs, allowed extra kind, secondary-label roles, type-rewrite markers and renderer entry once per diagnostic
 - [ ] replace compiler-generated prose stored in payload/label string fields with typed reason/message codes and facts; an authored string may remain a `StringId`, but `RenderedText` is not a generic escape hatch
 - [ ] use one small `macro_rules!` vocabulary and const tables

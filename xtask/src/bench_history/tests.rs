@@ -30,7 +30,7 @@ fn make_record(system_uuid: &str, timestamp: &str) -> LocalRunRecord {
             name: "check_speed-test_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
-            args: vec!["benchmarks/speed-test.bst".to_string()],
+            args: vec!["benchmarks/speed-test.moth".to_string()],
             mean_ms: 40.0,
             median_ms: 39.0,
             stddev_ms: 3.0,
@@ -84,7 +84,7 @@ fn test_v1_record_parses_into_v2_in_memory_shape() {
 
     fs::write(
         &path,
-        r#"{"format_version":1,"timestamp":"2026-05-10T15:21","month_key":"2026-05","commit":"abc123","system_uuid":"sys-a","public_system_id":"B7F2A9","display_name":"macOS M1","warmup_runs":1,"measured_iterations":10,"suite_mean_ms":68.0,"suite_stddev_ms":9.0,"cases":[{"name":"check_benchmarks_speed-test_bst","command":"check","args":["benchmarks/speed-test.bst"],"mean_ms":40.0,"stddev_ms":3.0}]}"#,
+        r#"{"format_version":1,"timestamp":"2026-05-10T15:21","month_key":"2026-05","commit":"abc123","system_uuid":"sys-a","public_system_id":"B7F2A9","display_name":"macOS M1","warmup_runs":1,"measured_iterations":10,"suite_mean_ms":68.0,"suite_stddev_ms":9.0,"cases":[{"name":"check_benchmarks_speed-test_bst","command":"check","args":["benchmarks/speed-test.moth"],"mean_ms":40.0,"stddev_ms":3.0}]}"#,
     )
     .unwrap();
 
@@ -109,7 +109,7 @@ fn test_v1_group_inference_for_docs_and_stress() {
 
     fs::write(
         &path,
-        r#"{"format_version":1,"timestamp":"2026-05-10T15:21","month_key":"2026-05","commit":null,"system_uuid":"sys-a","public_system_id":"B7F2A9","display_name":"macOS M1","warmup_runs":1,"measured_iterations":10,"suite_mean_ms":20.0,"suite_stddev_ms":5.0,"cases":[{"name":"check_docs","command":"check","args":["docs"],"mean_ms":30.0,"stddev_ms":1.0},{"name":"check_benchmarks_template-stress_bst","command":"check","args":["benchmarks/template-stress.bst"],"mean_ms":10.0,"stddev_ms":1.0}]}"#,
+        r#"{"format_version":1,"timestamp":"2026-05-10T15:21","month_key":"2026-05","commit":null,"system_uuid":"sys-a","public_system_id":"B7F2A9","display_name":"macOS M1","warmup_runs":1,"measured_iterations":10,"suite_mean_ms":20.0,"suite_stddev_ms":5.0,"cases":[{"name":"check_docs","command":"check","args":["docs"],"mean_ms":30.0,"stddev_ms":1.0},{"name":"check_benchmarks_template-stress_bst","command":"check","args":["benchmarks/template-stress.moth"],"mean_ms":10.0,"stddev_ms":1.0}]}"#,
     )
     .unwrap();
 
@@ -178,7 +178,7 @@ fn test_v3_record_defaults_to_end_to_end_cli() {
 
     fs::write(
         &path,
-        r#"{"format_version":3,"timestamp":"2026-05-10T15:21","month_key":"2026-05","commit":"abc123","system_uuid":"sys-a","public_system_id":"B7F2A9","display_name":"macOS M1","warmup_runs":1,"measured_iterations":10,"suite_average_ms":68.0,"suite_case_spread_ms":9.0,"groups":[{"name":"core","case_count":1,"average_ms":40.0}],"cases":[{"name":"check_speed-test_bst","group_name":"core","command":"check","args":["benchmarks/speed-test.bst"],"mean_ms":40.0,"median_ms":39.0,"stddev_ms":3.0,"stage_timings":[],"counters":[]}]}"#,
+        r#"{"format_version":3,"timestamp":"2026-05-10T15:21","month_key":"2026-05","commit":"abc123","system_uuid":"sys-a","public_system_id":"B7F2A9","display_name":"macOS M1","warmup_runs":1,"measured_iterations":10,"suite_average_ms":68.0,"suite_case_spread_ms":9.0,"groups":[{"name":"core","case_count":1,"average_ms":40.0}],"cases":[{"name":"check_speed-test_bst","group_name":"core","command":"check","args":["benchmarks/speed-test.moth"],"mean_ms":40.0,"median_ms":39.0,"stddev_ms":3.0,"stage_timings":[],"counters":[]}]}"#,
     )
     .unwrap();
 
@@ -549,7 +549,7 @@ fn test_to_local_record_preserves_options() {
         case_name: "check_speed-test_bst".to_string(),
         group_name: "core".to_string(),
         command: "check".to_string(),
-        args: vec!["benchmarks/speed-test.bst".to_string()],
+        args: vec!["benchmarks/speed-test.moth".to_string()],
         mean_ms: 40.0,
         median_ms: 40.0,
         stddev_ms: 3.0,

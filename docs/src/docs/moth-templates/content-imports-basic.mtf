@@ -1,0 +1,21 @@
+Import moth template content with normal extensionless imports.
+
+### Import and use
+
+[codeblock, $code("moth"):
+    import @docs/intro {content as intro}
+
+    [: [intro] ]
+]
+
+The `content` constant is a compile-time string. Insert it wherever you want.
+
+### Do not include the extension
+
+`import @docs/intro.mtf` is rejected. Use `import @docs/intro`.
+
+### Remember
+
+- `content` is the only exported name.
+- Use `as` to alias it.
+- Imported content is not a page fragment by itself.

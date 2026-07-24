@@ -12,7 +12,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 // Map operation statement lowering tests [map]
 // ---------------------------------------------------------------------------
 
-/// Verifies that a map `get` statement lowers to `__bs_map_get` with receiver and key. [map]
+/// Verifies that a map `get` statement lowers to `__moth_map_get` with receiver and key. [map]
 #[test]
 fn map_get_statement_lowers_to_helper() {
     let mut string_table = StringTable::new();
@@ -78,14 +78,14 @@ fn map_get_statement_lowers_to_helper() {
     assert!(
         output
             .source
-            .contains("__bs_map_get(__bs_read(bst_map_l0), \"Priya\")"),
-        "map get must lower to __bs_map_get helper"
+            .contains("__moth_map_get(__moth_read(moth_map_l0), \"Priya\")"),
+        "map get must lower to __moth_map_get helper"
     );
     assert!(
         output
             .source
-            .contains("__bs_assign_value(bst_result_l1, __bs_map_get"),
-        "map get with result local must assign via __bs_assign_value"
+            .contains("__moth_assign_value(moth_result_l1, __moth_map_get"),
+        "map get with result local must assign via __moth_assign_value"
     );
 }
 
@@ -153,7 +153,7 @@ fn map_set_statement_without_result_emits_plain_call() {
     assert!(
         output
             .source
-            .contains("__bs_map_set(__bs_read(bst_map_l0), \"Priya\", 42);"),
+            .contains("__moth_map_set(__moth_read(moth_map_l0), \"Priya\", 42);"),
         "map set without result must emit plain helper call"
     );
 }
@@ -251,24 +251,24 @@ fn map_infallible_ops_lower_to_plain_helpers() {
     assert!(
         output
             .source
-            .contains("__bs_map_contains(__bs_read(bst_map_l0), \"Priya\")"),
-        "map contains must lower to __bs_map_contains"
+            .contains("__moth_map_contains(__moth_read(moth_map_l0), \"Priya\")"),
+        "map contains must lower to __moth_map_contains"
     );
     assert!(
         output
             .source
-            .contains("__bs_map_clear(__bs_read(bst_map_l0))"),
-        "map clear must lower to __bs_map_clear"
+            .contains("__moth_map_clear(__moth_read(moth_map_l0))"),
+        "map clear must lower to __moth_map_clear"
     );
     assert!(
         output
             .source
-            .contains("__bs_map_length(__bs_read(bst_map_l0))"),
-        "map length must lower to __bs_map_length"
+            .contains("__moth_map_length(__moth_read(moth_map_l0))"),
+        "map length must lower to __moth_map_length"
     );
 }
 
-/// Verifies that a map `remove` statement lowers to `__bs_map_remove` with receiver and key. [map]
+/// Verifies that a map `remove` statement lowers to `__moth_map_remove` with receiver and key. [map]
 #[test]
 fn map_remove_statement_lowers_to_helper() {
     let mut string_table = StringTable::new();
@@ -334,13 +334,13 @@ fn map_remove_statement_lowers_to_helper() {
     assert!(
         output
             .source
-            .contains("__bs_map_remove(__bs_read(bst_map_l0), \"Priya\")"),
-        "map remove must lower to __bs_map_remove helper"
+            .contains("__moth_map_remove(__moth_read(moth_map_l0), \"Priya\")"),
+        "map remove must lower to __moth_map_remove helper"
     );
     assert!(
         output
             .source
-            .contains("__bs_assign_value(bst_removed_l1, __bs_map_remove"),
-        "map remove with result local must assign via __bs_assign_value"
+            .contains("__moth_assign_value(moth_removed_l1, __moth_map_remove"),
+        "map remove with result local must assign via __moth_assign_value"
     );
 }

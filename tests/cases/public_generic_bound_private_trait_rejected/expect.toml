@@ -1,13 +1,13 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0074"]
+diagnostic_codes = ["MOTH-RULE-0074"]
 message_contains = [
     "Public generic function 'identity' exposes private trait bound 'PRIVATE_DISPLAY'",
 ]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0074"
-path = "input/sub/#mod.bst"
+code = "MOTH-RULE-0074"
+path = "input/sub/#mod.moth"
 line = 4
 count = 1

@@ -1,0 +1,23 @@
+Moth checks arithmetic instead of quietly wrapping or producing invalid
+floating-point values.
+
+These operations can fail:
+
+- overflowing an `Int`
+- dividing by zero
+- using an invalid integer exponent
+- producing `NaN` or infinity
+
+A function with an `Error!` return can pass that failure through its normal
+error path:
+
+[codeblock, $code("moth"):
+    divide |left Int, right Int| -> Float, Error!:
+        return left / right
+    ;
+]
+
+Outside that kind of function, an unexpected runtime numeric failure stops the
+current program path.
+
+A failure the compiler can prove in advance is reported during compilation.

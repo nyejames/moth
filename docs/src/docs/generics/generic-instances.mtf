@@ -1,0 +1,92 @@
+A concrete generic instance substitutes the generic parameters with concrete type arguments. The resulting type is ordinary: it has fields, constructors and the same access rules as any other type.
+
+### Field and payload substitution
+
+[codeblock, $code("moth"):
+    Box type A = |
+        value A,
+    |
+
+    int_box Box of Int = Box(42)
+    string_box Box of String = Box("hello")
+]
+
+`Box of Int` and `Box of String` are different semantic types. The field `value` has type `Int` in the first and `String` in the second.
+
+### Generic choices
+
+[codeblock, $code("moth"):
+    Maybe type A ::
+        Some | value A |,
+        Empty,
+    ;
+
+    name Maybe of String = Maybe::Some("Ana")
+    missing Maybe of String = Maybe::Empty
+]
+
+Choice payload matching uses the substituted payload types.
+
+### Instance identity
+
+Same constructor plus same concrete arguments yields the same instance type. Different arguments yield incompatible instance types.
+
+[codeblock, $code("moth"):
+    Box type A = |
+        value A,
+    |
+
+    a Box of Int = Box(1)
+    b Box of Int = Box(2)
+    -- c Box of String = a -- would be an error
+]
+
+### Constructor inference
+
+Generic struct and choice constructors infer their concrete type arguments from immediate constructor arguments and from the immediate receiving type. No explicit constructor type arguments are needed or supported.
+
+[codeblock, $code("moth"):
+    Box type A = |
+        value A,
+    |
+
+    -- Inferred from the constructor argument.
+    value = Box(42)
+
+    -- Inferred from the receiving type.
+    text_box Box of String = Box("hello")
+]
+
+### Aligned receiver methods
+
+A receiver method may be declared on a generic type when the method's generic parameters align exactly with the receiver constructor's parameters.
+
+[codeblock, $code("moth"):
+    Box type A = |
+        value A,
+    |
+
+    get type A |this Box of A| -> A:
+        return this.value
+    ;
+
+    box Box of Int = Box(42)
+    value = box.get()
+]
+
+Receiver methods on one concrete generic instance remain rejected.
+
+### Generic bounds and evidence
+
+Concrete instantiation with trait bounds requires visible reusable evidence. See @../traits/#generic-trait-bounds (Generic trait bounds).
+
+### Deferred and rejected surfaces
+
+- Recursive generic nominal types are rejected.
+- Receiver methods on concrete instances are rejected.
+- Generic external package functions and types are deferred.
+
+### Related concepts
+
+- For type application see @#type-application (Type application).
+- For trait bounds see @../traits/#generic-trait-bounds (Generic trait bounds).

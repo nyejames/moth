@@ -18,7 +18,7 @@ fn test_record(run_id: &str) -> ProfileHistoryRecord {
             case_name: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
-            args: vec!["foo.bst".to_string()],
+            args: vec!["foo.moth".to_string()],
             observation_wall_ms: 1234.5,
             sample_count: 500,
             sample_weight: 500.0,
@@ -31,7 +31,7 @@ fn test_record(run_id: &str) -> ProfileHistoryRecord {
                 value: 12000.0,
             }],
             hot_functions: vec![HistoryHotFunction {
-                name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+                name: "moth::compiler_frontend::ast::resolve_type".to_string(),
                 bucket_label: "AST".to_string(),
                 inclusive_samples: 150.0,
                 self_samples: 80.0,
@@ -60,7 +60,7 @@ fn test_record_b(run_id: &str) -> ProfileHistoryRecord {
             case_name: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
-            args: vec!["foo.bst".to_string()],
+            args: vec!["foo.moth".to_string()],
             observation_wall_ms: 1400.0,
             sample_count: 600,
             sample_weight: 600.0,
@@ -73,7 +73,7 @@ fn test_record_b(run_id: &str) -> ProfileHistoryRecord {
                 value: 13000.0,
             }],
             hot_functions: vec![HistoryHotFunction {
-                name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+                name: "moth::compiler_frontend::ast::resolve_type".to_string(),
                 bucket_label: "AST".to_string(),
                 inclusive_samples: 200.0,
                 self_samples: 100.0,
@@ -196,7 +196,7 @@ fn roundtrip_preserves_case_data() {
     assert_eq!(case.hot_functions.len(), 1);
     assert_eq!(
         case.hot_functions[0].name,
-        "beanstalk::compiler_frontend::ast::resolve_type"
+        "moth::compiler_frontend::ast::resolve_type"
     );
     assert_eq!(case.hot_functions[0].bucket_label, "AST");
     assert_eq!(case.hot_functions[0].inclusive_pct, 30.0);
@@ -262,12 +262,12 @@ fn case_with_multiple_args_roundtrips() {
     let path = temp_dir.path().join("profile-runs.jsonl");
 
     let mut record = test_record("2026-06-18T10-30-abc1234");
-    record.cases[0].args = vec!["foo.bst".to_string(), "--verbose".to_string()];
+    record.cases[0].args = vec!["foo.moth".to_string(), "--verbose".to_string()];
     append_profile_run(&path, &record).expect("append");
 
     let records = read_profile_runs(&path).expect("read");
     assert_eq!(records[0].cases[0].args.len(), 2);
-    assert_eq!(records[0].cases[0].args[0], "foo.bst");
+    assert_eq!(records[0].cases[0].args[0], "foo.moth");
     assert_eq!(records[0].cases[0].args[1], "--verbose");
 }
 

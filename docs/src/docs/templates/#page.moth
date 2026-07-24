@@ -1,0 +1,140 @@
+import @./template-basics {
+    content as template_basics,
+}
+
+import @./template-basics-basic {
+    content as template_basics_basic,
+}
+
+import @./template-directives {
+    content as template_directives,
+}
+
+import @./template-directives-basic {
+    content as template_directives_basic,
+}
+
+import @./template-slots {
+    content as template_slots,
+}
+
+import @./template-slots-basic {
+    content as template_slots_basic,
+}
+
+import @./child-wrappers {
+    content as child_wrappers,
+}
+
+import @./child-wrappers-basic {
+    content as child_wrappers_basic,
+}
+
+import @./template-control-flow {
+    content as template_control_flow,
+}
+
+import @./template-control-flow-basic {
+    content as template_control_flow_basic,
+}
+
+import @./markdown-formatting {
+    content as markdown_formatting,
+}
+
+import @./markdown-formatting-basic {
+    content as markdown_formatting_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Templates"
+page_description #= "Template strings, directives, slots, wrappers, control flow and Markdown in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Templates
+
+    # Templates
+
+    Templates are Moth's superpowered strings. They can stay tiny, or grow into a compile-time HTML and Markdown engine with slots, wrappers and control flow.
+
+    Square brackets look unusual for about five minutes. Then ordinary string formatting starts to feel underdressed.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):template-basics]
+        [$insert("title"):Template basics]
+        [$insert("advanced"):[template_basics]]
+
+        [template_basics_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):template-directives]
+        [$insert("title"):Template directives]
+        [$insert("advanced"):[template_directives]]
+
+        [template_directives_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):template-slots]
+        [$insert("title"):Template slots]
+        [$insert("advanced"):[template_slots]]
+
+        [template_slots_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):child-wrappers]
+        [$insert("title"):Child wrappers]
+        [$insert("advanced"):[child_wrappers]]
+
+        [child_wrappers_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):template-control-flow]
+        [$insert("title"):Template control flow]
+        [$insert("advanced"):[template_control_flow]]
+
+        [template_control_flow_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):markdown-formatting]
+        [$insert("title"):Markdown formatting]
+        [$insert("advanced"):[markdown_formatting]]
+
+        [markdown_formatting_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../collections/]
+        [$insert("previous_title"):Collections and maps]
+        [$insert("next_path"):../constants/]
+        [$insert("next_title"):Constants and compile-time behaviour]
+    ]
+]

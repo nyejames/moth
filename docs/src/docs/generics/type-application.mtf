@@ -1,0 +1,62 @@
+Concrete generic instances are created with `of` in type position.
+
+### Syntax
+
+[codeblock, $code("moth"):
+    number_box Box of Int = Box(42)
+    text_box Box of String = Box("hello")
+
+    Pair type A, B = |
+        first A,
+        second B,
+    |
+
+    item Pair of String, Int = Pair("count", 3)
+]
+
+### Exact contract
+
+- `of` applies concrete type arguments in type position.
+- Argument count must match the generic declaration.
+- Each argument must be a valid concrete type.
+- Different concrete argument lists produce different semantic types.
+- Constructors use ordinary constructor syntax.
+- Explicit generic free-function call type arguments are not supported.
+
+### Nested `of` boundary
+
+Nested inline `of` applications are rejected. Use a named concrete alias for any nested shape the current compiler rejects.
+
+[codeblock, $code("moth"):
+    -- Error
+    value Box of Pair of String, Int = Box(Pair("count", 3))
+]
+
+Work around the limit with an intermediate alias:
+
+[codeblock, $code("moth"):
+    StringIntPair as Pair of String, Int
+    value Box of StringIntPair = Box(Pair("count", 3))
+]
+
+The collection element exception allows one inline `of` application inside a collection element annotation, such as `{Box of String}`. Nested `of` applications inside a collection element are rejected for the same reason as nested `of` in any other type position: use a named concrete alias.
+
+### Concrete generic aliases
+
+A type alias may name a fully applied generic instance. The alias remains transparent.
+
+[codeblock, $code("moth"):
+    StringBox as Box of String
+
+    box StringBox = Box("docs")
+    raw Box of String = box
+]
+
+### Constructed forms are compiler-owned
+
+Public `Option of T`, `Result of T, E`, `Option.Some` and `Result.Ok` are not language syntax. Options, fallible carriers and collections are compiler-owned constructed forms with their own source syntax.
+
+### Related concepts
+
+- For generic declarations see @#generic-declarations (Generic declarations).
+- For type aliases see @../aliases/#type-aliases (Type aliases).

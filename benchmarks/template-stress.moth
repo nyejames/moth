@@ -1,0 +1,352 @@
+-- template-stress.moth
+-- Template system stress test:
+-- - Deeply nested template composition (10+ levels)
+-- - Heavy slot usage (positional, named, default, repeated replay)
+-- - Complex $children(..) wrapper chains
+-- - Multiple formatter directives ($md, $css, $html, $raw, $escape_html)
+-- - $fresh opt-out patterns
+-- - Large compile-time template folding
+-- - Runtime template construction in loops
+
+page_title #= "Template System Stress Test"
+base_color #= "hsl(280, 70%, 50%)"
+accent_a #= "hsl(200, 80%, 55%)"
+accent_b #= "hsl(40, 90%, 60%)"
+bg_dark #= "hsl(240, 20%, 10%)"
+text_light #= "hsl(0, 0%, 95%)"
+
+-- Level 10 deep nested templates
+level_10 #= [: L10 content ]
+level_9 #= [: <div class="l9">[level_10]</div> ]
+level_8 #= [: <div class="l8">[level_9]</div> ]
+level_7 #= [: <div class="l7">[level_8]</div> ]
+level_6 #= [: <div class="l6">[level_7]</div> ]
+level_5 #= [: <div class="l5">[level_6]</div> ]
+level_4 #= [: <div class="l4">[level_5]</div> ]
+level_3 #= [: <div class="l3">[level_4]</div> ]
+level_2 #= [: <div class="l2">[level_3]</div> ]
+level_1 #= [: <div class="l1">[level_2]</div> ]
+
+-- Template with multiple named slots
+multi_slot #= [:
+    <header data-slot="header">[$slot("header")]</header>
+    <nav data-slot="nav">[$slot("nav")]</nav>
+    <main data-slot="main">[$slot("main")]</main>
+    <aside data-slot="aside">[$slot("aside")]</aside>
+    <footer data-slot="footer">[$slot("footer")]</footer>
+    <div data-slot="default">[$slot]</div>
+]
+
+-- Positional slot templates
+pos_slot #= [:
+    <span data-pos="1">[$slot(1)]</span>
+    <span data-pos="2">[$slot(2)]</span>
+    <span data-pos="3">[$slot(3)]</span>
+    <div data-default>[$slot]</div>
+]
+
+-- Named insert helpers
+header_insert #= [$insert("header"):
+    <h1>Template Stress Test Header</h1>
+]
+nav_insert #= [$insert("nav"):
+    <ul><li>Nav item 1</li><li>Nav item 2</li><li>Nav item 3</li></ul>
+]
+main_insert #= [$insert("main"):
+    <p>Main content area with substantial text for template folding tests.</p>
+]
+aside_insert #= [$insert("aside"):
+    <div class="sidebar">Sidebar content here</div>
+]
+footer_insert #= [$insert("footer"):
+    <p>Footer text with copyright info</p>
+]
+
+-- $children wrapper chains
+wrapper_1 #= [$children([:<div class="w1">[$slot]</div>]):
+    <section class="section-1">[$slot]</section>
+]
+wrapper_2 #= [$children([:<span class="w2">[$slot]</span>]):
+    <div class="section-2">[$slot]</div>
+]
+wrapper_3 #= [$children([:<em class="w3">[$slot]</em>]):
+    <article class="section-3">[$slot]</article>
+]
+
+-- Nested $children wrappers
+nested_wrapper #= [$children([:<div class="outer-wrap">[$slot]</div>]):
+    [$children([:<div class="inner-wrap">[$slot]</div>]):
+        [$children([:<span class="core-wrap">[$slot]</span>]):
+            <div class="deepest">[$slot]</div>
+        ]
+    ]
+]
+
+-- Formatter directive templates
+markdown_block #= [$md:
+    ## Markdown Section
+    
+    This is **bold** and *italic* text.
+    
+    - List item 1
+    - List item 2
+    - List item 3
+    
+    @example.com (Link text here)
+    
+    ```
+    code block content
+    ```
+]
+
+css_block #= [$css:
+    .stress-container {
+        background: [bg_dark];
+        color: [text_light];
+        padding: 2rem;
+        border-radius: 12px;
+    }
+    
+    .stress-header {
+        font-size: 2rem;
+        font-weight: 700;
+        color: [base_color];
+    }
+    
+    .stress-accent {
+        color: [accent_a];
+    }
+]
+
+html_block #= [$html:
+    <div class="raw-html">
+        <custom-element data-test="value">
+            Nested <b>HTML</b> content
+        </custom-element>
+    </div>
+]
+
+raw_block #= [$raw:
+    This    preserves    all    whitespace
+    and     irregular    spacing
+]
+
+escape_block #= [$escape_html:
+    <script>alert("This should be escaped")</script>
+    <div onmouseover="alert('xss')">Escaped div</div>
+]
+
+-- $fresh opt-out patterns
+fresh_parent #= [$children([:<li class="wrapped">[$slot]</li>]):
+    <ul class="fresh-test">[$slot]</ul>
+]
+
+fresh_child_normal #= [: Normal wrapped item ]
+fresh_child_fresh #= [$fresh: [: Fresh unwrapped item ]]
+
+-- Repeated slot replay
+replay_template #= [:
+    <div>First: [$slot("replay")]</div>
+    <div>Second: [$slot("replay")]</div>
+    <div>Third: [$slot("replay")]</div>
+    <div>Fourth: [$slot("replay")]</div>
+    <div>Fifth: [$slot("replay")]</div>
+]
+
+replay_content #= [$insert("replay"): Replayed content]
+
+-- Large compile-time template
+large_template #= [:
+    <article class="large">
+        <header>
+            <h1>[page_title]</h1>
+            <p class="subtitle">Subtitle text here</p>
+        </header>
+        <section class="content">
+            <p>Paragraph 1 with some content.</p>
+            <p>Paragraph 2 with more content.</p>
+            <p>Paragraph 3 continues the text.</p>
+            <ul>
+                <li>List item alpha</li>
+                <li>List item beta</li>
+                <li>List item gamma</li>
+                <li>List item delta</li>
+            </ul>
+            <blockquote>
+                A quote that spans multiple words and provides emphasis.
+            </blockquote>
+            <p>Another paragraph with <strong>bold</strong> and <em>italic</em>.</p>
+        </section>
+        <aside>
+            <h3>Related</h3>
+            <ul>
+                <li>Link 1</li>
+                <li>Link 2</li>
+                <li>Link 3</li>
+            </ul>
+        </aside>
+        <footer>
+            <p>Footer content with additional information.</p>
+        </footer>
+    </article>
+]
+
+-- Runtime template construction
+TemplateConfig = |
+    title String,
+    sections Int,
+    depth Int,
+|
+
+build_nested |depth Int| -> String:
+    if depth is 0:
+        return [: <span class="leaf">leaf</span> ]
+    ;
+    inner = build_nested(depth - 1)
+    return [: <div class="level-[depth]">[inner]</div> ]
+;
+
+build_repeated_slots |count Int| -> String:
+    result ~= [: <div class="repeated">]
+    
+    loop 0 to count |i|:
+        result = [: [result]<span class="slot-[i]">item [i]</span>]
+    ;
+    
+    result = [: [result]</div> ]
+    return result
+;
+
+build_fresh_mix || -> String:
+    result ~= [: <div class="fresh-mix">]
+    
+    loop 0 to 8 |i|:
+        if i % 3 is 0:
+            result = [: [result][: wrapped [i]]]
+        ;
+        if i % 3 is 1:
+            result = [: [result][$fresh: [: fresh [i]]]]
+        ;
+        if i % 3 is 2:
+            result = [: [result][: mixed [i]]]
+        ;
+    ;
+    
+    result = [: [result]</div> ]
+    return result
+;
+
+build_formatter_chain || -> String:
+    return [: 
+        [markdown_block]
+        [css_block]
+        [html_block]
+        [raw_block]
+        [escape_block]
+    ]
+;
+
+build_multi_insert || -> String:
+    return [multi_slot, header_insert, nav_insert, main_insert, aside_insert, footer_insert:
+        Default slot content here
+    ]
+;
+
+build_positional_test || -> String:
+    return [pos_slot, "first", "second", "third":
+        default content
+    ]
+;
+
+-- Template with many interpolated values
+interp_a #= "alpha"
+interp_b #= "beta"
+interp_c #= "gamma"
+interp_d #= "delta"
+interp_e #= "epsilon"
+interp_z #= "zeta"
+
+heavy_interpolation #= [:
+    <div>
+        <span>[interp_a]</span>
+        <span>[interp_b]</span>
+        <span>[interp_c]</span>
+        <span>[interp_d]</span>
+        <span>[interp_e]</span>
+        <span>[interp_z]</span>
+        <p>Combined: [interp_a]-[interp_b]-[interp_c]-[interp_d]-[interp_e]-[interp_z]</p>
+        <p>Repeated: [interp_a] and [interp_a] and [interp_a]</p>
+    </div>
+]
+
+-- Shell template for page assembly
+shell #= [:
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>[$slot("title")]</title>
+    <style>[$slot("style")]</style>
+</head>
+<body>
+    [$slot]
+</body>
+</html>
+]
+
+shell_style #= [$insert("style"):
+    body {
+        background: [bg_dark];
+        color: [text_light];
+        font-family: system-ui, sans-serif;
+    }
+]
+
+-- Stress test entry
+run_tests ||:
+    io.line("Template stress test starting")
+    
+    -- Deep nesting
+    nested_result = build_nested(10)
+    io.line([: [nested_result]])
+    
+    -- Repeated slots
+    repeated_result = build_repeated_slots(20)
+    io.line([: [repeated_result]])
+    
+    -- Fresh mixing
+    fresh_result = build_fresh_mix()
+    io.line([: [fresh_result]])
+    
+    -- Formatter chains
+    formatter_result = build_formatter_chain()
+    io.line([: [formatter_result]])
+    
+    -- Multi insert
+    multi_result = build_multi_insert()
+    io.line([: [multi_result]])
+    
+    -- Positional
+    pos_result = build_positional_test()
+    io.line([: [pos_result]])
+;
+
+-- Final output
+[shell, shell_style:
+    [$insert("title"):
+        [page_title]
+    ]
+    
+    [level_1]
+    [large_template]
+    [heavy_interpolation]
+    [replay_template, replay_content]
+    [fresh_parent:
+        [fresh_child_normal]
+        [fresh_child_fresh]
+        [fresh_child_normal]
+    ]
+    [nested_wrapper:
+        [: nested content ]
+    ]
+]

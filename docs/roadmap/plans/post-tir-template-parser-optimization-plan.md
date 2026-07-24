@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Own profiling-led performance work across Beandown source preparation, template text storage,
+Own profiling-led performance work across Moth Templates source preparation, template text storage,
 template parsing, formatting, fold scheduling, incremental reuse and backend string assembly after
 the final TIR architecture. This plan may optimise each established owner, but it must not create a
 second template representation, preparation pass, fold entry or AST-to-HIR boundary.
@@ -16,7 +16,7 @@ CURRENT_SLICE: Phase 0 - capture fresh profiles and attribute one actionable own
 FINAL_TIR_REVIEW_COMMIT: 1298da468
 LAST_GOOD_COMMIT: none until the first profiling or implementation slice is accepted
 BRANCH: main
-IMPLEMENTATION_SCOPE: Beandown preparation, template parser/formatter, TIR fold scheduling, cache prerequisites and backend string assembly
+IMPLEMENTATION_SCOPE: Moth Templates preparation, template parser/formatter, TIR fold scheduling, cache prerequisites and backend string assembly
 ACTIVATION_GATE: representative profiling or counters must identify a material bottleneck in one named owner
 ```
 
@@ -58,9 +58,9 @@ are written and reviewed.
 
 ## Current owner map
 
-- Beandown and raw Markdown preparation:
+- Moth Templates and raw Markdown preparation:
   - `src/compiler_frontend/pipeline.rs`
-  - `src/compiler_frontend/headers/beandown_prepare.rs`
+  - `src/compiler_frontend/headers/mtf_prepare.rs`
   - `src/compiler_frontend/plain_markdown.rs`
   - `src/compiler_frontend/headers/plain_markdown_prepare.rs`
 - Template construction and body parsing:
@@ -107,7 +107,7 @@ every semantic input relevant to that result. Depending on the owner, this inclu
 
 - stable project, package, module and source identity
 - source content digest and relevant source spans or token ranges
-- source kind (`.bst`, Beandown or raw Markdown) and parser grammar/version
+- source kind (`.bst`, Moth Templates or raw Markdown) and parser grammar/version
 - formatter identity/version, directive registry fingerprint, whitespace policy and formatting
   configuration
 - exact template root, phase and full view context for AST-local fold reuse
@@ -137,7 +137,7 @@ preparation remains uncached unless binding identity is explicit and complete.
 - Use `just bench-check` for non-recording evidence and Samply or existing detailed counters for
   attribution.
 - Cover template stress, wrapper/slot churn, control-flow templates, collection templates, docs and
-  Beandown preparation.
+  Moth Templates preparation.
 - Separate source preparation, parsing, formatting, preparation/folding, HIR append and backend
   assembly time.
 - Record allocation, clone or byte-volume evidence only where the current instrumentation can
@@ -185,7 +185,7 @@ exist.
 - A formatter-output cache must key formatter/version, exact input text/anchors, whitespace policy,
   directives/configuration and all semantic dependencies.
 - Preserve one formatter contract and one TIR formatter-view owner.
-- Keep plain Markdown's non-Beanstalk path distinct from Beandown `$md` formatting.
+- Keep plain Markdown's non-Moth path distinct from Moth Templates `$md` formatting.
 
 Backtrack an algorithm rewrite or cache whose hit rate, memory use or diagnostic complexity does not
 beat the current implementation on representative profiles.
@@ -229,7 +229,7 @@ Backtrack if scheduling overhead, synchronization or deterministic replay remove
 Every implementation slice requires:
 
 - focused unit tests for hidden key/invalidation/identity facts
-- integration cases for user-visible template, Beandown, docs and diagnostic behavior
+- integration cases for user-visible template, Moth Templates, docs and diagnostic behavior
 - backend-specific artifact or runtime assertions when output assembly changes
 - `cargo fmt --all` and the appropriate focused checks during iteration
 - `just validate` for every accepted code-bearing checkpoint

@@ -1,9 +1,9 @@
 //! Tokenization, header parsing, dependency sorting, and AST construction for Stage 0 project
 //! config files.
 //!
-//! WHAT: loads `config.bst` and any reachable builder/core source-backed package files through the normal
+//! WHAT: loads `config.moth` and any reachable builder/core source-backed package files through the normal
 //! frontend pipeline up to AST, then hands the folded AST off to config validation.
-//! WHY: config uses normal Beanstalk syntax, so reusing tokenizer → headers → dependency sort →
+//! WHY: config uses normal Moth syntax, so reusing tokenizer → headers → dependency sort →
 //! AST keeps Stage 0 aligned with the rest of the language and lets config values benefit from
 //! constant folding and type checking, including imported package constants.
 
@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 pub(super) struct ParsedConfigFile {
     pub(super) ast: Ast,
     pub(super) errors: Vec<CompilerDiagnostic>,
-    /// The interned source identity of the authored `config.bst` file.
+    /// The interned source identity of the authored `config.moth` file.
     ///
     /// WHY: validation must distinguish declarations authored in config from imported support
     /// declarations so only authored declarations are treated as config keys. This is the same
@@ -58,7 +58,7 @@ pub(super) struct ParsedConfigFile {
 //  Config Parsing Entry
 // -------------------------
 
-/// Parse `config.bst` through tokenizer → headers → dependency sort → AST.
+/// Parse `config.moth` through tokenizer → headers → dependency sort → AST.
 ///
 /// WHY: value validation happens later, but the pipeline must surface all structural errors before
 /// Stage 0 tries to apply any settings.
@@ -182,7 +182,7 @@ pub(super) fn parse_config_file(
                 CompilerError::file_error(
                     &non_utf8.path,
                     format!(
-                        "Config path {:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths.",
+                        "Config path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
                         non_utf8.path
                     ),
                     string_table,
@@ -219,7 +219,7 @@ pub(super) fn parse_config_file(
                                 CompilerError::file_error(
                                     &non_utf8.path,
                                     format!(
-                                        "Config scope path {:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths.",
+                                        "Config scope path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
                                         non_utf8.path
                                     ),
                                     string_table,
@@ -417,7 +417,7 @@ pub(super) fn parse_config_file(
 ///
 /// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
 ///      observation in the active collection scope and emits the stable
-///      `BST_BENCH timing` line when the output mode permits.
+///      `MOTH_BENCH timing` line when the output mode permits.
 /// WHY:  config parsing uses dotted `config.parse.*` metric names. The start
 ///      token is zero-sized when `timers` is off, so regular builds do not read
 ///      clocks for instrumentation-only measurements.
@@ -431,7 +431,7 @@ fn log_config_stage_timing(metric: &str, start: crate::timing::PipelineTimingSta
 
 /// Build the set of source files that config parsing must compile.
 ///
-/// WHAT: starts from the authored `config.bst` and BFS-follows imports into builder/core
+/// WHAT: starts from the authored `config.moth` and BFS-follows imports into builder/core
 /// source-backed package files only. External package imports are tracked but do not add files.
 /// WHY: config expressions may reference imported package constants, so those files must be
 /// parsed and folded, but project-local files and relative imports are rejected by policy.
@@ -628,7 +628,7 @@ fn collect_authored_config_key_name_locations(
 //  Structural Validation
 // -------------------------
 
-/// Reject unsupported surfaces in the authored `config.bst` file after header parsing has
+/// Reject unsupported surfaces in the authored `config.moth` file after header parsing has
 /// normalized declaration shapes.
 ///
 /// WHY: Stage 0 config uses frontend parsing for expression semantics, but config is not a normal

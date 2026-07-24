@@ -362,8 +362,8 @@ pub enum ImportDiagnosticKind {
     ExplicitSourceExtension,
     UnsupportedSourceFileKind,
     InvalidSourceFileEntry,
-    InvalidBeandownApiScopeItem,
-    DuplicateBeandownInputPath,
+    InvalidMothTemplateApiScopeItem,
+    DuplicateMothTemplateInputPath,
     UnsupportedExternalExtension,
     InvalidExternalModule,
 }
@@ -392,8 +392,8 @@ impl ImportDiagnosticKind {
             Self::ExplicitSourceExtension,
             Self::UnsupportedSourceFileKind,
             Self::InvalidSourceFileEntry,
-            Self::InvalidBeandownApiScopeItem,
-            Self::DuplicateBeandownInputPath,
+            Self::InvalidMothTemplateApiScopeItem,
+            Self::DuplicateMothTemplateInputPath,
             Self::UnsupportedExternalExtension,
             Self::InvalidExternalModule,
         ]

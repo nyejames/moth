@@ -1,0 +1,16 @@
+Moth uses `Int` for whole numbers and `Float` for decimal numbers.
+
+[codeblock, $code("moth"):
+    lives Int = 3
+    progress Float = 0.75
+]
+
+An `Int` can be used where a `Float` is expected:
+
+[codeblock, $code("moth"):
+    lives Int = 3
+    display_value Float = lives
+]
+
+A `Float` never silently becomes an `Int`. That conversion can lose
+information, so it needs an explicit cast.

@@ -367,7 +367,7 @@ fn test_profile_record(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord 
             case_name: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
-            args: vec!["foo.bst".to_string()],
+            args: vec!["foo.moth".to_string()],
             observation_wall_ms: 1234.5,
             sample_count: 500,
             sample_weight: 500.0,
@@ -380,7 +380,7 @@ fn test_profile_record(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord 
                 value: 12000.0,
             }],
             hot_functions: vec![HistoryHotFunction {
-                name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+                name: "moth::compiler_frontend::ast::resolve_type".to_string(),
                 bucket_label: "AST".to_string(),
                 inclusive_samples: 400.0,
                 self_samples: 200.0,
@@ -408,7 +408,7 @@ fn test_profile_record_shifted(run_id: &str, system_uuid: &str) -> ProfileHistor
             case_name: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
-            args: vec!["foo.bst".to_string()],
+            args: vec!["foo.moth".to_string()],
             observation_wall_ms: 1500.0,
             sample_count: 600,
             sample_weight: 600.0,
@@ -421,7 +421,7 @@ fn test_profile_record_shifted(run_id: &str, system_uuid: &str) -> ProfileHistor
                 value: 13000.0,
             }],
             hot_functions: vec![HistoryHotFunction {
-                name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+                name: "moth::compiler_frontend::ast::resolve_type".to_string(),
                 bucket_label: "AST".to_string(),
                 inclusive_samples: 500.0,
                 self_samples: 250.0,
@@ -488,7 +488,7 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
     let drift_cases = vec![crate::profile::drift::DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
             name: "ast_ms".to_string(),
             value: 900.0,
@@ -498,7 +498,7 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
             value: 13000.0,
         }],
         hot_functions: vec![crate::profile::drift::DriftHotFunction {
-            name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+            name: "moth::compiler_frontend::ast::resolve_type".to_string(),
             bucket_label: "AST".to_string(),
             inclusive_samples: 500.0,
             inclusive_pct: 41.7,

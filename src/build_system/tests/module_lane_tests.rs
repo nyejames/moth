@@ -94,7 +94,7 @@ fn remap_string_ids_routes_hir_through_executable_and_leaves_link_facts_untouche
         }],
     };
 
-    let entry_point = PathBuf::from("src/#page.bst");
+    let entry_point = PathBuf::from("src/#page.moth");
     let mut module = Module {
         executable: ModuleExecutable {
             hir: hir_module,
@@ -189,7 +189,7 @@ fn legacy_handoff_discards_validated_generic_template_store_before_remap() {
             module_external_imports: vec![],
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::from("src/#page.bst"),
+            entry_point: PathBuf::from("src/#page.moth"),
             warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: ModuleRootActivity::default(),

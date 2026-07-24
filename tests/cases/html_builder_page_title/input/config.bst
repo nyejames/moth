@@ -1,2 +1,0 @@
-html_title_prefix #= "Docs | "
-html_title_postfix #= " | Beanstalk"

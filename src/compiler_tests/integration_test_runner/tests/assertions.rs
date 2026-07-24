@@ -56,11 +56,11 @@ fn test_location_at(
 
 fn diagnostic_messages(codes: &[&str]) -> CompilerMessages {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let diagnostics = codes
         .iter()
         .map(|code| match *code {
-            "BST-RULE-0044" => CompilerDiagnostic::invalid_assignment_target(
+            "MOTH-RULE-0044" => CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::ImmutableBinding,
                 None,
                 None,
@@ -69,7 +69,7 @@ fn diagnostic_messages(codes: &[&str]) -> CompilerMessages {
                 None,
                 test_location(source_path.clone()),
             ),
-            "BST-SYNTAX-0003" => {
+            "MOTH-SYNTAX-0003" => {
                 CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path.clone()))
             }
             other => panic!("test diagnostic code is not constructed: {other}"),
@@ -100,7 +100,7 @@ fn diagnostic_expectation(
 #[test]
 fn failure_message_contains_uses_structured_render_output() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let variable_name = string_table.intern("value");
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
@@ -114,7 +114,7 @@ fn failure_message_contains_uses_structured_render_output() {
     let messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
-        diagnostic_codes: vec!["BST-RULE-0044".to_string()],
+        diagnostic_codes: vec!["MOTH-RULE-0044".to_string()],
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
@@ -129,7 +129,7 @@ fn failure_message_contains_uses_structured_render_output() {
 #[test]
 fn failure_message_contains_includes_rendered_label_text() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let label_text = string_table.intern("secondary context lives here");
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
@@ -147,7 +147,7 @@ fn failure_message_contains_includes_rendered_label_text() {
     let messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
-        diagnostic_codes: vec!["BST-RULE-0044".to_string()],
+        diagnostic_codes: vec!["MOTH-RULE-0044".to_string()],
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
@@ -171,9 +171,9 @@ fn failure_message_contains_stays_on_typed_render_output() {
 
 #[test]
 fn exact_diagnostic_matching_ignores_order() {
-    let messages = diagnostic_messages(&["BST-SYNTAX-0003", "BST-RULE-0044"]);
+    let messages = diagnostic_messages(&["MOTH-SYNTAX-0003", "MOTH-RULE-0044"]);
     let expectation = diagnostic_expectation(
-        &["BST-RULE-0044", "BST-SYNTAX-0003"],
+        &["MOTH-RULE-0044", "MOTH-SYNTAX-0003"],
         DiagnosticMatchMode::Exact,
         None,
     );
@@ -185,8 +185,8 @@ fn exact_diagnostic_matching_ignores_order() {
 
 #[test]
 fn exact_diagnostic_matching_reports_unexpected_extra() {
-    let messages = diagnostic_messages(&["BST-RULE-0044", "BST-SYNTAX-0003"]);
-    let expectation = diagnostic_expectation(&["BST-RULE-0044"], DiagnosticMatchMode::Exact, None);
+    let messages = diagnostic_messages(&["MOTH-RULE-0044", "MOTH-SYNTAX-0003"]);
+    let expectation = diagnostic_expectation(&["MOTH-RULE-0044"], DiagnosticMatchMode::Exact, None);
 
     let result = validate_failure_result(messages, &expectation, Path::new("."));
     let reason = result
@@ -194,7 +194,7 @@ fn exact_diagnostic_matching_reports_unexpected_extra() {
         .expect("unexpected diagnostic should fail matching");
 
     assert!(
-        reason.contains("Unexpected codes: BST-SYNTAX-0003"),
+        reason.contains("Unexpected codes: MOTH-SYNTAX-0003"),
         "{reason}"
     );
     assert!(!reason.contains("Missing codes"), "{reason}");
@@ -202,8 +202,8 @@ fn exact_diagnostic_matching_reports_unexpected_extra() {
 
 #[test]
 fn exact_diagnostic_matching_reports_duplicate_count_mismatch() {
-    let messages = diagnostic_messages(&["BST-RULE-0044", "BST-RULE-0044"]);
-    let expectation = diagnostic_expectation(&["BST-RULE-0044"], DiagnosticMatchMode::Exact, None);
+    let messages = diagnostic_messages(&["MOTH-RULE-0044", "MOTH-RULE-0044"]);
+    let expectation = diagnostic_expectation(&["MOTH-RULE-0044"], DiagnosticMatchMode::Exact, None);
 
     let result = validate_failure_result(messages, &expectation, Path::new("."));
     let reason = result
@@ -217,17 +217,17 @@ fn exact_diagnostic_matching_reports_duplicate_count_mismatch() {
 
 #[test]
 fn exact_diagnostic_matching_keeps_missing_and_unexpected_categories_distinct() {
-    let messages = diagnostic_messages(&["BST-SYNTAX-0003"]);
-    let expectation = diagnostic_expectation(&["BST-RULE-0044"], DiagnosticMatchMode::Exact, None);
+    let messages = diagnostic_messages(&["MOTH-SYNTAX-0003"]);
+    let expectation = diagnostic_expectation(&["MOTH-RULE-0044"], DiagnosticMatchMode::Exact, None);
 
     let result = validate_failure_result(messages, &expectation, Path::new("."));
     let reason = result
         .failure_reason
         .expect("different diagnostic should fail matching");
 
-    assert!(reason.contains("Missing codes: BST-RULE-0044"), "{reason}");
+    assert!(reason.contains("Missing codes: MOTH-RULE-0044"), "{reason}");
     assert!(
-        reason.contains("Unexpected codes: BST-SYNTAX-0003"),
+        reason.contains("Unexpected codes: MOTH-SYNTAX-0003"),
         "{reason}"
     );
     assert!(!reason.contains("Count-mismatched codes"), "{reason}");
@@ -235,9 +235,9 @@ fn exact_diagnostic_matching_keeps_missing_and_unexpected_categories_distinct() 
 
 #[test]
 fn justified_contains_matching_accepts_extra_diagnostics() {
-    let messages = diagnostic_messages(&["BST-RULE-0044", "BST-SYNTAX-0003"]);
+    let messages = diagnostic_messages(&["MOTH-RULE-0044", "MOTH-SYNTAX-0003"]);
     let expectation = diagnostic_expectation(
-        &["BST-RULE-0044"],
+        &["MOTH-RULE-0044"],
         DiagnosticMatchMode::Contains,
         Some("independent parser recovery can emit a second diagnostic"),
     );
@@ -249,9 +249,9 @@ fn justified_contains_matching_accepts_extra_diagnostics() {
 
 #[test]
 fn justified_contains_matching_accepts_extra_expected_code_occurrences() {
-    let messages = diagnostic_messages(&["BST-RULE-0044", "BST-RULE-0044"]);
+    let messages = diagnostic_messages(&["MOTH-RULE-0044", "MOTH-RULE-0044"]);
     let expectation = diagnostic_expectation(
-        &["BST-RULE-0044"],
+        &["MOTH-RULE-0044"],
         DiagnosticMatchMode::Contains,
         Some("independent recovery may repeat this diagnostic"),
     );
@@ -263,9 +263,9 @@ fn justified_contains_matching_accepts_extra_expected_code_occurrences() {
 
 #[test]
 fn contains_matching_requires_every_expected_occurrence() {
-    let messages = diagnostic_messages(&["BST-RULE-0044"]);
+    let messages = diagnostic_messages(&["MOTH-RULE-0044"]);
     let expectation = diagnostic_expectation(
-        &["BST-RULE-0044", "BST-RULE-0044"],
+        &["MOTH-RULE-0044", "MOTH-RULE-0044"],
         DiagnosticMatchMode::Contains,
         Some("two independent sites must report the same diagnostic"),
     );
@@ -283,11 +283,11 @@ fn contains_matching_requires_every_expected_occurrence() {
 fn structured_diagnostic_messages(fixture_root: &Path) -> CompilerMessages {
     let mut string_table = StringTable::new();
     let primary_path = InternedPath::from_single_str(
-        &fixture_root.join("input/main.bst").to_string_lossy(),
+        &fixture_root.join("input/main.moth").to_string_lossy(),
         &mut string_table,
     );
     let secondary_path = InternedPath::from_single_str(
-        &fixture_root.join("input/helper.bst").to_string_lossy(),
+        &fixture_root.join("input/helper.moth").to_string_lossy(),
         &mut string_table,
     );
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
@@ -307,7 +307,7 @@ fn structured_diagnostic_expectation(assertion: DiagnosticAssertion) -> FailureE
     FailureExpectation {
         warnings: WarningExpectation::Ignore,
         message_contains: Vec::new(),
-        diagnostic_codes: vec!["BST-RULE-0044".to_owned()],
+        diagnostic_codes: vec!["MOTH-RULE-0044".to_owned()],
         diagnostic_assertions: vec![assertion],
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
@@ -319,21 +319,21 @@ fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
     let fixture_root = temp_dir("structured_diagnostic_paths");
     let input_root = fixture_root.join("input");
     fs::create_dir_all(&input_root).expect("should create temporary fixture input directory");
-    fs::write(input_root.join("main.bst"), "main").expect("should write primary source");
-    fs::write(input_root.join("helper.bst"), "helper").expect("should write secondary source");
+    fs::write(input_root.join("main.moth"), "main").expect("should write primary source");
+    fs::write(input_root.join("helper.moth"), "helper").expect("should write secondary source");
     let fixture_root = fs::canonicalize(&fixture_root).expect("fixture root should canonicalize");
 
     let expectation = structured_diagnostic_expectation(DiagnosticAssertion {
-        code: "BST-RULE-0044".to_owned(),
+        code: "MOTH-RULE-0044".to_owned(),
         occurrence: 1,
         reason: Some("invalid_assignment_target.immutable_binding".to_owned()),
-        path: Some("input/main.bst".to_owned()),
+        path: Some("input/main.moth".to_owned()),
         line: Some(3),
         column: Some(2),
         count: Some(1),
         secondary_labels: vec![SecondaryLabelAssertion {
             occurrence: 1,
-            path: Some("input/helper.bst".to_owned()),
+            path: Some("input/helper.moth".to_owned()),
             line: Some(4),
             column: Some(5),
         }],
@@ -372,26 +372,26 @@ fn structured_diagnostic_assertions_resolve_relative_scopes_under_input_root() {
     let input_root = fixture_root.join("input");
     fs::create_dir_all(input_root.join("nested"))
         .expect("should create temporary fixture input directory");
-    fs::write(input_root.join("#page.bst"), "page").expect("should write source");
-    fs::write(input_root.join("nested/helper.bst"), "helper").expect("should write nested source");
+    fs::write(input_root.join("#page.moth"), "page").expect("should write source");
+    fs::write(input_root.join("nested/helper.moth"), "helper").expect("should write nested source");
     let fixture_root = fs::canonicalize(&fixture_root).expect("fixture root should canonicalize");
 
     for (scope, expected_path) in [
-        ("#page.bst", "input/#page.bst"),
-        ("input/#page.bst", "input/#page.bst"),
-        ("nested/helper.bst", "input/nested/helper.bst"),
-        ("input/nested/helper.bst", "input/nested/helper.bst"),
+        ("#page.moth", "input/#page.moth"),
+        ("input/#page.moth", "input/#page.moth"),
+        ("nested/helper.moth", "input/nested/helper.moth"),
+        ("input/nested/helper.moth", "input/nested/helper.moth"),
         (
-            "nested/helper.bst/declaration.header",
-            "input/nested/helper.bst",
+            "nested/helper.moth/declaration.header",
+            "input/nested/helper.moth",
         ),
         (
-            "input/nested/helper.bst/declaration.header",
-            "input/nested/helper.bst",
+            "input/nested/helper.moth/declaration.header",
+            "input/nested/helper.moth",
         ),
     ] {
         let expectation = structured_diagnostic_expectation(DiagnosticAssertion {
-            code: "BST-RULE-0044".to_owned(),
+            code: "MOTH-RULE-0044".to_owned(),
             occurrence: 1,
             reason: Some("invalid_assignment_target.immutable_binding".to_owned()),
             path: Some(expected_path.to_owned()),
@@ -421,16 +421,16 @@ fn structured_diagnostic_assertions_resolve_relative_scopes_under_input_root() {
 fn structured_diagnostic_mismatches_report_code_occurrence_field_expected_and_actual() {
     let fixture_root = std::env::current_dir().expect("test should have a current directory");
     let expectation = structured_diagnostic_expectation(DiagnosticAssertion {
-        code: "BST-RULE-0044".to_owned(),
+        code: "MOTH-RULE-0044".to_owned(),
         occurrence: 1,
         reason: Some("invalid_assignment_target.temporary_not_assignable".to_owned()),
-        path: Some("wrong.bst".to_owned()),
+        path: Some("wrong.moth".to_owned()),
         line: Some(8),
         column: Some(9),
         count: Some(2),
         secondary_labels: vec![SecondaryLabelAssertion {
             occurrence: 1,
-            path: Some("wrong-helper.bst".to_owned()),
+            path: Some("wrong-helper.moth".to_owned()),
             line: Some(10),
             column: Some(11),
         }],
@@ -453,17 +453,17 @@ fn structured_diagnostic_mismatches_report_code_occurrence_field_expected_and_ac
         "{reason}"
     );
     assert!(
-        reason.contains("code 'BST-RULE-0044' occurrence 1"),
+        reason.contains("code 'MOTH-RULE-0044' occurrence 1"),
         "{reason}"
     );
-    assert!(reason.contains("expected 'wrong.bst'"), "{reason}");
-    assert!(reason.contains("actual 'input/main.bst'"), "{reason}");
+    assert!(reason.contains("expected 'wrong.moth'"), "{reason}");
+    assert!(reason.contains("actual 'input/main.moth'"), "{reason}");
 }
 
 #[test]
 fn structured_secondary_label_matching_ignores_primary_labels_and_reports_missing_occurrences() {
     let expectation = structured_diagnostic_expectation(DiagnosticAssertion {
-        code: "BST-RULE-0044".to_owned(),
+        code: "MOTH-RULE-0044".to_owned(),
         occurrence: 1,
         reason: None,
         path: None,
@@ -472,7 +472,7 @@ fn structured_secondary_label_matching_ignores_primary_labels_and_reports_missin
         count: None,
         secondary_labels: vec![SecondaryLabelAssertion {
             occurrence: 2,
-            path: Some("helper.bst".to_owned()),
+            path: Some("helper.moth".to_owned()),
             line: Some(4),
             column: None,
         }],
@@ -508,8 +508,10 @@ fn warning_build_result(codes: &[&str]) -> BuildResult {
     let warnings = codes
         .iter()
         .map(|code| match *code {
-            "BST-RULE-0022" => CompilerDiagnostic::unreachable_match_arm(SourceLocation::default()),
-            "BST-IMPORT-0003" => CompilerDiagnostic::import_alias_case_mismatch(
+            "MOTH-RULE-0022" => {
+                CompilerDiagnostic::unreachable_match_arm(SourceLocation::default())
+            }
+            "MOTH-IMPORT-0003" => CompilerDiagnostic::import_alias_case_mismatch(
                 alias,
                 symbol,
                 SourceLocation::default(),
@@ -525,7 +527,7 @@ fn warning_build_result(codes: &[&str]) -> BuildResult {
 #[test]
 fn exact_warning_codes_match_success_warnings_independent_of_order() {
     let expectation = SuccessExpectation {
-        warnings: exact_warning_expectation(&["BST-IMPORT-0003", "BST-RULE-0022"]),
+        warnings: exact_warning_expectation(&["MOTH-IMPORT-0003", "MOTH-RULE-0022"]),
         success_contract: None,
         artifact_assertions: Vec::new(),
         golden: GoldenExpectation::default(),
@@ -535,7 +537,7 @@ fn exact_warning_codes_match_success_warnings_independent_of_order() {
     let case = success_test_case(BackendId::Html, expectation.clone());
     let result = validate_success_result(
         &case,
-        warning_build_result(&["BST-RULE-0022", "BST-IMPORT-0003"]),
+        warning_build_result(&["MOTH-RULE-0022", "MOTH-IMPORT-0003"]),
         &expectation,
     );
 
@@ -545,7 +547,7 @@ fn exact_warning_codes_match_success_warnings_independent_of_order() {
 #[test]
 fn exact_warning_codes_report_missing_and_unexpected_codes() {
     let expectation = SuccessExpectation {
-        warnings: exact_warning_expectation(&["BST-RULE-0022"]),
+        warnings: exact_warning_expectation(&["MOTH-RULE-0022"]),
         success_contract: None,
         artifact_assertions: Vec::new(),
         golden: GoldenExpectation::default(),
@@ -555,7 +557,7 @@ fn exact_warning_codes_report_missing_and_unexpected_codes() {
     let case = success_test_case(BackendId::Html, expectation.clone());
     let result = validate_success_result(
         &case,
-        warning_build_result(&["BST-IMPORT-0003"]),
+        warning_build_result(&["MOTH-IMPORT-0003"]),
         &expectation,
     );
     let reason = result
@@ -573,7 +575,7 @@ fn exact_warning_codes_report_missing_and_unexpected_codes() {
 #[test]
 fn exact_warning_codes_report_duplicate_count_mismatch() {
     let expectation = SuccessExpectation {
-        warnings: exact_warning_expectation(&["BST-RULE-0022", "BST-RULE-0022"]),
+        warnings: exact_warning_expectation(&["MOTH-RULE-0022", "MOTH-RULE-0022"]),
         success_contract: None,
         artifact_assertions: Vec::new(),
         golden: GoldenExpectation::default(),
@@ -583,7 +585,7 @@ fn exact_warning_codes_report_duplicate_count_mismatch() {
     let case = success_test_case(BackendId::Html, expectation.clone());
     let result = validate_success_result(
         &case,
-        warning_build_result(&["BST-RULE-0022"]),
+        warning_build_result(&["MOTH-RULE-0022"]),
         &expectation,
     );
     let reason = result
@@ -611,7 +613,7 @@ fn ignore_and_forbid_keep_their_structured_warning_behaviour() {
     let ignored_case = success_test_case(BackendId::Html, ignored.clone());
     let ignored_result = validate_success_result(
         &ignored_case,
-        warning_build_result(&["BST-RULE-0022"]),
+        warning_build_result(&["MOTH-RULE-0022"]),
         &ignored,
     );
     assert!(ignored_result.passed, "{:?}", ignored_result.failure_reason);
@@ -623,7 +625,7 @@ fn ignore_and_forbid_keep_their_structured_warning_behaviour() {
     let forbidden_case = success_test_case(BackendId::Html, forbidden.clone());
     let forbidden_result = validate_success_result(
         &forbidden_case,
-        warning_build_result(&["BST-RULE-0022"]),
+        warning_build_result(&["MOTH-RULE-0022"]),
         &forbidden,
     );
     assert!(!forbidden_result.passed);
@@ -638,16 +640,16 @@ fn ignore_and_forbid_keep_their_structured_warning_behaviour() {
 #[test]
 fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let warning = CompilerDiagnostic::unreachable_match_arm(test_location(source_path.clone()));
     let error = CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path));
     let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
     // diagnostic_codes owns the error contract only; warning_codes independently owns the
     // warning. A warning code must never appear in diagnostic_codes for a failed compilation.
     let expectation = FailureExpectation {
-        warnings: exact_warning_expectation(&["BST-RULE-0022"]),
+        warnings: exact_warning_expectation(&["MOTH-RULE-0022"]),
         message_contains: Vec::new(),
-        diagnostic_codes: vec!["BST-SYNTAX-0003".to_owned()],
+        diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned()],
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
@@ -661,14 +663,14 @@ fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() 
 #[test]
 fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let warning = CompilerDiagnostic::unreachable_match_arm(test_location(source_path.clone()));
     let error = CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path));
     let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         message_contains: Vec::new(),
-        diagnostic_codes: vec!["BST-SYNTAX-0003".to_owned()],
+        diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned()],
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
@@ -682,16 +684,16 @@ fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
 #[test]
 fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let warning = CompilerDiagnostic::unreachable_match_arm(test_location(source_path.clone()));
     let error = CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path));
     let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
     // Authoring the warning code as a diagnostic code must fail: the warning is not in the
     // error-severity stream, so the multiset reports it as missing.
     let expectation = FailureExpectation {
-        warnings: exact_warning_expectation(&["BST-RULE-0022"]),
+        warnings: exact_warning_expectation(&["MOTH-RULE-0022"]),
         message_contains: Vec::new(),
-        diagnostic_codes: vec!["BST-SYNTAX-0003".to_owned(), "BST-RULE-0022".to_owned()],
+        diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned(), "MOTH-RULE-0022".to_owned()],
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
@@ -708,7 +710,7 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
         .as_deref()
         .expect("a warning-as-error mismatch should report a reason");
     assert!(
-        reason.contains("Missing codes") && reason.contains("BST-RULE-0022"),
+        reason.contains("Missing codes") && reason.contains("MOTH-RULE-0022"),
         "unexpected reason: {reason}"
     );
 }
@@ -716,7 +718,7 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
 #[test]
 fn warning_prose_cannot_satisfy_error_message_contains() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let warning = CompilerDiagnostic::unreachable_match_arm(test_location(source_path.clone()));
     let error = CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path));
     let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
@@ -725,7 +727,7 @@ fn warning_prose_cannot_satisfy_error_message_contains() {
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         message_contains: vec!["Unreachable match arm".to_owned()],
-        diagnostic_codes: vec!["BST-SYNTAX-0003".to_owned()],
+        diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned()],
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
@@ -752,68 +754,68 @@ fn warning_prose_cannot_satisfy_error_message_contains() {
 #[test]
 fn normalization_replaces_fn_counter_suffix() {
     assert_eq!(
-        normalize_text_for_comparison("bst_rhs_and_fn0"),
-        "bst_rhs_and_fnN"
+        normalize_text_for_comparison("moth_rhs_and_fn0"),
+        "moth_rhs_and_fnN"
     );
     assert_eq!(
-        normalize_text_for_comparison("bst_start_fn1"),
-        "bst_start_fnN"
+        normalize_text_for_comparison("moth_start_fn1"),
+        "moth_start_fnN"
     );
 }
 
 #[test]
 fn normalization_replaces_local_counter_suffix() {
     assert_eq!(
-        normalize_text_for_comparison("bst_calls_l0"),
-        "bst_calls_lN"
+        normalize_text_for_comparison("moth_calls_l0"),
+        "moth_calls_lN"
     );
     assert_eq!(
-        normalize_text_for_comparison("bst_lhs_l1 bst_value_l3"),
-        "bst_lhs_lN bst_value_lN"
+        normalize_text_for_comparison("moth_lhs_l1 moth_value_l3"),
+        "moth_lhs_lN moth_value_lN"
     );
 }
 
 #[test]
 fn normalization_replaces_hir_tmp_counters() {
     assert_eq!(
-        normalize_text_for_comparison("bst___hir_tmp_0_l4"),
-        "bst___hir_tmp_N_lN"
+        normalize_text_for_comparison("moth___hir_tmp_0_l4"),
+        "moth___hir_tmp_N_lN"
     );
     assert_eq!(
-        normalize_text_for_comparison("bst___hir_tmp_3_l13"),
-        "bst___hir_tmp_N_lN"
+        normalize_text_for_comparison("moth___hir_tmp_3_l13"),
+        "moth___hir_tmp_N_lN"
     );
 }
 
 #[test]
 fn normalization_replaces_template_fn_counters() {
     assert_eq!(
-        normalize_text_for_comparison("bst___template_fn_0_fn3"),
-        "bst___template_fn_N_fnN"
+        normalize_text_for_comparison("moth___template_fn_0_fn3"),
+        "moth___template_fn_N_fnN"
     );
     assert_eq!(
-        normalize_text_for_comparison("bst___template_fn_2_fn5"),
-        "bst___template_fn_N_fnN"
+        normalize_text_for_comparison("moth___template_fn_2_fn5"),
+        "moth___template_fn_N_fnN"
     );
 }
 
 #[test]
 fn normalization_replaces_frag_counters() {
     assert_eq!(
-        normalize_text_for_comparison("bst___bst_frag_0_fn2"),
-        "bst___bst_frag_N_fnN"
+        normalize_text_for_comparison("moth___moth_frag_0_fn2"),
+        "moth___moth_frag_N_fnN"
     );
 }
 
 #[test]
 fn normalization_preserves_runtime_library_names() {
-    let input = "__bs_read __bs_write __bs_binding __bs_assign_value __bs_result_fallback";
+    let input = "__moth_read __moth_write __moth_binding __moth_assign_value __moth_result_fallback";
     assert_eq!(normalize_text_for_comparison(input), input);
 }
 
 #[test]
 fn normalization_is_deterministic() {
-    let input = "function bst_rhs_and_fn0(bst_calls_l2) { bst___hir_tmp_3_l13; }";
+    let input = "function moth_rhs_and_fn0(moth_calls_l2) { moth___hir_tmp_3_l13; }";
     let first = normalize_text_for_comparison(input);
     let second = normalize_text_for_comparison(input);
     assert_eq!(first, second);
@@ -821,8 +823,8 @@ fn normalization_is_deterministic() {
 
 #[test]
 fn normalization_does_not_mask_semantic_name_change() {
-    let a = normalize_text_for_comparison("bst_rhs_and_fn0");
-    let b = normalize_text_for_comparison("bst_rhs_or_fn0");
+    let a = normalize_text_for_comparison("moth_rhs_and_fn0");
+    let b = normalize_text_for_comparison("moth_rhs_or_fn0");
     assert_ne!(
         a, b,
         "different base names must still differ after normalization"
@@ -830,16 +832,16 @@ fn normalization_does_not_mask_semantic_name_change() {
 }
 
 #[test]
-fn normalization_preserves_non_bst_identifiers() {
+fn normalization_preserves_non_moth_identifiers() {
     let input = "function foo(x) { return x + 1; }";
     assert_eq!(normalize_text_for_comparison(input), input);
 }
 
 #[test]
 fn normalization_preserves_base_name_segment() {
-    let result = normalize_text_for_comparison("bst_rhs_and_fn0");
+    let result = normalize_text_for_comparison("moth_rhs_and_fn0");
     assert!(
-        result.starts_with("bst_rhs_and_fn"),
+        result.starts_with("moth_rhs_and_fn"),
         "base name must be preserved: {result}"
     );
     assert!(
@@ -851,7 +853,7 @@ fn normalization_preserves_base_name_segment() {
 const VALID_HTML: &str = "<!DOCTYPE html><html><head></head><body></body></html>";
 const VALID_HTML_WASM: &str =
     "<!DOCTYPE html><html><head></head><body><script src=\"./page.js\"></script></body></html>";
-const VALID_PAGE_JS: &str = "__bst_instantiate_wasm instance.exports.bst_start() \"./page.wasm\"";
+const VALID_PAGE_JS: &str = "__moth_instantiate_wasm instance.exports.moth_start() \"./page.wasm\"";
 
 fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) -> BuildResult {
     let output_files = files
@@ -865,7 +867,7 @@ fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) -> BuildResul
             cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
         },
-        config: Config::new(PathBuf::from("main.bst")),
+        config: Config::new(PathBuf::from("main.moth")),
         warnings: Vec::new(),
         string_table: StringTable::new(),
     }
@@ -1074,8 +1076,8 @@ fn strict_text_goldens_ignore_lf_vs_crlf_differences() {
 fn normalized_text_goldens_ignore_lf_vs_crlf_differences() {
     assert!(
         compare_text_golden(
-            "<p>bst_rhs_and_fn0\r\n</p>\r\n",
-            "<p>bst_rhs_and_fn7\n</p>\n",
+            "<p>moth_rhs_and_fn0\r\n</p>\r\n",
+            "<p>moth_rhs_and_fn7\n</p>\n",
             GoldenMode::Normalized,
         )
         .is_none()
@@ -1356,10 +1358,10 @@ fn normalized_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
     let root = temp_dir("normalized_golden_line_endings");
     let golden_dir = root.join("golden");
     fs::create_dir_all(&golden_dir).expect("should create golden dir");
-    fs::write(golden_dir.join("index.html"), "bst_rhs_and_fn0\r\n")
+    fs::write(golden_dir.join("index.html"), "moth_rhs_and_fn0\r\n")
         .expect("should write CRLF golden");
 
-    let build_result = build_result_with_index_html("bst_rhs_and_fn8\n");
+    let build_result = build_result_with_index_html("moth_rhs_and_fn8\n");
     let golden = discover_golden_expectation(&golden_dir, Some(GoldenMode::Normalized))
         .expect("golden inventory should be discovered");
     let mismatch = validate_golden_outputs(&build_result, &golden);
@@ -1390,7 +1392,7 @@ fn nested_golden_validation_compares_relative_paths() {
             cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
         },
-        config: Config::new(PathBuf::from("main.bst")),
+        config: Config::new(PathBuf::from("main.moth")),
         warnings: Vec::new(),
         string_table: StringTable::new(),
     };

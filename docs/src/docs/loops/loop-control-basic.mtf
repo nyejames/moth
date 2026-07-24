@@ -1,0 +1,39 @@
+Use `break` when a loop should end early.
+
+Use `continue` when the current iteration should stop but the loop itself should
+keep going.
+
+[codeblock, $code("moth"):
+    loop 0 to 10 |number|:
+        if number is 2:
+            continue
+        ;
+
+        if number is 7:
+            break
+        ;
+
+        io.line([: [number]])
+    ;
+]
+
+The loop skips `2`. It ends when it reaches `7`, so `7` and the later numbers
+are not printed.
+
+### Nested loops
+
+`break` and `continue` affect the closest loop around them.
+
+[codeblock, $code("moth"):
+    loop 0 to 3 |row|:
+        loop 0 to 3 |column|:
+            if column is 1:
+                continue
+            ;
+
+            io.line([: row [row], column [column]])
+        ;
+    ;
+]
+
+In this example, `continue` skips one column. The outer row loop keeps running.

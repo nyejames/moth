@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0083"]
+diagnostic_codes = ["MOTH-RULE-0083"]
 message_contains = ["No cast evidence exists from 'Bool' to 'Int'"]

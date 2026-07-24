@@ -27,7 +27,7 @@ fn rendered_runtime_page_includes_version_error_text_and_dark_mode() {
     assert!(page.contains("something broke"));
     assert!(page.contains("Timestamp (unix):"));
     assert!(page.contains("color-scheme: dark"));
-    assert!(page.contains("EventSource('/preview/__beanstalk/events')"));
+    assert!(page.contains("EventSource('/preview/__moth/events')"));
 }
 
 #[test]
@@ -41,14 +41,14 @@ fn formatted_compiler_messages_include_typed_diagnostics() {
 
     let formatted = format_compiler_messages(&messages);
 
-    assert!(formatted.contains("BST-CONFIG-0001"));
+    assert!(formatted.contains("MOTH-CONFIG-0001"));
     assert!(formatted.contains("Unsupported value"));
 }
 
 #[test]
 fn compiler_error_page_links_to_project_relative_resolved_source_path() {
     let root = temp_dir("relative_path");
-    let source_file = root.join("src/docs/guide.bst");
+    let source_file = root.join("src/docs/guide.moth");
     fs::create_dir_all(
         source_file
             .parent()
@@ -79,13 +79,13 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
 
     let page = render_compiler_error_page(&messages, &root, "/docs", 7);
 
-    // The browser card should not visibly show BST-* codes but should
+    // The browser card should not visibly show MOTH-* codes but should
     // carry them as data attributes for debugging.
     assert!(page.contains("color-scheme: dark"));
-    assert!(page.contains("data-diagnostic-code=\"BST-CONFIG-0001\""));
-    assert!(!page.contains(">BST-CONFIG-0001<"));
-    assert!(page.contains("guide.bst"));
-    assert!(page.contains("--> src/docs/guide.bst:1:5"));
+    assert!(page.contains("data-diagnostic-code=\"MOTH-CONFIG-0001\""));
+    assert!(!page.contains(">MOTH-CONFIG-0001<"));
+    assert!(page.contains("guide.moth"));
+    assert!(page.contains("--> src/docs/guide.moth:1:5"));
     assert!(page.contains("Unsupported value"));
     assert!(!page.contains("start.header"));
 
@@ -96,7 +96,7 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
     assert!(page.contains("file://"));
 
     // SSE client is injected.
-    assert!(page.contains("EventSource('/docs/__beanstalk/events')"));
+    assert!(page.contains("EventSource('/docs/__moth/events')"));
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }

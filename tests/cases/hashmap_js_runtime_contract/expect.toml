@@ -7,13 +7,13 @@ rendered_output_exact = "hashmap_runtime has_ada=true has_linus=false insert_len
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_map_new(",
-    "function __bs_map_get(",
-    "function __bs_map_contains(",
-    "function __bs_map_set(",
-    "function __bs_map_remove(",
-    "function __bs_map_clear(",
-    "function __bs_map_length(",
+    "function __moth_map_new(",
+    "function __moth_map_get(",
+    "function __moth_map_contains(",
+    "function __moth_map_set(",
+    "function __moth_map_remove(",
+    "function __moth_map_clear(",
+    "function __moth_map_length(",
 ]
 
 [[backends.html.artifact_assertions]]

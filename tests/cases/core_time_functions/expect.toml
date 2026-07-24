@@ -21,11 +21,11 @@ must_contain = [
     "toISOString()",
 ]
 must_not_contain = [
-    "function __bs_time_now_millis(",
-    "function __bs_time_now_seconds(",
+    "function __moth_time_now_millis(",
+    "function __moth_time_now_seconds(",
 ]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

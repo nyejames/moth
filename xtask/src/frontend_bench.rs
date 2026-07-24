@@ -3,7 +3,7 @@
 //! WHAT: runs in-process frontend benchmarks through the compiler's public API.
 //! WHY: avoids subprocess noise for focused compiler-stage checks.
 
-use beanstalk::benchmarking::{
+use moth::benchmarking::{
     FrontendBenchmarkBuildProfile, FrontendBenchmarkOptions, FrontendBenchmarkReport,
     run_frontend_benchmark,
 };

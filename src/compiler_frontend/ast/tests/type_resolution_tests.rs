@@ -340,7 +340,7 @@ Buffer = |
 
     let buffer_name = string_table.intern("Buffer");
     let buffer_path =
-        InternedPath::from_single_str("#page.bst", &mut string_table).append(buffer_name);
+        InternedPath::from_single_str("#page.moth", &mut string_table).append(buffer_name);
     let buffer_type_id = ast
         .type_environment
         .nominal_id_for_path(&buffer_path)
@@ -523,7 +523,8 @@ make || -> {capacity Int}:
     let (ast, mut string_table) = parse_single_file_ast(source);
 
     let make_name = string_table.intern("make");
-    let make_path = InternedPath::from_single_str("#page.bst", &mut string_table).append(make_name);
+    let make_path =
+        InternedPath::from_single_str("#page.moth", &mut string_table).append(make_name);
     let signature = ast
         .nodes
         .iter()
@@ -549,7 +550,7 @@ make || -> {capacity Int}:
 // ---------------------------------------------------------------
 
 fn page_path(name: &str, string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str("#page.bst", string_table).append(string_table.intern(name))
+    InternedPath::from_single_str("#page.moth", string_table).append(string_table.intern(name))
 }
 
 fn nominal_type_id(ast: &Ast, string_table: &mut StringTable, name: &str) -> TypeId {

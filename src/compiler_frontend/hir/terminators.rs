@@ -52,7 +52,7 @@ pub enum HirTerminator {
     /// WHAT: represents `return value` from a fallible function without constructing a runtime
     /// fallible carrier in HIR.
     /// WHY: explicit success/error terminators keep the HIR control-flow contract aligned with
-    /// Beanstalk's fallible signature model.
+    /// Moth's fallible signature model.
     ReturnSuccess(HirExpression),
 
     /// Return through the function's fallible error slot.
@@ -82,7 +82,7 @@ pub enum HirTerminator {
     /// Assertion failure — unrecoverable runtime stop.
     ///
     /// WHAT: represents a failed `assert` statement.
-    /// WHY: this is the only source-level unrecoverable stop in Alpha Beanstalk.
+    /// WHY: this is the only source-level unrecoverable stop in Alpha Moth.
     /// `message: None` means the default "assertion failed" message.
     AssertFailure {
         message: Option<String>,

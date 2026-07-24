@@ -1,6 +1,6 @@
 //! Stage 0 source-backed package-tree collision detection.
 //!
-//! WHAT: scans source-backed package roots for sibling `.bst` file / folder name collisions and reports
+//! WHAT: scans source-backed package roots for sibling `.moth` file / folder name collisions and reports
 //! them as typed project-structure diagnostics.
 //! WHY: unambiguous import path segments are a prerequisite for correct import resolution. The
 //! collision rule is Stage 0-owned, not HTML-builder-specific.
@@ -12,7 +12,7 @@ use crate::builder_surface::SourcePackageRegistry;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::BEANSTALK_FILE_EXTENSION;
+use crate::projects::settings::LANGUAGE_SOURCE_EXTENSION;
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -22,19 +22,19 @@ use super::project_structure_diagnostics::{
     non_utf8_filesystem_name_error, path_id, project_structure_messages,
 };
 
-/// Reject sibling `.bst` file stems and folder names that share the same import name inside
+/// Reject sibling `.moth` file stems and folder names that share the same import name inside
 /// source-backed package trees.
 ///
-/// WHAT: for every source-backed package root, collects the set of `.bst` file stems (excluding `.js`
+/// WHAT: for every source-backed package root, collects the set of `.moth` file stems (excluding `.js`
 /// files) and folder names. If any stem collides with a folder name, emits a typed diagnostic.
-/// WHY: Beanstalk imports resolve a path segment to either a `.bst` file or a folder; sharing the
+/// WHY: Moth imports resolve a path segment to either a `.moth` file or a folder; sharing the
 /// same stem makes the import name ambiguous.
 ///
 /// Entry-root collisions are checked by `SourceTreeIndex::discover` during the single entry-root
 /// traversal. Source-backed package trees remain separate because registered source-backed package traversal
 /// lives outside entry-root indexing.
 ///
-/// The rule applies even when the folder is empty or contains no Beanstalk files.
+/// The rule applies even when the folder is empty or contains no Moth files.
 pub(super) fn validate_source_package_tree_collisions(
     source_packages: &SourcePackageRegistry,
     string_table: &mut StringTable,
@@ -101,7 +101,7 @@ fn validate_directory_tree_collisions(
                 folder_names.insert(name.to_owned());
                 subdirectories.push(path);
             } else if let Some(extension) = path.extension().and_then(|e| e.to_str())
-                && extension == BEANSTALK_FILE_EXTENSION
+                && extension == LANGUAGE_SOURCE_EXTENSION
                 && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
             {
                 file_stems.insert(stem.to_owned());
@@ -111,7 +111,7 @@ fn validate_directory_tree_collisions(
         // Report the first collision found in this directory.
         for stem in &file_stems {
             if folder_names.contains(stem) {
-                let file_name_id = string_table.intern(&format!("{stem}.bst"));
+                let file_name_id = string_table.intern(&format!("{stem}.moth"));
                 let folder_name_id = string_table.intern(stem);
 
                 return Err(project_structure_messages(

@@ -1,0 +1,39 @@
+A binding gives a value a visible name.
+
+[codeblock, $code("moth"):
+    count = 42
+    ratio Float = 0.5
+]
+
+### Declaration forms
+
+[codeblock, $code("moth"):
+    name = value
+    name Type = value
+]
+
+- A binding must have an initializer.
+- Without an annotation, the initializer supplies the natural type.
+- An explicit annotation supplies a receiving type and may apply normal contextual coercion.
+- Ordinary bindings are immutable by default.
+- `=` creates a binding when the name is new.
+- `=` reassigns an existing binding only when that binding is mutable.
+
+Compile-time constants use `#` and are documented separately by Constants and
+compile-time behaviour.
+
+### Binding mode and type
+
+Binding mode is not semantic type identity.
+
+An immutable `String` binding and a mutable `String` binding still have the
+same semantic `String` type. The binding decides which later operations are
+permitted.
+
+### Scope
+
+A binding is visible in its scope and child scopes unless a language rule
+creates a narrower visibility boundary.
+
+Moth does not allow a visible name to be redeclared. See the Shadowing
+section for the exact rule.

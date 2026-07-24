@@ -1,0 +1,140 @@
+import @./error-values {
+    content as error_values,
+}
+
+import @./error-values-basic {
+    content as error_values_basic,
+}
+
+import @./error-returns {
+    content as error_returns,
+}
+
+import @./error-returns-basic {
+    content as error_returns_basic,
+}
+
+import @./propagation {
+    content as propagation,
+}
+
+import @./propagation-basic {
+    content as propagation_basic,
+}
+
+import @./catch-and-recovery {
+    content as catch_and_recovery,
+}
+
+import @./catch-and-recovery-basic {
+    content as catch_and_recovery_basic,
+}
+
+import @./options {
+    content as options,
+}
+
+import @./options-basic {
+    content as options_basic,
+}
+
+import @./assertions {
+    content as assertions,
+}
+
+import @./assertions-basic {
+    content as assertions_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Errors, options and assertions"
+page_description #= "Recoverable errors, optional values, local recovery and assertions in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Errors, options and assertions
+
+    # Errors, options and assertions
+
+    Missing data, expected failure and a broken invariant are three different problems. Moth gives each one a separate path.
+
+    Use options for ordinary absence. Use typed error returns when callers need failure information. Use assertions when continuing would be wrong.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):error-values]
+        [$insert("title"):Error values]
+        [$insert("advanced"):[error_values]]
+
+        [error_values_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):error-returns]
+        [$insert("title"):Error returns]
+        [$insert("advanced"):[error_returns]]
+
+        [error_returns_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):propagation]
+        [$insert("title"):Error propagation]
+        [$insert("advanced"):[propagation]]
+
+        [propagation_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):catch-and-recovery]
+        [$insert("title"):Catch and recovery]
+        [$insert("advanced"):[catch_and_recovery]]
+
+        [catch_and_recovery_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):options]
+        [$insert("title"):Options]
+        [$insert("advanced"):[options]]
+
+        [options_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):assertions]
+        [$insert("title"):Assertions]
+        [$insert("advanced"):[assertions]]
+
+        [assertions_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../choices/]
+        [$insert("previous_title"):Choices]
+        [$insert("next_path"):../collections/]
+        [$insert("next_title"):Collections and maps]
+    ]
+]

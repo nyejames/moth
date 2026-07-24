@@ -99,7 +99,7 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
 
     assert!(
         output.source.contains(&format!(
-            "[__bs_read({loaded_name}), __bs_clone_value(__bs_read({copied_name}))];"
+            "[__moth_read({loaded_name}), __moth_clone_value(__moth_read({copied_name}))];"
         )),
         "plain expression lowering must read Load and clone Copy"
     );
@@ -232,24 +232,24 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
 
     assert!(
         output.source.contains(&format!(
-            "__bs_write(__bs_field({target_name}, \"{copy_field_name}\"), __bs_clone_value(__bs_read({copy_source_name})))"
+            "__moth_write(__moth_field({target_name}, \"{copy_field_name}\"), __moth_clone_value(__moth_read({copy_source_name})))"
         )),
-        "Copy in non-local assignment must emit __bs_clone_value(__bs_read(...))"
+        "Copy in non-local assignment must emit __moth_clone_value(__moth_read(...))"
     );
     assert!(
         output.source.contains(&format!(
-            "__bs_write(__bs_field({target_name}, \"{load_field_name}\"), __bs_read({load_source_name}))"
+            "__moth_write(__moth_field({target_name}, \"{load_field_name}\"), __moth_read({load_source_name}))"
         )),
-        "Load in non-local assignment must emit __bs_read(...)"
+        "Load in non-local assignment must emit __moth_read(...)"
     );
 }
 
-// Beanstalk call arguments [value_use]
+// Moth call arguments [value_use]
 // ---------------------------------------------------------------------------
 
-/// Verifies that Beanstalk call arguments pass loads as refs and wrap copies in bindings.
+/// Verifies that Moth call arguments pass loads as refs and wrap copies in bindings.
 #[test]
-fn load_and_copy_in_beanstalk_call_arguments_use_reference_abi() {
+fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
@@ -360,9 +360,9 @@ fn load_and_copy_in_beanstalk_call_arguments_use_reference_abi() {
 
     assert!(
         output.source.contains(&format!(
-            "{callee_name}(__bs_binding(__bs_clone_value(__bs_read({copy_source_name}))), {load_source_name})"
+            "{callee_name}(__moth_binding(__moth_clone_value(__moth_read({copy_source_name}))), {load_source_name})"
         )),
-        "Beanstalk call arguments must wrap Copy in __bs_binding and pass Load as a ref"
+        "Moth call arguments must wrap Copy in __moth_binding and pass Load as a ref"
     );
 }
 
@@ -452,14 +452,14 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_io_line(__bs_read({loaded_name}))")),
+            .contains(&format!("__moth_io_line(__moth_read({loaded_name}))")),
         "Load in host call argument must read the raw JS value"
     );
     assert!(
         output.source.contains(&format!(
-            "__bs_io_line(__bs_clone_value(__bs_read({copied_name})))"
+            "__moth_io_line(__moth_clone_value(__moth_read({copied_name})))"
         )),
-        "Copy in host call argument must emit __bs_clone_value(__bs_read(...))"
+        "Copy in host call argument must emit __moth_clone_value(__moth_read(...))"
     );
 }
 
@@ -530,8 +530,8 @@ fn load_in_return_value_passes_place_ref() {
     assert!(
         !output
             .source
-            .contains(&format!("return __bs_read({param_name});")),
-        "Load in return value must not read through __bs_read"
+            .contains(&format!("return __moth_read({param_name});")),
+        "Load in return value must not read through __moth_read"
     );
 }
 
@@ -594,9 +594,9 @@ fn copy_in_return_value_emits_clone_value() {
 
     assert!(
         output.source.contains(&format!(
-            "return __bs_clone_value(__bs_read({param_name}));"
+            "return __moth_clone_value(__moth_read({param_name}));"
         )),
-        "Copy in return value must emit __bs_clone_value(__bs_read(...))"
+        "Copy in return value must emit __moth_clone_value(__moth_read(...))"
     );
 }
 
@@ -683,7 +683,7 @@ fn tuple_return_preserves_return_value_handling_per_element() {
 
     assert!(
         output.source.contains(&format!(
-            "return [{first_name}, __bs_clone_value(__bs_read({second_name}))];"
+            "return [{first_name}, __moth_clone_value(__moth_read({second_name}))];"
         )),
         "tuple return must preserve per-element return-value handling: Load as place ref, Copy as clone"
     );

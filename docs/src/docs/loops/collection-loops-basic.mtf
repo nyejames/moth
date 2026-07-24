@@ -1,0 +1,42 @@
+A collection loop visits each value in a collection, from the first item to the
+last.
+
+[codeblock, $code("moth"):
+    names = {"Priya", "Grace", "Linus"}
+
+    loop names |name|:
+        io.line([: Hello, [name]])
+    ;
+]
+
+The name inside `|...|` is created for the loop body. On each iteration it
+refers to the current item.
+
+### Add an index when you need one
+
+A second name receives the zero-based position of the item.
+
+[codeblock, $code("moth"):
+    names = {"Priya", "Grace", "Linus"}
+
+    loop names |name, index|:
+        io.line([: [index]: [name]])
+    ;
+]
+
+The first item has index `0`.
+
+### Ignore the item when only the repetition matters
+
+Bindings are optional.
+
+[codeblock, $code("moth"):
+    items = {10, 20, 30}
+    count ~= 0
+
+    loop items:
+        count += 1
+    ;
+]
+
+After this loop, `count` is `3`.

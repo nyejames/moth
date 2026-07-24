@@ -49,14 +49,14 @@ Current HTML builder:
 
 Current Wasm mode:
 
-- exports `start` as `bst_start`
-- bootstrap instantiates `page.wasm`, calls `bst_start`, reads returned handles and hydrates slots
+- exports `start` as `moth_start`
+- bootstrap instantiates `page.wasm`, calls `moth_start`, reads returned handles and hydrates slots
 - helper export structs are duplicated between HTML-Wasm and core Wasm request types
 
 Current Wasm LIR:
 
 - `WasmLirFunction` contains a flat `Vec<WasmLirBlock>` with `Jump` and `Branch` terminators
-- ABI includes `I64` for Beanstalk `Int`
+- ABI includes `I64` for Moth `Int`
 - instructions include bridge-like `StringFromI64`
 - user functions are emitted through a dispatcher-loop strategy using an artificial program counter
 - the emitter defines memory inside each emitted module
@@ -106,7 +106,7 @@ See `docs/build-system-design.md` "HTML project builder", "Mixed-target planning
 Retain:
 - JavaScript-owned `start` (the implicit `start` is lowered to JS, not Wasm)
 - backwards propagation of JavaScript requirements (DOM, browser, project JS force JS ownership, requirements propagate to transitive callers)
-- no Wasm-to-JavaScript Beanstalk call after propagation
+- no Wasm-to-JavaScript Moth call after propagation
 - JavaScript-to-Wasm wrappers (JS-owned functions may call Wasm-owned functions through generated wrappers)
 - explicit partition reasons (every decision records why)
 - entry-specific partition (partitioning is per-entry, not global)
@@ -122,7 +122,7 @@ Retain:
 
 The final design removes (deleted rather than retained through compatibility adapters):
 - dispatcher-loop control flow as the durable backend shape
-- `bst_start`
+- `moth_start`
 - per-module memories
 - helper-export booleans
 - the `i64` Int bridge architecture
@@ -133,11 +133,11 @@ The final design removes (deleted rather than retained through compatibility ada
 
 ## Non-goals
 
-- no Wasm-to-JavaScript Beanstalk call
+- no Wasm-to-JavaScript Moth call
 - no per-module Wasm memory
 - no dispatcher-loop LIR
 - no `i64` Int bridge
-- no `bst_start` export
+- no `moth_start` export
 - no whole-module JS or Wasm validation mode
 - no compatibility adapters for old paths
 - no standalone Wasm output pipeline design beyond the HTML builder orchestration
@@ -182,7 +182,7 @@ Context: replace whole-module JS or Wasm mode with function-level partitioning.
 See `docs/build-system-design.md` "Mixed-target planning and validation" for partition rules.
 
 - Compute target affinity from semantic package and capability metadata.
-- Apply partition rules: `start` is JavaScript-owned, DOM and browser JS force JavaScript, JS requirements propagate backwards, no Wasm-to-JS Beanstalk call after propagation, JS-to-Wasm wrappers, remaining functions default to Wasm.
+- Apply partition rules: `start` is JavaScript-owned, DOM and browser JS force JavaScript, JS requirements propagate backwards, no Wasm-to-JS Moth call after propagation, JS-to-Wasm wrappers, remaining functions default to Wasm.
 - Every decision records an explicit reason.
 - Partitioning is entry-specific and independent of development or release mode.
 - Run compiler target validation against the completed deterministic partition.
@@ -230,7 +230,7 @@ See `docs/build-system-design.md` "Runtime and memory" for the LIR contract.
 
 Context: define the Wasm ABI type mapping and replace bridge instructions.
 
-- Remove `I64` as Beanstalk `Int` ABI path. Use `i32`.
+- Remove `I64` as Moth `Int` ABI path. Use `i32`.
 - Remove `StringFromI64`. Replace with `StringFromI32` or generic numeric format helpers.
 - Remove `Void` as a real ABI type. Represent no result as `results: []`.
 - Define Wasm ABI type mapping for scalars, handles, strings, collections, structs, choices, options and errors.
@@ -272,16 +272,16 @@ See `docs/build-system-design.md` "Physical variants" and "Output ownership".
 Context: the refactor is not complete while old whole-module modes, dispatcher loops, bridge instructions and bootstrap paths remain.
 
 - Delete `Flag::HtmlWasm` whole-module mode selection.
-- Delete `bst_start` export and bootstrap path.
+- Delete `moth_start` export and bootstrap path.
 - Delete dispatcher-loop emission code and `WasmCfgLoweringStrategy::DispatcherLoop`.
 - Delete `StringFromI64` bridge instruction.
 - Delete per-module memory section emission for user modules.
 - Delete `WasmFunctionEmissionPolicy::AllFunctions` and `ReachableFromExports` from the final module path.
 - Delete whole-module validation in `compile_one_module`.
-- Delete `I64` as Beanstalk `Int` ABI path.
+- Delete `I64` as Moth `Int` ABI path.
 - Delete helper-export boolean structs.
 - Delete duplicated helper export types between HTML-Wasm and core Wasm.
-- Search for `DispatcherLoop`, `StringFromI64`, `I64`, `bst_start`, `export_str_ptr` and old helper booleans. Confirm only intentional history remains.
+- Search for `DispatcherLoop`, `StringFromI64`, `I64`, `moth_start`, `export_str_ptr` and old helper booleans. Confirm only intentional history remains.
 
 ### Phase 11: Complete backend-specific integration coverage and docs
 
@@ -298,12 +298,12 @@ Context: documentation, tests and progress matrix must reflect the final backend
 
 - `BackendBuilder::build_backend(Vec<Module>, ...)` flat handoff
 - `Flag::HtmlWasm` whole-module mode selection
-- `bst_start` export and bootstrap path
+- `moth_start` export and bootstrap path
 - dispatcher-loop emission code
 - `StringFromI64` bridge instruction
 - per-module memory section emission for user modules
 - `WasmLirBlock` flat block model with `Jump` and `Branch` terminators
-- `I64` as Beanstalk `Int` ABI path
+- `I64` as Moth `Int` ABI path
 - helper-export boolean structs
 - duplicated helper export types between HTML-Wasm and core Wasm
 - `WasmCfgLoweringStrategy::DispatcherLoop`
@@ -316,7 +316,7 @@ Cover:
 
 - JavaScript-owned `start` lowering
 - backwards propagation of JavaScript requirements
-- no Wasm-to-JavaScript Beanstalk call after propagation
+- no Wasm-to-JavaScript Moth call after propagation
 - JavaScript-to-Wasm wrappers
 - explicit partition reasons
 - entry-specific partition
@@ -327,7 +327,7 @@ Cover:
 - imported runtime memory
 - explicit selected-function, import, export, capability and layout plans
 - central output writing
-- no dispatcher-loop, `bst_start`, per-module memory, `i64` bridge or `StringFromI64` remains
+- no dispatcher-loop, `moth_start`, per-module memory, `i64` bridge or `StringFromI64` remains
 - no old bootstrap path remains
 - `check` performs the same planning and validation as `build`
 - foreign builder manifest conflict is rejected before writing
@@ -362,9 +362,9 @@ Before marking this plan complete, verify:
 - the backend consumes `ProjectCompilation`, not `Vec<Module>`
 - function-level partitioning replaces whole-module JS or Wasm mode
 - `start` is JavaScript-owned with backwards propagation
-- no Wasm-to-JavaScript Beanstalk call exists after propagation
+- no Wasm-to-JavaScript Moth call exists after propagation
 - Wasm LIR is structured, not flat basic-block with dispatcher loops
 - Wasm modules import page-local runtime memory rather than owning separate memories
-- `bst_start`, `StringFromI64`, `i64` Int bridge and helper-export booleans are gone
+- `moth_start`, `StringFromI64`, `i64` Int bridge and helper-export booleans are gone
 - no compatibility adapter remains
 - `check` runs the same planning and validation as `build`

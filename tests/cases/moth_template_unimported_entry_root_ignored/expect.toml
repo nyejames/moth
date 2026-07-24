@@ -1,0 +1,8 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["moth_template_unimported_entry_root_ignored page content"]
+rendered_output_not_contains = ["moth_template_unimported_entry_root_ignored hidden content"]
+

@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0008"]
+diagnostic_codes = ["MOTH-SYNTAX-0008"]
 message_contains = ["-1E6", "lowercase", "e"]

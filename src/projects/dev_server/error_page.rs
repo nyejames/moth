@@ -91,7 +91,7 @@ fn render_error_page_shell(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Beanstalk Dev Server Error</title>
+  <title>Moth Dev Server Error</title>
   <style>
     :root {{
       color-scheme: dark;

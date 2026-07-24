@@ -1,0 +1,25 @@
+-- Test case: Consistent ownership outcomes across all paths
+-- This should be accepted by Moth's global consistency requirement
+
+-- This test demonstrates correct usage where the same place has
+-- consistent ownership outcomes regardless of control flow path
+
+data = "test_data"
+condition = true
+
+if condition:
+    -- On this path, data is moved (last use)
+    result1 ~= data
+    io.line([: consistent_ownership_outcomes true-branch-result=[result1]])
+    -- No further use of data
+else
+    -- On this path, data is also moved (last use)
+    result2 ~= data
+    io.line([: consistent_ownership_outcomes false-branch-result=[result2]])
+    -- No further use of data
+;
+
+-- This is correct because:
+-- 1. In both branches, data is moved (it's the last use in both cases)
+-- 2. The ownership outcome is consistent across all paths
+-- 3. This satisfies Moth's global consistency requirement

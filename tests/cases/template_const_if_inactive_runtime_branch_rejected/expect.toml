@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0022"]
+diagnostic_codes = ["MOTH-SYNTAX-0022"]
 message_contains = ["fully evaluated at compile time", "both `if` branches", "compile-time values"]

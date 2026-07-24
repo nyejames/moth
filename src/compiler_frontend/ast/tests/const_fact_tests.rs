@@ -53,7 +53,7 @@ fn find_fact_by_name<'a>(
 
 #[test]
 fn explicit_module_constant_is_collected_as_fact() {
-    let source = r#"site_name #= "Beanstalk""#;
+    let source = r#"site_name #= "Moth""#;
     let (ast, string_table) = parse_single_file_ast(source);
 
     let fact = fact_for(&ast, &string_table, "site_name");

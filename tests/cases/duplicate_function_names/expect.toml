@@ -1,15 +1,15 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0002"]
+diagnostic_codes = ["MOTH-RULE-0002"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0002"
-path = "input/#page.bst"
+code = "MOTH-RULE-0002"
+path = "input/#page.moth"
 line = 7
 count = 1
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 3

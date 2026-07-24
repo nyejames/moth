@@ -124,7 +124,7 @@ fn integer_division_binop_emits_zero_checked_truncation_path() {
 // Clone / explicit copy tests [clone]
 // ---------------------------------------------------------------------------
 
-/// Verifies that a HIR Copy expression emits __bs_clone_value(__bs_read(...)). [clone]
+/// Verifies that a HIR Copy expression emits __moth_clone_value(__moth_read(...)). [clone]
 #[test]
 fn explicit_copy_emits_clone_value_wrapped_read() {
     let mut string_table = StringTable::new();
@@ -197,8 +197,8 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_clone_value(__bs_read({src_name}))")),
-        "Copy expression must emit __bs_clone_value(__bs_read(src))"
+            .contains(&format!("__moth_clone_value(__moth_read({src_name}))")),
+        "Copy expression must emit __moth_clone_value(__moth_read(src))"
     );
 }
 
@@ -322,12 +322,12 @@ fn growable_collection_expression_lowers_to_array() {
     // The runtime prelude includes the helper definition, so this checks only
     // for the expression-level wrapper call shape.
     assert!(
-        !output.source.contains("__bs_fixed_collection([1, 2]"),
-        "growable collection expression must not be wrapped in __bs_fixed_collection"
+        !output.source.contains("__moth_fixed_collection([1, 2]"),
+        "growable collection expression must not be wrapped in __moth_fixed_collection"
     );
 }
 
-/// Verifies that a fixed collection expression lowers to a __bs_fixed_collection call. [fixed-collection]
+/// Verifies that a fixed collection expression lowers to a __moth_fixed_collection call. [fixed-collection]
 #[test]
 fn fixed_collection_expression_lowers_to_wrapper() {
     let mut string_table = StringTable::new();
@@ -376,8 +376,8 @@ fn fixed_collection_expression_lowers_to_wrapper() {
     .expect("JS lowering should succeed");
 
     assert!(
-        output.source.contains("__bs_fixed_collection([10, 20], 4)"),
-        "fixed collection must lower to __bs_fixed_collection(items, capacity)"
+        output.source.contains("__moth_fixed_collection([10, 20], 4)"),
+        "fixed collection must lower to __moth_fixed_collection(items, capacity)"
     );
 }
 
@@ -427,15 +427,15 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
     .expect("JS lowering should succeed");
 
     assert!(
-        output.source.contains("__bs_fixed_collection([], 2)"),
-        "empty fixed collection must lower to __bs_fixed_collection([], capacity)"
+        output.source.contains("__moth_fixed_collection([], 2)"),
+        "empty fixed collection must lower to __moth_fixed_collection([], capacity)"
     );
 }
 
 // Map literal expression lowering tests [map]
 // ---------------------------------------------------------------------------
 
-/// Verifies that a map literal with entries lowers to `__bs_map_new([[key, value], ...])`. [map]
+/// Verifies that a map literal with entries lowers to `__moth_map_new([[key, value], ...])`. [map]
 #[test]
 fn map_literal_with_entries_lowers_to_map_new() {
     let mut string_table = StringTable::new();
@@ -490,12 +490,12 @@ fn map_literal_with_entries_lowers_to_map_new() {
     assert!(
         output
             .source
-            .contains("__bs_map_new([[\"Priya\", 10], [\"Grace\", 12]])"),
-        "map literal must lower to __bs_map_new with ordered key-value pairs"
+            .contains("__moth_map_new([[\"Priya\", 10], [\"Grace\", 12]])"),
+        "map literal must lower to __moth_map_new with ordered key-value pairs"
     );
 }
 
-/// Verifies that an empty map literal lowers to `__bs_map_new([])`. [map]
+/// Verifies that an empty map literal lowers to `__moth_map_new([])`. [map]
 #[test]
 fn empty_map_literal_lowers_to_map_new_with_empty_array() {
     let mut string_table = StringTable::new();
@@ -539,7 +539,7 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
     .expect("JS lowering should succeed");
 
     assert!(
-        output.source.contains("__bs_map_new([])"),
-        "empty map literal must lower to __bs_map_new([])"
+        output.source.contains("__moth_map_new([])"),
+        "empty map literal must lower to __moth_map_new([])"
     );
 }

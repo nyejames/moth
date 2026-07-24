@@ -62,9 +62,9 @@ fn averages_metrics_by_name_across_iterations() {
 #[test]
 fn parses_stable_benchmark_timing_lines() {
     let stdout = concat!(
-        "BST_BENCH timing file_prepare_ms=12.5ms\n",
-        "BST_BENCH timing ast_ms=51.731083ms\n",
-        "BST_BENCH timing hir_ms=8ms\n",
+        "MOTH_BENCH timing file_prepare_ms=12.5ms\n",
+        "MOTH_BENCH timing ast_ms=51.731083ms\n",
+        "MOTH_BENCH timing hir_ms=8ms\n",
     );
 
     let observations = parse_stdout_observations(stdout);
@@ -78,9 +78,9 @@ fn parses_stable_benchmark_timing_lines() {
 #[test]
 fn parses_dotted_stable_benchmark_timing_lines() {
     let stdout = concat!(
-        "BST_BENCH timing command.check.path_validation=1.25ms\n",
-        "BST_BENCH timing build_project.compile_project_frontend=42ms\n",
-        "BST_BENCH timing stage0.module_root_discovery.total=3.5ms\n",
+        "MOTH_BENCH timing command.check.path_validation=1.25ms\n",
+        "MOTH_BENCH timing build_project.compile_project_frontend=42ms\n",
+        "MOTH_BENCH timing stage0.module_root_discovery.total=3.5ms\n",
     );
 
     let observations = parse_stdout_observations(stdout);
@@ -106,10 +106,10 @@ fn parses_dotted_stable_benchmark_timing_lines() {
 #[test]
 fn parses_ast_substage_stable_timing_lines() {
     let stdout = concat!(
-        "BST_BENCH timing ast_function_body_parse_ms=4.5ms\n",
-        "BST_BENCH timing ast_start_body_parse_ms=0.75ms\n",
-        "BST_BENCH timing ast_const_template_parse_ms=1.25ms\n",
-        "BST_BENCH timing ast_const_template_fold_ms=0.5ms\n",
+        "MOTH_BENCH timing ast_function_body_parse_ms=4.5ms\n",
+        "MOTH_BENCH timing ast_start_body_parse_ms=0.75ms\n",
+        "MOTH_BENCH timing ast_const_template_parse_ms=1.25ms\n",
+        "MOTH_BENCH timing ast_const_template_fold_ms=0.5ms\n",
     );
 
     let observations = parse_stdout_observations(stdout);
@@ -135,7 +135,7 @@ fn parses_ast_substage_stable_timing_lines() {
 
 #[test]
 fn parses_stable_counter_line() {
-    let observations = parse_stdout_observations("BST_BENCH counter string_table_full_clones=8\n");
+    let observations = parse_stdout_observations("MOTH_BENCH counter string_table_full_clones=8\n");
 
     assert_eq!(observations.counters.len(), 1);
     assert_metric_value(&observations.counters, "string_table_full_clones", 8.0);
@@ -144,8 +144,8 @@ fn parses_stable_counter_line() {
 #[test]
 fn parses_multiple_stable_counter_lines() {
     let stdout = concat!(
-        "BST_BENCH counter type_compatibility_cache_lookups=11\n",
-        "BST_BENCH counter type_compatibility_cache_hits=7\n",
+        "MOTH_BENCH counter type_compatibility_cache_lookups=11\n",
+        "MOTH_BENCH counter type_compatibility_cache_hits=7\n",
     );
 
     let observations = parse_stdout_observations(stdout);
@@ -162,10 +162,10 @@ fn parses_multiple_stable_counter_lines() {
 #[test]
 fn ignores_malformed_stable_counter_lines() {
     let stdout = concat!(
-        "BST_BENCH counter =10\n",
-        "BST_BENCH counter missing_value=\n",
-        "BST_BENCH counter bad_value=abc\n",
-        "BST_BENCH counter good_value=3\n",
+        "MOTH_BENCH counter =10\n",
+        "MOTH_BENCH counter missing_value=\n",
+        "MOTH_BENCH counter bad_value=abc\n",
+        "MOTH_BENCH counter good_value=3\n",
     );
 
     let observations = parse_stdout_observations(stdout);
@@ -176,7 +176,7 @@ fn ignores_malformed_stable_counter_lines() {
 
 #[test]
 fn parses_ansi_stripped_stable_counter_line() {
-    let stdout = "BST_BENCH counter \u{1b}[32mmodule_remap_string_ids_calls\u{1b}[0m=4\n";
+    let stdout = "MOTH_BENCH counter \u{1b}[32mmodule_remap_string_ids_calls\u{1b}[0m=4\n";
 
     let observations = parse_stdout_observations(stdout);
 
@@ -188,7 +188,7 @@ fn parses_ansi_stripped_stable_counter_line() {
 fn ignores_unknown_lines() {
     let stdout = concat!(
         "Some random compiler output\n",
-        "BST_BENCH timing ast_ms=10ms\n",
+        "MOTH_BENCH timing ast_ms=10ms\n",
         "Another random line\n",
     );
 
@@ -201,9 +201,9 @@ fn ignores_unknown_lines() {
 #[test]
 fn ignores_malformed_stable_benchmark_timing_lines() {
     let stdout = concat!(
-        "BST_BENCH timing =10ms\n",
-        "BST_BENCH timing ast_ms=10\n",
-        "BST_BENCH timing hir_ms=7ms\n",
+        "MOTH_BENCH timing =10ms\n",
+        "MOTH_BENCH timing ast_ms=10\n",
+        "MOTH_BENCH timing hir_ms=7ms\n",
     );
 
     let observations = parse_stdout_observations(stdout);
@@ -215,8 +215,8 @@ fn ignores_malformed_stable_benchmark_timing_lines() {
 #[test]
 fn sums_duplicate_stable_metrics_within_one_command_output() {
     let stdout = concat!(
-        "BST_BENCH timing ast_ms=2ms\n",
-        "BST_BENCH timing ast_ms=3ms\n",
+        "MOTH_BENCH timing ast_ms=2ms\n",
+        "MOTH_BENCH timing ast_ms=3ms\n",
     );
 
     let observations = parse_stdout_observations(stdout);
@@ -227,7 +227,7 @@ fn sums_duplicate_stable_metrics_within_one_command_output() {
 #[test]
 fn stable_lines_take_precedence_over_legacy_human_lines() {
     let stdout = concat!(
-        "BST_BENCH timing ast_ms=10ms\n",
+        "MOTH_BENCH timing ast_ms=10ms\n",
         "AST created in: 10ms\n",
         "HIR generated in: 5ms\n",
     );
@@ -245,8 +245,8 @@ fn sums_duplicate_metrics_within_one_command_output() {
     let stdout = concat!(
         "AST created in: 2ms\n",
         "AST created in: 3ms\n",
-        "BST_BENCH counter scope_contexts_created=4\n",
-        "BST_BENCH counter scope_contexts_created=6\n",
+        "MOTH_BENCH counter scope_contexts_created=4\n",
+        "MOTH_BENCH counter scope_contexts_created=6\n",
     );
 
     let observations = parse_stdout_observations(stdout);

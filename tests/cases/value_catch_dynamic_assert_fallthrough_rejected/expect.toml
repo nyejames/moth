@@ -1,8 +1,8 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0051"]
+diagnostic_codes = ["MOTH-RULE-0051"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0051"
+code = "MOTH-RULE-0051"
 reason = "invalid_fallible_handling.catch_handler_can_fall_through"

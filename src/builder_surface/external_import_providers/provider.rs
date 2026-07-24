@@ -1,7 +1,7 @@
 //! External import provider trait and associated request/response types.
 //!
 //! WHAT: defines the contract between the compiler and builder-registered providers that
-//!       resolve non-Beanstalk source files into typed external package surfaces.
+//!       resolve non-Moth source files into typed external package surfaces.
 //! WHY: keeps the provider API general so JS, WIT, Rust, and host-manifest providers all
 //!      fit the same shape without leaking JS-specific concepts into the trait.
 
@@ -77,7 +77,7 @@ impl From<&str> for ExternalFileExtension {
 ///
 /// WHAT: carries the import path, canonical filesystem location, and source location
 ///       so the provider can parse the file and emit diagnostics that point back to
-///       the Beanstalk source that requested the import.
+///       the Moth source that requested the import.
 /// WHY: context structs avoid long parameter lists and keep the trait stable.
 #[derive(Debug, Clone)]
 pub struct ExternalImportRequest {
@@ -85,7 +85,7 @@ pub struct ExternalImportRequest {
     pub import_path: String,
     /// Canonical absolute path to the external source file.
     pub canonical_source_path: PathBuf,
-    /// Source location of the import statement in the requesting Beanstalk file.
+    /// Source location of the import statement in the requesting Moth file.
     pub source_location: SourceLocation,
 }
 
@@ -112,7 +112,7 @@ impl std::fmt::Debug for ExternalImportProviderContext<'_> {
     }
 }
 
-/// General trait for resolving non-Beanstalk source files into typed external imports.
+/// General trait for resolving non-Moth source files into typed external imports.
 ///
 /// WHAT: every builder-registered provider (JS, WIT, etc.) implements this trait.
 /// WHY: keeps the compiler frontend agnostic to the exact syntax of external files.
@@ -167,9 +167,9 @@ pub struct RuntimeAssetIdentity {
 ///      scaffolding without hard-coding JS import syntax.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequiredRuntimeImport {
-    /// Runtime module name, e.g. `"@beanstalk/runtime"`.
+    /// Runtime module name, e.g. `"@moth/runtime"`.
     pub module_name: String,
-    /// Symbols imported from that module, e.g. `["bstOk", "bstErr"]`.
+    /// Symbols imported from that module, e.g. `["mothOk", "mothErr"]`.
     pub imported_names: Vec<String>,
 }
 

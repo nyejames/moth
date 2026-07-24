@@ -9,12 +9,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[test]
-fn compile_html_module_wasm_exports_bst_start_directly() {
-    // WHAT: verify that the export plan exports entry start() as "bst_start", not per-function
+fn compile_html_module_wasm_exports_moth_start_directly() {
+    // WHAT: verify that the export plan exports entry start() as "moth_start", not per-function
     //       wrappers discovered by entry-body call scanning.
     // WHY: entry start() is the sole runtime fragment producer; JS calls it directly.
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("#page.bst"), &mut string_table);
+    let module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
 
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
@@ -35,24 +35,24 @@ fn compile_html_module_wasm_exports_bst_start_directly() {
     let js = expect_js_output(&compiled.output_files, "page.js");
 
     assert!(
-        js.contains("instance.exports.bst_start()"),
-        "bootstrap must call bst_start() directly, got:\n{js}"
+        js.contains("instance.exports.moth_start()"),
+        "bootstrap must call moth_start() directly, got:\n{js}"
     );
     assert!(
-        !js.contains("bst_call_0"),
+        !js.contains("moth_call_0"),
         "per-function wrapper exports must not appear in the new architecture"
     );
     assert!(
-        !js.contains("__bst_install_wasm_wrappers"),
+        !js.contains("__moth_install_wasm_wrappers"),
         "wrapper installation must not appear in the new architecture"
     );
 }
 
 #[test]
 fn wasm_export_plan_contains_single_entry_start_export() {
-    // WHAT: export plan must contain exactly one function export: bst_start for the start function.
+    // WHAT: export plan must contain exactly one function export: moth_start for the start function.
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("#page.bst"), &mut string_table);
+    let module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
 
     let plan_a =
         build_html_wasm_plan(&module.executable.hir, Vec::new()).expect("wasm plan should build");
@@ -69,8 +69,8 @@ fn wasm_export_plan_contains_single_entry_start_export() {
         "exported function must be the start function"
     );
     assert_eq!(
-        plan_a.export_plan.function_exports[0].export_name, "bst_start",
-        "export name must be bst_start"
+        plan_a.export_plan.function_exports[0].export_name, "moth_start",
+        "export name must be moth_start"
     );
     // Verify determinism.
     assert_eq!(
@@ -82,7 +82,7 @@ fn wasm_export_plan_contains_single_entry_start_export() {
 #[test]
 fn wasm_export_plan_wires_required_helper_exports() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("#page.bst"), &mut string_table);
+    let module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
 
     let plan =
         build_html_wasm_plan(&module.executable.hir, Vec::new()).expect("wasm plan should build");
@@ -101,7 +101,7 @@ fn wasm_export_plan_wires_required_helper_exports() {
 #[test]
 fn compile_html_module_wasm_preserves_nested_logical_html_route() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("docs/#page.bst"), &mut string_table);
+    let module = create_test_module(PathBuf::from("docs/#page.moth"), &mut string_table);
 
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,

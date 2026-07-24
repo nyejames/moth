@@ -1,0 +1,18 @@
+import @./borrow-validation {content as reference_content}
+import @styles/docs {navbar, section, theme_head}
+
+page_title #= "Borrow validation"
+page_description #= "How Moth checks exclusivity, aliasing and optional transfer safety."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Memory management) / Borrow validation
+
+    # Borrow validation
+
+    Borrow validation runs after HIR generation. It writes analysis facts beside HIR without changing it. Lifetime topology is a separate later analysis.
+]
+
+#[section, reference_content]

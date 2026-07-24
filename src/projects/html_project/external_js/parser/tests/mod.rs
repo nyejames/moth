@@ -1,4 +1,4 @@
-//! Behavior-level parser tests for the JS `@bst.*` annotation scanner.
+//! Behavior-level parser tests for the JS `@moth.*` annotation scanner.
 //!
 //! WHAT: asserts parser output (opaque types, functions, diagnostics) for valid and
 //!       invalid JS source snippets.

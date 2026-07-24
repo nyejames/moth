@@ -76,7 +76,7 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
 #[test]
 fn truncated_template_head_stream_returns_missing_closing_delimiter() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let context = new_constant_context(scope.to_owned());
 
     let mut token_stream = FileTokens::new(
@@ -97,7 +97,7 @@ fn truncated_template_head_stream_returns_missing_closing_delimiter() {
 #[test]
 fn single_item_template_head_with_close_is_foldable() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let context = new_constant_context(scope.to_owned());
 
     let mut token_stream = FileTokens::new(
@@ -1067,7 +1067,7 @@ fn template_if_composition_formats_each_branch_independently() {
 fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
     let mut string_table = StringTable::new();
     let wrapper_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
 
     let mut card_tokens =
         template_tokens_from_source("[: <card>[$slot]</card>]", &mut string_table);
@@ -1458,7 +1458,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
         &mut string_table,
     );
     let show_banner = string_table.intern("show_banner");
-    let flags_scope = InternedPath::from_single_str("flags.bst", &mut string_table);
+    let flags_scope = InternedPath::from_single_str("flags.moth", &mut string_table);
     let imported_path = flags_scope.append(show_banner);
     let declaration = Declaration {
         id: imported_path.clone(),
@@ -1485,7 +1485,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
 fn const_required_template_if_false_without_else_skips_shared_head_output() {
     let mut string_table = StringTable::new();
     let wrapper_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
 
     let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]", &mut string_table);
     let card_context = new_constant_context(card_tokens.src_path.to_owned());
@@ -1676,7 +1676,7 @@ fn const_required_template_collection_loop_folds_iteration_bindings() {
 fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     let mut string_table = StringTable::new();
     let wrapper_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
 
     let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]", &mut string_table);
     let card_context = new_constant_context(card_tokens.src_path.to_owned());
@@ -1711,7 +1711,7 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
 fn const_required_template_loop_wraps_aggregate_once() {
     let mut string_table = StringTable::new();
     let wrapper_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
 
     let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]", &mut string_table);
     let card_context = new_constant_context(card_tokens.src_path.to_owned());
@@ -2042,7 +2042,7 @@ fn const_required_template_loop_uses_configured_expansion_limit() {
 fn const_required_template_option_capture_present_folds_then_branch() {
     let mut string_table = StringTable::new();
     let context_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let context = new_constant_context(context_scope.clone());
 
     let mut type_environment = TypeEnvironment::new();
@@ -2081,7 +2081,7 @@ fn const_required_template_option_capture_present_folds_then_branch() {
 fn const_required_template_option_capture_absent_folds_else_branch() {
     let mut string_table = StringTable::new();
     let context_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let context = new_constant_context(context_scope.clone());
 
     let mut type_environment = TypeEnvironment::new();

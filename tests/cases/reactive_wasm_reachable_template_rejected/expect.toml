@@ -8,8 +8,8 @@ rendered_output_contains = ["reactive_wasm_reachable_template_rejected 1"]
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0064"]
+diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
-code = "BST-RULE-0064"
+code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.reactive_template_runtime"

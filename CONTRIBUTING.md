@@ -1,6 +1,6 @@
-# Contributing to Beanstalk
+# Contributing to Moth
 
-Beanstalk is an early-stage compiler and language project with ambitious long-term, difficult goals. 
+Moth is an early-stage compiler and language project with ambitious long-term, difficult goals. 
 
 If you are interested in compilers/programming languages or the goals of this project 
 and want to contribute or make suggestions, please open a discussion on GitHub.
@@ -26,7 +26,7 @@ To see the current plans and priority goals of the compiler and language, see th
 ### Language and current support
 
 - [User-facing documentation](docs/src/docs/)
-- [Progress matrix](docs/src/docs/progress/#page.bst)
+- [Progress matrix](docs/src/docs/progress/#page.moth)
 - [Roadmap](docs/roadmap/roadmap.md)
 
 ### Compiler and memory design
@@ -35,17 +35,17 @@ More technical details about the language, compiler and build system.
 
 - [Compiler design overview](docs/compiler-design-overview.md)
 - [Build system overview](docs/build-system-design.md)
-- [Memory-management overview](docs/src/docs/codebase/memory-management/overview.bd)
-- [Design scope](docs/src/docs/codebase/design-scope/overview.bd)
+- [Memory-management overview](docs/src/docs/codebase/memory-management/overview.mtf)
+- [Design scope](docs/src/docs/codebase/design-scope/overview.mtf)
 - [Repository index](index.md)
 
 ### Development standards
 
-- [Code style](docs/src/docs/codebase/style-guide/style-guide.bd)
-- [Testing standards](docs/src/docs/codebase/style-guide/testing.bd)
-- [Validation gates](docs/src/docs/codebase/style-guide/validation.bd)
+- [Code style](docs/src/docs/codebase/style-guide/style-guide.mtf)
+- [Testing standards](docs/src/docs/codebase/style-guide/testing.mtf)
+- [Validation gates](docs/src/docs/codebase/style-guide/validation.mtf)
 
-These Beandown files are the development-standard references. The generated web page combines them at `/docs/codebase/style-guide/`.
+These Moth template files are the development-standard references. The generated web page combines them at `/docs/codebase/style-guide/`.
 
 ---
 
@@ -62,7 +62,7 @@ These Beandown files are the development-standard references. The generated web 
 
 ## Testing
 
-The complete testing policy is in [testing.bd](docs/src/docs/codebase/style-guide/testing.bd).
+The complete testing policy is in [testing.mtf](docs/src/docs/codebase/style-guide/testing.mtf).
 
 In general:
 
@@ -122,7 +122,7 @@ must be repeated. Exact diagnostic matching is the default:
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0033", "BST-RULE-0033"]
+diagnostic_codes = ["MOTH-RULE-0033", "MOTH-RULE-0033"]
 ```
 
 When a broad code needs a stable reason or source remapping is contractual, add a structured
@@ -131,14 +131,14 @@ compiler-owned qualified reason key, and write normalized paths relative to the 
 
 ```toml
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0057"
+code = "MOTH-RULE-0057"
 reason = "invalid_generic_instantiation.recursive_function_instantiation"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 3
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/helpers.bst"
+path = "input/helpers.moth"
 line = 2
 ```
 
@@ -154,7 +154,7 @@ intentionally leaves warnings unchecked.
 
 ## Validation
 
-The executable validation policy is summarized in [validation.bd](docs/src/docs/codebase/style-guide/validation.bd).
+The executable validation policy is summarized in [validation.mtf](docs/src/docs/codebase/style-guide/validation.mtf).
 
 ### Code-bearing changes
 

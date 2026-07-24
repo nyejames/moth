@@ -1,0 +1,30 @@
+A mutable receiver method declares `this ~Type`.
+
+[codeblock, $code("moth"):
+    Vector2 = |
+        x Float,
+        y Float,
+    |
+
+    reset |this ~Vector2|:
+        this.x = 0.0
+        this.y = 0.0
+    ;
+
+    vector ~= Vector2(3.0, 4.0)
+    ~vector.reset()
+]
+
+### Contract
+
+- The receiver root must be a mutable place.
+- The call uses `~receiver.method(...)`.
+- Omitting `~` for a mutable receiver method is invalid.
+- Adding `~` to a shared receiver method is invalid.
+- A temporary or computed rvalue cannot receive a mutable receiver call.
+- Field writes inside the method are permitted through mutable `this`.
+- `~` requests exclusive access for the call. It is not move syntax and is not part of type identity.
+
+This differs from a fresh rvalue passed to a mutable free-function parameter.
+The compiler may materialize that free-function argument into a hidden local.
+A mutable receiver call still requires an authored mutable place.

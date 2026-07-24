@@ -1,4 +1,4 @@
-//! Coercion policy for the Beanstalk compiler frontend.
+//! Coercion policy for the Moth compiler frontend.
 //!
 //! WHAT: Compatibility and coercion policy are centralized here, but assignment-like frontend sites still apply those rules explicitly after parsing.
 //! WHY: coercion logic was previously scattered across datatypes, expression

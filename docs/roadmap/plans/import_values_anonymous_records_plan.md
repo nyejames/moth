@@ -146,7 +146,7 @@ Retain and sharpen:
 - no lowercase `import` overload for build values
 - no runtime `Import` wrapper type
 - no compatibility path for the old flat hidden config-key shape
-- no Beanstalk-native env-file or general input source until a separate accepted design
+- no Moth-native env-file or general input source until a separate accepted design
 
 ## Risks and blockers
 
@@ -278,7 +278,7 @@ Context: resolved config and inputs must flow through all command paths consiste
 - Keep the root project's explicit inputs scoped to the root project compilation boundary.
 - When source dependencies compile, construct a separate dependency input context rather than forwarding the root project's unqualified input map.
 - Ensure dev server preserves input values through runtime path resolution, initial build and every rebuild.
-- Ensure `bean check --input` and `bean build --input` resolve frontend constants identically.
+- Ensure `moth check --input` and `moth build --input` resolve frontend constants identically.
 - Ensure HTML-Wasm either accepts compile-time-only cases or rejects unsupported runtime anonymous record use before backend lowering.
 
 ### Phase 10: Delete flat globals, builder selector, global output folders and config compatibility paths
@@ -298,7 +298,7 @@ Context: the refactor is not complete while old flat config, builder selector or
 
 Context: documentation and scaffolding must teach the accepted config model.
 
-- Update `bean new` scaffold `config.bst` output to the grouped record shape with `project` record, builder sections and direct `#Import` fields.
+- Update `moth new` scaffold `config.bst` output to the grouped record shape with `project` record, builder sections and direct `#Import` fields.
 - Update all integration fixtures containing old flat hidden keys.
 - Update `docs/language-overview.md` with config, `#Import` and anonymous record source semantics.
 - Update project-structure and imported-build-values source pages.

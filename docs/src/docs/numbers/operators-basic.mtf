@@ -1,0 +1,35 @@
+Put spaces around symbolic operators.
+
+[codeblock, $code("moth"):
+    total = left + right
+    count += 1
+]
+
+Moth uses words for equality and logic:
+
+[codeblock, $code("moth"):
+    same = left is right
+    different = left is not right
+    ready = loaded and valid
+    retry = timed_out or disconnected
+    blocked = not ready
+]
+
+Division has two forms:
+
+[codeblock, $code("moth"):
+    real_result = 5 / 2
+    whole_result = 5 // 2
+]
+
+`/` produces a real `Float` result. `//` performs integer division and produces
+an `Int`.
+
+Use templates to join text:
+
+[codeblock, $code("moth"):
+    greeting = ["Hello, ", "Priya"]
+]
+
+Templates handle all string joining and interpolation. `+` is for numbers
+only.

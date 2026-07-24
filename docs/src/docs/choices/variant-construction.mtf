@@ -1,0 +1,40 @@
+Choice values are constructed through the choice name and variant name.
+
+### Unit variants
+
+A unit variant is a value without a constructor call.
+
+[codeblock, $code("moth"):
+    current = Status::Ready
+]
+
+This form is invalid:
+
+[codeblock, $code("moth"):
+    current = Status::Ready()
+]
+
+### Payload variants
+
+A payload variant requires constructor parentheses.
+
+[codeblock, $code("moth"):
+    failed = Status::Failed("network")
+    named = Status::Failed(message = "network")
+]
+
+### Argument rules
+
+- Positional arguments fill payload fields in declaration order.
+- Positional arguments must come before named arguments.
+- A named argument must match a payload field.
+- Each payload field must be supplied exactly once.
+- Payload fields have no defaults.
+- Extra or missing arguments are invalid.
+- Argument values are checked and contextually coerced against field types.
+
+Constructed payload fields are immutable.
+
+Direct payload field mutation is invalid.
+
+Use pattern matching to inspect payload fields.

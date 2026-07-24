@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 env:
-  BIN_NAME: bean
-  PACKAGE_NAME: beanstalk
+  BIN_NAME: moth
+  PACKAGE_NAME: moth
 
 jobs:
   validate:
@@ -56,23 +56,23 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
-            binary: bean
+            binary: moth
 
           # Build Intel macOS from Apple Silicon to avoid macos-13 runner queue stalls.
           - os: macos-14
             target: x86_64-apple-darwin
             archive: tar.gz
-            binary: bean
+            binary: moth
 
           - os: macos-14
             target: aarch64-apple-darwin
             archive: tar.gz
-            binary: bean
+            binary: moth
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
-            binary: bean.exe
+            binary: moth.exe
 
     steps:
       - name: Checkout
@@ -205,4 +205,4 @@ jobs:
             --verify-tag \
             --prerelease \
             --generate-notes \
-            --title "Beanstalk ${GITHUB_REF_NAME}"
+            --title "Moth ${GITHUB_REF_NAME}"

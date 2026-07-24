@@ -90,7 +90,7 @@ fn exposes_function_name_map_for_runtime_fragments() {
     );
     module.side_table.bind_function_name(
         FunctionId(1),
-        InternedPath::from_single_str("__bst_frag_0", &mut string_table),
+        InternedPath::from_single_str("__moth_frag_0", &mut string_table),
     );
 
     let output = lower_hir_to_js(
@@ -102,7 +102,7 @@ fn exposes_function_name_map_for_runtime_fragments() {
     )
     .expect("JS lowering should succeed");
     let expected_start = expected_dev_function_name("start", 0);
-    let expected_fragment = expected_dev_function_name("__bst_frag_0", 1);
+    let expected_fragment = expected_dev_function_name("__moth_frag_0", 1);
 
     assert_eq!(
         output

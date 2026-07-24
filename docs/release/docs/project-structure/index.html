@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Project structure | Beanstalk</title>
-    <meta name="description" content="How Beanstalk projects are structured, how modules are discovered, and how the HTML builder emits pages.">
+    <title>Project structure | Moth</title>
+    <meta name="description" content="How Moth projects are structured, how modules are discovered, and how the HTML builder emits pages.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -668,7 +668,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Project structure</p><h1>Project structure</h1><p>A Beanstalk project is a set of modules, one strict project config and a builder that decides what those modules produce.</p><p>The root filename begins with <code>#</code>, but the name after it is deliberately unimportant. The source tells the compiler what is public. The builder decides whether the module becomes an artifact.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Project structure</p><h1>Project structure</h1><p>A Moth project is a set of modules, one strict project config and a builder that decides what those modules produce.</p><p>The root filename begins with <code>#</code>, but the name after it is deliberately unimportant. The source tells the compiler what is public. The builder decides whether the module becomes an artifact.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Project layout
@@ -718,22 +718,22 @@ body {
 
 
 
-            <p>A Beanstalk project has one config file, one source root, and generated output folders.</p><h3>Where things live</h3><ul><li><code>config.bst</code> at the project root controls build settings.</li><li><code>src/</code> (or whatever <code>entry_root</code> says) holds your source files.</li><li><code>lib/</code> holds project-local source-backed packages by default. Each direct child becomes a package prefix.</li><li><code>dev/</code> and <code>release/</code> are generated output. Do not edit them.</li></ul><h3>One root file per module directory</h3><p>Each source directory can have one <code>#*.bst</code> file that marks it as a module. The <code>#</code> filename is just a convention. <code>#page.bst</code>, <code>#api.bst</code> and <code>#mod.bst</code> all mean the same thing to the compiler.</p><h3>Outputs are generated</h3><p>The build command creates output folders. They are not source. The builder cleans up stale artifacts automatically.</p><h3>Remember</h3><ul><li><code>config.bst</code> is the only config file.</li><li><code>#*.bst</code> files are module roots.</li><li><code>dev/</code> and <code>release/</code> are generated.</li></ul>
+            <p>A Moth project has one config file, one source root, and generated output folders.</p><h3>Where things live</h3><ul><li><code>config.moth</code> at the project root controls build settings.</li><li><code>src/</code> (or whatever <code>entry_root</code> says) holds your source files.</li><li><code>lib/</code> holds project-local source-backed packages by default. Each direct child becomes a package prefix.</li><li><code>dev/</code> and <code>release/</code> are generated output. Do not edit them.</li></ul><h3>One root file per module directory</h3><p>Each source directory can have one <code>#*.moth</code> file that marks it as a module. The <code>#</code> filename is just a convention. <code>#page.moth</code>, <code>#api.moth</code> and <code>#mod.moth</code> all mean the same thing to the compiler.</p><h3>Outputs are generated</h3><p>The build command creates output folders. They are not source. The builder cleans up stale artifacts automatically.</p><h3>Remember</h3><ul><li><code>config.moth</code> is the only config file.</li><li><code>#*.moth</code> files are module roots.</li><li><code>dev/</code> and <code>release/</code> are generated.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A Beanstalk project is a directory tree with one strict config file, a source entry root, and generated output folders.</p><h3>Project root contents</h3><pre style=""><code class='codeblock'>
+        <p>A Moth project is a directory tree with one strict config file, a source entry root, and generated output folders.</p><h3>Project root contents</h3><pre style=""><code class='codeblock'>
         project-root/
-        ├── config.bst
+        ├── config.moth
         ├── src/
-        │   └── #page.bst
+        │   └── #page.moth
         ├── lib/
         ├── dev/
-        │   └── .beanstalk_manifest
+        │   └── .moth_manifest
         ├── release/
-        │   └── .beanstalk_manifest
+        │   └── .moth_manifest
         └── .gitignore
-    </code></pre><h3>Directory roles</h3><ul><li><code>config.bst</code> is the only project config file. It lives at the project root and is not module source.</li><li>The configured <code>entry_root</code> (usually <code>src</code>) is the source folder the compiler searches for module roots.</li><li><code>lib/</code> is the conventional default folder for project-local source-backed packages. Each direct child becomes a package prefix.</li><li><code>dev/</code> and <code>release/</code> are builder output folders, not source folders. They are generated and managed by the build system.</li><li><code>.beanstalk_manifest</code> files are build-system metadata used for safe stale-output cleanup. They are not source.</li></ul><h3>Hash-root files inside source directories</h3><p>A non-config file whose name starts with <code>#</code> and ends with <code>.bst</code> is a module root. The filename after <code>#</code> has no language-level semantic role. <code>#page.bst</code>, <code>#mod.bst</code>, <code>#api.bst</code> and <code>#anything.bst</code> are all equivalent root filenames.</p><p>The <code>bean new html</code> scaffold generates <code>src/#page.bst</code> as a conventional default. That convention does not make <code>#page.bst</code> a special compiler role. Any <code>#*.bst</code> filename in a source directory marks that directory as a module root.</p><h3>Source versus output</h3><p>Source directories are owned by the developer. Output folders are generated by the builder and should be treated as build artifacts, not source. The builder owns stale-output cleanup for generated artifacts.</p><h3>Builder-neutral frontend versus builder-owned output</h3><p>The compiler frontend discovers modules, resolves imports, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.</p><p>This separation means the same frontend can later feed other builders. The frontend does not decide which modules produce artifacts. That decision belongs to the builder.</p><h3>Only config.bst has config semantics</h3><p>No other filename has config meaning. <code>#config.bst</code> is a module root, not a config file. Alternate config filenames, compatibility handling and config-specific diagnostics for other names are not supported.</p><h3>Related concepts</h3><ul><li>For config key rules see <a href="#project-config">Project config</a>.</li><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For HTML routes and artifacts see <a href="#html-routing-and-artifacts">HTML routing and artifacts</a>.</li></ul>
+    </code></pre><h3>Directory roles</h3><ul><li><code>config.moth</code> is the only project config file. It lives at the project root and is not module source.</li><li>The configured <code>entry_root</code> (usually <code>src</code>) is the source folder the compiler searches for module roots.</li><li><code>lib/</code> is the conventional default folder for project-local source-backed packages. Each direct child becomes a package prefix.</li><li><code>dev/</code> and <code>release/</code> are builder output folders, not source folders. They are generated and managed by the build system.</li><li><code>.moth_manifest</code> files are build-system metadata used for safe stale-output cleanup. They are not source.</li></ul><h3>Hash-root files inside source directories</h3><p>A non-config file whose name starts with <code>#</code> and ends with <code>.moth</code> is a module root. The filename after <code>#</code> has no language-level semantic role. <code>#page.moth</code>, <code>#mod.moth</code>, <code>#api.moth</code> and <code>#anything.moth</code> are all equivalent root filenames.</p><p>The <code>moth new html</code> scaffold generates <code>src/#page.moth</code> as a conventional default. That convention does not make <code>#page.moth</code> a special compiler role. Any <code>#*.moth</code> filename in a source directory marks that directory as a module root.</p><h3>Source versus output</h3><p>Source directories are owned by the developer. Output folders are generated by the builder and should be treated as build artifacts, not source. The builder owns stale-output cleanup for generated artifacts.</p><h3>Builder-neutral frontend versus builder-owned output</h3><p>The compiler frontend discovers modules, resolves imports, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.</p><p>This separation means the same frontend can later feed other builders. The frontend does not decide which modules produce artifacts. That decision belongs to the builder.</p><h3>Only config.moth has config semantics</h3><p>No other filename has config meaning. <code>#config.moth</code> is a module root, not a config file. Alternate config filenames, compatibility handling and config-specific diagnostics for other names are not supported.</p><h3>Related concepts</h3><ul><li>For config key rules see <a href="#project-config">Project config</a>.</li><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For HTML routes and artifacts see <a href="#html-routing-and-artifacts">HTML routing and artifacts</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -785,37 +785,37 @@ body {
 
 
 
-            <p><code>config.bst</code> at the project root controls build settings. It is one self-contained compile-time source file with no source imports.</p><h3>A minimal config</h3><pre style=""><code class='codeblock'>
-    project <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;my_project&quot;</span>,
-        entry_root <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;src&quot;</span>,
-    <span class='bst-code-operator'>|</span>
+            <p><code>config.moth</code> at the project root controls build settings. It is one self-contained compile-time source file with no source imports.</p><h3>A minimal config</h3><pre style=""><code class='codeblock'>
+    project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;my_project&quot;</span>,
+        entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
+    <span class='moth-code-operator'>|</span>
 
-    html <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        dev_output <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;dev&quot;</span>,
-        release_output <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;release&quot;</span>,
-    <span class='bst-code-operator'>|</span>
-    </code></pre><h3>Structure</h3><ul><li>One required <code>project</code> record provides project identity and settings.</li><li><code>project.name</code> is required for stable identity.</li><li>Builder sections like <code>html</code> hold builder-specific settings.</li><li>The command selects the builder before config validation. <code>config.bst</code> does not select the builder.</li><li>Only active sections are schema-validated.</li></ul><h3>Remember</h3><ul><li>Only <code>config.bst</code> has config semantics.</li><li>Values must be compile-time constants.</li><li>Output settings are builder-owned, not global project fields.</li></ul>
+    html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
+        release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
+    <span class='moth-code-operator'>|</span>
+    </code></pre><h3>Structure</h3><ul><li>One required <code>project</code> record provides project identity and settings.</li><li><code>project.name</code> is required for stable identity.</li><li>Builder sections like <code>html</code> hold builder-specific settings.</li><li>The command selects the builder before config validation. <code>config.moth</code> does not select the builder.</li><li>Only active sections are schema-validated.</li></ul><h3>Remember</h3><ul><li>Only <code>config.moth</code> has config semantics.</li><li>Values must be compile-time constants.</li><li>Output settings are builder-owned, not global project fields.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p><code>config.bst</code> is the single project config file. It lives at the project root, is loaded before source-tree discovery, and is one self-contained compile-time source file with no source imports or package resolution.</p><h3>Canonical config</h3><pre style=""><code class='codeblock'>
-    default_channel <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;alpha&quot;</span>
+        <p><code>config.moth</code> is the single project config file. It lives at the project root, is loaded before source-tree discovery, and is one self-contained compile-time source file with no source imports or package resolution.</p><h3>Canonical config</h3><pre style=""><code class='codeblock'>
+    default_channel <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;alpha&quot;</span>
 
-    project <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;beanstalk_docs&quot;</span>,
-        version <span class='bst-code-operator'>#</span><span class='bst-code-struct'>Import</span> of <span class='bst-code-type'>String</span> <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;0.1.0&quot;</span>,
-        entry_root <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;src&quot;</span>,
-        metadata <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-            channel <span class='bst-code-operator'>=</span> default_channel,
-        <span class='bst-code-operator'>|</span>,
-    <span class='bst-code-operator'>|</span>
+    project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;moth_docs&quot;</span>,
+        version <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>,
+        entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
+        metadata <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+            channel <span class='moth-code-operator'>=</span> default_channel,
+        <span class='moth-code-operator'>|</span>,
+    <span class='moth-code-operator'>|</span>
 
-    html <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        dev_output <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;dev&quot;</span>,
-        release_output <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;release&quot;</span>,
-    <span class='bst-code-operator'>|</span>
-    </code></pre><h3>Structure</h3><ul><li>One required open <code>project</code> const record provides stable project identity.</li><li><code>project.name</code> is required and must be a valid package-style identifier.</li><li>Private helper constants declared before use are allowed.</li><li>Top-level builder and tooling section records are allowed.</li><li>All sections are folded, but only active sections are schema-validated.</li><li>The active builder project section is required, even when empty.</li><li>Inactive sections are parsed and folded, then discarded.</li><li>Project and entry schemas are separate with no shared fields.</li><li>Project fields may contain folded scalar values, optionals, nested anonymous const records, collections and folded template strings.</li><li>Builder sections use backend-neutral folded values and cannot declare <code>#Import</code>.</li><li>Output settings are builder-owned.</li></ul><h3>Direct project #Import fields</h3><p>A direct primitive or optional field of <code>project</code> may declare a build-input contract using <code>#Import of T</code>. Nested project fields cannot declare imports.</p><p>Accepted imported-value types are <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those types.</p><p>See <code>docs/build-system-design.md</code> for the full <code>#Import</code> and <code>@project</code> contract.</p><h3>Rejected in config</h3><ul><li>Every source import, including relative, project, Core, Builder, dependency and binding-backed imports.</li><li>Runtime declarations, mutable bindings, functions, named support types, traits, conformances.</li><li>Standalone templates and top-level const page fragments.</li><li><code>export:</code>.</li></ul><h3>Config is loaded before module discovery</h3><p>The command selects the builder before config schema validation. <code>config.bst</code> does not select the builder. Config is parsed and folded before Stage 0 source-tree indexing begins.</p><h3>Related concepts</h3><ul><li>For the source tree layout see <a href="#project-layout">Project layout</a>.</li><li>For package discovery see <a href="../packages/#project-local-packages">Project-local packages</a>.</li></ul>
+    html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
+        release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
+    <span class='moth-code-operator'>|</span>
+    </code></pre><h3>Structure</h3><ul><li>One required open <code>project</code> const record provides stable project identity.</li><li><code>project.name</code> is required and must be a valid package-style identifier.</li><li>Private helper constants declared before use are allowed.</li><li>Top-level builder and tooling section records are allowed.</li><li>All sections are folded, but only active sections are schema-validated.</li><li>The active builder project section is required, even when empty.</li><li>Inactive sections are parsed and folded, then discarded.</li><li>Project and entry schemas are separate with no shared fields.</li><li>Project fields may contain folded scalar values, optionals, nested anonymous const records, collections and folded template strings.</li><li>Builder sections use backend-neutral folded values and cannot declare <code>#Import</code>.</li><li>Output settings are builder-owned.</li></ul><h3>Direct project #Import fields</h3><p>A direct primitive or optional field of <code>project</code> may declare a build-input contract using <code>#Import of T</code>. Nested project fields cannot declare imports.</p><p>Accepted imported-value types are <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those types.</p><p>See <code>docs/build-system-design.md</code> for the full <code>#Import</code> and <code>@project</code> contract.</p><h3>Rejected in config</h3><ul><li>Every source import, including relative, project, Core, Builder, dependency and binding-backed imports.</li><li>Runtime declarations, mutable bindings, functions, named support types, traits, conformances.</li><li>Standalone templates and top-level const page fragments.</li><li><code>export:</code>.</li></ul><h3>Config is loaded before module discovery</h3><p>The command selects the builder before config schema validation. <code>config.moth</code> does not select the builder. Config is parsed and folded before Stage 0 source-tree indexing begins.</p><h3>Related concepts</h3><ul><li>For the source tree layout see <a href="#project-layout">Project layout</a>.</li><li>For package discovery see <a href="../packages/#project-local-packages">Project-local packages</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -867,16 +867,16 @@ body {
 
 
 
-            <p>Each source directory can have one <code>#*.bst</code> file that marks it as a module.</p><h3>One root per folder</h3><p>The filename after <code>#</code> does not matter. <code>#page.bst</code>, <code>#mod.bst</code> and <code>#api.bst</code> all mean the same thing. Two <code>#*.bst</code> files in one folder are rejected.</p><h3>Import the module, not the root file</h3><p>You cannot import <code>#api.bst</code> directly. Import the module through its directory path to access its public surface.</p><h3>Two roles</h3><p>When a module root is the active module being compiled, its top-level runtime code runs. When it is imported by another module, only its exported declarations are available. Its runtime code does not run.</p><h3>Remember</h3><ul><li>One <code>#*.bst</code> file per directory.</li><li>The <code>#</code> name is cosmetic.</li><li><code>config.bst</code> is not a module root.</li></ul>
+            <p>Each source directory can have one <code>#*.moth</code> file that marks it as a module.</p><h3>One root per folder</h3><p>The filename after <code>#</code> does not matter. <code>#page.moth</code>, <code>#mod.moth</code> and <code>#api.moth</code> all mean the same thing. Two <code>#*.moth</code> files in one folder are rejected.</p><h3>Import the module, not the root file</h3><p>You cannot import <code>#api.moth</code> directly. Import the module through its directory path to access its public surface.</p><h3>Two roles</h3><p>When a module root is the active module being compiled, its top-level runtime code runs. When it is imported by another module, only its exported declarations are available. Its runtime code does not run.</p><h3>Remember</h3><ul><li>One <code>#*.moth</code> file per directory.</li><li>The <code>#</code> name is cosmetic.</li><li><code>config.moth</code> is not a module root.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A non-config file whose name starts with <code>#</code> and ends with <code>.bst</code> is the module root for its containing directory.</p><h3>Root filename semantics</h3><p>The filename after <code>#</code> has no language-level semantic role. These are all equivalent module root spellings:</p><pre style=""><code class='codeblock'>
-        #page.bst
-        #mod.bst
-        #api.bst
-        #anything.bst
-    </code></pre><p>The compiler treats each one as the module root for its directory. The HTML route comes from the directory position, not from the root filename.</p><h3>One root per directory</h3><p>A source directory may contain at most one non-config <code>#*.bst</code> file. Two or more hash-root files in one directory are rejected with <code>BST-CONFIG-0001</code>.</p><h3>Config files are not module roots</h3><p><code>config.bst</code> is the project config file. It is not a module root, does not produce HIR and does not export declarations. <code>#config.bst</code> is a module root, not a config file. Only plain <code>config.bst</code> without <code>#</code> has config semantics.</p><h3>Direct root-file imports are rejected</h3><p>Import the module boundary, not the root filename. Direct imports of hash-root files are rejected. Use the directory path to import a module&#39;s public surface.</p><h3>Normal files belong to the surrounding module</h3><p>Files without <code>#</code> in the same directory as a root file are normal source files within that module. They contribute declarations that the module root can import and export. They do not execute top-level runtime code independently.</p><h3>Active versus imported module roots</h3><p>A module root can serve two roles depending on context:</p><ul><li><strong>Active root</strong>: the module being compiled. Its top-level runtime code becomes implicit module start work. Its direct top-level templates become page fragments.</li><li><strong>Imported root</strong>: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by <code>export:</code> are visible through the module boundary.</li></ul><h3>API-only roots</h3><p>A module root with no builder-relevant top-level activity (no runtime code, no const fragments, no runtime fragments) is API-only. It is a valid module root that exports declarations but produces no builder artifact.</p><h3>Migrating older module projects</h3><ul><li>Rename the project config file to plain <code>config.bst</code>.</li><li>Keep one non-config <code>#*.bst</code> root per source directory. Merge old <code>#page.bst</code> and <code>#mod.bst</code> roles when they shared a directory.</li><li>Replace inline <code>export</code> declarations and imports with one strict <code>export:</code> block in the module root.</li><li>Import the module directory or package prefix. Do not import the hash-root filename directly.</li></ul><h3>Related concepts</h3><ul><li>For the export block see <a href="#public-api">Public API</a>.</li><li>For root activity and page fragments see <a href="#entry-runtime-and-fragments">Active-root runtime and fragments</a>.</li><li>For HTML routes see <a href="#html-routing-and-artifacts">HTML routing and artifacts</a>.</li></ul>
+        <p>A non-config file whose name starts with <code>#</code> and ends with <code>.moth</code> is the module root for its containing directory.</p><h3>Root filename semantics</h3><p>The filename after <code>#</code> has no language-level semantic role. These are all equivalent module root spellings:</p><pre style=""><code class='codeblock'>
+        #page.moth
+        #mod.moth
+        #api.moth
+        #anything.moth
+    </code></pre><p>The compiler treats each one as the module root for its directory. The HTML route comes from the directory position, not from the root filename.</p><h3>One root per directory</h3><p>A source directory may contain at most one non-config <code>#*.moth</code> file. Two or more hash-root files in one directory are rejected with <code>MOTH-CONFIG-0001</code>.</p><h3>Config files are not module roots</h3><p><code>config.moth</code> is the project config file. It is not a module root, does not produce HIR and does not export declarations. <code>#config.moth</code> is a module root, not a config file. Only plain <code>config.moth</code> without <code>#</code> has config semantics.</p><h3>Direct root-file imports are rejected</h3><p>Import the module boundary, not the root filename. Direct imports of hash-root files are rejected. Use the directory path to import a module&#39;s public surface.</p><h3>Normal files belong to the surrounding module</h3><p>Files without <code>#</code> in the same directory as a root file are normal source files within that module. They contribute declarations that the module root can import and export. They do not execute top-level runtime code independently.</p><h3>Active versus imported module roots</h3><p>A module root can serve two roles depending on context:</p><ul><li><strong>Active root</strong>: the module being compiled. Its top-level runtime code becomes implicit module start work. Its direct top-level templates become page fragments.</li><li><strong>Imported root</strong>: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by <code>export:</code> are visible through the module boundary.</li></ul><h3>API-only roots</h3><p>A module root with no builder-relevant top-level activity (no runtime code, no const fragments, no runtime fragments) is API-only. It is a valid module root that exports declarations but produces no builder artifact.</p><h3>Migrating older module projects</h3><ul><li>Rename the project config file to plain <code>config.moth</code>.</li><li>Keep one non-config <code>#*.moth</code> root per source directory. Merge old <code>#page.moth</code> and <code>#mod.moth</code> roles when they shared a directory.</li><li>Replace inline <code>export</code> declarations and imports with one strict <code>export:</code> block in the module root.</li><li>Import the module directory or package prefix. Do not import the hash-root filename directly.</li></ul><h3>Related concepts</h3><ul><li>For the export block see <a href="#public-api">Public API</a>.</li><li>For root activity and page fragments see <a href="#entry-runtime-and-fragments">Active-root runtime and fragments</a>.</li><li>For HTML routes see <a href="#html-routing-and-artifacts">HTML routing and artifacts</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -929,15 +929,15 @@ body {
 
 
             <p>Declarations are private to their module by default. The <code>export:</code> block marks what other modules can see.</p><h3>A compact export block</h3><pre style=""><code class='codeblock'>
-    private_helper <span class='bst-code-operator'>|</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-string'>&quot;private&quot;</span>
+    private_helper <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;private&quot;</span>
     ;
 
-    export<span class='bst-code-operator'>:</span>
-        public_name <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Beanstalk&quot;</span>
+    export<span class='moth-code-operator'>:</span>
+        public_name <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
 
-        render <span class='bst-code-operator'>|</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-            <span class='bst-code-keyword'>return</span> private_helper<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+        render <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+            <span class='moth-code-keyword'>return</span> private_helper<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
         ;
     ;
     </code></pre><h3>Private by default</h3><p>Files in the same module can see each other&#39;s declarations. Other modules can only see what the <code>export:</code> block makes public.</p><h3>Remember</h3><ul><li><code>export:</code> is only valid in the module root file.</li><li>One <code>export:</code> block per root.</li><li><code>#</code> means compile-time constant, not public.</li></ul>
@@ -945,28 +945,28 @@ body {
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>The <code>export:</code> block is the only public API marker. It is valid only in a module root file and marks declarations as visible to other modules.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    private_helper <span class='bst-code-operator'>|</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-string'>&quot;private&quot;</span>
+    private_helper <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;private&quot;</span>
     ;
 
-    export<span class='bst-code-operator'>:</span>
-        public_name <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Beanstalk&quot;</span>
+    export<span class='moth-code-operator'>:</span>
+        public_name <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
 
-        render <span class='bst-code-operator'>|</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-            <span class='bst-code-keyword'>return</span> private_helper<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+        render <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+            <span class='moth-code-keyword'>return</span> private_helper<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
         ;
     ;
-    </code></pre><h3>Rules</h3><ul><li><code>export:</code> is valid only in a module root file. An <code>export:</code> block in a normal source file is rejected with <code>BST-RULE-0077</code>.</li><li>A module root may contain at most one <code>export:</code> block. Duplicate blocks are rejected with <code>BST-RULE-0085</code>.</li><li>The block ends with normal Beanstalk <code>;</code>.</li><li>An empty <code>export:</code> block is rejected with <code>BST-RULE-0080</code>.</li><li>Items inside the block are ordinary top-level module-root items marked public.</li><li>Items outside the block remain private to the module root file.</li></ul><h3>Allowed inside export:</h3><ul><li>grouped source imports (re-exports)</li><li>grouped external imports</li><li>functions</li><li>structs</li><li>choices</li><li>type aliases</li><li>traits</li><li>compile-time constants using <code>#</code></li></ul><h3>Rejected inside export:</h3><ul><li>runtime bindings</li><li>mutable bindings</li><li>top-level executable statements</li><li>runtime templates</li><li>top-level const page fragments</li><li>trait conformances</li><li>trait incompatibility declarations</li><li>receiver methods as directly exported symbols</li><li>bare namespace imports or exports</li><li>wildcard exports</li><li>export lists</li><li>function alias exports</li><li>nested <code>export:</code> blocks</li><li>all legacy inline <code>export</code> forms</li></ul><p>Runtime statements inside the block are rejected with <code>BST-RULE-0080</code>. Legacy inline <code>export</code> syntax (without the <code>:</code> block delimiter) is rejected with <code>BST-SYNTAX-0001</code>.</p><h3>Re-exports</h3><p>The export block can re-export grouped imports from other files:</p><pre style=""><code class='codeblock'>
-    export<span class='bst-code-operator'>:</span>
-        import <span class='bst-code-operator'>@</span>components<span class='bst-code-operator'>/</span>card <span class='bst-code-parenthesis'>{</span>
-            <span class='bst-code-struct'>CardData</span> <span class='bst-code-keyword'>as</span> <span class='bst-code-struct'>Card,</span>
+    </code></pre><h3>Rules</h3><ul><li><code>export:</code> is valid only in a module root file. An <code>export:</code> block in a normal source file is rejected with <code>MOTH-RULE-0077</code>.</li><li>A module root may contain at most one <code>export:</code> block. Duplicate blocks are rejected with <code>MOTH-RULE-0085</code>.</li><li>The block ends with normal Moth <code>;</code>.</li><li>An empty <code>export:</code> block is rejected with <code>MOTH-RULE-0080</code>.</li><li>Items inside the block are ordinary top-level module-root items marked public.</li><li>Items outside the block remain private to the module root file.</li></ul><h3>Allowed inside export:</h3><ul><li>grouped source imports (re-exports)</li><li>grouped external imports</li><li>functions</li><li>structs</li><li>choices</li><li>type aliases</li><li>traits</li><li>compile-time constants using <code>#</code></li></ul><h3>Rejected inside export:</h3><ul><li>runtime bindings</li><li>mutable bindings</li><li>top-level executable statements</li><li>runtime templates</li><li>top-level const page fragments</li><li>trait conformances</li><li>trait incompatibility declarations</li><li>receiver methods as directly exported symbols</li><li>bare namespace imports or exports</li><li>wildcard exports</li><li>export lists</li><li>function alias exports</li><li>nested <code>export:</code> blocks</li><li>all legacy inline <code>export</code> forms</li></ul><p>Runtime statements inside the block are rejected with <code>MOTH-RULE-0080</code>. Legacy inline <code>export</code> syntax (without the <code>:</code> block delimiter) is rejected with <code>MOTH-SYNTAX-0001</code>.</p><h3>Re-exports</h3><p>The export block can re-export grouped imports from other files:</p><pre style=""><code class='codeblock'>
+    export<span class='moth-code-operator'>:</span>
+        import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span>
+            <span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Card,</span>
             render_card,
-        <span class='bst-code-parenthesis'>}</span>
+        <span class='moth-code-parenthesis'>}</span>
 
-        import <span class='bst-code-operator'>@</span>core<span class='bst-code-operator'>/</span>math <span class='bst-code-parenthesis'>{</span>
-            <span class='bst-code-struct'>PI,</span>
+        import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>
+            <span class='moth-code-struct'>PI,</span>
             sin,
-        <span class='bst-code-parenthesis'>}</span>
+        <span class='moth-code-parenthesis'>}</span>
     ;
     </code></pre><p>The grouped alias becomes the public name. In this example cross-module consumers can import <code>Card</code>, not <code>CardData</code>, unless the export block lists <code>CardData</code> separately.</p><h3><code>#</code> constants are compile-time, not visibility</h3><p>The <code>#</code> marker on a binding means compile-time constant. It does not control cross-module visibility. Cross-module visibility is controlled exclusively by the <code>export:</code> block.</p><h3>Same-module versus cross-module visibility</h3><ul><li>Normal declarations in any file within a module are visible to other files in the same module by default.</li><li>Cross-module imports can only access declarations marked public by the module root&#39;s <code>export:</code> block.</li><li>Private declarations in the module root file are not available to other modules.</li><li>A module root with no <code>export:</code> block exports nothing.</li></ul><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For re-export syntax see <a href="../packages/#public-reexports">Public re-exports</a>.</li><li>For visibility rules see <a href="../packages/#module-visibility">Module visibility</a>.</li></ul>
     </div>
@@ -1077,19 +1077,19 @@ body {
 
 
             <p>HTML routes come from directory position, not from the <code>#</code> filename.</p><h3>Directory routes</h3><pre style=""><code class='codeblock'>
-        src/#page.bst  -> index.html
-        src/about/#page.bst  -> about/index.html
-    </code></pre><p>The root module is the home page. Each nested directory gets its own route.</p><h3>API-only modules</h3><p>A module with only exports and no page activity produces no HTML. Not every <code>#*.bst</code> file becomes a page.</p><h3>Remember</h3><ul><li>Routes come from directories.</li><li>The <code>#</code> filename does not choose the route.</li><li>API-only modules produce no HTML artifact.</li></ul>
+        src/#page.moth  -> index.html
+        src/about/#page.moth  -> about/index.html
+    </code></pre><p>The root module is the home page. Each nested directory gets its own route.</p><h3>API-only modules</h3><p>A module with only exports and no page activity produces no HTML. Not every <code>#*.moth</code> file becomes a page.</p><h3>Remember</h3><ul><li>Routes come from directories.</li><li>The <code>#</code> filename does not choose the route.</li><li>API-only modules produce no HTML artifact.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>The HTML builder derives routes from directory position under the configured <code>entry_root</code>. The hash-root filename does not choose the route name.</p><h3>Directory-based routes</h3><p>The module root&#39;s directory determines the HTML output path:</p><pre style=""><code class='codeblock'>
-        src/#page.bst              -> index.html
-        src/docs/#page.bst         -> docs/index.html
-        src/docs/basics/#page.bst  -> docs/basics/index.html
-        src/#home.bst              -> index.html
-        src/#api.bst               -> index.html
-    </code></pre><p>The root module maps to the project index. A nested directory maps to a nested index route. The hash-root filename (<code>#page.bst</code>, <code>#home.bst</code>, <code>#api.bst</code>) has no effect on the route name.</p><h3>API-only modules</h3><p>A module root with no builder-relevant top-level activity is API-only. It does not emit an HTML artifact merely because a root file exists. Artifact emission requires builder-relevant root activity: runtime code, const fragments or runtime fragments.</p><h3>Builder ownership</h3><p>The HTML builder owns route and artifact policy. The frontend remains builder-neutral. The builder decides:</p><ul><li>which modules produce HTML artifacts</li><li>how routes are derived</li><li>how output files are organised</li><li>whether to reject unsupported reachable features</li></ul><h3>Output folders</h3><p>Output folders are generated and manifest-managed. Builder sections in <code>config.bst</code> own output settings. HTML defaults are development <code>dev</code> and release <code>release</code>. Generated output folders should be treated as build artifacts, not source.</p><h3>Release versus development output</h3><p>The default build writes to the dev folder. The <code>--release</code> flag writes to the output folder. The dev server serves from the dev folder.</p><h3>Entry root artifact requirement</h3><p>The HTML builder requires at least one artifact-producing module root at the configured entry root. If the entry root contains only API-only roots, the build is rejected with <code>BST-CONFIG-0001</code>.</p><h3>Experimental Wasm mode</h3><p>In the experimental <code>--html-wasm</code> mode, the builder can emit a route folder containing <code>index.html</code>, <code>page.js</code> and <code>page.wasm</code> instead of a single HTML file with embedded JavaScript.</p><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For root activity see <a href="#entry-runtime-and-fragments">Active-root runtime and fragments</a>.</li><li>For project layout see <a href="#project-layout">Project layout</a>.</li></ul>
+        src/#page.moth              -> index.html
+        src/docs/#page.moth         -> docs/index.html
+        src/docs/basics/#page.moth  -> docs/basics/index.html
+        src/#home.moth              -> index.html
+        src/#api.moth               -> index.html
+    </code></pre><p>The root module maps to the project index. A nested directory maps to a nested index route. The hash-root filename (<code>#page.moth</code>, <code>#home.moth</code>, <code>#api.moth</code>) has no effect on the route name.</p><h3>API-only modules</h3><p>A module root with no builder-relevant top-level activity is API-only. It does not emit an HTML artifact merely because a root file exists. Artifact emission requires builder-relevant root activity: runtime code, const fragments or runtime fragments.</p><h3>Builder ownership</h3><p>The HTML builder owns route and artifact policy. The frontend remains builder-neutral. The builder decides:</p><ul><li>which modules produce HTML artifacts</li><li>how routes are derived</li><li>how output files are organised</li><li>whether to reject unsupported reachable features</li></ul><h3>Output folders</h3><p>Output folders are generated and manifest-managed. Builder sections in <code>config.moth</code> own output settings. HTML defaults are development <code>dev</code> and release <code>release</code>. Generated output folders should be treated as build artifacts, not source.</p><h3>Release versus development output</h3><p>The default build writes to the dev folder. The <code>--release</code> flag writes to the output folder. The dev server serves from the dev folder.</p><h3>Entry root artifact requirement</h3><p>The HTML builder requires at least one artifact-producing module root at the configured entry root. If the entry root contains only API-only roots, the build is rejected with <code>MOTH-CONFIG-0001</code>.</p><h3>Experimental Wasm mode</h3><p>In the experimental <code>--html-wasm</code> mode, the builder can emit a route folder containing <code>index.html</code>, <code>page.js</code> and <code>page.wasm</code> instead of a single HTML file with embedded JavaScript.</p><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For root activity see <a href="#entry-runtime-and-fragments">Active-root runtime and fragments</a>.</li><li>For project layout see <a href="#project-layout">Project layout</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><nav class="doc-pager" aria-label="Language documentation">
@@ -1117,109 +1117,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1234,63 +1234,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1300,36 +1300,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1342,65 +1342,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1408,10 +1408,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

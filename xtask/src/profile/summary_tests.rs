@@ -24,7 +24,7 @@ fn make_observation(
         case_name: case_name.to_string(),
         group_name: "test".to_string(),
         command: "check".to_string(),
-        command_args: vec!["test.bst".to_string()],
+        command_args: vec!["test.moth".to_string()],
         wall_ms,
         observations: BenchmarkCaseObservations {
             stage_timings,
@@ -114,7 +114,7 @@ fn hint_ast_stage_with_ast_bucket() {
         vec![],
     );
     let hotspot_fn = make_hot_function(
-        "beanstalk::compiler_frontend::ast::type_resolution::resolve_type",
+        "moth::compiler_frontend::ast::type_resolution::resolve_type",
         "AST",
         31.4,
         6.8,
@@ -148,7 +148,7 @@ fn hint_file_prepare_stage_with_tokenization_bucket() {
         vec![],
     );
     let hotspot_fn = make_hot_function(
-        "beanstalk::compiler_frontend::tokenizer::tokenize_file",
+        "moth::compiler_frontend::tokenizer::tokenize_file",
         "Tokenization",
         45.0,
         12.0,
@@ -251,7 +251,7 @@ fn hint_no_hot_functions() {
 }
 
 #[test]
-fn hint_non_beanstalk_dominant() {
+fn hint_non_moth_dominant() {
     let obs = make_observation("test_case", 1000.0, vec![], vec![]);
     let hotspot_fn = make_hot_function("std::collections::HashMap::insert", "std", 60.0, 30.0);
     let hotspots = make_hotspots(vec![hotspot_fn], vec![]);
@@ -264,8 +264,8 @@ fn hint_non_beanstalk_dominant() {
 
     let hint = generate_hint(&data);
     assert!(
-        hint.contains("non-Beanstalk") || hint.contains("caller edges"),
-        "Hint should mention non-Beanstalk functions: {}",
+        hint.contains("non-Moth") || hint.contains("caller edges"),
+        "Hint should mention non-Moth functions: {}",
         hint
     );
 }
@@ -284,7 +284,7 @@ fn unsymbolicated_hex_address() {
 #[test]
 fn unsymbolicated_normal_names() {
     assert!(!is_raw_address_function_name(
-        "beanstalk::compiler_frontend::ast::build"
+        "moth::compiler_frontend::ast::build"
     ));
     assert!(!is_raw_address_function_name(
         "std::collections::HashMap::insert"
@@ -323,7 +323,7 @@ fn signal_score_includes_hotspot_pct() {
     let obs = make_observation("case", 1000.0, vec![], vec![]);
     let hotspots_with = make_hotspots(
         vec![make_hot_function(
-            "beanstalk::compiler_frontend::ast::build",
+            "moth::compiler_frontend::ast::build",
             "AST",
             40.0,
             10.0,
@@ -366,7 +366,7 @@ fn root_hotspots_json_is_valid() {
         }],
     );
     let hotspot_fn = make_hot_function(
-        "beanstalk::compiler_frontend::ast::type_resolution::resolve_type",
+        "moth::compiler_frontend::ast::type_resolution::resolve_type",
         "AST",
         31.4,
         6.8,
@@ -419,8 +419,7 @@ fn agent_summary_contains_case_name() {
         }],
         vec![],
     );
-    let hotspot_fn =
-        make_hot_function("beanstalk::compiler_frontend::ast::build", "AST", 20.0, 5.0);
+    let hotspot_fn = make_hot_function("moth::compiler_frontend::ast::build", "AST", 20.0, 5.0);
     let hotspots = make_hotspots(vec![hotspot_fn], vec![]);
     let data = CaseSummaryData {
         observation: &obs,
@@ -490,7 +489,7 @@ fn enriched_case_summary_includes_hotspots_and_samply_command() {
         }],
     );
     let hotspot_fn = make_hot_function(
-        "beanstalk::compiler_frontend::ast::type_resolution::resolve_type",
+        "moth::compiler_frontend::ast::type_resolution::resolve_type",
         "AST",
         31.4,
         6.8,
@@ -532,15 +531,10 @@ fn enriched_case_summary_includes_hotspots_and_samply_command() {
 #[test]
 fn bucket_summary_aggregates_by_label() {
     let functions = vec![
-        make_hot_function("beanstalk::compiler_frontend::ast::build", "AST", 20.0, 5.0),
+        make_hot_function("moth::compiler_frontend::ast::build", "AST", 20.0, 5.0),
+        make_hot_function("moth::compiler_frontend::ast::resolve", "AST", 15.0, 3.0),
         make_hot_function(
-            "beanstalk::compiler_frontend::ast::resolve",
-            "AST",
-            15.0,
-            3.0,
-        ),
-        make_hot_function(
-            "beanstalk::compiler_frontend::tokenizer::tokenize",
+            "moth::compiler_frontend::tokenizer::tokenize",
             "Tokenization",
             10.0,
             8.0,

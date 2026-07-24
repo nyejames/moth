@@ -3,7 +3,7 @@
 //! WHAT: verifies that `cast Float -> String` and runtime Float template interpolation lower
 //!       through `HirStatementKind::FormatFloat` instead of plain `HirExpressionKind::Cast` or
 //!       target-native string coercion.
-//! WHY: Float formatting is a Beanstalk-owned contract shared by casts and templates; dedicated
+//! WHY: Float formatting is a Moth-owned contract shared by casts and templates; dedicated
 //!      tests guard against regressions back to native stringification.
 
 use crate::compiler_frontend::ast::expressions::expression::{

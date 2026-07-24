@@ -538,14 +538,14 @@ fn default_nested_style_for_source_path(
     token_stream: &FileTokens,
     string_table: &StringTable,
 ) -> Option<Style> {
-    if !is_beandown_content_constant_path(token_stream, string_table) {
+    if !is_moth_template_content_constant_path(token_stream, string_table) {
         return None;
     }
 
     Some(markdown_default_style())
 }
 
-fn is_beandown_content_constant_path(
+fn is_moth_template_content_constant_path(
     token_stream: &FileTokens,
     string_table: &StringTable,
 ) -> bool {
@@ -558,7 +558,7 @@ fn is_beandown_content_constant_path(
         .parent()
         .and_then(|parent| parent.name_str(string_table).map(str::to_owned))
         .is_some_and(|source_name| {
-            source_name.ends_with(SourceFileKind::Beandown.extension_suffix())
+            source_name.ends_with(SourceFileKind::MothTemplate.extension_suffix())
         })
 }
 

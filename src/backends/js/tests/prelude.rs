@@ -11,28 +11,28 @@ fn runtime_prelude_contains_all_binding_helpers() {
     let source = lower_minimal_module("main");
 
     assert!(
-        source.contains("function __bs_is_ref("),
-        "prelude must contain __bs_is_ref"
+        source.contains("function __moth_is_ref("),
+        "prelude must contain __moth_is_ref"
     );
     assert!(
-        source.contains("function __bs_binding("),
-        "prelude must contain __bs_binding"
+        source.contains("function __moth_binding("),
+        "prelude must contain __moth_binding"
     );
     assert!(
-        source.contains("function __bs_param_binding("),
-        "prelude must contain __bs_param_binding"
+        source.contains("function __moth_param_binding("),
+        "prelude must contain __moth_param_binding"
     );
     assert!(
-        source.contains("function __bs_resolve("),
-        "prelude must contain __bs_resolve"
+        source.contains("function __moth_resolve("),
+        "prelude must contain __moth_resolve"
     );
     assert!(
-        source.contains("function __bs_read("),
-        "prelude must contain __bs_read"
+        source.contains("function __moth_read("),
+        "prelude must contain __moth_read"
     );
     assert!(
-        source.contains("function __bs_write("),
-        "prelude must contain __bs_write"
+        source.contains("function __moth_write("),
+        "prelude must contain __moth_write"
     );
 }
 
@@ -42,12 +42,12 @@ fn runtime_prelude_contains_alias_helpers() {
     let source = lower_minimal_module("main");
 
     assert!(
-        source.contains("function __bs_assign_borrow("),
-        "prelude must contain __bs_assign_borrow"
+        source.contains("function __moth_assign_borrow("),
+        "prelude must contain __moth_assign_borrow"
     );
     assert!(
-        source.contains("function __bs_assign_value("),
-        "prelude must contain __bs_assign_value"
+        source.contains("function __moth_assign_value("),
+        "prelude must contain __moth_assign_value"
     );
 }
 
@@ -57,12 +57,12 @@ fn runtime_prelude_contains_computed_place_helpers() {
     let source = lower_minimal_module("main");
 
     assert!(
-        source.contains("function __bs_field("),
-        "prelude must contain __bs_field"
+        source.contains("function __moth_field("),
+        "prelude must contain __moth_field"
     );
     assert!(
-        source.contains("function __bs_index("),
-        "prelude must contain __bs_index"
+        source.contains("function __moth_index("),
+        "prelude must contain __moth_index"
     );
 }
 
@@ -72,8 +72,8 @@ fn runtime_prelude_contains_clone_helper() {
     let source = lower_minimal_module("main");
 
     assert!(
-        source.contains("function __bs_clone_value("),
-        "prelude must contain __bs_clone_value"
+        source.contains("function __moth_clone_value("),
+        "prelude must contain __moth_clone_value"
     );
 }
 
@@ -87,11 +87,11 @@ fn binding_helpers_appear_before_alias_helpers() {
     let source = lower_minimal_module("main");
 
     let binding_pos = source
-        .find("function __bs_binding(")
-        .expect("__bs_binding must be present");
+        .find("function __moth_binding(")
+        .expect("__moth_binding must be present");
     let alias_pos = source
-        .find("function __bs_assign_borrow(")
-        .expect("__bs_assign_borrow must be present");
+        .find("function __moth_assign_borrow(")
+        .expect("__moth_assign_borrow must be present");
 
     assert!(
         binding_pos < alias_pos,
@@ -105,11 +105,11 @@ fn alias_helpers_appear_before_computed_place_helpers() {
     let source = lower_minimal_module("main");
 
     let alias_pos = source
-        .find("function __bs_assign_value(")
-        .expect("__bs_assign_value must be present");
+        .find("function __moth_assign_value(")
+        .expect("__moth_assign_value must be present");
     let computed_pos = source
-        .find("function __bs_field(")
-        .expect("__bs_field must be present");
+        .find("function __moth_field(")
+        .expect("__moth_field must be present");
 
     assert!(
         alias_pos < computed_pos,
@@ -123,11 +123,11 @@ fn computed_place_helpers_appear_before_clone_helper() {
     let source = lower_minimal_module("main");
 
     let computed_pos = source
-        .find("function __bs_index(")
-        .expect("__bs_index must be present");
+        .find("function __moth_index(")
+        .expect("__moth_index must be present");
     let clone_pos = source
-        .find("function __bs_clone_value(")
-        .expect("__bs_clone_value must be present");
+        .find("function __moth_clone_value(")
+        .expect("__moth_clone_value must be present");
 
     assert!(
         computed_pos < clone_pos,
@@ -145,8 +145,8 @@ fn runtime_prelude_contains_error_helpers() {
     let source = lower_minimal_module("main");
 
     assert!(
-        source.contains("function __bs_make_error("),
-        "prelude must contain __bs_make_error"
+        source.contains("function __moth_make_error("),
+        "prelude must contain __moth_make_error"
     );
 }
 
@@ -156,8 +156,8 @@ fn runtime_prelude_contains_result_helpers() {
     let source = lower_minimal_module("main");
 
     assert!(
-        source.contains("function __bs_result_propagate("),
-        "prelude must contain __bs_result_propagate"
+        source.contains("function __moth_result_propagate("),
+        "prelude must contain __moth_result_propagate"
     );
 }
 
@@ -167,12 +167,12 @@ fn runtime_prelude_contains_string_helpers() {
     let source = lower_minimal_module("main");
 
     assert!(
-        source.contains("function __bs_value_to_string("),
-        "prelude must contain __bs_value_to_string"
+        source.contains("function __moth_value_to_string("),
+        "prelude must contain __moth_value_to_string"
     );
     assert!(
-        !source.contains("function __bs_io("),
-        "old __bs_io helper must no longer be emitted unconditionally"
+        !source.contains("function __moth_io("),
+        "old __moth_io helper must no longer be emitted unconditionally"
     );
 }
 
@@ -182,8 +182,8 @@ fn runtime_prelude_contains_collection_helpers() {
     let source = lower_minimal_module("main");
 
     assert!(
-        source.contains("function __bs_collection_get("),
-        "prelude must contain __bs_collection_get"
+        source.contains("function __moth_collection_get("),
+        "prelude must contain __moth_collection_get"
     );
 }
 
@@ -194,15 +194,15 @@ fn runtime_prelude_contains_cast_helpers() {
     let source = lower_minimal_module_with_string_int_cast("main");
 
     assert!(
-        source.contains("function __bs_cast_int("),
-        "prelude must contain __bs_cast_int when StringToInt is used"
+        source.contains("function __moth_cast_int("),
+        "prelude must contain __moth_cast_int when StringToInt is used"
     );
     assert!(
-        source.contains("function __bs_cast_int_in_range(value)"),
+        source.contains("function __moth_cast_int_in_range(value)"),
         "prelude must contain the shared i32 range predicate"
     );
     assert!(
-        !source.contains("function __bs_normalize_numeric_text("),
+        !source.contains("function __moth_normalize_numeric_text("),
         "String -> Int must not emit the whitespace-trimming numeric text normalizer"
     );
 }
@@ -214,15 +214,15 @@ fn runtime_prelude_contains_float_formatter_for_float_to_string_cast() {
     let source = lower_minimal_module_with_float_string_cast("main");
 
     assert!(
-        source.contains("function __bs_cast_float_to_string("),
+        source.contains("function __moth_cast_float_to_string("),
         "Float -> String expression casts must emit their cast helper"
     );
     assert!(
-        source.contains("function __bs_format_float("),
-        "Float -> String expression casts must emit the Beanstalk formatter helper"
+        source.contains("function __moth_format_float("),
+        "Float -> String expression casts must emit the Moth formatter helper"
     );
     assert!(
-        source.contains("function __bs_numeric_trap("),
+        source.contains("function __moth_numeric_trap("),
         "Float -> String expression casts use the shared numeric trap helper"
     );
 }
@@ -234,19 +234,19 @@ fn runtime_prelude_omits_cast_helpers_when_only_identity_cast_is_used() {
     let source = lower_minimal_module_with_int_to_float_cast("main");
 
     assert!(
-        !source.contains("function __bs_cast_int("),
-        "prelude must not contain __bs_cast_int when only Int -> Float is used"
+        !source.contains("function __moth_cast_int("),
+        "prelude must not contain __moth_cast_int when only Int -> Float is used"
     );
     assert!(
-        !source.contains("function __bs_cast_float("),
-        "prelude must not contain __bs_cast_float when only Int -> Float is used"
+        !source.contains("function __moth_cast_float("),
+        "prelude must not contain __moth_cast_float when only Int -> Float is used"
     );
     assert!(
-        !source.contains("function __bs_normalize_numeric_text("),
+        !source.contains("function __moth_normalize_numeric_text("),
         "prelude must not contain the numeric text normalizer when no numeric parsing helper is used"
     );
     assert!(
-        !source.contains("function __bs_cast_int_in_range(value)"),
+        !source.contains("function __moth_cast_int_in_range(value)"),
         "prelude must not contain the shared range predicate when no helper needs it"
     );
 }
@@ -259,36 +259,36 @@ fn runtime_prelude_contains_map_helpers() {
     let source = lower_minimal_map_module("main");
 
     assert!(
-        source.contains("function __bs_map_new("),
-        "prelude must contain __bs_map_new"
+        source.contains("function __moth_map_new("),
+        "prelude must contain __moth_map_new"
     );
     assert!(
-        source.contains("function __bs_map_is_valid("),
-        "prelude must contain __bs_map_is_valid"
+        source.contains("function __moth_map_is_valid("),
+        "prelude must contain __moth_map_is_valid"
     );
     assert!(
-        source.contains("function __bs_map_get("),
-        "prelude must contain __bs_map_get"
+        source.contains("function __moth_map_get("),
+        "prelude must contain __moth_map_get"
     );
     assert!(
-        source.contains("function __bs_map_contains("),
-        "prelude must contain __bs_map_contains"
+        source.contains("function __moth_map_contains("),
+        "prelude must contain __moth_map_contains"
     );
     assert!(
-        source.contains("function __bs_map_set("),
-        "prelude must contain __bs_map_set"
+        source.contains("function __moth_map_set("),
+        "prelude must contain __moth_map_set"
     );
     assert!(
-        source.contains("function __bs_map_remove("),
-        "prelude must contain __bs_map_remove"
+        source.contains("function __moth_map_remove("),
+        "prelude must contain __moth_map_remove"
     );
     assert!(
-        source.contains("function __bs_map_clear("),
-        "prelude must contain __bs_map_clear"
+        source.contains("function __moth_map_clear("),
+        "prelude must contain __moth_map_clear"
     );
     assert!(
-        source.contains("function __bs_map_length("),
-        "prelude must contain __bs_map_length"
+        source.contains("function __moth_map_length("),
+        "prelude must contain __moth_map_length"
     );
 }
 
@@ -302,28 +302,28 @@ fn runtime_prelude_omits_io_helpers_when_unused() {
     let source = lower_minimal_module("main");
 
     assert!(
-        !source.contains("function __bs_io_print("),
-        "unused io.print should not emit __bs_io_print"
+        !source.contains("function __moth_io_print("),
+        "unused io.print should not emit __moth_io_print"
     );
     assert!(
-        !source.contains("function __bs_io_line("),
-        "unused io.line should not emit __bs_io_line"
+        !source.contains("function __moth_io_line("),
+        "unused io.line should not emit __moth_io_line"
     );
     assert!(
-        !source.contains("function __bs_io_debug("),
-        "unused io.debug should not emit __bs_io_debug"
+        !source.contains("function __moth_io_debug("),
+        "unused io.debug should not emit __moth_io_debug"
     );
     assert!(
-        !source.contains("function __bs_io_warn("),
-        "unused io.warn should not emit __bs_io_warn"
+        !source.contains("function __moth_io_warn("),
+        "unused io.warn should not emit __moth_io_warn"
     );
     assert!(
-        !source.contains("function __bs_io_error("),
-        "unused io.error should not emit __bs_io_error"
+        !source.contains("function __moth_io_error("),
+        "unused io.error should not emit __moth_io_error"
     );
     assert!(
-        !source.contains("function __bs_io("),
-        "old __bs_io helper must not be emitted"
+        !source.contains("function __moth_io("),
+        "old __moth_io helper must not be emitted"
     );
 }
 
@@ -335,16 +335,16 @@ fn io_print_helper_is_emitted_when_reachable() {
         crate::compiler_frontend::external_packages::ExternalFunctionId::IoPrint,
     );
     assert!(
-        source.contains("function __bs_io_print("),
-        "io.print reachability should emit __bs_io_print"
+        source.contains("function __moth_io_print("),
+        "io.print reachability should emit __moth_io_print"
     );
     assert!(
-        !source.contains("function __bs_io_line("),
+        !source.contains("function __moth_io_line("),
         "only io.print should be emitted"
     );
     assert!(
-        !source.contains("function __bs_io("),
-        "old __bs_io helper must not be emitted"
+        !source.contains("function __moth_io("),
+        "old __moth_io helper must not be emitted"
     );
 }
 
@@ -355,16 +355,16 @@ fn io_line_helper_is_emitted_when_reachable() {
         crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine,
     );
     assert!(
-        source.contains("function __bs_io_line("),
-        "io.line reachability should emit __bs_io_line"
+        source.contains("function __moth_io_line("),
+        "io.line reachability should emit __moth_io_line"
     );
     assert!(
-        !source.contains("function __bs_io_print("),
+        !source.contains("function __moth_io_print("),
         "only io.line should be emitted"
     );
     assert!(
-        !source.contains("function __bs_io("),
-        "old __bs_io helper must not be emitted"
+        !source.contains("function __moth_io("),
+        "old __moth_io helper must not be emitted"
     );
 }
 
@@ -375,12 +375,12 @@ fn io_debug_helper_is_emitted_when_reachable() {
         crate::compiler_frontend::external_packages::ExternalFunctionId::IoDebug,
     );
     assert!(
-        source.contains("function __bs_io_debug("),
-        "io.debug reachability should emit __bs_io_debug"
+        source.contains("function __moth_io_debug("),
+        "io.debug reachability should emit __moth_io_debug"
     );
     assert!(
-        !source.contains("function __bs_io("),
-        "old __bs_io helper must not be emitted"
+        !source.contains("function __moth_io("),
+        "old __moth_io helper must not be emitted"
     );
 }
 
@@ -391,12 +391,12 @@ fn io_warn_helper_is_emitted_when_reachable() {
         crate::compiler_frontend::external_packages::ExternalFunctionId::IoWarn,
     );
     assert!(
-        source.contains("function __bs_io_warn("),
-        "io.warn reachability should emit __bs_io_warn"
+        source.contains("function __moth_io_warn("),
+        "io.warn reachability should emit __moth_io_warn"
     );
     assert!(
-        !source.contains("function __bs_io("),
-        "old __bs_io helper must not be emitted"
+        !source.contains("function __moth_io("),
+        "old __moth_io helper must not be emitted"
     );
 }
 
@@ -407,12 +407,12 @@ fn io_error_helper_is_emitted_when_reachable() {
         crate::compiler_frontend::external_packages::ExternalFunctionId::IoError,
     );
     assert!(
-        source.contains("function __bs_io_error("),
-        "io.error reachability should emit __bs_io_error"
+        source.contains("function __moth_io_error("),
+        "io.error reachability should emit __moth_io_error"
     );
     assert!(
-        !source.contains("function __bs_io("),
-        "old __bs_io helper must not be emitted"
+        !source.contains("function __moth_io("),
+        "old __moth_io helper must not be emitted"
     );
 }
 
@@ -426,28 +426,28 @@ fn runtime_prelude_omits_input_helpers_when_unused() {
     let source = lower_minimal_module("main");
 
     assert!(
-        !source.contains("function __bs_io_input_new("),
-        "unused io.input.new should not emit __bs_io_input_new"
+        !source.contains("function __moth_io_input_new("),
+        "unused io.input.new should not emit __moth_io_input_new"
     );
     assert!(
-        !source.contains("function __bs_io_input_update("),
-        "unused io.input.update should not emit __bs_io_input_update"
+        !source.contains("function __moth_io_input_update("),
+        "unused io.input.update should not emit __moth_io_input_update"
     );
     assert!(
-        !source.contains("function __bs_io_input_close("),
-        "unused io.input.close should not emit __bs_io_input_close"
+        !source.contains("function __moth_io_input_close("),
+        "unused io.input.close should not emit __moth_io_input_close"
     );
     assert!(
-        !source.contains("function __bs_io_input_key_down("),
-        "unused io.input.key_down should not emit __bs_io_input_key_down"
+        !source.contains("function __moth_io_input_key_down("),
+        "unused io.input.key_down should not emit __moth_io_input_key_down"
     );
     assert!(
-        !source.contains("function __bs_io_input_pointer_x("),
-        "unused io.input.pointer_x should not emit __bs_io_input_pointer_x"
+        !source.contains("function __moth_io_input_pointer_x("),
+        "unused io.input.pointer_x should not emit __moth_io_input_pointer_x"
     );
     assert!(
-        !source.contains("function __bs_io_input_last_key_pressed("),
-        "unused io.input.last_key_pressed should not emit __bs_io_input_last_key_pressed"
+        !source.contains("function __moth_io_input_last_key_pressed("),
+        "unused io.input.last_key_pressed should not emit __moth_io_input_last_key_pressed"
     );
 }
 
@@ -460,11 +460,11 @@ fn console_io_does_not_emit_input_helpers() {
     );
 
     assert!(
-        source.contains("function __bs_io_line("),
-        "io.line reachability should emit __bs_io_line"
+        source.contains("function __moth_io_line("),
+        "io.line reachability should emit __moth_io_line"
     );
     assert!(
-        !source.contains("function __bs_io_input_new("),
+        !source.contains("function __moth_io_input_new("),
         "console-only IO should not emit input helpers"
     );
 }
@@ -478,23 +478,23 @@ fn io_input_new_helper_is_emitted_when_reachable() {
     );
 
     assert!(
-        source.contains("function __bs_io_input_new("),
-        "io.input.new reachability should emit __bs_io_input_new"
+        source.contains("function __moth_io_input_new("),
+        "io.input.new reachability should emit __moth_io_input_new"
     );
     assert!(
-        source.contains("function __bs_io_input_map_button("),
+        source.contains("function __moth_io_input_map_button("),
         "input helpers should emit shared button mapper"
     );
     assert!(
-        source.contains("function __bs_io_input_normalize_key("),
+        source.contains("function __moth_io_input_normalize_key("),
         "input helpers should emit shared key normalizer"
     );
     assert!(
-        source.contains("function __bs_io_input_release_all("),
+        source.contains("function __moth_io_input_release_all("),
         "input helpers should emit shared release helper"
     );
 
-    let new_helper = helper_source(&source, "__bs_io_input_new");
+    let new_helper = helper_source(&source, "__moth_io_input_new");
     assert!(
         new_helper.contains("typeof window.PointerEvent === \"undefined\""),
         "io.input.new must feature-detect Pointer Events"
@@ -513,14 +513,14 @@ fn io_input_update_helper_is_emitted_when_reachable() {
         crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputUpdate,
     );
 
-    let helper = helper_source(&source, "__bs_io_input_update");
+    let helper = helper_source(&source, "__moth_io_input_update");
     assert!(
         helper.contains("handle.pending.length = 0"),
-        "__bs_io_input_update must drain pending events"
+        "__moth_io_input_update must drain pending events"
     );
     assert!(
         helper.contains("handle.pressedKeys.clear()"),
-        "__bs_io_input_update must clear previous key press edges"
+        "__moth_io_input_update must clear previous key press edges"
     );
 }
 
@@ -532,14 +532,14 @@ fn io_input_close_helper_is_emitted_when_reachable() {
         crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputClose,
     );
 
-    let helper = helper_source(&source, "__bs_io_input_close");
+    let helper = helper_source(&source, "__moth_io_input_close");
     assert!(
         helper.contains("handle.controller.abort()"),
-        "__bs_io_input_close must abort the AbortController"
+        "__moth_io_input_close must abort the AbortController"
     );
     assert!(
         helper.contains("handle.pointerX = 0.0"),
-        "__bs_io_input_close must reset pointer coordinates"
+        "__moth_io_input_close must reset pointer coordinates"
     );
 }
 
@@ -552,22 +552,22 @@ fn io_input_key_helpers_are_emitted_when_reachable() {
     );
 
     assert!(
-        source.contains("function __bs_io_input_key_down("),
-        "io.input.key_down reachability should emit __bs_io_input_key_down"
+        source.contains("function __moth_io_input_key_down("),
+        "io.input.key_down reachability should emit __moth_io_input_key_down"
     );
     assert!(
-        source.contains("function __bs_io_input_key_pressed("),
+        source.contains("function __moth_io_input_key_pressed("),
         "input key helpers should be emitted together"
     );
     assert!(
-        source.contains("function __bs_io_input_key_released("),
+        source.contains("function __moth_io_input_key_released("),
         "input key helpers should be emitted together"
     );
 
-    let key_down = helper_source(&source, "__bs_io_input_key_down");
+    let key_down = helper_source(&source, "__moth_io_input_key_down");
     assert!(
-        key_down.contains("return handle.heldKeys.has(__bs_io_input_normalize_key(key))"),
-        "__bs_io_input_key_down must normalize query keys before checking held keys"
+        key_down.contains("return handle.heldKeys.has(__moth_io_input_normalize_key(key))"),
+        "__moth_io_input_key_down must normalize query keys before checking held keys"
     );
 }
 
@@ -580,11 +580,11 @@ fn io_input_pointer_helpers_are_emitted_when_reachable() {
     );
 
     assert!(
-        source.contains("function __bs_io_input_pointer_x("),
-        "io.input.pointer_x reachability should emit __bs_io_input_pointer_x"
+        source.contains("function __moth_io_input_pointer_x("),
+        "io.input.pointer_x reachability should emit __moth_io_input_pointer_x"
     );
     assert!(
-        source.contains("function __bs_io_input_pointer_down("),
+        source.contains("function __moth_io_input_pointer_down("),
         "input pointer helpers should be emitted together"
     );
 }
@@ -598,11 +598,11 @@ fn io_input_last_helpers_return_canonical_option_carrier() {
     );
 
     assert!(
-        source.contains("function __bs_io_input_last_key_pressed("),
-        "io.input.last_key_pressed reachability should emit __bs_io_input_last_key_pressed"
+        source.contains("function __moth_io_input_last_key_pressed("),
+        "io.input.last_key_pressed reachability should emit __moth_io_input_last_key_pressed"
     );
 
-    let helper = helper_source(&source, "__bs_io_input_last_key_pressed");
+    let helper = helper_source(&source, "__moth_io_input_last_key_pressed");
     assert!(
         helper.contains("return { tag: \"some\", value: handle.lastKeyPressed }"),
         "last_key_pressed must return the some carrier"
@@ -616,7 +616,7 @@ fn io_input_last_helpers_return_canonical_option_carrier() {
         "main",
         crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputLastPointerPressed,
     );
-    let pointer_helper = helper_source(&pointer_source, "__bs_io_input_last_pointer_pressed");
+    let pointer_helper = helper_source(&pointer_source, "__moth_io_input_last_pointer_pressed");
     assert!(
         pointer_helper.contains("handle.lastPointerPressed"),
         "last_pointer_pressed must use the plan's pointer-edge field"

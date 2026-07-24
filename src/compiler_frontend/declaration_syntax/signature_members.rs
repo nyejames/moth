@@ -436,7 +436,7 @@ pub fn parse_signature_members_syntax(
 /// Reject a duplicate member name in one shared `| ... |` member list.
 ///
 /// WHAT: the current member is primary and the first member is secondary, reusing
-/// `DuplicateDeclaration` (`BST-RULE-0002`) so ordinary function parameters, struct fields,
+/// `DuplicateDeclaration` (`MOTH-RULE-0002`) so ordinary function parameters, struct fields,
 /// choice payload fields and ordinary trait-requirement parameters share one owner. Reserved
 /// receivers keep their receiver-specific validation.
 /// WHY: keeping duplicate-name detection in the shared signature-member parser prevents

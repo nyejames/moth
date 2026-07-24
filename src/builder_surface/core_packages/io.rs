@@ -23,27 +23,27 @@ const IO_CONSOLE_FUNCTIONS: &[IoConsoleFunctionSpec] = &[
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoPrint,
         path: "print",
-        js_helper: "__bs_io_print",
+        js_helper: "__moth_io_print",
     },
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoLine,
         path: "line",
-        js_helper: "__bs_io_line",
+        js_helper: "__moth_io_line",
     },
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoDebug,
         path: "debug",
-        js_helper: "__bs_io_debug",
+        js_helper: "__moth_io_debug",
     },
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoWarn,
         path: "warn",
-        js_helper: "__bs_io_warn",
+        js_helper: "__moth_io_warn",
     },
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoError,
         path: "error",
-        js_helper: "__bs_io_error",
+        js_helper: "__moth_io_error",
     },
 ];
 

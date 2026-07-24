@@ -1,5 +1,5 @@
 [backends.html]
 mode = "success"
 warnings = "exact"
-warning_codes = ["BST-RULE-0022", "BST-RULE-0022", "BST-RULE-0022"]
+warning_codes = ["MOTH-RULE-0022", "MOTH-RULE-0022", "MOTH-RULE-0022"]
 rendered_output_contains = ["pattern_unreachable_after_capture_warning result=hello"]

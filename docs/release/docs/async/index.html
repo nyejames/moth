@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Coroutines and Async in Beanstalk | Beanstalk</title>
-    <meta name="description" content="Design draft for structured async, coroutines, channels, and explicit suspension in Beanstalk.">
+    <title>Coroutines and Async in Moth | Moth</title>
+    <meta name="description" content="Design draft for structured async, coroutines, channels, and explicit suspension in Moth.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -318,15 +318,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -335,13 +335,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -352,9 +352,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -364,15 +364,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -395,9 +395,9 @@ body {
             </a>
         </div>
     </nav>
-     <h1 style="font-size: 2em;text-align: center;"> COROUTINES AND ASYNC IN BEANSTALK</h1>
-    <section class="container"><p><strong>Design draft:</strong> This page is a future-facing design document for language and compiler planning. It is not final user-facing documentation, and the syntax, semantics, and implementation details may change before this feature is implemented.</p><p>Beanstalk approaches async and concurrency by making <strong>control flow explicit</strong> and <strong>communication safe by default</strong>.</p><p>Instead of hiding async behind keywords like <code>async</code> / <code>await</code> or complex runtime abstractions, Beanstalk uses a small set of primitives that make data flow, suspension, and concurrency visible in the syntax.</p><p>At a high level:</p><ul><li>Coroutines are lightweight, cooperative tasks</li><li>Coroutines communicate using typed channels</li><li>Concurrency is structured and scoped</li><li>Suspension points are visible in code</li><li>The compiler can enforce safety rules around shared data, references, and task lifetimes</li></ul><p>The goal is async code that remains readable, predictable, and analyzable.</p></section>
-    <section class="container"><h1>Core idea</h1><p>Async in Beanstalk is built around three concepts:</p><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+     <h1 style="font-size: 2em;text-align: center;"> COROUTINES AND ASYNC IN MOTH</h1>
+    <section class="container"><p><strong>Design draft:</strong> This page is a future-facing design document for language and compiler planning. It is not final user-facing documentation, and the syntax, semantics, and implementation details may change before this feature is implemented.</p><p>Moth approaches async and concurrency by making <strong>control flow explicit</strong> and <strong>communication safe by default</strong>.</p><p>Instead of hiding async behind keywords like <code>async</code> / <code>await</code> or complex runtime abstractions, Moth uses a small set of primitives that make data flow, suspension, and concurrency visible in the syntax.</p><p>At a high level:</p><ul><li>Coroutines are lightweight, cooperative tasks</li><li>Coroutines communicate using typed channels</li><li>Concurrency is structured and scoped</li><li>Suspension points are visible in code</li><li>The compiler can enforce safety rules around shared data, references, and task lifetimes</li></ul><p>The goal is async code that remains readable, predictable, and analyzable.</p></section>
+    <section class="container"><h1>Core idea</h1><p>Async in Moth is built around three concepts:</p><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -454,7 +454,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    reader, writer <span class='bst-code-operator'>=</span> <span class='bst-code-struct'>Channel</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-type'>Int</span><span class='bst-code-parenthesis'>)</span>
+    reader, writer <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Channel</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><p>In this example:</p><ul><li><code>writer</code> is the sending endpoint</li><li><code>reader</code> is the receiving endpoint</li><li>the channel carries values of type <code>Int</code></li></ul><p>You can think of this as a one-way pipe for values of a specific type.</p></section>
     <section class="container"><h1>Sending values</h1><p>Values are sent into a channel with <code>&gt;&gt;</code>.</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
@@ -464,7 +464,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    value <span class='bst-code-operator'>&gt;</span><span class='bst-code-operator'>&gt;</span> writer
+    value <span class='moth-code-operator'>&gt;</span><span class='moth-code-operator'>&gt;</span> writer
     </code></pre><p>The value flows to the right into the channel.</p><p>Sending may suspend the current coroutine if the receiver is not ready.</p><p>This is an intentional visible suspension point.</p></section>
     <section class="container"><h1>Receiving values</h1><p>Values are received from a channel with <code>&lt;&lt;</code>.</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
@@ -474,7 +474,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    value <span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>&lt;</span> reader
+    value <span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>&lt;</span> reader
     </code></pre><p>The value flows left out of the channel and is assigned to <code>value</code>.</p><p>Receiving may suspend the current coroutine until a value is available.</p><p>Like sending, this is a visible suspension point.</p></section>
     <section class="container"><h1>Coroutines</h1><p>A coroutine is a function that can suspend and resume execution.</p><p>Coroutines are started with <code>spawn</code> and must run inside an <code>async</code> scope.</p><p>Example coroutine functions:</p><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
@@ -484,17 +484,17 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    producer <span class='bst-code-operator'>|</span>writer <span class='bst-code-operator'>~</span><span class='bst-code-struct'>Channel</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-type'>Int</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>10</span> <span class='bst-code-operator'>|</span>i<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-            i <span class='bst-code-operator'>&gt;</span><span class='bst-code-operator'>&gt;</span> writer
+    producer <span class='moth-code-operator'>|</span>writer <span class='moth-code-operator'>~</span><span class='moth-code-struct'>Channel</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-operator'>|</span>i<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+            i <span class='moth-code-operator'>&gt;</span><span class='moth-code-operator'>&gt;</span> writer
             yield
         ;
     ;
 
-    consumer <span class='bst-code-operator'>|</span>reader <span class='bst-code-operator'>~</span><span class='bst-code-struct'>Channel</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-type'>Int</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>loop</span><span class='bst-code-operator'>:</span>
-            value <span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>&lt;</span> reader
-            io.line<span class='bst-code-parenthesis'>(</span>value<span class='bst-code-parenthesis'>)</span>
+    consumer <span class='moth-code-operator'>|</span>reader <span class='moth-code-operator'>~</span><span class='moth-code-struct'>Channel</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>loop</span><span class='moth-code-operator'>:</span>
+            value <span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>&lt;</span> reader
+            io.line<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
         ;
     ;
     </code></pre><p>In this example:</p><ul><li><code>producer</code> sends integers into the channel</li><li><code>consumer</code> receives and prints them</li><li>neither coroutine shares mutable memory directly</li><li>all interaction happens through the channel</li></ul></section>
@@ -515,10 +515,10 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>1_000_000</span> <span class='bst-code-operator'>|</span>i<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        i <span class='bst-code-operator'>&gt;</span><span class='bst-code-operator'>&gt;</span> writer
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>1_000_000</span> <span class='moth-code-operator'>|</span>i<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        i <span class='moth-code-operator'>&gt;</span><span class='moth-code-operator'>&gt;</span> writer
 
-        <span class='bst-code-keyword'>if</span> i <span class='bst-code-operator'>%</span> <span class='bst-code-number'>128</span> is <span class='bst-code-number'>0</span><span class='bst-code-operator'>:</span>
+        <span class='moth-code-keyword'>if</span> i <span class='moth-code-operator'>%</span> <span class='moth-code-number'>128</span> is <span class='moth-code-number'>0</span><span class='moth-code-operator'>:</span>
             yield
         ;
     ;
@@ -531,7 +531,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    async<span class='bst-code-operator'>:</span>
+    async<span class='moth-code-operator'>:</span>
         ...
     ;
     </code></pre><p>An <code>async</code> scope means:</p><ul><li>coroutines may be spawned inside the scope</li><li>suspension is allowed inside the scope</li><li>channel send and receive operations may suspend inside the scope</li><li>spawned coroutines are bounded by the scope</li><li>no detached background task can silently outlive its data</li></ul><p>Example:</p><pre style="
@@ -542,19 +542,19 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    async<span class='bst-code-operator'>:</span>
-        reader, writer <span class='bst-code-operator'>=</span> <span class='bst-code-struct'>Channel</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-type'>Int</span><span class='bst-code-parenthesis'>)</span>
+    async<span class='moth-code-operator'>:</span>
+        reader, writer <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Channel</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>)</span>
 
-        spawn producer<span class='bst-code-parenthesis'>(</span>writer<span class='bst-code-parenthesis'>)</span>
-        spawn consumer<span class='bst-code-parenthesis'>(</span>reader<span class='bst-code-parenthesis'>)</span>
+        spawn producer<span class='moth-code-parenthesis'>(</span>writer<span class='moth-code-parenthesis'>)</span>
+        spawn consumer<span class='moth-code-parenthesis'>(</span>reader<span class='moth-code-parenthesis'>)</span>
 
-        <span class='bst-code-keyword'>loop</span><span class='bst-code-operator'>:</span>
+        <span class='moth-code-keyword'>loop</span><span class='moth-code-operator'>:</span>
             yield
         ;
     ;
     </code></pre><p>This makes concurrency structured and bounded.</p><p>You can see where async work starts, where it may suspend, and where it must be contained.</p></section>
-    <section class="container"><h1>Why not viral async types?</h1><p>Beanstalk should avoid making async infect every function type by default.</p><p>The draft model does not rely on a special <code>Future[T]</code> return type everywhere, and it does not require every caller to become async just because one operation may suspend.</p><p>Instead:</p><ul><li>suspension is only valid in async-capable contexts</li><li>suspension points are explicit</li><li>channels make communication visible</li><li>spawned work is scoped</li><li>the compiler can reject unsafe use across scope boundaries</li></ul><p>The goal is not to hide async.</p><p>The goal is to make async local and visible.</p></section>
-    <section class="container"><h1>Safety model</h1><p>The async model should preserve Beanstalk&#39;s normal safety rules.</p><p>Async code should not allow:</p><ul><li>data races</li><li>dangling references into completed scopes</li><li>detached tasks that keep using local state</li><li>hidden mutable sharing between coroutines</li><li>unbounded background work by default</li></ul><p>Channels are the main communication primitive because they give the compiler a clear place to reason about ownership, borrowing, and transfer.</p><p>Mutable shared state may be possible later through specific safe abstractions, but it should not be the default async model.</p></section>
+    <section class="container"><h1>Why not viral async types?</h1><p>Moth should avoid making async infect every function type by default.</p><p>The draft model does not rely on a special <code>Future[T]</code> return type everywhere, and it does not require every caller to become async just because one operation may suspend.</p><p>Instead:</p><ul><li>suspension is only valid in async-capable contexts</li><li>suspension points are explicit</li><li>channels make communication visible</li><li>spawned work is scoped</li><li>the compiler can reject unsafe use across scope boundaries</li></ul><p>The goal is not to hide async.</p><p>The goal is to make async local and visible.</p></section>
+    <section class="container"><h1>Safety model</h1><p>The async model should preserve Moth&#39;s normal safety rules.</p><p>Async code should not allow:</p><ul><li>data races</li><li>dangling references into completed scopes</li><li>detached tasks that keep using local state</li><li>hidden mutable sharing between coroutines</li><li>unbounded background work by default</li></ul><p>Channels are the main communication primitive because they give the compiler a clear place to reason about ownership, borrowing, and transfer.</p><p>Mutable shared state may be possible later through specific safe abstractions, but it should not be the default async model.</p></section>
     <section class="container"><h1>Full example</h1><pre style="
         background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
@@ -563,140 +563,140 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-    producer <span class='bst-code-operator'>|</span>writer <span class='bst-code-operator'>~</span><span class='bst-code-struct'>Channel</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-type'>Int</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>10</span> <span class='bst-code-operator'>|</span>i<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-            i <span class='bst-code-operator'>&gt;</span><span class='bst-code-operator'>&gt;</span> writer
+    producer <span class='moth-code-operator'>|</span>writer <span class='moth-code-operator'>~</span><span class='moth-code-struct'>Channel</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-operator'>|</span>i<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+            i <span class='moth-code-operator'>&gt;</span><span class='moth-code-operator'>&gt;</span> writer
             yield
         ;
     ;
 
-    consumer <span class='bst-code-operator'>|</span>reader <span class='bst-code-operator'>~</span><span class='bst-code-struct'>Channel</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-type'>Int</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>loop</span><span class='bst-code-operator'>:</span>
-            value <span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>&lt;</span> reader
-            io.line<span class='bst-code-parenthesis'>(</span>value<span class='bst-code-parenthesis'>)</span>
+    consumer <span class='moth-code-operator'>|</span>reader <span class='moth-code-operator'>~</span><span class='moth-code-struct'>Channel</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>loop</span><span class='moth-code-operator'>:</span>
+            value <span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>&lt;</span> reader
+            io.line<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
         ;
     ;
 
-    async<span class='bst-code-operator'>:</span>
-        reader, writer <span class='bst-code-operator'>=</span> <span class='bst-code-struct'>Channel</span><span class='bst-code-parenthesis'>(</span><span class='bst-code-type'>Int</span><span class='bst-code-parenthesis'>)</span>
+    async<span class='moth-code-operator'>:</span>
+        reader, writer <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Channel</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>)</span>
 
-        spawn producer<span class='bst-code-parenthesis'>(</span>writer<span class='bst-code-parenthesis'>)</span>
-        spawn consumer<span class='bst-code-parenthesis'>(</span>reader<span class='bst-code-parenthesis'>)</span>
+        spawn producer<span class='moth-code-parenthesis'>(</span>writer<span class='moth-code-parenthesis'>)</span>
+        spawn consumer<span class='moth-code-parenthesis'>(</span>reader<span class='moth-code-parenthesis'>)</span>
 
-        <span class='bst-code-keyword'>loop</span><span class='bst-code-operator'>:</span>
+        <span class='moth-code-keyword'>loop</span><span class='moth-code-operator'>:</span>
             yield
         ;
     ;
     </code></pre><p>This example has three visible forms of async behavior:</p><ul><li><code>spawn</code> starts concurrent work</li><li><code>&gt;&gt;</code> and <code>&lt;&lt;</code> communicate through the channel</li><li><code>yield</code> explicitly gives the scheduler a chance to run other work</li></ul></section>
-    <section class="container"><h1>Compiler lowering</h1><p>The exact lowering strategy is not final.</p><p>A future compiler implementation may lower coroutines into state machines.</p><p>Conceptually, each coroutine needs to preserve:</p><ul><li>its current execution point</li><li>its live local values</li><li>pending channel operations</li><li>any values that cross suspension points</li><li>enough ownership and borrow information to remain memory safe</li></ul><p>This fits Beanstalk&#39;s broader compiler direction:</p><ul><li>AST validates syntax and types</li><li>HIR makes control flow explicit</li><li>borrow validation checks safe access</li><li>backend lowering decides how coroutines are represented for the target runtime</li></ul><p>Async should be represented semantically before backend-specific lowering.</p></section>
-    <section class="container"><h1>Backend considerations</h1><p>This design depends on backend capabilities.</p><p>Important open questions include:</p><ul><li>how WebAssembly stack switching evolves</li><li>how browsers expose scheduling and suspension</li><li>how native Wasm runtimes expose async host calls</li><li>how Beanstalk should integrate with browser event loops</li><li>how game engines or embedded hosts should drive scheduling</li><li>whether early JS output should use generator-style lowering, explicit state machines, or host promises</li></ul><p>The user-facing syntax should remain stable even if backend strategies differ.</p></section>
+    <section class="container"><h1>Compiler lowering</h1><p>The exact lowering strategy is not final.</p><p>A future compiler implementation may lower coroutines into state machines.</p><p>Conceptually, each coroutine needs to preserve:</p><ul><li>its current execution point</li><li>its live local values</li><li>pending channel operations</li><li>any values that cross suspension points</li><li>enough ownership and borrow information to remain memory safe</li></ul><p>This fits Moth&#39;s broader compiler direction:</p><ul><li>AST validates syntax and types</li><li>HIR makes control flow explicit</li><li>borrow validation checks safe access</li><li>backend lowering decides how coroutines are represented for the target runtime</li></ul><p>Async should be represented semantically before backend-specific lowering.</p></section>
+    <section class="container"><h1>Backend considerations</h1><p>This design depends on backend capabilities.</p><p>Important open questions include:</p><ul><li>how WebAssembly stack switching evolves</li><li>how browsers expose scheduling and suspension</li><li>how native Wasm runtimes expose async host calls</li><li>how Moth should integrate with browser event loops</li><li>how game engines or embedded hosts should drive scheduling</li><li>whether early JS output should use generator-style lowering, explicit state machines, or host promises</li></ul><p>The user-facing syntax should remain stable even if backend strategies differ.</p></section>
     <section class="container"><h1>Deferred design questions</h1><p>Several details should be deliberately deferred until the basic model is proven:</p><ul><li>cancellation semantics</li><li>channel buffering</li><li>channel close behavior</li><li>task failure propagation</li><li>timeout syntax</li><li>select-style waiting on multiple channels</li><li>async host function imports</li><li>interaction with closures and captured mutable access</li><li>whether <code>Channel[Int]</code> remains the final channel type syntax</li></ul><p>These should be designed as extensions, not packed into the first implementation.</p></section>
     <section class="container"><h1>Current status</h1><p>This design is not implemented yet.</p><p>It is intended as a future reference for language design and compiler implementation planning.</p><p>The first implementation should likely focus on:</p><ul><li>parsing and rejecting async syntax deliberately</li><li>defining the HIR representation for suspension-capable control flow</li><li>validating what values may live across suspension points</li><li>modelling channel endpoints as typed values</li><li>lowering a minimal cooperative coroutine model in one backend</li></ul><p>The important part is to keep the source model explicit and structured.</p></section>
-    <section class="container"><h1>Summary</h1><p>Async in Beanstalk is intended to be:</p><ul><li>explicit: suspension is visible</li><li>structured: spawned work is scoped</li><li>safe: communication goes through typed channels</li><li>analyzable: control flow and data flow are compiler-visible</li><li>backend-flexible: JS, Wasm, and host runtimes can lower the same semantics differently</li></ul><p>The core primitives are:</p><ul><li><code>Channel(T)</code> creates typed channel endpoints</li><li><code>&gt;&gt;</code> sends values</li><li><code>&lt;&lt;</code> receives values</li><li><code>yield</code> suspends the current coroutine</li><li><code>spawn</code> starts a coroutine inside an async scope</li><li><code>async:</code> defines the structured concurrency boundary</li></ul><p>The core rule is:</p><p>&gt; Async work must be visible, scoped, and safe by construction.</p></section>
+    <section class="container"><h1>Summary</h1><p>Async in Moth is intended to be:</p><ul><li>explicit: suspension is visible</li><li>structured: spawned work is scoped</li><li>safe: communication goes through typed channels</li><li>analyzable: control flow and data flow are compiler-visible</li><li>backend-flexible: JS, Wasm, and host runtimes can lower the same semantics differently</li></ul><p>The core primitives are:</p><ul><li><code>Channel(T)</code> creates typed channel endpoints</li><li><code>&gt;&gt;</code> sends values</li><li><code>&lt;&lt;</code> receives values</li><li><code>yield</code> suspends the current coroutine</li><li><code>spawn</code> starts a coroutine inside an async scope</li><li><code>async:</code> defines the structured concurrency boundary</li></ul><p>The core rule is:</p><p>&gt; Async work must be visible, scoped, and safe by construction.</p></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -711,63 +711,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -777,36 +777,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -819,65 +819,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -885,10 +885,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

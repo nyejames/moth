@@ -41,21 +41,21 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-fn beanstalk_prepared_input(
+fn moth_prepared_input(
     source_path: PathBuf,
     source_code: &str,
     tokens: FileTokens,
 ) -> PreparedSourceInput {
-    PreparedSourceInput::Beanstalk {
+    PreparedSourceInput::Moth {
         source_code: source_code.to_owned(),
         source_path,
         tokens: Box::new(tokens),
     }
 }
 
-/// Tokenize source text against a source file table and string table, then build a Beanstalk
+/// Tokenize source text against a source file table and string table, then build a Moth
 /// `PreparedSourceInput` carrying the retained token stream.
-fn tokenized_beanstalk_prepared_input(
+fn tokenized_moth_prepared_input(
     source_files: &SourceFileTable,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
@@ -71,7 +71,7 @@ fn tokenized_beanstalk_prepared_input(
         string_table,
     )
     .expect("test source should tokenize");
-    beanstalk_prepared_input(source_path, source_code, tokens)
+    moth_prepared_input(source_path, source_code, tokens)
 }
 
 fn source_byte_count(input_files: &[PreparedSourceInput]) -> usize {
@@ -129,7 +129,7 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
                 &mut string_table,
             )
             .expect("fixture source should tokenize");
-            beanstalk_prepared_input(canonical.clone(), source, tokens)
+            moth_prepared_input(canonical.clone(), source, tokens)
         })
         .collect();
 
@@ -173,7 +173,7 @@ fn chunked_fixture_sources() -> Vec<(String, String)> {
     (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
         .map(|index| {
             (
-                format!("{index}.bst"),
+                format!("{index}.moth"),
                 format!("value_{index} #= {index}\n"),
             )
         })
@@ -220,8 +220,8 @@ fn merge_stage_messages_preserves_render_type_context_with_warnings() {
 #[test]
 fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_strings() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let file_a = temp_dir.path().join("a.bst");
-    let file_b = temp_dir.path().join("b.bst");
+    let file_a = temp_dir.path().join("a.moth");
+    let file_b = temp_dir.path().join("b.moth");
     // File A is the entry file with a runtime statement and a const template (which generates
     // a synthetic header name during header parsing).
     fs::write(&file_a, "alpha = 1\n#[hello]\n").unwrap();
@@ -287,7 +287,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 options: &options,
             };
             let input = FrontendFilePrepareInput {
-                source: FrontendFilePrepareSource::Beanstalk {
+                source: FrontendFilePrepareSource::Moth {
                     source_path,
                     tokens: &retained_tokens,
                 },
@@ -435,7 +435,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
 #[test]
 fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let entry_file = temp_dir.path().join("entry.bst");
+    let entry_file = temp_dir.path().join("entry.moth");
     let source = "export:\n\
     identity type T |value T| -> T:\n\
         return value\n\
@@ -454,7 +454,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     .expect("source file table should build");
 
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let input_files = vec![tokenized_beanstalk_prepared_input(
+    let input_files = vec![tokenized_moth_prepared_input(
         &source_files,
         &style_directives,
         &mut string_table,
@@ -689,9 +689,9 @@ fn chunk_planning_is_bounded_by_thread_policy_and_minimum_chunk_size() {
 #[test]
 fn serial_file_preparation_produces_deterministic_ordered_output() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let file_a = temp_dir.path().join("a.bst");
-    let file_b = temp_dir.path().join("b.bst");
-    let file_c = temp_dir.path().join("c.bst");
+    let file_a = temp_dir.path().join("a.moth");
+    let file_b = temp_dir.path().join("b.moth");
+    let file_c = temp_dir.path().join("c.moth");
 
     // File A is the entry file with a runtime template, a const template, and a declaration.
     fs::write(&file_a, "alpha = 1\n#[hello]\n[runtime]\n").unwrap();
@@ -725,21 +725,21 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     frontend.set_source_files(source_files);
 
     let input_files = vec![
-        tokenized_beanstalk_prepared_input(
+        tokenized_moth_prepared_input(
             &frontend.source_files,
             &frontend.style_directives,
             &mut frontend.string_table,
             canonical_a.clone(),
             "alpha = 1\n#[hello]\n[runtime]\n",
         ),
-        tokenized_beanstalk_prepared_input(
+        tokenized_moth_prepared_input(
             &frontend.source_files,
             &frontend.style_directives,
             &mut frontend.string_table,
             canonical_b.clone(),
             "Beta #= 2\n",
         ),
-        tokenized_beanstalk_prepared_input(
+        tokenized_moth_prepared_input(
             &frontend.source_files,
             &frontend.style_directives,
             &mut frontend.string_table,
@@ -790,15 +790,15 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
 
     let last_a = header_source_names
         .iter()
-        .rposition(|name| name == "a.bst")
+        .rposition(|name| name == "a.moth")
         .expect("file A headers should be present");
     let first_b = header_source_names
         .iter()
-        .position(|name| name == "b.bst")
+        .position(|name| name == "b.moth")
         .expect("file B headers should be present");
     let first_c = header_source_names
         .iter()
-        .position(|name| name == "c.bst")
+        .position(|name| name == "c.moth")
         .expect("file C headers should be present");
     assert!(
         last_a < first_b && first_b < first_c,
@@ -908,7 +908,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     let mut canonical_paths = Vec::new();
     let mut sources = Vec::new();
     for index in 0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT {
-        let path = temp_dir.path().join(format!("{index}.bst"));
+        let path = temp_dir.path().join(format!("{index}.moth"));
         let source = format!("value_{index} #= {index}\n");
         fs::write(&path, &source).unwrap();
         let canonical = fs::canonicalize(&path).unwrap();
@@ -935,7 +935,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         .iter()
         .zip(&sources)
         .map(|(canonical, source)| {
-            tokenized_beanstalk_prepared_input(
+            tokenized_moth_prepared_input(
                 &source_files,
                 &style_directives,
                 &mut string_table,
@@ -991,7 +991,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
 
     let mut previous_file_last_header = None;
     for index in 0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT {
-        let expected_name = format!("{index}.bst");
+        let expected_name = format!("{index}.moth");
         let first_position = header_source_names
             .iter()
             .position(|name| name == &expected_name)
@@ -1065,7 +1065,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
     let header_source_names = header_source_file_names(&headers, &fixture.frontend.string_table);
     let mut previous_file_last_header = None;
     for index in 0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT {
-        let expected_name = format!("{index}.bst");
+        let expected_name = format!("{index}.moth");
         let first_position = header_source_names
             .iter()
             .position(|name| name == &expected_name)
@@ -1132,7 +1132,12 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
 #[test]
 fn chunked_file_preparation_preserves_warning_source_order() {
     let file_sources: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
-        .map(|index| (format!("{index}.bst"), format!("Value{index} #= {index}\n")))
+        .map(|index| {
+            (
+                format!("{index}.moth"),
+                format!("Value{index} #= {index}\n"),
+            )
+        })
         .collect();
     let file_source_refs = fixture_source_refs(&file_sources);
     let mut fixture = frontend_preparation_fixture(&file_source_refs);
@@ -1215,7 +1220,7 @@ fn assert_malformed_chunks_rejected(
     module_file_count: usize,
     expected_fragment: &str,
 ) {
-    let mut fixture = frontend_preparation_fixture(&[("a.bst", "x #= 1\n")]);
+    let mut fixture = frontend_preparation_fixture(&[("a.moth", "x #= 1\n")]);
     let base_len = fixture.frontend.string_table.fork_source().base_len();
 
     let error_messages = match super::ModulePreparationContext::merge_file_preparation_chunks(
@@ -1304,7 +1309,7 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     // active origin passed by the caller is distinct origin B. Preparation must reject this
     // mismatch rather than trusting the loose expected-origin argument.
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let entry_path = temp_dir.path().join("#page.bst");
+    let entry_path = temp_dir.path().join("#page.moth");
     fs::write(&entry_path, "#page\n").expect("test source file should be written");
     let canonical_entry = fs::canonicalize(&entry_path).expect("file should canonicalize");
 

@@ -56,7 +56,7 @@ fn assert_location_resolves_to(
 }
 
 fn make_signature_member(name: &str, string_table: &mut StringTable) -> SignatureMemberSyntax {
-    let location = make_location("test.bst", string_table);
+    let location = make_location("test.moth", string_table);
 
     SignatureMemberSyntax {
         id: InternedPath::from_single_str(name, string_table),
@@ -75,17 +75,17 @@ fn make_generic_parameter_list(name: &str, string_table: &mut StringTable) -> Ge
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: string_table.intern(name),
-            location: make_location("test.bst", string_table),
+            location: make_location("test.moth", string_table),
             trait_bounds: Vec::new(),
         }],
     }
 }
 
 fn make_file_tokens(symbol_name: &str, string_table: &mut StringTable) -> FileTokens {
-    let src_path = InternedPath::from_single_str("test.bst", string_table);
+    let src_path = InternedPath::from_single_str("test.moth", string_table);
     let token = Token::new(
         TokenKind::Symbol(string_table.intern(symbol_name)),
-        make_location("test.bst", string_table),
+        make_location("test.moth", string_table),
     );
     FileTokens::new(src_path, vec![token])
 }
@@ -95,8 +95,8 @@ fn top_level_const_fragment_remaps_path_and_location() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
 
-    let header_path = InternedPath::from_single_str("src/#page.bst", &mut local);
-    let location = make_location("src/#page.bst", &mut local);
+    let header_path = InternedPath::from_single_str("src/#page.moth", &mut local);
+    let location = make_location("src/#page.moth", &mut local);
 
     let mut fragment = TopLevelConstFragment {
         runtime_insertion_index: 3,
@@ -110,9 +110,9 @@ fn top_level_const_fragment_remaps_path_and_location() {
     assert_eq!(fragment.runtime_insertion_index, 3);
     assert_eq!(
         fragment.header_path.to_portable_string(&global),
-        "src/#page.bst"
+        "src/#page.moth"
     );
-    assert_location_resolves_to(&fragment.location, "src/#page.bst", &global);
+    assert_location_resolves_to(&fragment.location, "src/#page.moth", &global);
 }
 
 #[test]
@@ -121,8 +121,8 @@ fn file_import_remaps_all_fields_without_alias() {
     let mut global = StringTable::new();
 
     let header_path = InternedPath::from_single_str("@html/head", &mut local);
-    let location = make_location("test.bst", &mut local);
-    let path_location = make_location("test.bst", &mut local);
+    let location = make_location("test.moth", &mut local);
+    let path_location = make_location("test.moth", &mut local);
 
     let mut import = FileImport {
         provider: StructuralProviderReference {
@@ -144,8 +144,8 @@ fn file_import_remaps_all_fields_without_alias() {
         "@html/head"
     );
     assert!(import.alias.is_none());
-    assert_location_resolves_to(&import.location, "test.bst", &global);
-    assert_location_resolves_to(&import.provider.path_location, "test.bst", &global);
+    assert_location_resolves_to(&import.location, "test.moth", &global);
+    assert_location_resolves_to(&import.provider.path_location, "test.moth", &global);
     assert!(import.alias_location.is_none());
     assert_eq!(import.export_mode, HeaderExportMode::Private);
 }
@@ -157,9 +157,9 @@ fn file_import_remaps_all_fields_with_alias() {
 
     let alias_name = local.intern("h");
     let header_path = InternedPath::from_single_str("@html/head", &mut local);
-    let location = make_location("test.bst", &mut local);
-    let path_location = make_location("test.bst", &mut local);
-    let alias_location = Some(make_location("test.bst", &mut local));
+    let location = make_location("test.moth", &mut local);
+    let path_location = make_location("test.moth", &mut local);
+    let alias_location = Some(make_location("test.moth", &mut local));
 
     let mut import = FileImport {
         provider: StructuralProviderReference {
@@ -181,9 +181,9 @@ fn file_import_remaps_all_fields_with_alias() {
         "@html/head"
     );
     assert_eq!(global.resolve(import.alias.unwrap()), "h");
-    assert_location_resolves_to(&import.location, "test.bst", &global);
-    assert_location_resolves_to(&import.provider.path_location, "test.bst", &global);
-    assert_location_resolves_to(&import.alias_location.unwrap(), "test.bst", &global);
+    assert_location_resolves_to(&import.location, "test.moth", &global);
+    assert_location_resolves_to(&import.provider.path_location, "test.moth", &global);
+    assert_location_resolves_to(&import.alias_location.unwrap(), "test.moth", &global);
     assert_eq!(import.export_mode, HeaderExportMode::Public);
 }
 
@@ -198,9 +198,9 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
 
     let alias_name = local.intern("my_alias");
     let header_path = InternedPath::from_single_str("@utils/helpers", &mut local);
-    let location = make_location("file.bst", &mut local);
-    let path_location = make_location("file.bst", &mut local);
-    let alias_location = Some(make_location("file.bst", &mut local));
+    let location = make_location("file.moth", &mut local);
+    let path_location = make_location("file.moth", &mut local);
+    let alias_location = Some(make_location("file.moth", &mut local));
 
     let mut import = FileImport {
         provider: StructuralProviderReference {
@@ -216,8 +216,8 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
 
     let mut fragment = TopLevelConstFragment {
         runtime_insertion_index: 7,
-        header_path: InternedPath::from_single_str("file.bst", &mut local),
-        location: make_location("file.bst", &mut local),
+        header_path: InternedPath::from_single_str("file.moth", &mut local),
+        location: make_location("file.moth", &mut local),
     };
 
     let remap = global.merge_from(&local);
@@ -234,13 +234,16 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
     );
 
     // Verify fragment path resolves correctly.
-    assert_eq!(fragment.header_path.to_portable_string(&global), "file.bst");
+    assert_eq!(
+        fragment.header_path.to_portable_string(&global),
+        "file.moth"
+    );
 
     // Verify all locations still resolve.
-    assert_location_resolves_to(&import.location, "file.bst", &global);
-    assert_location_resolves_to(&import.provider.path_location, "file.bst", &global);
-    assert_location_resolves_to(&import.alias_location.unwrap(), "file.bst", &global);
-    assert_location_resolves_to(&fragment.location, "file.bst", &global);
+    assert_location_resolves_to(&import.location, "file.moth", &global);
+    assert_location_resolves_to(&import.provider.path_location, "file.moth", &global);
+    assert_location_resolves_to(&import.alias_location.unwrap(), "file.moth", &global);
+    assert_location_resolves_to(&fragment.location, "file.moth", &global);
 }
 
 // -----------------------------------------------------------
@@ -272,7 +275,7 @@ fn header_kind_function_remaps_generic_parameters_and_signature() {
     assert_eq!(global.resolve(generic_parameters.parameters[0].name), "T");
     assert_location_resolves_to(
         &generic_parameters.parameters[0].location,
-        "test.bst",
+        "test.moth",
         &global,
     );
 }
@@ -287,11 +290,11 @@ fn header_kind_constant_remaps_declaration() {
         binding_mode: BindingMode::ImmutableRuntime,
         type_annotation: ParsedTypeRef::Named {
             name: type_name,
-            location: make_location("test.bst", &mut local),
+            location: make_location("test.moth", &mut local),
         },
         initializer_tokens: vec![],
         initializer_references: vec![],
-        location: make_location("test.bst", &mut local),
+        location: make_location("test.moth", &mut local),
     };
 
     let mut kind = HeaderKind::Constant { declaration };
@@ -307,8 +310,8 @@ fn header_kind_constant_remaps_declaration() {
         panic!("expected Named type annotation");
     };
     assert_eq!(global.resolve(*name), "MyType");
-    assert_location_resolves_to(location, "test.bst", &global);
-    assert_location_resolves_to(&declaration.location, "test.bst", &global);
+    assert_location_resolves_to(location, "test.moth", &global);
+    assert_location_resolves_to(&declaration.location, "test.moth", &global);
 }
 
 #[test]
@@ -335,7 +338,7 @@ fn header_kind_struct_remaps_generic_parameters_and_fields() {
         panic!("expected Struct kind");
     };
     assert_eq!(global.resolve(generic_parameters.parameters[0].name), "T");
-    assert_location_resolves_to(&fields[0].location, "test.bst", &global);
+    assert_location_resolves_to(&fields[0].location, "test.moth", &global);
 }
 
 #[test]
@@ -347,7 +350,7 @@ fn header_kind_choice_remaps_generic_parameters_and_variants() {
     let variant = ChoiceVariantSyntax {
         id: local.intern("SomeVariant"),
         payload: ChoiceVariantPayloadSyntax::Unit,
-        location: make_location("test.bst", &mut local),
+        location: make_location("test.moth", &mut local),
     };
 
     let mut kind = HeaderKind::Choice {
@@ -367,7 +370,7 @@ fn header_kind_choice_remaps_generic_parameters_and_variants() {
     };
     assert_eq!(global.resolve(generic_parameters.parameters[0].name), "T");
     assert_eq!(global.resolve(variants[0].id), "SomeVariant");
-    assert_location_resolves_to(&variants[0].location, "test.bst", &global);
+    assert_location_resolves_to(&variants[0].location, "test.moth", &global);
 }
 
 #[test]
@@ -377,7 +380,7 @@ fn header_kind_type_alias_remaps_target() {
 
     let target = ParsedTypeRef::Named {
         name: local.intern("TargetType"),
-        location: make_location("test.bst", &mut local),
+        location: make_location("test.moth", &mut local),
     };
 
     let mut kind = HeaderKind::TypeAlias { target };
@@ -393,7 +396,7 @@ fn header_kind_type_alias_remaps_target() {
         panic!("expected Named target");
     };
     assert_eq!(global.resolve(name), "TargetType");
-    assert_location_resolves_to(&location, "test.bst", &global);
+    assert_location_resolves_to(&location, "test.moth", &global);
 }
 
 #[test]
@@ -406,7 +409,7 @@ fn header_kind_const_template_remaps_condition_references() {
         condition_references: vec![InitializerReference {
             name: show_banner,
             dot_member: None,
-            location: make_location("test.bst", &mut local),
+            location: make_location("test.moth", &mut local),
             followed_by_call: false,
             followed_by_choice_namespace: false,
         }],
@@ -423,7 +426,7 @@ fn header_kind_const_template_remaps_condition_references() {
         panic!("expected ConstTemplate kind");
     };
     assert_eq!(global.resolve(condition_references[0].name), "show_banner");
-    assert_location_resolves_to(&condition_references[0].location, "test.bst", &global);
+    assert_location_resolves_to(&condition_references[0].location, "test.moth", &global);
 }
 
 #[test]
@@ -460,9 +463,9 @@ fn header_remaps_kind_dependencies_locations_tokens_source_file_and_imports() {
         file_role: FileRole::Normal,
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: dependencies,
-        name_location: make_location("test.bst", &mut local),
+        name_location: make_location("test.moth", &mut local),
         tokens: make_file_tokens("my_symbol", &mut local),
-        source_file: InternedPath::from_single_str("test.bst", &mut local),
+        source_file: InternedPath::from_single_str("test.moth", &mut local),
         capacity_references: Vec::new(),
     };
 
@@ -484,12 +487,12 @@ fn header_remaps_kind_dependencies_locations_tokens_source_file_and_imports() {
     assert_eq!(dep.path().to_portable_string(&global), "@core/prelude");
 
     // Verify name location remapped.
-    assert_location_resolves_to(&header.name_location, "test.bst", &global);
+    assert_location_resolves_to(&header.name_location, "test.moth", &global);
 
     // Verify tokens remapped.
     assert_eq!(
         header.tokens.src_path.to_portable_string(&global),
-        "test.bst"
+        "test.moth"
     );
     let token_kind = &header.tokens.tokens[0].kind;
     let TokenKind::Symbol(symbol_id) = token_kind else {
@@ -498,7 +501,7 @@ fn header_remaps_kind_dependencies_locations_tokens_source_file_and_imports() {
     assert_eq!(global.resolve(*symbol_id), "my_symbol");
 
     // Verify source file remapped.
-    assert_eq!(header.source_file.to_portable_string(&global), "test.bst");
+    assert_eq!(header.source_file.to_portable_string(&global), "test.moth");
 }
 
 #[test]
@@ -524,9 +527,9 @@ fn header_remap_preserves_correct_ids_when_global_has_preexisting_strings() {
         file_role: FileRole::Normal,
         export_mode: HeaderExportMode::Public,
         local_ordering_hints: dependencies,
-        name_location: make_location("test.bst", &mut local),
+        name_location: make_location("test.moth", &mut local),
         tokens: make_file_tokens("my_symbol", &mut local),
-        source_file: InternedPath::from_single_str("test.bst", &mut local),
+        source_file: InternedPath::from_single_str("test.moth", &mut local),
         capacity_references: Vec::new(),
     };
 
@@ -567,7 +570,7 @@ fn header_remap_preserves_correct_ids_when_global_has_preexisting_strings() {
 
 fn make_unknown_name_diagnostic(name: &str, string_table: &mut StringTable) -> CompilerDiagnostic {
     let name_id = string_table.intern(name);
-    let location = make_location("test.bst", string_table);
+    let location = make_location("test.moth", string_table);
     CompilerDiagnostic::new(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         location,
@@ -587,7 +590,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     global.intern("preexisting_a");
     global.intern("preexisting_b");
 
-    let source_file = InternedPath::from_single_str("src/main.bst", &mut local);
+    let source_file = InternedPath::from_single_str("src/main.moth", &mut local);
 
     let generic_parameters = make_generic_parameter_list("T", &mut local);
     let mut dependencies = HashSet::new();
@@ -603,16 +606,16 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
         file_role: FileRole::Normal,
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: dependencies,
-        name_location: make_location("test.bst", &mut local),
+        name_location: make_location("test.moth", &mut local),
         tokens: make_file_tokens("my_func", &mut local),
-        source_file: InternedPath::from_single_str("test.bst", &mut local),
+        source_file: InternedPath::from_single_str("test.moth", &mut local),
         capacity_references: Vec::new(),
     };
 
     let fragment = TopLevelConstFragment {
         runtime_insertion_index: 2,
-        header_path: InternedPath::from_single_str("src/#page.bst", &mut local),
-        location: make_location("src/#page.bst", &mut local),
+        header_path: InternedPath::from_single_str("src/#page.moth", &mut local),
+        location: make_location("src/#page.moth", &mut local),
     };
 
     let warning = make_unknown_name_diagnostic("warn_name", &mut local);
@@ -620,11 +623,11 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     let import = FileImport {
         provider: StructuralProviderReference {
             path: InternedPath::from_single_str("@html/head", &mut local),
-            path_location: make_location("test.bst", &mut local),
+            path_location: make_location("test.moth", &mut local),
         },
         alias: Some(local.intern("h")),
-        location: make_location("test.bst", &mut local),
-        alias_location: Some(make_location("test.bst", &mut local)),
+        location: make_location("test.moth", &mut local),
+        alias_location: Some(make_location("test.moth", &mut local)),
         from_grouped: false,
         export_mode: HeaderExportMode::Public,
     };
@@ -651,7 +654,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     // source_file remapped.
     assert_eq!(
         output.source_file.to_portable_string(&global),
-        "src/main.bst"
+        "src/main.moth"
     );
 
     // file_id unchanged.
@@ -677,12 +680,12 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
             .to_portable_string(&global),
         "@core/prelude"
     );
-    assert_location_resolves_to(&header.name_location, "test.bst", &global);
+    assert_location_resolves_to(&header.name_location, "test.moth", &global);
     let TokenKind::Symbol(symbol_id) = &header.tokens.tokens[0].kind else {
         panic!("expected Symbol token");
     };
     assert_eq!(global.resolve(*symbol_id), "my_func");
-    assert_eq!(header.source_file.to_portable_string(&global), "test.bst");
+    assert_eq!(header.source_file.to_portable_string(&global), "test.moth");
 
     // Per-file imports remapped.
     assert_eq!(output.file_imports.len(), 1);
@@ -700,9 +703,9 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     assert_eq!(fragment.runtime_insertion_index, 2);
     assert_eq!(
         fragment.header_path.to_portable_string(&global),
-        "src/#page.bst"
+        "src/#page.moth"
     );
-    assert_location_resolves_to(&fragment.location, "src/#page.bst", &global);
+    assert_location_resolves_to(&fragment.location, "src/#page.moth", &global);
 
     // Counters unchanged.
     assert_eq!(output.const_template_count, 5);
@@ -715,7 +718,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
         panic!("expected UnknownName payload");
     };
     assert_eq!(global.resolve(*name), "warn_name");
-    assert_location_resolves_to(&warning.primary_location, "test.bst", &global);
+    assert_location_resolves_to(&warning.primary_location, "test.moth", &global);
 }
 
 #[test]
@@ -723,7 +726,7 @@ fn file_frontend_prepare_output_identity_remap_preserves_payload() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
 
-    let source_file = InternedPath::from_single_str("src/main.bst", &mut local);
+    let source_file = InternedPath::from_single_str("src/main.moth", &mut local);
     let warning = make_unknown_name_diagnostic("warn_name", &mut local);
 
     let mut output = FileFrontendPrepareOutput {
@@ -749,14 +752,14 @@ fn file_frontend_prepare_output_identity_remap_preserves_payload() {
 
     assert_eq!(
         output.source_file.to_portable_string(&global),
-        "src/main.bst"
+        "src/main.moth"
     );
 
     let DiagnosticPayload::UnknownName { name, .. } = &output.warnings[0].payload else {
         panic!("expected UnknownName payload");
     };
     assert_eq!(global.resolve(*name), "warn_name");
-    assert_location_resolves_to(&output.warnings[0].primary_location, "test.bst", &global);
+    assert_location_resolves_to(&output.warnings[0].primary_location, "test.moth", &global);
 }
 
 // -----------------------------------------------------------
@@ -791,13 +794,13 @@ fn file_frontend_prepare_error_remaps_warnings_and_diagnostic() {
         panic!("expected UnknownName payload");
     };
     assert_eq!(global.resolve(*name_a), "warn_a");
-    assert_location_resolves_to(&error.warnings[0].primary_location, "test.bst", &global);
+    assert_location_resolves_to(&error.warnings[0].primary_location, "test.moth", &global);
 
     let DiagnosticPayload::UnknownName { name: name_b, .. } = &error.warnings[1].payload else {
         panic!("expected UnknownName payload");
     };
     assert_eq!(global.resolve(*name_b), "warn_b");
-    assert_location_resolves_to(&error.warnings[1].primary_location, "test.bst", &global);
+    assert_location_resolves_to(&error.warnings[1].primary_location, "test.moth", &global);
 
     // Primary diagnostic remapped.
     let DiagnosticPayload::UnknownName {
@@ -807,7 +810,7 @@ fn file_frontend_prepare_error_remaps_warnings_and_diagnostic() {
         panic!("expected UnknownName payload");
     };
     assert_eq!(global.resolve(*error_name), "error_name");
-    assert_location_resolves_to(&error.diagnostic.primary_location, "test.bst", &global);
+    assert_location_resolves_to(&error.diagnostic.primary_location, "test.moth", &global);
 }
 
 #[test]
@@ -832,7 +835,7 @@ fn file_frontend_prepare_error_identity_remap_preserves_payload() {
         panic!("expected UnknownName payload");
     };
     assert_eq!(global.resolve(*name), "warn_name");
-    assert_location_resolves_to(&error.warnings[0].primary_location, "test.bst", &global);
+    assert_location_resolves_to(&error.warnings[0].primary_location, "test.moth", &global);
 
     let DiagnosticPayload::UnknownName {
         name: error_name, ..
@@ -841,5 +844,5 @@ fn file_frontend_prepare_error_identity_remap_preserves_payload() {
         panic!("expected UnknownName payload");
     };
     assert_eq!(global.resolve(*error_name), "error_name");
-    assert_location_resolves_to(&error.diagnostic.primary_location, "test.bst", &global);
+    assert_location_resolves_to(&error.diagnostic.primary_location, "test.moth", &global);
 }

@@ -1,0 +1,104 @@
+import @./function-declarations {
+    content as function_declarations,
+}
+
+import @./function-declarations-basic {
+    content as function_declarations_basic,
+}
+
+import @./parameters-and-defaults {
+    content as parameters_and_defaults,
+}
+
+import @./parameters-and-defaults-basic {
+    content as parameters_and_defaults_basic,
+}
+
+import @./calls-and-access {
+    content as calls_and_access,
+}
+
+import @./calls-and-access-basic {
+    content as calls_and_access_basic,
+}
+
+import @./returns-and-multiple-values {
+    content as returns_and_multiple_values,
+}
+
+import @./returns-and-multiple-values-basic {
+    content as returns_and_multiple_values_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Functions"
+page_description #= "Function declarations, parameters, calls, access and return values in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Functions
+
+    # Functions
+
+    Functions are named, statically checked and deliberately ordinary. Their signatures show the values they need, the access they request and every value they can return.
+
+    There are no hidden closure captures or distant conversion rules. The call stays readable from the source.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):function-declarations]
+        [$insert("title"):Function declarations]
+        [$insert("advanced"):[function_declarations]]
+
+        [function_declarations_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):parameters-and-defaults]
+        [$insert("title"):Parameters and defaults]
+        [$insert("advanced"):[parameters_and_defaults]]
+
+        [parameters_and_defaults_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):calls-and-access]
+        [$insert("title"):Calls and access]
+        [$insert("advanced"):[calls_and_access]]
+
+        [calls_and_access_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):returns-and-multiple-values]
+        [$insert("title"):Returns and multiple values]
+        [$insert("advanced"):[returns_and_multiple_values]]
+
+        [returns_and_multiple_values_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../casts/]
+        [$insert("previous_title"):Casts]
+        [$insert("next_path"):../branching/]
+        [$insert("next_title"):Branching]
+    ]
+]

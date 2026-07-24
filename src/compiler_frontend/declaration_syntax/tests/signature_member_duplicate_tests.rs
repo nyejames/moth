@@ -2,7 +2,7 @@
 //!
 //! WHAT: verifies that duplicate function parameters, struct fields, choice payload fields
 //! and trait-requirement parameters are all rejected by the shared signature-member parser
-//! with `DuplicateDeclaration` (`BST-RULE-0002`), before any HIR or infrastructure invariant
+//! with `DuplicateDeclaration` (`MOTH-RULE-0002`), before any HIR or infrastructure invariant
 //! can fire.
 //! WHY: the shared parser is the single owner of member-name uniqueness. Function-, struct-
 //! and choice-specific duplicate validators would duplicate that ownership.
@@ -26,7 +26,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, Tokeniz
 /// Tokenize `source` and position the stream on the first opening `|` so a wrapper parser
 /// (`parse_record_body`, `parse_function_signature_syntax`, ...) can advance past it.
 fn stream_positioned_at_open_bracket(source: &str, string_table: &mut StringTable) -> FileTokens {
-    let source_path = InternedPath::from_single_str("test.bst", string_table);
+    let source_path = InternedPath::from_single_str("test.moth", string_table);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut token_stream = tokenize(
         source,
@@ -49,11 +49,11 @@ fn stream_positioned_at_open_bracket(source: &str, string_table: &mut StringTabl
 }
 
 fn owner_path(string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str("test.bst", string_table)
+    InternedPath::from_single_str("test.moth", string_table)
 }
 
 /// Asserts `error` is the shared-parser duplicate-member diagnostic for `expected_name`:
-/// stable `BST-RULE-0002` kind, current member primary, first member secondary, and the
+/// stable `MOTH-RULE-0002` kind, current member primary, first member secondary, and the
 /// scope-neutral rendered message.
 fn assert_shared_duplicate_diagnostic(
     error: &CompilerDiagnostic,
@@ -63,7 +63,7 @@ fn assert_shared_duplicate_diagnostic(
     assert_eq!(
         error.kind,
         DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration),
-        "duplicate members must use BST-RULE-0002 DuplicateDeclaration",
+        "duplicate members must use MOTH-RULE-0002 DuplicateDeclaration",
     );
 
     let DiagnosticPayload::DuplicateDeclaration {

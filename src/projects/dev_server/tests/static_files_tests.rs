@@ -20,20 +20,13 @@ fn site_config(page_url_style: PageUrlStyle, redirect_index_html: bool) -> HtmlS
 fn injection_happens_before_closing_body_once() {
     let html = "<html><body><h1>Hello</h1></body></html>";
     let injected = inject_dev_client(html, "/");
-    assert!(injected.contains("EventSource('/__beanstalk/events')"));
-    assert_eq!(
-        injected
-            .matches("EventSource('/__beanstalk/events')")
-            .count(),
-        1
-    );
+    assert!(injected.contains("EventSource('/__moth/events')"));
+    assert_eq!(injected.matches("EventSource('/__moth/events')").count(), 1);
     assert!(injected.find("</body>").expect("should contain body close") > 0);
 
     let reinjected = inject_dev_client(&injected, "/");
     assert_eq!(
-        reinjected
-            .matches("EventSource('/__beanstalk/events')")
-            .count(),
+        reinjected.matches("EventSource('/__moth/events')").count(),
         1,
         "snippet should not be injected twice"
     );
@@ -313,7 +306,7 @@ fn origin_aware_resolution_and_redirects() {
     fs::write(output_dir.join("site.css"), "body {}").expect("should write asset");
 
     let cfg = HtmlSiteConfig {
-        origin: String::from("/beanstalk"),
+        origin: String::from("/moth"),
         page_url_style: PageUrlStyle::TrailingSlash,
         redirect_index_html: true,
     };
@@ -331,7 +324,7 @@ fn origin_aware_resolution_and_redirects() {
     assert_eq!(
         resolve_request("/docs", None, &output_dir, None, cfg.clone()),
         ResolvedRequest::Redirect {
-            location: String::from("/beanstalk/docs/"),
+            location: String::from("/moth/docs/"),
         }
     );
 
@@ -339,7 +332,7 @@ fn origin_aware_resolution_and_redirects() {
     assert_eq!(
         resolve_request("/docs/index.html", None, &output_dir, None, cfg.clone()),
         ResolvedRequest::Redirect {
-            location: String::from("/beanstalk/docs/"),
+            location: String::from("/moth/docs/"),
         }
     );
 

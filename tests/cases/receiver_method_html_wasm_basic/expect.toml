@@ -1,11 +1,11 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0041"]
+diagnostic_codes = ["MOTH-RULE-0041"]
 message_contains = ["cannot target builtin scalar types"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0041"]
+diagnostic_codes = ["MOTH-RULE-0041"]
 message_contains = ["cannot target builtin scalar types"]

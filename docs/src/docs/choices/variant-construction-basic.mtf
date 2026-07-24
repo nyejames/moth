@@ -1,0 +1,20 @@
+Create a unit variant without parentheses:
+
+[codeblock, $code("moth"):
+    current = Status::Ready
+]
+
+Create a payload variant with its values:
+
+[codeblock, $code("moth"):
+    failure = Status::Failed("network")
+]
+
+Named arguments also work:
+
+[codeblock, $code("moth"):
+    failure = Status::Failed(message = "network")
+]
+
+Payload values cannot be changed after construction. Match the choice to read
+them.

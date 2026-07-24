@@ -795,7 +795,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     let mut env = TypeEnvironment::new();
     let mut local_table = StringTable::new();
 
-    let source_scope = InternedPath::from_single_str("source.bst", &mut local_table);
+    let source_scope = InternedPath::from_single_str("source.moth", &mut local_table);
     let source_location =
         SourceLocation::new(source_scope.clone(), Default::default(), Default::default());
 
@@ -911,7 +911,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     assert_eq!(fields[0].name.name_str(&merged_table), Some("value"));
     assert_eq!(
         fields[0].location.scope.name_str(&merged_table),
-        Some("source.bst")
+        Some("source.moth")
     );
 
     let variants = env
@@ -925,7 +925,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     assert_eq!(fields[0].name.name_str(&merged_table), Some("item"));
     assert_eq!(
         fields[0].location.scope.name_str(&merged_table),
-        Some("source.bst")
+        Some("source.moth")
     );
 }
 

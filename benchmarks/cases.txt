@@ -1,4 +1,4 @@
-# Benchmark cases for Beanstalk compiler
+# Benchmark cases for Moth compiler
 # Format:
 #   # group: <name>
 #   <command> <arg1> <arg2> ...
@@ -6,27 +6,27 @@
 # Other comment lines are ignored
 
 # group: core
-check benchmark-root-single-file.bst
-check benchmarks/speed-test.bst
-build benchmarks/speed-test.bst
+check benchmark-root-single-file.moth
+check benchmarks/speed-test.moth
+build benchmarks/speed-test.moth
 
 # group: docs
 check docs
 
 # group: stress
-check benchmarks/template-stress.bst
-check benchmarks/type-stress.bst
-check benchmarks/fold-stress.bst
-check benchmarks/pattern-stress.bst
-check benchmarks/collection-stress.bst
-check benchmarks/environment-stress.bst
-check benchmarks/adversarial/one-module-kitchen-sink.bst
-check benchmarks/adversarial/deep-scope-churn.bst
-check benchmarks/adversarial/template-render-plan-churn.bst
-check benchmarks/adversarial/constant-dag-churn.bst
-check benchmarks/adversarial/expression-rpn-churn.bst
-check benchmarks/adversarial/generic-trait-churn.bst
-check benchmarks/adversarial/collection-map-borrow-churn.bst
+check benchmarks/template-stress.moth
+check benchmarks/type-stress.moth
+check benchmarks/fold-stress.moth
+check benchmarks/pattern-stress.moth
+check benchmarks/collection-stress.moth
+check benchmarks/environment-stress.moth
+check benchmarks/adversarial/one-module-kitchen-sink.moth
+check benchmarks/adversarial/deep-scope-churn.moth
+check benchmarks/adversarial/template-render-plan-churn.moth
+check benchmarks/adversarial/constant-dag-churn.moth
+check benchmarks/adversarial/expression-rpn-churn.moth
+check benchmarks/adversarial/generic-trait-churn.moth
+check benchmarks/adversarial/collection-map-borrow-churn.moth
 
 # group: module
 check benchmarks/module-graph
@@ -41,4 +41,4 @@ check benchmarks/adversarial/import-external-churn
 build benchmarks/adversarial/import-external-churn
 
 # group: borrow
-check benchmarks/borrow-stress.bst
+check benchmarks/borrow-stress.moth

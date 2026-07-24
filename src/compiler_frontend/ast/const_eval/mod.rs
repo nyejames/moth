@@ -729,7 +729,7 @@ impl Expression {
         string_table: &mut StringTable,
     ) -> Result<Option<Expression>, ConstantFoldError> {
         let kind: ExpressionKind = match (&self.kind, &rhs.kind) {
-            // Float operations: Beanstalk `Float` is finite f64. Require finite results and
+            // Float operations: Moth `Float` is finite f64. Require finite results and
             // report divide/modulo-by-zero explicitly instead of relying on NaN/Inf classification.
             (ExpressionKind::Float(lhs_val), ExpressionKind::Float(rhs_val)) => match op {
                 Operator::Add => {

@@ -8,8 +8,8 @@ rendered_output_contains = ["runtime i32 boundary catch codes: 201/201/241/241"]
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0064"]
+diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
-code = "BST-RULE-0064"
+code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.runtime_casts"

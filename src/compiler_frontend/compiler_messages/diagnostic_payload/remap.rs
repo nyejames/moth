@@ -58,11 +58,11 @@ impl DiagnosticPayload {
             }
             | DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path: path }
             | DiagnosticPayload::CrossModuleImportNotExported { symbol_path: path }
-            | DiagnosticPayload::InvalidBeandownApiScopeItem { path } => {
+            | DiagnosticPayload::InvalidMothTemplateApiScopeItem { path } => {
                 remap_path_import_payload(path, remap);
             }
 
-            DiagnosticPayload::DuplicateBeandownInputPath {
+            DiagnosticPayload::DuplicateMothTemplateInputPath {
                 path,
                 first_location,
             } => {

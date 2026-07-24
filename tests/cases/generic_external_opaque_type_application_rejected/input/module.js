@@ -1,3 +1,3 @@
 /**
- * @bst.opaque Canvas
+ * @moth.opaque Canvas
  */

@@ -8,6 +8,6 @@ kind = "html"
 must_contain = [
   "\" count=\"",
   "\", ratio=\"",
-  "__bs_int_div",
+  "__moth_int_div",
   "Division by zero",
 ]

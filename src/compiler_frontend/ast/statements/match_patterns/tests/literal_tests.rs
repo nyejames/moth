@@ -66,7 +66,7 @@ fn parse_whole_number_pattern(
     normalized_text: &str,
 ) -> LiteralPatternTestResult<Expression> {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("test.bst", &mut string_table);
+    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
     let text = string_table.intern(normalized_text);
     // For signed tokens the source_text includes the sign prefix.
     let source = match sign {
@@ -106,7 +106,7 @@ fn parse_whole_number_pattern(
 
 fn parse_negative_number_pattern(normalized_text: &str) -> LiteralPatternTestResult<Expression> {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("test.bst", &mut string_table);
+    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
     let text = string_table.intern(normalized_text);
     // In this path the Negative token is separate, so the literal is unsigned.
     let source_text = string_table.intern(normalized_text);

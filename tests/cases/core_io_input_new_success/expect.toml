@@ -6,7 +6,7 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = [
-  "function __bs_io_input_new(",
+  "function __moth_io_input_new(",
   "AbortController",
   "PointerEvent",
   "return { tag: \"ok\", value: handle };",

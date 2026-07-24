@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Declared memory groups | Beanstalk</title>
+    <title>Declared memory groups | Moth</title>
     <meta name="description" content="Accepted deferred group / into semantics and hard destination lifetimes.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -318,15 +318,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -335,13 +335,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -352,9 +352,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -364,15 +364,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -395,80 +395,80 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Memory management</a> / Declared memory groups</p><h1>Declared memory groups</h1><p><strong>Beanstalk is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>A declared memory group is a hard semantic lifetime region. Values placed into a group belong to that group for their full lifetime. Accepted design with implementation deferred.</p></section>
-    <section class="container"><h1>Declared memory groups</h1><h2>Design contract</h2><p>A declared memory group is a hard semantic lifetime region. Values placed into a group belong to that group for their full lifetime. They may retain references to allocations owned by the same group or by a region statically known to outlive the group. No group-owned value, projection, or alias may outlive the group.</p><p>Group identity is semantic lifetime metadata. It is not a value, type, field, parameter, generic argument, trait, allocator object, or lifetime annotation, and it must not enter <code>TypeId</code> or a source signature.</p><p><strong>Beanstalk is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><h2>Status</h2><p>Accepted end-state design with implementation deferred. This page is the canonical semantic authority for <code>group</code> / <code>into</code>. Implementation sequencing, prerequisites and deferred optimisation investigations live in <code>docs/roadmap/plans/grouped-memory-design.md</code>. Current implementation support lives in the progress matrix.</p><h2>Relationship to the general memory model</h2><p>Grouped memory extends, rather than replaces, Beanstalk&#39;s existing memory model:</p><ul><li>Existing values use shared read-only access by default.</li><li>Independent duplication uses explicit <code>copy</code>.</li><li>Mutation requires explicit exclusive access.</li><li>Ownership transfer is compiler-inferred and optional.</li><li>Borrow validation is mandatory and backend-independent.</li><li>Lifetime-region and escape validation is mandatory and backend-independent.</li><li>HIR remains the backend-facing semantic IR.</li><li>Borrow validation and lifetime analysis write side-table facts and do not rewrite HIR.</li><li>Allocation and release strategy remain backend decisions.</li><li>GC remains a legal physical representation for already-legal topology.</li></ul><p>GC must not weaken group escape rules. A GC-only backend may ignore physical group release, but it must accept and reject the same grouped source as every other backend.</p><p>Canonical general topology rules, including the one-owner invariant, the stored-edge outlives rule, narrowing and widening, cycles and projection families, live in <code>docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/</code>.</p><h2>Terminology</h2><h3>Lexical scope</h3><p>A source and HIR scope that controls name visibility and control-flow exits.</p><h3>Implicit lifetime region</h3><p>A compiler-inferred lifetime owner for ordinary ungrouped allocations. The compiler may merge, widen, split or physically ignore implicit regions when behaviour remains unchanged, subject to the nearest-existing-ancestor rule.</p><h3>Declared lifetime region</h3><p>A source <code>group name:</code> block. It is a hard lifetime boundary. The compiler must not silently widen it to make an invalid escape legal.</p><h3>Physical arena</h3><p>One possible backend representation for one or more lifetime regions. An arena is not a source value and is not synonymous with a semantic region.</p><h3>Runtime reference</h3><p>A target representation that locates a runtime value, such as a JavaScript object reference, Wasm offset, pointer or table index.</p><h3>Destruction responsibility</h3><p>The obligation to release or safely transfer storage when deterministic release is enabled. The unified ownership bit represents this responsibility. It does not prove uniqueness.</p><h3>Lifetime owner</h3><p>The one semantic region responsible for keeping an allocation alive and eventually ending its lifetime.</p><h2>group block</h2><pre style=""><code class='codeblock'>
-    group request<span class='bst-code-operator'>:</span>
-        parsed <span class='bst-code-struct'>ParsedPost</span> into request <span class='bst-code-operator'>=</span> parse_post<span class='bst-code-parenthesis'>(</span>post<span class='bst-code-parenthesis'>)</span>
-        html <span class='bst-code-type'>String</span> into request <span class='bst-code-operator'>=</span> render_post<span class='bst-code-parenthesis'>(</span>parsed<span class='bst-code-parenthesis'>)</span>
+    <section class="container"><p><a href="../">Memory management</a> / Declared memory groups</p><h1>Declared memory groups</h1><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>A declared memory group is a hard semantic lifetime region. Values placed into a group belong to that group for their full lifetime. Accepted design with implementation deferred.</p></section>
+    <section class="container"><h1>Declared memory groups</h1><h2>Design contract</h2><p>A declared memory group is a hard semantic lifetime region. Values placed into a group belong to that group for their full lifetime. They may retain references to allocations owned by the same group or by a region statically known to outlive the group. No group-owned value, projection, or alias may outlive the group.</p><p>Group identity is semantic lifetime metadata. It is not a value, type, field, parameter, generic argument, trait, allocator object, or lifetime annotation, and it must not enter <code>TypeId</code> or a source signature.</p><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><h2>Status</h2><p>Accepted end-state design with implementation deferred. This page is the canonical semantic authority for <code>group</code> / <code>into</code>. Implementation sequencing, prerequisites and deferred optimisation investigations live in <code>docs/roadmap/plans/grouped-memory-design.md</code>. Current implementation support lives in the progress matrix.</p><h2>Relationship to the general memory model</h2><p>Grouped memory extends, rather than replaces, Moth&#39;s existing memory model:</p><ul><li>Existing values use shared read-only access by default.</li><li>Independent duplication uses explicit <code>copy</code>.</li><li>Mutation requires explicit exclusive access.</li><li>Ownership transfer is compiler-inferred and optional.</li><li>Borrow validation is mandatory and backend-independent.</li><li>Lifetime-region and escape validation is mandatory and backend-independent.</li><li>HIR remains the backend-facing semantic IR.</li><li>Borrow validation and lifetime analysis write side-table facts and do not rewrite HIR.</li><li>Allocation and release strategy remain backend decisions.</li><li>GC remains a legal physical representation for already-legal topology.</li></ul><p>GC must not weaken group escape rules. A GC-only backend may ignore physical group release, but it must accept and reject the same grouped source as every other backend.</p><p>Canonical general topology rules, including the one-owner invariant, the stored-edge outlives rule, narrowing and widening, cycles and projection families, live in <code>docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/</code>.</p><h2>Terminology</h2><h3>Lexical scope</h3><p>A source and HIR scope that controls name visibility and control-flow exits.</p><h3>Implicit lifetime region</h3><p>A compiler-inferred lifetime owner for ordinary ungrouped allocations. The compiler may merge, widen, split or physically ignore implicit regions when behaviour remains unchanged, subject to the nearest-existing-ancestor rule.</p><h3>Declared lifetime region</h3><p>A source <code>group name:</code> block. It is a hard lifetime boundary. The compiler must not silently widen it to make an invalid escape legal.</p><h3>Physical arena</h3><p>One possible backend representation for one or more lifetime regions. An arena is not a source value and is not synonymous with a semantic region.</p><h3>Runtime reference</h3><p>A target representation that locates a runtime value, such as a JavaScript object reference, Wasm offset, pointer or table index.</p><h3>Destruction responsibility</h3><p>The obligation to release or safely transfer storage when deterministic release is enabled. The unified ownership bit represents this responsibility. It does not prove uniqueness.</p><h3>Lifetime owner</h3><p>The one semantic region responsible for keeping an allocation alive and eventually ending its lifetime.</p><h2>group block</h2><pre style=""><code class='codeblock'>
+    group request<span class='moth-code-operator'>:</span>
+        parsed <span class='moth-code-struct'>ParsedPost</span> into request <span class='moth-code-operator'>=</span> parse_post<span class='moth-code-parenthesis'>(</span>post<span class='moth-code-parenthesis'>)</span>
+        html <span class='moth-code-type'>String</span> into request <span class='moth-code-operator'>=</span> render_post<span class='moth-code-parenthesis'>(</span>parsed<span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><pre style=""><code class='codeblock'>
-    name <span class='bst-code-parenthesis'>[</span>access<span class='bst-code-operator'>/</span>type<span class='bst-code-parenthesis'>]</span> into group_name <span class='bst-code-operator'>=</span> expression
+    name <span class='moth-code-parenthesis'>[</span>access<span class='moth-code-operator'>/</span>type<span class='moth-code-parenthesis'>]</span> into group_name <span class='moth-code-operator'>=</span> expression
     </code></pre><p>Rules:</p><ul><li><code>group name:</code> is valid only in runtime executable bodies.</li><li><code>into group_name</code> appears only on declaration receiving boundaries in V1.</li><li>Placement may target the current group or a lexically enclosing ancestor group.</li><li>Placement may not target a sibling, child, unrelated group, or builder lifecycle root by spelling its name.</li><li>Groups cannot be passed, returned, stored, imported, exported, compared, or used as values.</li><li>Group identity is not source type identity.</li><li>Group closure occurs on every exit: fallthrough, <code>return</code>, <code>return!</code>, <code>break</code>, recovery exit, and checked-operation failure path.</li></ul><p>The group name is local to the current executable body scope. It cannot collide with a visible value, type, import, constant, reactive source or active group. A group is not a value. Groups are invalid in constants, config, signatures, fields, choices, traits and export surfaces.</p><h2>into declaration placement</h2><pre style=""><code class='codeblock'>
-    parsed into scratch <span class='bst-code-operator'>=</span> parse_post<span class='bst-code-parenthesis'>(</span>post<span class='bst-code-parenthesis'>)</span>
-    parsed <span class='bst-code-struct'>ParsedPost</span> into scratch <span class='bst-code-operator'>=</span> parse_post<span class='bst-code-parenthesis'>(</span>post<span class='bst-code-parenthesis'>)</span>
-    rows <span class='bst-code-operator'>~</span><span class='bst-code-parenthesis'>{</span><span class='bst-code-struct'>Row</span><span class='bst-code-parenthesis'>}</span> into scratch <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-parenthesis'>}</span>
-    maybe_name <span class='bst-code-type'>String</span><span class='bst-code-operator'>?</span> into scratch <span class='bst-code-operator'>=</span> find_name<span class='bst-code-parenthesis'>(</span>id<span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>?</span>
+    parsed into scratch <span class='moth-code-operator'>=</span> parse_post<span class='moth-code-parenthesis'>(</span>post<span class='moth-code-parenthesis'>)</span>
+    parsed <span class='moth-code-struct'>ParsedPost</span> into scratch <span class='moth-code-operator'>=</span> parse_post<span class='moth-code-parenthesis'>(</span>post<span class='moth-code-parenthesis'>)</span>
+    rows <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>Row</span><span class='moth-code-parenthesis'>}</span> into scratch <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
+    maybe_name <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> into scratch <span class='moth-code-operator'>=</span> find_name<span class='moth-code-parenthesis'>(</span>id<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>?</span>
     </code></pre><p><code>into group_name</code> appears after access or type syntax and before <code>=</code>.</p><p>V1 has no expression-site placement. Prefer:</p><pre style=""><code class='codeblock'>
-    row <span class='bst-code-struct'>Row</span> into scratch <span class='bst-code-operator'>=</span> parse_row<span class='bst-code-parenthesis'>(</span>raw<span class='bst-code-parenthesis'>)</span>
-    <span class='bst-code-operator'>~</span>rows.push<span class='bst-code-parenthesis'>(</span>row<span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>!</span>
+    row <span class='moth-code-struct'>Row</span> into scratch <span class='moth-code-operator'>=</span> parse_row<span class='moth-code-parenthesis'>(</span>raw<span class='moth-code-parenthesis'>)</span>
+    <span class='moth-code-operator'>~</span>rows.push<span class='moth-code-parenthesis'>(</span>row<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span>
     </code></pre><p>Do not initially add:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-operator'>~</span>rows.push<span class='bst-code-parenthesis'>(</span>parse_row<span class='bst-code-parenthesis'>(</span>raw<span class='bst-code-parenthesis'>)</span> into scratch<span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>!</span>
+    <span class='moth-code-operator'>~</span>rows.push<span class='moth-code-parenthesis'>(</span>parse_row<span class='moth-code-parenthesis'>(</span>raw<span class='moth-code-parenthesis'>)</span> into scratch<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span>
     </code></pre><p>Placement stays attached to closed receiving boundaries.</p><h2>Destination scope and visibility</h2><p>A declaration targeting an ancestor group is a narrow V1 escape mechanism, not a general definite-assignment system.</p><p>Canonical V1 rule:</p><ul><li>A declaration targeting an ancestor group is legal only from a straight-line nested <code>block:</code> or nested <code>group:</code> that executes at most once.</li><li>It is invalid when any conditional or repeatable construct lies between the declaration and the destination group&#39;s body.</li><li>It is therefore invalid directly inside:<ul><li><code>if</code> branches;</li><li>match arms;</li><li><code>catch</code> branches;</li><li>loops;</li><li>repeated template/runtime control flow;</li><li>any construct that may execute zero or multiple times.</li></ul></li><li>Conditional production must use one declaration in the destination scope whose initializer is a value-producing <code>if</code>, match, or <code>catch</code>.</li><li>Loop production must use a collection or aggregate already owned by the destination group and mutate it through ordinary exclusive access; it must not repeatedly declare the same ancestor-owned name.</li><li>Name collisions and definite initialization are checked in the destination scope.</li><li>Visibility begins at the declaration point and continues through the remainder of the destination group.</li></ul><p>Valid nested placement:</p><pre style=""><code class='codeblock'>
-    group request<span class='bst-code-operator'>:</span>
-        group scratch<span class='bst-code-operator'>:</span>
-            parsed <span class='bst-code-struct'>ParsedPost</span> into scratch <span class='bst-code-operator'>=</span> parse_post<span class='bst-code-parenthesis'>(</span>post<span class='bst-code-parenthesis'>)</span>
-            html <span class='bst-code-type'>String</span> into request <span class='bst-code-operator'>=</span> render_post<span class='bst-code-parenthesis'>(</span>parsed<span class='bst-code-parenthesis'>)</span>
+    group request<span class='moth-code-operator'>:</span>
+        group scratch<span class='moth-code-operator'>:</span>
+            parsed <span class='moth-code-struct'>ParsedPost</span> into scratch <span class='moth-code-operator'>=</span> parse_post<span class='moth-code-parenthesis'>(</span>post<span class='moth-code-parenthesis'>)</span>
+            html <span class='moth-code-type'>String</span> into request <span class='moth-code-operator'>=</span> render_post<span class='moth-code-parenthesis'>(</span>parsed<span class='moth-code-parenthesis'>)</span>
         ;
 
-        use<span class='bst-code-parenthesis'>(</span>html<span class='bst-code-parenthesis'>)</span>
+        use<span class='moth-code-parenthesis'>(</span>html<span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>Invalid branch placement:</p><pre style=""><code class='codeblock'>
-    group request<span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>if</span> condition<span class='bst-code-operator'>:</span>
-            html <span class='bst-code-type'>String</span> into request <span class='bst-code-operator'>=</span> render_post<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span> <span class='bst-code-comment'>-- invalid in V1</span>
+    group request<span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>if</span> condition<span class='moth-code-operator'>:</span>
+            html <span class='moth-code-type'>String</span> into request <span class='moth-code-operator'>=</span> render_post<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span> <span class='moth-code-comment'>-- invalid in V1</span>
         ;
 
-        use<span class='bst-code-parenthesis'>(</span>html<span class='bst-code-parenthesis'>)</span>
+        use<span class='moth-code-parenthesis'>(</span>html<span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>Conditional replacement:</p><pre style=""><code class='codeblock'>
-    group request<span class='bst-code-operator'>:</span>
-        html <span class='bst-code-type'>String</span> into request <span class='bst-code-operator'>=</span> <span class='bst-code-keyword'>if</span> condition<span class='bst-code-operator'>:</span>
-            then render_post<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
-        <span class='bst-code-keyword'>else</span>
-            then render_fallback<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    group request<span class='moth-code-operator'>:</span>
+        html <span class='moth-code-type'>String</span> into request <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> condition<span class='moth-code-operator'>:</span>
+            then render_post<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
+        <span class='moth-code-keyword'>else</span>
+            then render_fallback<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
         ;
     ;
     </code></pre><p>Invalid loop placement:</p><pre style=""><code class='codeblock'>
-    group request<span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>loop</span> posts <span class='bst-code-operator'>|</span>post<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-            html <span class='bst-code-type'>String</span> into request <span class='bst-code-operator'>=</span> render_post<span class='bst-code-parenthesis'>(</span>post<span class='bst-code-parenthesis'>)</span> <span class='bst-code-comment'>-- invalid repeated declaration</span>
+    group request<span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>loop</span> posts <span class='moth-code-operator'>|</span>post<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+            html <span class='moth-code-type'>String</span> into request <span class='moth-code-operator'>=</span> render_post<span class='moth-code-parenthesis'>(</span>post<span class='moth-code-parenthesis'>)</span> <span class='moth-code-comment'>-- invalid repeated declaration</span>
         ;
     ;
-    </code></pre><p>Loops must mutate a destination-owned aggregate instead of repeatedly declaring an ancestor-owned name.</p><p>An ordinary declaration&#39;s binding visibility follows its destination group. Visibility begins at the declaration point, not at the group opening. Name collisions are checked in the destination group scope. Ordinary declarations without <code>into</code> retain normal lexical visibility.</p><h2>Placement eligibility</h2><p>Define:</p><ul><li><strong>Fresh result root</strong>: The result&#39;s root allocation is newly created. The result may still retain references to pre-existing allocations, subject to outlives constraints.</li><li><strong>Alias result</strong>: The result root is an existing argument, projection, external allocation, or another result.</li><li><strong>Independent result graph</strong>: The result graph has no mutable sharing or retained Beanstalk reference to pre-existing storage. Explicit <code>copy</code> and WIT value lifting produce this stronger form.</li></ul><p>A declaration may be placed into a group when its result root is fresh and every retained edge is legal for the destination group, or when it is an independent result graph such as an explicit <code>copy</code>. An alias result cannot become new group-owned storage through <code>into</code>.</p><p>A fresh result root may retain parameters or other pre-existing values only when every retained edge satisfies the destination lifetime&#39;s outlives constraints. An independent result graph can enter an unrelated destination lifetime without retained-edge constraints to its source graph. A WIT value-only result is an independent result graph, not merely a fresh result root. An explicit <code>copy</code> result is an independent result graph while preserving internal alias topology inside the copied graph.</p><h2>Nested groups and retained edges</h2><p>Nested groups are valid.</p><pre style=""><code class='codeblock'>
-    group request<span class='bst-code-operator'>:</span>
-        config <span class='bst-code-struct'>Config</span> into request <span class='bst-code-operator'>=</span> load_config<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>)</span>
+    </code></pre><p>Loops must mutate a destination-owned aggregate instead of repeatedly declaring an ancestor-owned name.</p><p>An ordinary declaration&#39;s binding visibility follows its destination group. Visibility begins at the declaration point, not at the group opening. Name collisions are checked in the destination group scope. Ordinary declarations without <code>into</code> retain normal lexical visibility.</p><h2>Placement eligibility</h2><p>Define:</p><ul><li><strong>Fresh result root</strong>: The result&#39;s root allocation is newly created. The result may still retain references to pre-existing allocations, subject to outlives constraints.</li><li><strong>Alias result</strong>: The result root is an existing argument, projection, external allocation, or another result.</li><li><strong>Independent result graph</strong>: The result graph has no mutable sharing or retained Moth reference to pre-existing storage. Explicit <code>copy</code> and WIT value lifting produce this stronger form.</li></ul><p>A declaration may be placed into a group when its result root is fresh and every retained edge is legal for the destination group, or when it is an independent result graph such as an explicit <code>copy</code>. An alias result cannot become new group-owned storage through <code>into</code>.</p><p>A fresh result root may retain parameters or other pre-existing values only when every retained edge satisfies the destination lifetime&#39;s outlives constraints. An independent result graph can enter an unrelated destination lifetime without retained-edge constraints to its source graph. A WIT value-only result is an independent result graph, not merely a fresh result root. An explicit <code>copy</code> result is an independent result graph while preserving internal alias topology inside the copied graph.</p><h2>Nested groups and retained edges</h2><p>Nested groups are valid.</p><pre style=""><code class='codeblock'>
+    group request<span class='moth-code-operator'>:</span>
+        config <span class='moth-code-struct'>Config</span> into request <span class='moth-code-operator'>=</span> load_config<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
 
-        group scratch<span class='bst-code-operator'>:</span>
-            parsed <span class='bst-code-struct'>ParsedPost</span> into scratch <span class='bst-code-operator'>=</span> parse_post<span class='bst-code-parenthesis'>(</span>post<span class='bst-code-parenthesis'>)</span>
-            html <span class='bst-code-type'>String</span> into request <span class='bst-code-operator'>=</span> render_post<span class='bst-code-parenthesis'>(</span>parsed, config<span class='bst-code-parenthesis'>)</span>
+        group scratch<span class='moth-code-operator'>:</span>
+            parsed <span class='moth-code-struct'>ParsedPost</span> into scratch <span class='moth-code-operator'>=</span> parse_post<span class='moth-code-parenthesis'>(</span>post<span class='moth-code-parenthesis'>)</span>
+            html <span class='moth-code-type'>String</span> into request <span class='moth-code-operator'>=</span> render_post<span class='moth-code-parenthesis'>(</span>parsed, config<span class='moth-code-parenthesis'>)</span>
         ;
 
-        use<span class='bst-code-parenthesis'>(</span>html<span class='bst-code-parenthesis'>)</span>
+        use<span class='moth-code-parenthesis'>(</span>html<span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>For a child group nested in a parent group:</p><p>| Retained edge | Rule | |---|---| | child value -&gt; parent value | valid | | child value -&gt; same-child value | valid | | parent value -&gt; child value | invalid | | sibling value -&gt; sibling-group value | invalid | | child value -&gt; unrelated shorter-lived value | invalid |</p><p>A group-owned aggregate may retain:</p><ul><li>fresh values owned by the same group</li><li>same-group aliases</li><li>shared aliases to ancestor-group values</li><li>ordinary longer-lived external values whose retention contract is known</li></ul><p>It must not retain values owned by a child, sibling or otherwise shorter-lived region. Parent, sibling or otherwise longer-lived regions must not retain child-group values.</p><p>A group has one lexical entry and explicit exits. Values placed into the group cannot escape it. The compiler must not silently widen a declared group. A child group ends before its parent.</p><h3>No group-to-group transfer in V1</h3><p>A value crosses from a shorter-lived group into a longer-lived group only by producing independent storage in the destination lifetime or by invoking a fresh producer that allocates directly into the destination. V1 has no extraction, adoption, or group-to-group transfer operation.</p><p>Use one of:</p><ul><li>allocate the result directly into the destination group</li><li><code>copy</code> into the destination group</li><li>place the whole graph in the correct common group from the start</li></ul><p>This avoids graph splitting, alias rewriting and drop-list reparenting.</p><h2>Escapes</h2><p>Lifetime-region and escape validation must reject every path where a group-owned value or alias can outlive the group.</p><p>Invalid escapes include:</p><ul><li>returning a group-owned value</li><li>returning a projection or alias rooted in group-owned storage</li><li>storing a group-owned value in a longer-lived local or aggregate</li><li>storing a child-group value in a parent or sibling group</li><li>assigning a group-owned value into longer-lived reactive storage</li><li>passing a group-owned value to an external call that may retain it</li><li>keeping a map lookup, collection element or field alias live after group exit</li><li>creating a longer-lived retained edge into the group</li></ul><p>Backend GC representation does not legalise these cases.</p><h3>Crossing a group boundary</h3><pre style=""><code class='codeblock'>
-    group request<span class='bst-code-operator'>:</span>
-        group scratch<span class='bst-code-operator'>:</span>
-            label <span class='bst-code-type'>String</span> into scratch <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> temporary<span class='bst-code-parenthesis'>]</span>
-            saved <span class='bst-code-type'>String</span> into request <span class='bst-code-operator'>=</span> <span class='bst-code-keyword'>copy</span> label
+    group request<span class='moth-code-operator'>:</span>
+        group scratch<span class='moth-code-operator'>:</span>
+            label <span class='moth-code-type'>String</span> into scratch <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> temporary<span class='moth-code-parenthesis'>]</span>
+            saved <span class='moth-code-type'>String</span> into request <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> label
         ;
 
-        use<span class='bst-code-parenthesis'>(</span>saved<span class='bst-code-parenthesis'>)</span>
+        use<span class='moth-code-parenthesis'>(</span>saved<span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>A fresh producer may avoid the copy by allocating directly into the destination group.</p><h3>Interior aliases stay rooted</h3><p>An interior alias rooted in group-owned storage cannot escape its group by itself.</p><pre style=""><code class='codeblock'>
-    load_name <span class='bst-code-operator'>|</span>id <span class='bst-code-type'>String</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-struct'>String,</span> <span class='bst-code-struct'>Error</span><span class='bst-code-operator'>!</span><span class='bst-code-operator'>:</span>
-        group scratch<span class='bst-code-operator'>:</span>
-            user <span class='bst-code-struct'>User</span> into scratch <span class='bst-code-operator'>=</span> load_user<span class='bst-code-parenthesis'>(</span>id<span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>!</span>
-            <span class='bst-code-keyword'>return</span> user.name <span class='bst-code-comment'>-- invalid</span>
+    load_name <span class='moth-code-operator'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+        group scratch<span class='moth-code-operator'>:</span>
+            user <span class='moth-code-struct'>User</span> into scratch <span class='moth-code-operator'>=</span> load_user<span class='moth-code-parenthesis'>(</span>id<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span>
+            <span class='moth-code-keyword'>return</span> user.name <span class='moth-code-comment'>-- invalid</span>
         ;
     ;
     </code></pre><p>Use <code>copy</code> or produce a fresh value directly in a longer-lived group. Interior projections remain rooted in their containing allocation family; see the lifetime-regions leaf for the general projection rule.</p><h2>Reassignment inside a group</h2><p>V1 has no <code>into group</code> syntax on reassignment. A mutable binding already owned by a group may be reassigned only with a fresh result root valid for that same group, an independent copy allocated into that group, or a same-group value transferred at a proven final use.</p><p>A mutable binding declared into a group remains group-owned. Reassignment does not let a group-owned binding switch into a borrowed alias of ancestor, sibling or external storage. Use a separate ordinary alias binding for that purpose.</p><h2>Calls and hidden result destinations</h2><p>Group-owned values passed to ordinary functions are normally passed as borrowed. The callee may read or mutate according to the source access contract, but it must not individually destroy the group-owned allocation.</p><p>Functions whose result root is fresh may allocate that root directly into a caller-selected destination. The function summary classifies the result root as fresh and records retained-edge constraints separately.</p><p>A hidden destination:</p><ul><li>is not part of the source signature</li><li>is not a region parameter visible to generics or callers</li><li>is not a source lifetime parameter</li><li>may be ignored by a GC backend</li><li>lets an optimising backend allocate a fresh result root directly into the caller&#39;s region when every retained edge is legal for that destination</li></ul><p>A fresh-result-root summary and its retained-edge constraints must be backend-neutral parts of the function&#39;s semantic effect information.</p><p>The ownership bit records destruction responsibility only. It does not prove uniqueness, identify the final observer or establish lifetime legality. A group owns release responsibility for its storage family; an individual callee cannot release one group child merely because an owned bit exists.</p><h2>Reactive and builder-owned lifetimes</h2><p>Reactive storage can outlive the lexical function that creates it. V1 must reject:</p><ul><li>reactive declarations placed directly into an ordinary lexical memory group</li><li>assigning group-owned values into reactive storage that outlives the group</li><li>subscriptions or mounted state retaining group-owned aliases past group exit</li></ul><p>A GC backend may use ordinary reachability for already-legal topology.</p><p>A future collector-free HTML-Wasm path should use builder-owned lifecycle regions such as:</p><pre style=""><code class='codeblock'>
@@ -480,111 +480,111 @@ body {
         └── Mount B region
             ├── subscriptions
             └── render-generation region
-    </code></pre><p>Builder-owned regions obey the same retained-edge rule as source groups, but they are created and ended by the project runtime rather than ordinary source blocks. Builders cannot change source legality.</p><h2>Diagnostics</h2><p>Group-specific diagnostics must identify:</p><ul><li>group declaration;</li><li>destination declaration;</li><li>source value or result;</li><li>invalid retained edge or escape;</li><li>source and destination regions;</li><li>failed rule;</li><li>ranked remedy.</li></ul><p>Remedy order remains:</p><ol><li>allocate directly into the destination group;</li><li>place observers under one common group;</li><li>use <code>copy</code>;</li><li>shorten the retained edge;</li><li>repair package-owned metadata where applicable.</li></ol><p>User-authored topology that is invalid or cannot be proven legal produces a structured <code>CompilerDiagnostic</code>. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce <code>CompilerError</code>.</p><p>There is no backend-specific escape from semantic lifetime diagnostics. A backend may ignore physical grouping through GC while preserving the source contract.</p><h2>Deferred extensions</h2><p>Deferred work includes:</p><ul><li>reserved-byte or preallocation syntax</li><li>safe adoption of an ungrouped uniquely owned value into a group</li><li>safe extraction or movement between declared groups</li><li>expression-site placement</li><li>group-local graph construction and publication</li><li>direct reference-cycle construction</li><li>builder lifecycle region metadata for reactivity</li><li>field-sensitive region splitting</li><li>physical region layout and runtime ABI encoding</li></ul><p>Final-use extraction of one projected child from an allocation family is not accepted current design and is not part of the first grouped-memory implementation. See the deferred child-extraction note in <code>docs/roadmap/plans/grouped-memory-design.md</code>.</p><h2>Related reading</h2><ul><li><a href="../">Memory management</a>: top-level memory authority</li><li><a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: one owner, retained edges, escapes and region topology</li><li><a href="../access-and-aliasing">Access and aliasing</a>: shared aliases, copies and exclusive access</li><li><a href="../borrow-validation">Borrow validation</a>: exclusivity and optional transfer safety</li><li><a href="../ownership-and-drops">Ownership and drops</a>: destruction responsibility and the ownership bit</li><li><a href="../runtime-and-backend-lowering">Runtime and backend lowering</a>: backend representation and external profiles</li><li><a href="https://github.com/nyejames/beanstalk/blob/main/docs/roadmap/plans/grouped-memory-design.md">Grouped memory implementation roadmap</a>: implementation sequencing and deferred investigations</li></ul></section>
+    </code></pre><p>Builder-owned regions obey the same retained-edge rule as source groups, but they are created and ended by the project runtime rather than ordinary source blocks. Builders cannot change source legality.</p><h2>Diagnostics</h2><p>Group-specific diagnostics must identify:</p><ul><li>group declaration;</li><li>destination declaration;</li><li>source value or result;</li><li>invalid retained edge or escape;</li><li>source and destination regions;</li><li>failed rule;</li><li>ranked remedy.</li></ul><p>Remedy order remains:</p><ol><li>allocate directly into the destination group;</li><li>place observers under one common group;</li><li>use <code>copy</code>;</li><li>shorten the retained edge;</li><li>repair package-owned metadata where applicable.</li></ol><p>User-authored topology that is invalid or cannot be proven legal produces a structured <code>CompilerDiagnostic</code>. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce <code>CompilerError</code>.</p><p>There is no backend-specific escape from semantic lifetime diagnostics. A backend may ignore physical grouping through GC while preserving the source contract.</p><h2>Deferred extensions</h2><p>Deferred work includes:</p><ul><li>reserved-byte or preallocation syntax</li><li>safe adoption of an ungrouped uniquely owned value into a group</li><li>safe extraction or movement between declared groups</li><li>expression-site placement</li><li>group-local graph construction and publication</li><li>direct reference-cycle construction</li><li>builder lifecycle region metadata for reactivity</li><li>field-sensitive region splitting</li><li>physical region layout and runtime ABI encoding</li></ul><p>Final-use extraction of one projected child from an allocation family is not accepted current design and is not part of the first grouped-memory implementation. See the deferred child-extraction note in <code>docs/roadmap/plans/grouped-memory-design.md</code>.</p><h2>Related reading</h2><ul><li><a href="../">Memory management</a>: top-level memory authority</li><li><a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: one owner, retained edges, escapes and region topology</li><li><a href="../access-and-aliasing">Access and aliasing</a>: shared aliases, copies and exclusive access</li><li><a href="../borrow-validation">Borrow validation</a>: exclusivity and optional transfer safety</li><li><a href="../ownership-and-drops">Ownership and drops</a>: destruction responsibility and the ownership bit</li><li><a href="../runtime-and-backend-lowering">Runtime and backend lowering</a>: backend representation and external profiles</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/grouped-memory-design.md">Grouped memory implementation roadmap</a>: implementation sequencing and deferred investigations</li></ul></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -599,63 +599,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -665,36 +665,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -707,65 +707,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -773,10 +773,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

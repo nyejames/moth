@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This plan defines a cautious, evidence-based optimisation programme for the Beanstalk compiler frontend. The focus is to reduce allocation, cloning, remapping, and repeated semantic work in hot frontend paths while preserving compiler correctness, diagnostics, and the current stage ownership model.
+This plan defines a cautious, evidence-based optimisation programme for the Moth compiler frontend. The focus is to reduce allocation, cloning, remapping, and repeated semantic work in hot frontend paths while preserving compiler correctness, diagnostics, and the current stage ownership model.
 
-The first implementation target is **typed `Vec` arenas with stable ID handles**, seeded by capacity heuristics gathered during tokenization/header preparation. The first structural refactor target is **scope-frame arenas**, because Beanstalk’s no-shadowing rule gives a direct opportunity to replace cloned scope contexts with parent-linked frames.
+The first implementation target is **typed `Vec` arenas with stable ID handles**, seeded by capacity heuristics gathered during tokenization/header preparation. The first structural refactor target is **scope-frame arenas**, because Moth’s no-shadowing rule gives a direct opportunity to replace cloned scope contexts with parent-linked frames.
 
 This plan is deliberately staged. Each phase must produce benchmark/profile evidence and must be willing to backtrack if an expected optimisation does not improve the targeted measurements.
 
@@ -18,7 +18,7 @@ This plan is deliberately staged. Each phase must produce benchmark/profile evid
 - [x] Start with an instrumentation, benchmark, and profiling baseline phase before optimisation refactors.
 - [x] Require before/after profiling and benchmark evidence for every optimisation phase.
 - [x] Use repeatable performance gates with a rollback/scrutiny rule.
-- [x] Commit adversarial high-churn Beanstalk benchmark fixtures under `./benchmarks`.
+- [x] Commit adversarial high-churn Moth benchmark fixtures under `./benchmarks`.
 - [x] Include deterministic fixture generation only where useful, with committed generated fixtures as the canonical benchmark inputs.
 - [x] Include an early external package registry clone-reduction phase.
 - [x] Allow modest initial over-allocation for capacity heuristics.
@@ -180,7 +180,7 @@ These invariants should be documented in the optimisation report and used as rev
 
 ### No visible shadowing
 
-Beanstalk forbids visible redeclaration while a name is still in scope.
+Moth forbids visible redeclaration while a name is still in scope.
 
 Optimisation use:
 
@@ -353,22 +353,22 @@ Use Samply at baseline and after major refactors, not for every fixture.
 
 ```bash
 just profile-build
-samply record ./target/profiling/bean build docs --release
+samply record ./target/profiling/moth build docs --release
 ```
 
 If `just profile-build` does not build with `detailed_timers`, use:
 
 ```bash
 cargo build --profile profiling --features detailed_timers
-samply record ./target/profiling/bean build docs --release
+samply record ./target/profiling/moth build docs --release
 ```
 
 Targeted fixture examples:
 
 ```bash
-samply record ./target/profiling/bean check benchmarks/template-stress.bst
-samply record ./target/profiling/bean check benchmarks/environment-stress.bst
-samply record ./target/profiling/bean check benchmarks/adversarial/one-module-kitchen-sink.bst
+samply record ./target/profiling/moth check benchmarks/template-stress.bst
+samply record ./target/profiling/moth check benchmarks/environment-stress.bst
+samply record ./target/profiling/moth check benchmarks/adversarial/one-module-kitchen-sink.bst
 ```
 
 ### Regression threshold
@@ -493,7 +493,7 @@ function-level attribution.
 - [x] Build a profiling binary:
   - [x] `just profile-build`, or `cargo build --profile profiling --features detailed_timers` if needed.
 - [x] Record baseline Samply profiles:
-  - [x] `samply record ./target/profiling/bean build docs --release`;
+  - [x] `samply record ./target/profiling/moth build docs --release`;
   - [x] one targeted profile for existing `template-stress.bst`;
   - [x] one targeted profile for existing `environment-stress.bst`.
 - [x] Summarize top findings in `benchmarks/frontend-optimization-results.md`:
@@ -647,7 +647,7 @@ src/compiler_frontend/arena/capacity.rs
 
 ### Summary
 
-This phase expands benchmark coverage before the major refactors. The goal is to expose unexpected compiler weak spots and produce repeatable high-churn workloads. Fixtures should be valid Beanstalk programs, not diagnostic failures.
+This phase expands benchmark coverage before the major refactors. The goal is to expose unexpected compiler weak spots and produce repeatable high-churn workloads. Fixtures should be valid Moth programs, not diagnostic failures.
 
 Phase 2 completed on 2026-06-18. It added hand-authored adversarial benchmark fixtures under
 `benchmarks/adversarial/`, wired them into the focused frontend and end-to-end benchmark suites,
@@ -759,7 +759,7 @@ ownership or owned builder-runtime metadata at true module handoff boundaries.
 
 ### Summary
 
-This is the first major arena refactor. Replace scope-context cloning with a typed `Vec` arena of parent-linked scope frames. This directly exploits Beanstalk’s no-shadowing invariant and should reduce cloned maps/vectors during AST environment, expression, template, and body parsing.
+This is the first major arena refactor. Replace scope-context cloning with a typed `Vec` arena of parent-linked scope frames. This directly exploits Moth’s no-shadowing invariant and should reduce cloned maps/vectors during AST environment, expression, template, and body parsing.
 
 Phase 4 completed on 2026-06-18. It replaced the flat cloned local-declaration state with
 `ScopeArena`, stable `ScopeFrameId`s, parent-linked frames, and arena-local local declarations
@@ -1001,7 +1001,7 @@ src/compiler_frontend/ast/expressions/scratch.rs
 
 ### Summary
 
-This phase is gated by evidence. Templates are central to Beanstalk, so template arena changes must be cautious and heavily validated. The goal is to reduce cloning of template atoms, render pieces, and composed/finalized templates.
+This phase is gated by evidence. Templates are central to Moth, so template arena changes must be cautious and heavily validated. The goal is to reduce cloning of template atoms, render pieces, and composed/finalized templates.
 
 Gate checked on 2026-06-18 with targeted template and docs profiles. The
 `template-render-plan-churn` fixture remained a small `~7ms` AST case. The docs profile showed

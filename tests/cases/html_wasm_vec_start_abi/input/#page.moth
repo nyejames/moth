@@ -1,0 +1,10 @@
+-- Canonical test for the moth_start() -> Vec<String> fragment vec ABI.
+-- moth_start() accumulates runtime fragment strings into a vec handle,
+-- which the JS bootstrap reads via moth_vec_len / moth_vec_get to hydrate slots.
+
+get_greeting || -> String:
+    return "Hello from Wasm"
+;
+
+msg = get_greeting()
+[: [msg]]

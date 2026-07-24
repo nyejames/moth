@@ -8,5 +8,5 @@ rendered_output_contains = ["optional cast success: 42"]
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-INFRA-0001"]
+diagnostic_codes = ["MOTH-INFRA-0001"]
 message_contains = ["Wasm backend does not yet support variant payload fields"]

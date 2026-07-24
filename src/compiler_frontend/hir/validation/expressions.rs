@@ -244,7 +244,7 @@ impl<'a> HirValidator<'a> {
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_) => {}
 
-            // Beanstalk `Float` is finite f64. Non-finite values (NaN, Infinity) must never
+            // Moth `Float` is finite f64. Non-finite values (NaN, Infinity) must never
             // survive HIR lowering — rejecting them here catches backend-invariant breaches
             // before any backend sees a literal it cannot represent faithfully.
             HirExpressionKind::Float(value) => {

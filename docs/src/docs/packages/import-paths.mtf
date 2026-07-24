@@ -1,0 +1,44 @@
+Import paths resolve declaration surfaces, not file bytes. Every source import resolves from the importing file's owning module root, not the file's physical directory.
+
+### Path families
+
+- **Module-root-relative**: imports resolve from the importing file's owning module root. Example: inside `src/internal/deep/renderer.moth`, `import @accounts { Account }` resolves to `src/accounts.moth`, not `src/internal/deep/accounts.moth`.
+- **Child module**: reaching a child normal module ends filesystem traversal and exposes only its `export:` facade. Imports cannot bypass that facade with paths such as `@child/internal`.
+- **Support package**: scoped `+*.moth` support packages are imported by package name. Consumers do not encode ancestor paths.
+- **Core binding-backed package**: `@core/math`, `@core/text` and current peers are registered by the builder.
+- **Builder source-backed package**: `@html` is a builder-provided source-backed package.
+- **Builder binding-backed package**: `@web/canvas` is a builder-owned runtime package.
+- **JavaScript file**: project-local annotated JavaScript files require `.js` and a builder external import provider. The `.js` extension is kept.
+
+### Resolution rules
+
+- `@./...` has no supported meaning.
+- Parent components and `..` are invalid.
+- Paths may traverse ordinary unrooted directories owned by the same module.
+- `.moth`, `.mtf` and `.md` source imports are extensionless.
+- Direct `.js` imports keep the `.js` extension.
+- Scoped support packages are injected by package name, not physical ancestor paths.
+- Core and builder runtime packages use their registered package path.
+- Specific symbol imports use grouped syntax. Direct symbol-path imports such as `import @core/math/sin` are rejected.
+- Direct imports of `#*.moth`, `+*.moth` and `config.moth` are rejected.
+- Moth template `.mtf` and plain Markdown `.md` content files both expose generated `content` constants. See @../moth-templates/#content-imports (Moth template content imports) and @../markdown/#markdown-imports (Markdown imports).
+- The imported public surface of a module root comes from its `export:` block. See @#module-visibility (Module visibility).
+
+### Same-module imports
+
+Files in the same module can import ordinary sibling source files directly. Same-module imports bypass the public-surface boundary. See @#module-visibility (Module visibility).
+
+### Cross-module imports
+
+Imports that cross into another module boundary can only access what that module's `export:` block makes public. Cross-module imports cannot bypass the public API. See @#module-visibility (Module visibility).
+
+### Content-file imports
+
+Moth template and plain Markdown content files are imported with the same extensionless syntax. Their import shape is covered by the Moth template and Plain Markdown pages, not here.
+
+### Related concepts
+
+- For grouped and namespace imports see @#grouped-and-namespace-imports (Grouped and namespace imports).
+- For visibility rules see @#module-visibility (Module visibility).
+- For project-local source-backed packages see @#project-local-packages (Project-local packages).
+- For package origin and backing see @#package-origins-and-backing (Package origins and backing).

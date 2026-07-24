@@ -22,7 +22,7 @@ use rustc_hash::FxHashMap;
 
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_hash_root_file;
-use crate::projects::settings::{BEANSTALK_FILE_EXTENSION, Config};
+use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 
 use rayon::prelude::*;
 
@@ -48,7 +48,7 @@ use super::source_tree_index::SourceTreeIndex;
 ///
 /// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
 ///      observation in the active collection scope and emits the stable
-///      `BST_BENCH timing` line when the output mode permits.
+///      `MOTH_BENCH timing` line when the output mode permits.
 /// WHY:  single-file and directory Stage 0 flows use dotted `stage0.*` metric names
 ///      through the concise `timers` substrate. The start token is zero-sized when
 ///      `timers` is off, so regular builds do not read clocks for instrumentation-only
@@ -61,7 +61,7 @@ fn log_stage_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
 //  Single-File Compilation
 // -------------------------
 
-/// Compile a single `.bst` file as its own module.
+/// Compile a single `.moth` file as its own module.
 pub(crate) fn compile_single_file_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
@@ -70,7 +70,7 @@ pub(crate) fn compile_single_file_frontend(
     extension: &OsStr,
     string_table: &mut StringTable,
 ) -> Result<Vec<Module>, CompilerMessages> {
-    // 1. Verify standard Beanstalk file extension.
+    // 1. Verify standard Moth file extension.
     //
     // A non-UTF-8 extension is an unrepresentable filesystem input. Reject it before
     // any lossy conversion can collapse it into the empty extension.
@@ -86,7 +86,7 @@ pub(crate) fn compile_single_file_frontend(
         }
     };
 
-    if extension_text != BEANSTALK_FILE_EXTENSION {
+    if extension_text != LANGUAGE_SOURCE_EXTENSION {
         if SourceFileKind::from_extension(extension_text).is_some() {
             let interned_path =
                 match InternedPath::try_from_filesystem_path(&config.entry_dir, string_table) {
@@ -116,7 +116,7 @@ pub(crate) fn compile_single_file_frontend(
         let err = CompilerError::file_error(
             &config.entry_dir,
             format!(
-                "Unsupported file extension for compilation. Beanstalk files use .{BEANSTALK_FILE_EXTENSION}"
+                "Unsupported file extension for compilation. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
             ),
             string_table,
         );

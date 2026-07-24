@@ -42,7 +42,7 @@ pub(crate) fn parse_single_file_ast_result(
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
-    let file_path = std::path::PathBuf::from("#page.bst");
+    let file_path = std::path::PathBuf::from("#page.moth");
 
     let options = HeaderParseOptions {
         entry_file_id: None,
@@ -111,7 +111,7 @@ pub(crate) fn parse_single_file_ast_result(
         )
     })?;
 
-    let entry_path = InternedPath::from_single_str("#page.bst", &mut string_table);
+    let entry_path = InternedPath::from_single_str("#page.moth", &mut string_table);
     let ast = Ast::new(
         AstBuildInput {
             headers: sorted.headers,

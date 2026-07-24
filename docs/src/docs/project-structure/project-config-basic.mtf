@@ -1,0 +1,29 @@
+`config.moth` at the project root controls build settings. It is one self-contained compile-time source file with no source imports.
+
+### A minimal config
+
+[codeblock, $code("moth"):
+    project #= |
+        name = "my_project",
+        entry_root = "src",
+    |
+
+    html #= |
+        dev_output = "dev",
+        release_output = "release",
+    |
+]
+
+### Structure
+
+- One required `project` record provides project identity and settings.
+- `project.name` is required for stable identity.
+- Builder sections like `html` hold builder-specific settings.
+- The command selects the builder before config validation. `config.moth` does not select the builder.
+- Only active sections are schema-validated.
+
+### Remember
+
+- Only `config.moth` has config semantics.
+- Values must be compile-time constants.
+- Output settings are builder-owned, not global project fields.

@@ -2,9 +2,9 @@
 //!
 //! WHAT: centralizes how HIR `Load` and `Copy` expressions are lowered depending on the JS
 //! consumption context.
-//! WHY: Beanstalk calls, host/external calls, assignments, returns, and plain expressions each
+//! WHY: Moth calls, host/external calls, assignments, returns, and plain expressions each
 //! use a different value policy. Explicit contexts prevent duplicated `Load`/`Copy` branches
-//! across expression and statement lowering, and make the ABI boundary between Beanstalk
+//! across expression and statement lowering, and make the ABI boundary between Moth
 //! reference bindings and raw JS values explicit.
 
 use crate::backends::js::JsEmitter;
@@ -14,8 +14,8 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 /// Context in which a lowered JS expression will be consumed.
 ///
 /// WHAT: names the value-use site so the emitter can apply the correct ABI policy.
-/// WHY: Beanstalk functions speak a reference ABI (places are passed as binding refs, rvalues
-/// are wrapped in `__bs_binding`), while host/external JS calls cross into raw JS and must
+/// WHY: Moth functions speak a reference ABI (places are passed as binding refs, rvalues
+/// are wrapped in `__moth_binding`), while host/external JS calls cross into raw JS and must
 /// receive concrete values without binding wrappers. Returns may preserve alias references.
 /// Assignments need concrete values suitable for write-through or rebinding.
 pub(crate) enum JsValueUse {
@@ -25,12 +25,12 @@ pub(crate) enum JsValueUse {
     /// Assignment or write target: produces the concrete JS value to store.
     AssignmentValue,
 
-    /// Argument to a Beanstalk (user-defined or source-backed package) function call.
-    /// Places are passed as binding references; rvalues are wrapped in `__bs_binding(...)`.
-    BeanstalkCallArgument,
+    /// Argument to a Moth (user-defined or source-backed package) function call.
+    /// Places are passed as binding references; rvalues are wrapped in `__moth_binding(...)`.
+    MothCallArgument,
 
     /// Argument to a host or external JS function call.
-    /// These cross the Beanstalk-reference ABI boundary and receive raw JS values.
+    /// These cross the Moth-reference ABI boundary and receive raw JS values.
     HostCallArgument,
 
     /// Return value from a function.
@@ -63,7 +63,7 @@ impl<'hir> JsEmitter<'hir> {
                 }
             }
 
-            JsValueUse::BeanstalkCallArgument => {
+            JsValueUse::MothCallArgument => {
                 // String parameters that receive reactive templates should pass the template value
                 // object, not a binding wrapper, so the callee can preserve reactivity.
                 if self.value_is_reactive_template(expression.id) {
@@ -90,10 +90,10 @@ impl<'hir> JsEmitter<'hir> {
     ) -> Result<String, CompilerError> {
         match &expression.kind {
             HirExpressionKind::Load(place) => {
-                Ok(format!("__bs_read({})", self.lower_place(place)?))
+                Ok(format!("__moth_read({})", self.lower_place(place)?))
             }
             HirExpressionKind::Copy(place) => Ok(format!(
-                "__bs_clone_value(__bs_read({}))",
+                "__moth_clone_value(__moth_read({}))",
                 self.lower_place(place)?
             )),
             _ => self.lower_expr(expression),
@@ -107,10 +107,10 @@ impl<'hir> JsEmitter<'hir> {
         match &expression.kind {
             HirExpressionKind::Load(place) => self.lower_place(place),
             HirExpressionKind::Copy(place) => Ok(format!(
-                "__bs_binding(__bs_clone_value(__bs_read({})))",
+                "__moth_binding(__moth_clone_value(__moth_read({})))",
                 self.lower_place(place)?
             )),
-            _ => Ok(format!("__bs_binding({})", self.lower_expr(expression)?)),
+            _ => Ok(format!("__moth_binding({})", self.lower_expr(expression)?)),
         }
     }
 
@@ -118,7 +118,7 @@ impl<'hir> JsEmitter<'hir> {
         match &expression.kind {
             HirExpressionKind::Load(place) => self.lower_place(place),
             HirExpressionKind::Copy(place) => Ok(format!(
-                "__bs_clone_value(__bs_read({}))",
+                "__moth_clone_value(__moth_read({}))",
                 self.lower_place(place)?
             )),
             HirExpressionKind::TupleConstruct { elements } => {

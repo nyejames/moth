@@ -127,7 +127,7 @@ pub(crate) enum WasmLirStmt {
         rhs: WasmLirLocalId,
     },
     /// Regular division with integer operands. lhs/rhs are I64; dst is F64.
-    /// WHY: Beanstalk `Int / Int` always yields Float; conversion is emitted here.
+    /// WHY: Moth `Int / Int` always yields Float; conversion is emitted here.
     IntToFloatDiv {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,

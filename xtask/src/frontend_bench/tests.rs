@@ -1,4 +1,4 @@
-use beanstalk::benchmarking::{
+use moth::benchmarking::{
     FrontendBenchmarkCounter, FrontendBenchmarkReport, FrontendBenchmarkStage,
 };
 
@@ -65,7 +65,7 @@ fn frontend_case_requires_one_path_argument() {
         name: "frontend_bad".to_string(),
         group_name: "core".to_string(),
         command: "frontend".to_string(),
-        args: vec!["a.bst".to_string(), "b.bst".to_string()],
+        args: vec!["a.moth".to_string(), "b.moth".to_string()],
     };
 
     let error = run_one_frontend_case(&case).expect_err("extra path should fail");

@@ -27,19 +27,19 @@ pub(crate) fn invalid_config_message(
             "Config files may only import from Core or Builder packages.".to_owned()
         }
         InvalidConfigReason::FunctionUnsupported => {
-            "`config.bst` does not support user-defined functions. Use known setting declarations plus import/type support declarations only.".to_owned()
+            "`config.moth` does not support user-defined functions. Use known setting declarations plus import/type support declarations only.".to_owned()
         }
         InvalidConfigReason::TraitDeclarationUnsupported => {
-            "`config.bst` does not support trait declarations. Use ordinary source files for trait contracts.".to_owned()
+            "`config.moth` does not support trait declarations. Use ordinary source files for trait contracts.".to_owned()
         }
         InvalidConfigReason::TraitConformanceUnsupported => {
-            "`config.bst` does not support trait conformance declarations. Use ordinary source files for reusable trait evidence.".to_owned()
+            "`config.moth` does not support trait conformance declarations. Use ordinary source files for reusable trait evidence.".to_owned()
         }
         InvalidConfigReason::TraitIncompatibilityUnsupported => {
-            "`config.bst` does not support trait incompatibility declarations. Use ordinary source files for trait metadata.".to_owned()
+            "`config.moth` does not support trait incompatibility declarations. Use ordinary source files for trait metadata.".to_owned()
         }
         InvalidConfigReason::MutableBindingUnsupported => {
-            "`config.bst` settings must be immutable constant declarations. Use `name #= value`.".to_owned()
+            "`config.moth` settings must be immutable constant declarations. Use `name #= value`.".to_owned()
         }
         InvalidConfigReason::PlainBindingUnsupported => {
             format!(
@@ -47,10 +47,10 @@ pub(crate) fn invalid_config_message(
             )
         }
         InvalidConfigReason::UnsupportedStatement => {
-            "`config.bst` supports known setting declarations plus import/type support declarations only.".to_owned()
+            "`config.moth` supports known setting declarations plus import/type support declarations only.".to_owned()
         }
         InvalidConfigReason::StandaloneTemplateUnsupported => {
-            "`config.bst` does not support standalone templates or page fragments. Assign a folded template to a known setting instead.".to_owned()
+            "`config.moth` does not support standalone templates or page fragments. Assign a folded template to a known setting instead.".to_owned()
         }
         InvalidConfigReason::MissingValue => {
             format!("Missing value for config constant '{key_label}'.")
@@ -82,7 +82,7 @@ pub(crate) fn invalid_config_message(
             format!("Config setting '{key_label}' cannot be empty.")
         }
         InvalidConfigReason::UnknownKey { key } => format!(
-            "Unknown config key '{}'. `config.bst` currently accepts only known project config keys. Helper declarations are not supported yet.",
+            "Unknown config key '{}'. `config.moth` currently accepts only known project config keys. Helper declarations are not supported yet.",
             string_table.resolve(*key)
         ),
         InvalidConfigReason::InvalidConfigValueShape { expected } => format!(
@@ -103,7 +103,7 @@ pub(crate) fn invalid_config_message(
             entry_point,
             existing_entry_point,
         } => format!(
-            "HTML builder produced duplicate output path '{}'. Entry '{}' conflicts with already-mapped entry '{}'. Ensure each '#*.bst' entry maps to a unique page output.",
+            "HTML builder produced duplicate output path '{}'. Entry '{}' conflicts with already-mapped entry '{}'. Ensure each '#*.moth' entry maps to a unique page output.",
             string_table.resolve(*output_path),
             string_table.resolve(*entry_point),
             string_table.resolve(*existing_entry_point),
@@ -165,7 +165,7 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*prefix),
         ),
         InvalidConfigReason::SourcePackageMissingRoot { prefix, root } => format!(
-            "Source-backed package '@{}' at '{}' is missing a direct-child hash root file. Every source-backed package must contain exactly one non-empty filename matching '#*.bst'.",
+            "Source-backed package '@{}' at '{}' is missing a direct-child hash root file. Every source-backed package must contain exactly one non-empty filename matching '#*.moth'.",
             string_table.resolve(*prefix),
             string_table.resolve(*root),
         ),
@@ -180,14 +180,14 @@ pub(crate) fn invalid_config_message(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "Source-backed package '@{}' at '{}' has multiple direct-child hash root files: {}. Every source-backed package must contain exactly one non-empty filename matching '#*.bst'.",
+                "Source-backed package '@{}' at '{}' has multiple direct-child hash root files: {}. Every source-backed package must contain exactly one non-empty filename matching '#*.moth'.",
                 string_table.resolve(*prefix),
                 string_table.resolve(*root),
                 candidates,
             )
         }
         InvalidConfigReason::NoRootModuleEntries { entry_root } => format!(
-            "No root module entries were found under '{}'. Expected at least one '#*.bst' file under the configured entry root.",
+            "No root module entries were found under '{}'. Expected at least one '#*.moth' file under the configured entry root.",
             string_table.resolve(*entry_root),
         ),
         InvalidConfigReason::MultipleModuleRootFiles {
@@ -200,7 +200,7 @@ pub(crate) fn invalid_config_message(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "Module directory '{}' contains multiple hash-root files: {}. Every module directory must contain exactly one non-config '#*.bst' root file.",
+                "Module directory '{}' contains multiple hash-root files: {}. Every module directory must contain exactly one non-config '#*.moth' root file.",
                 string_table.resolve(*directory),
                 candidates,
             )
@@ -210,7 +210,7 @@ pub(crate) fn invalid_config_message(
             folder_name,
             directory,
         } => format!(
-            "Project structure collision: '{}' and folder '{}' share the same import name in '{}'. Beanstalk requires .bst files and folders in the same directory to have unique import names. Rename one of them to keep import paths unambiguous.",
+            "Project structure collision: '{}' and folder '{}' share the same import name in '{}'. Moth requires .moth files and folders in the same directory to have unique import names. Rename one of them to keep import paths unambiguous.",
             string_table.resolve(*file_name),
             string_table.resolve(*folder_name),
             string_table.resolve(*directory),
@@ -375,19 +375,19 @@ pub(crate) fn duplicate_import_surface_member_message(
     let member = string_table.resolve(member_name);
     format!(
         "Import surface `{path_text}` exposes more than one member named `{member}`.\n\
-         Beanstalk import records require unique member names, even across value and type contexts.\n\
+         Moth import records require unique member names, even across value and type contexts.\n\
          Rename or alias one of the exported members.",
     )
 }
 
-pub(crate) fn explicit_bst_extension_message(
+pub(crate) fn explicit_moth_extension_message(
     path: &InternedPath,
     string_table: &StringTable,
 ) -> String {
     let path_text = path.to_portable_string(string_table);
-    let extensionless_path = path_text.strip_suffix(".bst").unwrap_or(&path_text);
+    let extensionless_path = path_text.strip_suffix(".moth").unwrap_or(&path_text);
     format!(
-        "Import paths must not include the `.bst` extension: `@{path_text}`.\n\
+        "Import paths must not include the `.moth` extension: `@{path_text}`.\n\
          Use `@{extensionless_path}` instead.",
     )
 }
@@ -416,7 +416,7 @@ pub(crate) fn unsupported_source_file_kind_message(
     let extension = string_table.resolve(extension);
     format!(
         "Import `{path}` resolves to a recognized source file kind `.{extension}`, but this builder does not support it.\n\
-         Use a builder that supports `.{extension}` files or import a Beanstalk source file instead.",
+         Use a builder that supports `.{extension}` files or import a Moth source file instead.",
     )
 }
 
@@ -429,28 +429,28 @@ pub(crate) fn invalid_source_file_entry_message(
     let extension = string_table.resolve(extension);
     format!(
         "Entry file `{path}` uses the `.{extension}` source-file kind, but source assets cannot be compiled as page or module entries.\n\
-         Import this file from a `.bst` entry file using extensionless import syntax, or use a `.bst`/`#page.bst` file as the build entry.",
+         Import this file from a `.moth` entry file using extensionless import syntax, or use a `.moth`/`#page.moth` file as the build entry.",
     )
 }
 
-pub(crate) fn invalid_beandown_api_scope_item_message(
+pub(crate) fn invalid_moth_template_api_scope_item_message(
     path: &InternedPath,
     string_table: &StringTable,
 ) -> String {
     let path = path.to_portable_string(string_table);
     format!(
-        "Direct Beandown compilation for `{path}` does not support caller-supplied scope constants yet.\n\
+        "Direct Moth template compilation for `{path}` does not support caller-supplied scope constants yet.\n\
          Remove the scope constants from the request, or expose compile-time constants through the compiler-integrated `@html` and same-directory module-root public export paths."
     )
 }
 
-pub(crate) fn duplicate_beandown_input_path_message(
+pub(crate) fn duplicate_moth_template_input_path_message(
     path: &InternedPath,
     string_table: &StringTable,
 ) -> String {
     let path = path.to_portable_string(string_table);
     format!(
-        "Beandown input path `{path}` was provided more than once. Each file or in-memory display path in one direct compile request must be unique."
+        "Moth template input path `{path}` was provided more than once. Each file or in-memory display path in one direct compile request must be unique."
     )
 }
 
@@ -463,7 +463,7 @@ pub(crate) fn unsupported_external_extension_message(
     let ext = string_table.resolve(extension);
     format!(
         "External file import `{path}` uses extension `.{ext}`, which is not supported by this builder.\n\
-         Register an external import provider for `.{ext}` or import a Beanstalk source file instead.",
+         Register an external import provider for `.{ext}` or import a Moth source file instead.",
     )
 }
 
@@ -485,7 +485,7 @@ pub(crate) fn import_record_used_as_value_message(
     format!(
         "`{name}` is an import namespace, not a value.\n\
          Use `{name}.member` for imported values or `{name}.Type` in type position.\n\
-         For Beandown and Markdown content files, the generated string is always `{name}.content`.\n\
+         For Moth template and Markdown content files, the generated string is always `{name}.content`.\n\
          Alternative: import @path {{ content as {name} }}",
     )
 }
@@ -644,7 +644,7 @@ mod tests {
 
         assert_eq!(
             message,
-            "Unknown config key 'custom_key'. `config.bst` currently accepts only known project config keys. Helper declarations are not supported yet.",
+            "Unknown config key 'custom_key'. `config.moth` currently accepts only known project config keys. Helper declarations are not supported yet.",
             "UnknownKey should render the exact authored key name"
         );
     }

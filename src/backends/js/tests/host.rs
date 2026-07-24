@@ -90,11 +90,11 @@ fn host_io_reads_the_underlying_value_before_logging() {
 
     let assign_index = output
         .source
-        .find(&format!("__bs_assign_value({message_name}, \"hello\");"))
+        .find(&format!("__moth_assign_value({message_name}, \"hello\");"))
         .expect("expected local assignment to store the string value");
     let log_index = output
         .source
-        .find(&format!("__bs_io_line(__bs_read({message_name}));"))
+        .find(&format!("__moth_io_line(__moth_read({message_name}));"))
         .expect("expected host io call to read from the local binding");
 
     assert!(

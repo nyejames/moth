@@ -1,0 +1,25 @@
+Moth is a small language by design. Every feature has to earn its place.
+
+### How Moth decides
+
+The language prefers one clear mechanism over many specialised syntax forms.
+When a problem can be solved with an existing feature, the language doesn't
+add a second way to do it.
+
+[codeblock, $code("moth"):
+    -- Templates handle text composition
+    greeting = [: Hello, [name]]
+
+    -- Choices handle runtime heterogeneity
+    Status :: Ready, Waiting | reason String |;
+
+    -- Error! handles expected failures
+    result = parse(text)!
+]
+
+### What this means for you
+
+- fewer syntax forms to learn
+- code from different authors looks similar
+- the compiler can give clear error messages
+- optimisations happen behind the scenes

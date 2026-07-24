@@ -1,12 +1,12 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0057"]
+diagnostic_codes = ["MOTH-RULE-0057"]
 message_contains = ["requires 'T' to satisfy trait 'DISPLAY_TEXT'"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0057"
+code = "MOTH-RULE-0057"
 reason = "invalid_generic_instantiation.missing_trait_evidence"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 3
 count = 1

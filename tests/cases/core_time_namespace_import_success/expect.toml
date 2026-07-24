@@ -15,5 +15,5 @@ must_contain = [
     "(2 * 1000.0)",
 ]
 must_not_contain = [
-    "function __bs_time_duration_from_seconds(",
+    "function __moth_time_duration_from_seconds(",
 ]

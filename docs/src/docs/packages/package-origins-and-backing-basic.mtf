@@ -1,0 +1,21 @@
+Packages can differ in two ways: who provides them and what backs their implementation.
+
+### Origin
+
+- Core packages come from the compiler.
+- Builder packages come from the selected project builder.
+- ProjectLocal packages come from your project.
+
+### Backing
+
+- Source-backed packages contain ordinary Moth modules.
+- Binding-backed packages expose typed functions, constants and opaque types implemented outside Moth.
+
+`@html` is a source-backed Builder package. `@core/collections` and `@core/math` are binding-backed Core packages. `@web/canvas` is a binding-backed Builder package.
+
+### Remember
+
+- Origin and backing are separate.
+- The prelude is implicit-import policy, not a package kind.
+- The builder selects which packages are available.
+- No package manager yet. Use `lib/` for project-local packages.

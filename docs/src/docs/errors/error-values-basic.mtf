@@ -1,0 +1,11 @@
+An `Error` carries a message and an optional numeric code.
+
+[codeblock, $code("moth"):
+    missing = Error("Missing value")
+    coded = Error("Missing value", 200)
+]
+
+The code defaults to `0`.
+
+Use the message to explain the failure. Use the code when a stable category is
+useful to callers or tools.

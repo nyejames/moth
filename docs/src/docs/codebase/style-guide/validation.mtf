@@ -1,0 +1,299 @@
+## Validation gates
+
+This document defines the technical gates a completed compiler or documentation
+slice must pass.
+
+The required final gate depends on whether the slice changes implementation or
+is strictly documentation-only.
+
+### Compiler invocation
+
+Use an up-to-date release build of the compiler when one is available. The
+`moth` command in PATH is the usual direct form:
+
+[codeblock, $code("bash"):
+    moth check docs
+    moth build docs --release
+]
+
+If a suitable release build is not available, run the same operations through
+Cargo from the repository root:
+
+[codeblock, $code("bash"):
+    cargo run --quiet -- check docs
+    cargo run --quiet -- build docs --release
+]
+
+### Choose the final gate by scope
+
+[table:
+    [th:
+        [: **Slice**]
+        [: **Required final gate**]
+    ]
+
+    [td:
+        [: Code-bearing or mixed change]
+        [: `just validate`]
+    ]
+
+    [td:
+        [: Strictly documentation-only change]
+        [: `moth build docs --release` or the equivalent Cargo invocation]
+    ]
+]
+
+The `justfile` is the executable authority for the full code-bearing gate.
+
+### Code-bearing final gate
+
+A slice is code-bearing if it changes Rust, compiler or build-system sources,
+libraries, tests, benchmarks, manifests, scripts, configuration or any other
+non-documentation implementation file.
+
+Before declaring a non-trivial code-bearing slice complete, run:
+
+[codeblock, $code("bash"):
+    just validate
+]
+
+#### What just validate runs
+
+[table:
+    [th:
+        [: **Gate**]
+        [: **Current command**]
+        [: **Purpose**]
+    ]
+
+    [td:
+        [: Cross-target Clippy]
+        [: `just ci-clippy`]
+        [: Native, Linux x64 and Windows x64 linting with warnings denied]
+    ]
+
+    [td:
+        [: Rust unit tests]
+        [: `cargo test --quiet -- --format terse`]
+        [: Rust unit and subsystem tests]
+    ]
+
+    [td:
+        [: Compiler integration tests]
+        [: `cargo run --quiet -- tests`]
+        [: Canonical suite policy followed by end-to-end compiler cases]
+    ]
+
+    [td:
+        [: Documentation check]
+        [: `cargo run --quiet -- check docs`]
+        [: Moth docs-source checking inside the full gate]
+    ]
+
+    [td:
+        [: Benchmark sanity check]
+        [: `cargo run --package xtask --bin xtask -- bench-check`]
+        [: Non-recording performance sanity check]
+    ]
+]
+
+- `ci-clippy` uses the pinned Rust toolchain configured in the `justfile`.
+- Warnings are denied.
+- It checks the native host, Linux x64 and Windows x64 targets.
+- Benchmark checking must not update tracked benchmark history.
+
+The integration command loads the complete canonical suite and applies the shared hard-policy
+evaluator before selection or compilation. This makes missing ownership, duplicate primaries and
+other hard suite-policy findings part of the normal validation gate. Run the audit command when the
+JSON inventory under `target/test-reports/` is also required:
+
+[codeblock, $code("bash"):
+    cargo run --quiet -- tests --audit
+]
+
+### Documentation-only release-build gate
+
+A slice is documentation-only only when every modified file is documentation
+source or generated documentation.
+
+Allowed examples include:
+
+- files under `docs/**`
+- an explicitly requested root documentation file such as `README.md`,
+  `CONTRIBUTING.md` or `AGENTS.md`
+- generated files under `docs/release/**`
+
+A documentation-only slice must not change Rust, tests, libraries, build
+configuration, manifests, scripts, benchmark code or fixtures, compiler
+configuration or other executable project sources.
+
+For a strictly documentation-only slice, run one documentation release build
+using a current compiler.
+
+The direct release-binary form is:
+
+[codeblock, $code("bash"):
+    moth build docs --release
+]
+
+If no suitable release build is available, use
+`cargo run --quiet -- build docs --release` instead.
+
+Then:
+
+- inspect every changed route
+- inspect the generated diff
+- verify links, tables and code examples
+- confirm generated output came from source changes
+- confirm the changed-file list contains documentation only.
+
+Do not additionally run `just validate`, Clippy, unit tests, integration tests
+or benchmark checks for a documentation-only slice. A Cargo invocation of the
+compiler is an alternative way to run the same documentation gate, not an
+extra gate.
+
+If any non-documentation file changed, the documentation-only exception does
+not apply. Use the full code-bearing gate.
+
+### Fast iteration commands
+
+[table:
+    [th:
+        [: **Task**]
+        [: **Command**]
+    ]
+
+    [td:
+        [: Unit-test iteration]
+        [: `cargo test --quiet -- --format terse`]
+    ]
+
+    [td:
+        [: Integration iteration]
+        [: `moth tests`]
+    ]
+
+    [td:
+        [: Clippy iteration]
+        [: `just ci-clippy`]
+    ]
+
+    [td:
+        [: Docs-source iteration]
+        [: `moth check docs`]
+    ]
+
+    [td:
+        [: Benchmark sanity]
+        [: `just bench-check`]
+    ]
+
+    [td:
+        [: Documentation release-build iteration]
+        [: `moth build docs --release`]
+    ]
+
+    [td:
+        [: Complete code-bearing gate]
+        [: `just validate`]
+    ]
+]
+
+Passing one targeted command does not imply a code-bearing slice passes the
+complete gate.
+
+### Formatting
+
+- Run `cargo fmt` when Rust files changed.
+- `just validate` does not currently format source automatically.
+- Do not solve formatting failures through lint suppression.
+- Documentation-only changes do not require Rust formatting.
+
+The `ship` recipe formats before validation, while `validate` itself does not.
+
+### Generated documentation
+
+Do not edit files under `docs/release/**` directly.
+
+The documentation release build is:
+
+[codeblock, $code("bash"):
+    moth build docs --release
+]
+
+A generated diff must result from documentation source changes, not manual HTML
+edits.
+
+### Manual architecture audits
+
+When a code-bearing slice changes stage ownership, frontend boundaries, HIR,
+diagnostics, types or backend handoff, perform a manual architecture audit in
+addition to the automated gate.
+
+Audit that:
+
+- stage ownership remains narrow
+- AST and HIR type representation still respect `TypeEnvironment` and `TypeId`
+- user-facing failures use `CompilerDiagnostic`
+- internal and infrastructure failures use `CompilerError`
+- no obsolete API or duplicated path remains
+- no backend reparses source syntax
+- no analysis mutates HIR when its contract is side-table based
+- comments and documentation name the current owner
+- no compatibility shim preserves an obsolete path
+
+This full architecture audit is not required for a prose-only documentation
+change.
+
+### Progress-matrix review
+
+Review the progress matrix whenever behavior, support, rejection, backend
+coverage or test coverage changes.
+
+Update it when current status changed. Do not make a meaningless edit for a
+pure refactor or prose-only correction.
+
+### Benchmark safety
+
+- `just validate` uses non-recording `bench-check`.
+- Do not run or commit recording benchmark output unless performance history is
+  intentionally being updated.
+- A benchmark fluctuation does not replace correctness evidence.
+- Generated benchmark history is outside this standards split.
+
+### Failure handling
+
+- Do not ignore or suppress a failed required gate.
+- Do not remove tests merely to make validation pass.
+- Do not use lint allowances without documented justification.
+- If a required command fails for environmental reasons, report the exact
+  command, failure, completed checks and remaining uncertainty.
+- Do not claim full validation when only targeted commands or the
+  documentation-only gate ran.
+
+### Code-bearing completion checklist
+
+Before declaring a non-trivial code-bearing slice complete, check:
+
+- Rust source was formatted where applicable.
+- The changed code follows `style-guide.mtf`.
+- Test selection and assertions follow `testing.mtf`.
+- Relevant architecture boundaries were reviewed.
+- Diagnostics remain structured and stage appropriate.
+- The progress matrix was reviewed and updated when status changed.
+- Documentation was rebuilt when required.
+- Generated output was not edited manually.
+- Benchmark history was not changed accidentally.
+- `just validate` passes.
+
+### Documentation-only completion checklist
+
+Before declaring a documentation-only slice complete, check:
+
+- The changed-file list contains documentation only.
+- The documentation release build succeeds.
+- Changed routes, links, tables and examples were inspected.
+- Generated output was produced from source changes.
+- No generated HTML was edited manually.
+- No code, test, build, library, manifest, script, benchmark or configuration
+  file changed.

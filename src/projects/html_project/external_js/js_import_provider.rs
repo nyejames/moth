@@ -1,7 +1,7 @@
 //! HTML JavaScript external import provider.
 //!
 //! WHAT: implements `ExternalImportProvider` for single-file JavaScript binding modules annotated
-//!       with Beanstalk `@bst.*` metadata, turning parsed JS modules into typed external
+//!       with Moth `@moth.*` metadata, turning parsed JS modules into typed external
 //!       package registry entries.
 //! WHY: project-local `.js` imports and built-in JS-backed packages need a compiler frontend
 //!      surface before AST can resolve calls and types.
@@ -32,7 +32,7 @@ use std::path::Path;
 
 /// HTML-owned JS external import provider.
 ///
-/// WHAT: parses `.js` files with `@bst.opaque` and `@bst.sig` annotations and registers
+/// WHAT: parses `.js` files with `@moth.opaque` and `@moth.sig` annotations and registers
 ///       discovered symbols in the shared `ExternalPackageRegistry`.
 /// WHY: this is the bridge between the HTML builder's JS parser and the compiler frontend's
 ///      external package system.
@@ -93,7 +93,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
                     CompilerError::file_error(
                         &bad_path,
                         format!(
-                            "JS import source path {bad_path:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths."
+                            "JS import source path {bad_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                         ),
                         context.string_table,
                     ),
@@ -109,7 +109,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
         );
 
         // Reject project-local JS imports that declare receiver-style signatures.
-        // WHY: source-authored `@bst.sig` signatures must expose free functions and opaque
+        // WHY: source-authored `@moth.sig` signatures must expose free functions and opaque
         //      types, not `this` receiver parameters. The shared parser still classifies
         //      receiver-shaped signatures so every registration boundary can reject them.
         diagnostics.extend(reject_receiver_methods_in_project_local_js(
@@ -184,7 +184,7 @@ fn reject_receiver_methods_in_project_local_js(
     for receiver_method in &parsed.receiver_methods {
         let message = format!(
             "JS module signature for '{}' uses a 'this' receiver parameter. Project-local JS imports must expose free functions and opaque types only.",
-            receiver_method.beanstalk_name
+            receiver_method.moth_name
         );
         let message_id = string_table.intern(&message);
         let location = js_parser_source_location(path.clone(), &receiver_method.annotation_span);

@@ -1,4 +1,4 @@
-//! Frontend compilation coordinator for Beanstalk projects.
+//! Frontend compilation coordinator for Moth projects.
 //!
 //! Dispatches to single-file or directory-project flows, then delegates to focused submodules:
 //! - `frontend_orchestration`   — per-module pipeline (tokenization through borrow checking)
@@ -58,7 +58,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{Flag, FrontendBuildProfile};
 
 use crate::builder_surface::BuilderSurface;
-use crate::projects::settings::{BEANSTALK_FILE_EXTENSION, Config};
+use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 
 // -------------------------
 //  Compilation Entry Point
@@ -113,7 +113,7 @@ pub fn compile_project_frontend(
         let err = CompilerError::file_error(
             &config.entry_dir,
             format!(
-                "Found a file without an extension set. Beanstalk files use .{BEANSTALK_FILE_EXTENSION}"
+                "Found a file without an extension set. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
             ),
             string_table,
         );

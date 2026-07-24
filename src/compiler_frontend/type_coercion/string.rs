@@ -1,4 +1,4 @@
-//! String coercion policy for the Beanstalk compiler frontend.
+//! String coercion policy for the Moth compiler frontend.
 //!
 //! WHAT: defines what expression types are renderable as string content and
 //! provides the coercion logic used at template boundaries.

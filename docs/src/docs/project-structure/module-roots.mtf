@@ -1,0 +1,54 @@
+A non-config file whose name starts with `#` and ends with `.moth` is the module root for its containing directory.
+
+### Root filename semantics
+
+The filename after `#` has no language-level semantic role. These are all equivalent module root spellings:
+
+[codeblock, $code("text"):
+    #page.moth
+    #mod.moth
+    #api.moth
+    #anything.moth
+]
+
+The compiler treats each one as the module root for its directory. The HTML route comes from the directory position, not from the root filename.
+
+### One root per directory
+
+A source directory may contain at most one non-config `#*.moth` file. Two or more hash-root files in one directory are rejected with `MOTH-CONFIG-0001`.
+
+### Config files are not module roots
+
+`config.moth` is the project config file. It is not a module root, does not produce HIR and does not export declarations. `#config.moth` is a module root, not a config file. Only plain `config.moth` without `#` has config semantics.
+
+### Direct root-file imports are rejected
+
+Import the module boundary, not the root filename. Direct imports of hash-root files are rejected. Use the directory path to import a module's public surface.
+
+### Normal files belong to the surrounding module
+
+Files without `#` in the same directory as a root file are normal source files within that module. They contribute declarations that the module root can import and export. They do not execute top-level runtime code independently.
+
+### Active versus imported module roots
+
+A module root can serve two roles depending on context:
+
+- **Active root**: the module being compiled. Its top-level runtime code becomes implicit module start work. Its direct top-level templates become page fragments.
+- **Imported root**: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by `export:` are visible through the module boundary.
+
+### API-only roots
+
+A module root with no builder-relevant top-level activity (no runtime code, no const fragments, no runtime fragments) is API-only. It is a valid module root that exports declarations but produces no builder artifact.
+
+### Migrating older module projects
+
+- Rename the project config file to plain `config.moth`.
+- Keep one non-config `#*.moth` root per source directory. Merge old `#page.moth` and `#mod.moth` roles when they shared a directory.
+- Replace inline `export` declarations and imports with one strict `export:` block in the module root.
+- Import the module directory or package prefix. Do not import the hash-root filename directly.
+
+### Related concepts
+
+- For the export block see @#public-api (Public API).
+- For root activity and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For HTML routes see @#html-routing-and-artifacts (HTML routing and artifacts).

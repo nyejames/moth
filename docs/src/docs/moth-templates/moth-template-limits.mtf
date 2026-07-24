@@ -1,0 +1,44 @@
+Moth template files are intentionally small. These are the confirmed restrictions and implementation gaps.
+
+### Confirmed restrictions
+
+- **Implicit const-required evaluation**: the entire `.mtf` body must fold at compile time. There is no runtime path.
+- **No normal top-level declarations**: a `.mtf` file does not contain authored imports, functions, structs, choices, type aliases or trait declarations. Text that looks like a declaration is template body content, not a compiled declaration.
+- **No runtime bindings or calls**: runtime values are not visible. A reference to a runtime name is rejected with `MOTH-RULE-0034` or `MOTH-RULE-0053`.
+- **No fenced code blocks**: triple-backtick blocks are literal text in `$md`, not `<pre><code>`. Use `codeblock` helpers instead.
+- **No pipe tables**: Markdown pipe table syntax is literal text in `$md`, not `<table>`. Use structured lists or page-owned table components.
+- **No raw backtick strings**: backticks are Markdown inline-code delimiters, not raw string syntax.
+- **No stored named inserts**: the implementation gap for stored named inserts remains. Named inserts passed as loose contributions are rejected.
+- **Template and Markdown child boundaries**: child templates are opaque barriers to the parent formatter. Delimiters cannot pair across child boundaries.
+- **Unsupported runtime control flow**: template `if` and `loop` are available as template directives, but ordinary runtime control flow is not part of the const-required moth template body.
+
+### Differences from normal `.moth`
+
+- A `.moth` file can contain imports, declarations, runtime code and page fragments. A `.mtf` file cannot.
+- A `.moth` file has normal Moth source scope. A `.mtf` file has a restricted flat compile-time scope.
+- A `.moth` file can produce page fragments. A `.mtf` file produces one `content #String` constant.
+
+### Differences from plain `.md`
+
+- A `.mtf` file is parsed as Moth template syntax. A `.md` file is not.
+- A `.mtf` file can access compile-time constants and use nested templates. A `.md` file cannot.
+- A `.mtf` file uses the `$md` renderer. A `.md` file uses the plain Markdown renderer (CommonMark-compatible with GFM extensions).
+- A `.mtf` file escapes raw HTML. A `.md` file preserves raw HTML.
+
+### When to choose normal Templates instead
+
+Use a `.moth` template when:
+- runtime values or control flow are needed
+- full slot and wrapper composition is needed
+- the content is part of broader program logic
+- imports or declarations are needed in the same file
+
+### Implementation gaps
+
+- Stored named inserts remain an implementation gap. See the migration ledger for details.
+
+### Related concepts
+
+- For choosing between formats see @../markdown/#choosing-a-content-format (Choosing a content format).
+- For template scope see @#template-scope (Template scope).
+- For plain Markdown see @../markdown/#markdown-files (Markdown files).

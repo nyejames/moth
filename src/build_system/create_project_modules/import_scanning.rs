@@ -1,4 +1,4 @@
-//! Per-file import path extraction for Beanstalk source files.
+//! Per-file import path extraction for Moth source files.
 //!
 //! Tokenizes a single source file and returns the import paths declared in it.
 // Import scanning preserves the same `SourceDiscoveryError` boundary as reachable-file discovery,
@@ -21,20 +21,20 @@ use super::source_loading::extract_source_code;
 
 /// Import scan output that keeps the already-read source available to Stage 0.
 ///
-/// WHAT: pairs structural provider references with the Beanstalk source text used to discover
+/// WHAT: pairs structural provider references with the Moth source text used to discover
 ///      them.
 /// WHY: reachable-file discovery consumes the references directly, using `path` for current
 ///      resolution while retaining `path_location` for the graph boundary, and reuses the source
-///      when assembling `PreparedSourceInput` values instead of reading each scanned `.bst` file again.
+///      when assembling `PreparedSourceInput` values instead of reading each scanned `.moth` file again.
 #[derive(Clone)]
 pub(super) struct ScannedImportSource {
     pub(super) imports: Vec<StructuralProviderReference>,
     pub(super) source_code: String,
-    /// Exact token stream from the single Stage 0 lexical pass over this Beanstalk file.
+    /// Exact token stream from the single Stage 0 lexical pass over this Moth file.
     ///
     /// WHAT: the `FileTokens` produced by the same `tokenize` call that discovered `imports`.
     /// WHY: frontend header preparation consumes this retained stream instead of re-tokenizing
-    ///      the source text, so each discovered `.bst` file is lexed exactly once.
+    ///      the source text, so each discovered `.moth` file is lexed exactly once.
     pub(super) tokens: FileTokens,
 }
 
@@ -73,7 +73,7 @@ pub(super) fn scan_imports_from_source(
             return Err(SourceDiscoveryError::from(CompilerError::file_error(
                 &path,
                 format!(
-                    "Source file path {path:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths."
+                    "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                 ),
                 string_table,
             )));
@@ -82,7 +82,7 @@ pub(super) fn scan_imports_from_source(
 
     // Tokenize the file to find path declarations. Callers may supply source text that was read
     // during an earlier Stage 0 classification pass so provider-free discovery does not re-read
-    // the same Beanstalk file before assembling `PreparedSourceInput` values.
+    // the same Moth file before assembling `PreparedSourceInput` values.
     let tokens = tokenize(
         &source,
         &interned_path,

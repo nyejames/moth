@@ -1,0 +1,22 @@
+A struct groups named values into one new type.
+
+[codeblock, $code("moth"):
+    Player = |
+        name String,
+        score Int,
+    |
+]
+
+Each field has a name and a type.
+
+Fields can have defaults:
+
+[codeblock, $code("moth"):
+    Player = |
+        name String,
+        score Int = 0,
+    |
+]
+
+`Player` is its own type. Another struct with the same fields is still a
+different type.

@@ -722,7 +722,7 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
     assert_eq!(
         output
             .source
-            .matches(&format!("__bs_assign_value({merged_name}, __jump_arg_"))
+            .matches(&format!("__moth_assign_value({merged_name}, __jump_arg_"))
             .count(),
         3,
         "all converging match-arm edges should assign merge locals"
@@ -891,7 +891,7 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
     assert!(
         output
             .source
-            .matches(&format!("__bs_assign_value({merged_name}, __jump_arg_"))
+            .matches(&format!("__moth_assign_value({merged_name}, __jump_arg_"))
             .count()
             >= 3,
         "dispatcher should assign merge locals for converging match-arm edges"
@@ -1334,12 +1334,12 @@ fn jump_args_lower_block_to_block_value_transfer() {
     assert!(
         output
             .source
-            .contains(&format!("const __jump_arg_0 = __bs_read({source_name});")),
-        "jump arguments should capture source values with __bs_read before assignment"
+            .contains(&format!("const __jump_arg_0 = __moth_read({source_name});")),
+        "jump arguments should capture source values with __moth_read before assignment"
     );
     assert!(
         output.source.contains(&format!(
-            "__bs_assign_value({parameter_name}, __jump_arg_0);"
+            "__moth_assign_value({parameter_name}, __jump_arg_0);"
         )),
         "jump arguments should assign into the first target local by position"
     );
@@ -1456,7 +1456,7 @@ fn structured_branch_merge_lowers_jump_arguments() {
     assert_eq!(
         output
             .source
-            .matches(&format!("__bs_assign_value({merged_name}, __jump_arg_"))
+            .matches(&format!("__moth_assign_value({merged_name}, __jump_arg_"))
             .count(),
         2,
         "each branch edge should assign the merge parameter local"
@@ -1568,7 +1568,7 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
     assert!(
         output
             .source
-            .matches(&format!("__bs_assign_value({loop_value_name}, __jump_arg_"))
+            .matches(&format!("__moth_assign_value({loop_value_name}, __jump_arg_"))
             .count()
             >= 2,
         "dispatcher jump edges should assign carried loop values into block parameters"
@@ -1651,14 +1651,14 @@ fn jump_args_write_through_alias_only_target_local() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_write({destination_name}, __jump_arg_0);")),
-        "alias-only jump-arg destinations must use __bs_write at block entry"
+            .contains(&format!("__moth_write({destination_name}, __jump_arg_0);")),
+        "alias-only jump-arg destinations must use __moth_write at block entry"
     );
     assert!(
         !output.source.contains(&format!(
-            "__bs_assign_value({destination_name}, __jump_arg_0);"
+            "__moth_assign_value({destination_name}, __jump_arg_0);"
         )),
-        "alias-only jump-arg destinations must not use __bs_assign_value"
+        "alias-only jump-arg destinations must not use __moth_assign_value"
     );
 }
 
@@ -1786,13 +1786,13 @@ fn dispatcher_with_fallible_return_wraps_dispatcher_in_try_catch() {
     );
 
     assert!(
-        output.source.contains("} catch (__bs_err) {"),
+        output.source.contains("} catch (__moth_err) {"),
         "Fallible function must emit catch block for propagation sentinel"
     );
     assert!(
         output
             .source
-            .contains("return { tag: \"err\", value: __bs_err.value };"),
+            .contains("return { tag: \"err\", value: __moth_err.value };"),
         "catch block must re-wrap propagated errors into a fallible carrier"
     );
 }

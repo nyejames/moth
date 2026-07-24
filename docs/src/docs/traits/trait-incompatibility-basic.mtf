@@ -1,0 +1,26 @@
+Some trait contracts are mutually exclusive. A type cannot claim both.
+
+### Two ways to produce text
+
+[codeblock, $code("moth"):
+    TEXT must:
+        text |This| -> String
+    ;
+
+    FALLIBLE_TEXT must:
+        try_text |This| -> String, Error!
+    ;
+
+    TEXT must not FALLIBLE_TEXT
+]
+
+`TEXT` promises a `String` directly. `FALLIBLE_TEXT` promises a `String` or an error. A type cannot be both at once.
+
+### Symmetric
+
+The relation goes both ways. Saying `A must not B` also means `B must not A` in effect.
+
+### Remember
+
+- Incompatibility only affects conformance validation.
+- It does not create inheritance, composition or runtime dispatch.

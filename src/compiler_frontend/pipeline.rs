@@ -15,7 +15,7 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::headers::beandown_prepare::prepare_beandown_file;
+use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderParseOptions,
     parse_file_headers_with_table,
@@ -66,21 +66,21 @@ pub(crate) struct FrontendFilePrepareContext<'a> {
 
 /// State-safe per-file source payload for frontend preparation.
 ///
-/// WHAT: one variant per source kind. Beanstalk carries the retained `FileTokens` from the
-///       single Stage 0 lexical pass; Beandown and PlainMarkdown carry only raw source text.
+/// WHAT: one variant per source kind. Moth carries the retained `FileTokens` from the
+///       single Stage 0 lexical pass; Moth template and PlainMarkdown carry only raw source text.
 /// WHY: the variant makes the source-kind/token relationship unrepresentable as an invalid
-///      state. The Beanstalk preparation arm receives `FileTokens` by type, so it cannot panic
-///      on absent tokens, and Beandown/PlainMarkdown cannot carry Beanstalk tokens.
+///      state. The Moth preparation arm receives `FileTokens` by type, so it cannot panic
+///      on absent tokens, and Moth template/PlainMarkdown cannot carry Moth tokens.
 ///
 /// This is the frontend's borrowed view across the build-system/frontend stage boundary. The
 /// build system owns the `PreparedSourceInput` storage and constructs this view from it; the
 /// frontend does not depend on build-system types.
 pub(crate) enum FrontendFilePrepareSource<'a> {
-    Beanstalk {
+    Moth {
         source_path: &'a PathBuf,
         tokens: &'a FileTokens,
     },
-    Beandown {
+    MothTemplate {
         source_code: &'a str,
         source_path: &'a PathBuf,
     },
@@ -116,7 +116,7 @@ struct FrontendSourceFileIdentity {
 /// Look up frontend identity for a source path.
 ///
 /// WHAT: returns the logical interned path, stable file ID, and canonical OS path for one file.
-/// WHY: tokenized Beanstalk/Beandown files and non-tokenized Markdown files must share the same
+/// WHY: tokenized Moth/Moth template files and non-tokenized Markdown files must share the same
 ///      source identity so downstream stages treat them as ordinary module members.
 fn source_file_identity(
     source_files: &SourceFileTable,
@@ -136,7 +136,7 @@ fn source_file_identity(
                         CompilerError::file_error(
                             &path,
                             format!(
-                                "Source file path {path:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths."
+                                "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                             ),
                             string_table,
                         )
@@ -219,11 +219,11 @@ impl CompilerFrontend {
 
     /// Prepare one source file against a caller-provided local string table.
     ///
-    /// WHAT: parses retained Beanstalk tokens, tokenizes and prepares Beandown, or prepares plain
+    /// WHAT: parses retained Moth tokens, tokenizes and prepares Moth template, or prepares plain
     ///       Markdown without merge/remap so callers can run file work in parallel.
     /// WHY: parallel frontend preparation needs each worker to own its local table without shared
     ///      mutable access to the module-global table, while Stage 0 remains the sole tokenizer
-    ///      owner for discovered Beanstalk source.
+    ///      owner for discovered Moth source.
     pub(crate) fn prepare_file_frontend_local(
         context: &FrontendFilePrepareContext<'_>,
         input: FrontendFilePrepareInput<'_>,
@@ -250,11 +250,11 @@ impl CompilerFrontend {
                     local_string_table,
                 ))
             }
-            FrontendFilePrepareSource::Beanstalk {
+            FrontendFilePrepareSource::Moth {
                 source_path,
                 tokens,
             } => {
-                // Beanstalk files carry the exact token stream retained from the single Stage 0
+                // Moth files carry the exact token stream retained from the single Stage 0
                 // lexical pass. Rebind it to the module source identity and parse headers without
                 // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
                 let identity =
@@ -280,15 +280,15 @@ impl CompilerFrontend {
                     input.runtime_fragment_offset,
                 )
             }
-            FrontendFilePrepareSource::Beandown {
+            FrontendFilePrepareSource::MothTemplate {
                 source_code,
                 source_path,
             } => {
-                // Beandown is tokenized exactly once by its template-body preparation path.
+                // Moth template is tokenized exactly once by its template-body preparation path.
                 let tokenizer_entry_mode =
-                    match TokenizerEntryMode::for_source_file_kind(SourceFileKind::Beandown) {
+                    match TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate) {
                         Some(mode) => mode,
-                        None => unreachable!("Beandown has a tokenizer entry mode"),
+                        None => unreachable!("Moth template has a tokenizer entry mode"),
                     };
 
                 let tokenization = Self::tokenize_source(
@@ -310,7 +310,7 @@ impl CompilerFrontend {
                     }
                 };
 
-                Ok(prepare_beandown_file(file_tokens, local_string_table))
+                Ok(prepare_moth_template_file(file_tokens, local_string_table))
             }
         }
     }
@@ -346,7 +346,7 @@ impl CompilerFrontend {
                     let error = CompilerError::file_error(
                         &path,
                         format!(
-                            "Entry file path {path:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths."
+                            "Entry file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                         ),
                         &mut self.string_table,
                     );

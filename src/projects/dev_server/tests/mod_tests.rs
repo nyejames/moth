@@ -88,10 +88,10 @@ fn defaults_match_dev_server_contract() {
 }
 
 #[test]
-fn entry_path_validation_accepts_bst_files() {
+fn entry_path_validation_accepts_moth_files() {
     let root = temp_dir("entry_file");
     fs::create_dir_all(&root).expect("should create temp root");
-    let file = root.join("main.bst");
+    let file = root.join("main.moth");
     fs::write(&file, "x = 1").expect("should write test file");
 
     let validated = validate_dev_entry_path(
@@ -100,7 +100,7 @@ fn entry_path_validation_accepts_bst_files() {
     )
     .expect("valid bst path should pass validation");
 
-    assert!(validated.ends_with("main.bst"));
+    assert!(validated.ends_with("main.moth"));
     fs::remove_dir_all(&root).expect("should clean up temp dir");
 }
 

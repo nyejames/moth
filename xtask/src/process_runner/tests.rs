@@ -37,18 +37,18 @@ exit {}
 }
 
 #[test]
-fn test_run_bean_command_success() {
+fn test_run_moth_command_success() {
     let temp_dir = std::env::temp_dir();
-    let mock_bean = temp_dir.join("mock_bean_success");
+    let mock_moth = temp_dir.join("mock_moth_success");
 
     #[cfg(unix)]
-    let mock_bean = mock_bean.with_extension("");
+    let mock_moth = mock_moth.with_extension("");
     #[cfg(windows)]
-    let mock_bean = mock_bean.with_extension("bat");
+    let mock_moth = mock_moth.with_extension("bat");
 
-    create_mock_executable(&mock_bean, 0, "success output", "");
+    create_mock_executable(&mock_moth, 0, "success output", "");
 
-    let result = run_bean_command(&mock_bean, "check", &["test.bst".to_string()]);
+    let result = run_moth_command(&mock_moth, "check", &["test.moth".to_string()]);
 
     assert!(result.is_ok());
     let run = result.unwrap();
@@ -56,22 +56,22 @@ fn test_run_bean_command_success() {
     assert!(run.duration_ms >= 0.0);
     assert!(run.stdout.contains("success output"));
 
-    let _ = fs::remove_file(&mock_bean);
+    let _ = fs::remove_file(&mock_moth);
 }
 
 #[test]
-fn test_run_bean_command_failure() {
+fn test_run_moth_command_failure() {
     let temp_dir = std::env::temp_dir();
-    let mock_bean = temp_dir.join("mock_bean_failure");
+    let mock_moth = temp_dir.join("mock_moth_failure");
 
     #[cfg(unix)]
-    let mock_bean = mock_bean.with_extension("");
+    let mock_moth = mock_moth.with_extension("");
     #[cfg(windows)]
-    let mock_bean = mock_bean.with_extension("bat");
+    let mock_moth = mock_moth.with_extension("bat");
 
-    create_mock_executable(&mock_bean, 1, "", "error output");
+    create_mock_executable(&mock_moth, 1, "", "error output");
 
-    let result = run_bean_command(&mock_bean, "check", &["test.bst".to_string()]);
+    let result = run_moth_command(&mock_moth, "check", &["test.moth".to_string()]);
 
     assert!(result.is_ok());
     let run = result.unwrap();
@@ -79,13 +79,13 @@ fn test_run_bean_command_failure() {
     assert!(!run.stderr.is_empty());
     assert!(run.stderr.contains("error output"));
 
-    let _ = fs::remove_file(&mock_bean);
+    let _ = fs::remove_file(&mock_moth);
 }
 
 #[test]
-fn test_run_bean_command_nonexistent() {
-    let nonexistent = PathBuf::from("/nonexistent/bean");
-    let result = run_bean_command(&nonexistent, "check", &["test.bst".to_string()]);
+fn test_run_moth_command_nonexistent() {
+    let nonexistent = PathBuf::from("/nonexistent/moth");
+    let result = run_moth_command(&nonexistent, "check", &["test.moth".to_string()]);
 
     assert!(result.is_err());
 }

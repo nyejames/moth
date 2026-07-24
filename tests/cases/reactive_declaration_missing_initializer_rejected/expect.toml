@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0031"]
+diagnostic_codes = ["MOTH-RULE-0031"]
 message_contains = ["Declaration 'count' requires '=' followed by an initializer expression."]

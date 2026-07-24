@@ -29,6 +29,7 @@ use crate::compiler_frontend::paths::rendered_path_usage::resolve_compile_time_p
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::projects::settings::LANGUAGE_SOURCE_EXTENSION;
 
 pub(super) struct TemplateHeadExpressionContext<'a> {
     pub(super) context: &'a ScopeContext,
@@ -279,7 +280,7 @@ pub(super) fn push_template_head_reactive_subscription(
 }
 
 /// Coerces a compile-time path token in template head context to string output.
-/// Emits source-file warnings when `.bst` files are inserted into rendered output.
+/// Emits source-file warnings when `.moth` files are inserted into rendered output.
 pub(super) fn push_template_head_path_expression(
     paths: &[InternedPath],
     token_stream: &FileTokens,
@@ -311,16 +312,16 @@ pub(super) fn push_template_head_path_expression(
     )
     .map_err(CompilerDiagnostic::from)?;
 
-    // Warn when a .bst source file path is coerced into template output.
+    // Warn when a .moth source file path is coerced into template output.
     for path in &resolved.paths {
         if path
             .filesystem_path
             .extension()
-            .is_some_and(|extension| extension == "bst")
+            .is_some_and(|extension| extension == LANGUAGE_SOURCE_EXTENSION)
         {
             let location = token_stream.current_location();
             let path_str = path.source_path.to_portable_string(string_table);
-            context.emit_warning(CompilerDiagnostic::bst_file_path_in_template_output(
+            context.emit_warning(CompilerDiagnostic::moth_file_path_in_template_output(
                 string_table.get_or_intern(path_str),
                 location,
             ));

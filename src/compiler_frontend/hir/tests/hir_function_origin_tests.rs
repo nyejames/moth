@@ -64,7 +64,7 @@ fn find_function_id_by_path(
 fn classifies_entry_start_and_normal_functions() {
     let mut string_table = StringTable::new();
 
-    let entry_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let entry_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let entry_start = entry_path.join_str(IMPLICIT_START_FUNC_NAME, &mut string_table);
     let normal_fn = entry_path.join_str("helper", &mut string_table);
 
@@ -105,7 +105,7 @@ fn classifies_entry_start_and_normal_functions() {
 fn lowers_exact_stable_origin_to_local_function_id() {
     let mut string_table = StringTable::new();
 
-    let entry_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let entry_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let entry_start = entry_path.join_str(IMPLICIT_START_FUNC_NAME, &mut string_table);
     let normal_fn = entry_path.join_str("helper", &mut string_table);
     let stable_module_origin = StableModuleOriginIdentity::from_portable_path(

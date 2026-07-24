@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0028"]
+diagnostic_codes = ["MOTH-RULE-0028"]
 message_contains = ["Expected a default value after '='."]

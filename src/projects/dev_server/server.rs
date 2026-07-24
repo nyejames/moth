@@ -14,6 +14,7 @@ use crate::projects::dev_server::DevServerOptions;
 use crate::projects::dev_server::build_loop::{ProjectBuildExecutor, dev_server_error_messages};
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
+use crate::projects::settings::LANGUAGE_SOURCE_EXTENSION;
 use saying::say;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -192,18 +193,18 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
     if !resolved_path.is_file() {
         return Err(dev_server_error_messages(
             &resolved_path,
-            "Dev server entry path must resolve to either a project directory or a .bst file.",
+            "Dev server entry path must resolve to either a project directory or a .moth file.",
         ));
     }
 
-    let is_beanstalk_file = resolved_path
+    let is_moth_file = resolved_path
         .extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext == "bst");
-    if !is_beanstalk_file {
+        .is_some_and(|ext| ext == LANGUAGE_SOURCE_EXTENSION);
+    if !is_moth_file {
         return Err(dev_server_error_messages(
             &resolved_path,
-            "Dev server currently only supports .bst file entries.",
+            "Dev server currently only supports .moth file entries.",
         ));
     }
 

@@ -1,9 +1,9 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-IMPORT-0013"]
+diagnostic_codes = ["MOTH-IMPORT-0013"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-IMPORT-0013"]
+diagnostic_codes = ["MOTH-IMPORT-0013"]

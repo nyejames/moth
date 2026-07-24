@@ -1,0 +1,203 @@
+
+## Design contract
+
+Moth ownership is an optimisation state layered over GC-safe source semantics. It isn't a separate source type system.
+
+Borrow and lifetime analysis prove optional transfer eligibility and topology legality. Ownership lowering only realises already-validated facts.
+
+The compiler may transfer destruction responsibility only where static analysis proves that doing so can't invalidate a later source use. If that proof is unavailable, the operation remains a borrow and the value may remain GC-managed.
+
+## Ownership is an optimisation state
+
+- Ownership metadata is separate from semantic `TypeId`.
+- Shared/mutable parameter syntax doesn't create owned/borrowed source types.
+- Backend ownership eligibility isn't required for correctness.
+- GC is a permitted runtime representation for a statically legal lifetime topology.
+- Ownership-aware and GC paths must preserve identical observable behaviour.
+
+## Ownership bit
+
+The ownership bit records destruction responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.
+
+[codeblock, $code("text"):
+    borrowed
+        The runtime path must not destroy the value.
+
+    owned
+        The runtime path carries release or safe-transfer responsibility.
+]
+
+## Ownership responsibility versus lifetime ownership
+
+Contrast these distinct concepts:
+
+- **Lifetime owner:** the one semantic region responsible for allocation lifetime
+- **destruction-responsibility path:** the runtime path that may release or transfer when deterministic release is used
+- **shared aliases:** observers that do not become additional lifetime owners
+- **region-owned allocation family:** storage whose release is owned by a group or region rather than an individual callee
+
+The bit does not imply individual releasability when the value belongs to a region-owned allocation family.
+
+## Inferred transfer
+
+Assignments and calls can be optional transfer points. Analysis proves eligibility. Lowering realises validated transfer facts. There is no move keyword.
+
+- No later use on every relevant path → transfer may occur.
+- Later use → operation remains a borrow.
+- Path-dependent or imprecise outcome → operation remains a borrow.
+- Failure to prove transfer must not reject the program.
+
+When transfer is realised:
+
+- aliases can't remain usable after a possible transfer
+- a callee that receives ownership assumes eventual release responsibility
+- responsibility may be discharged by release or a further proven transfer
+
+Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site. Parameter mutability controls access; ownership metadata controls destruction responsibility. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.
+
+Closed external boundary profiles override this general rule. WIT value-only calls are non-consuming. Restricted host-value crossings are non-consuming, and mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.
+
+## Single ownership transfer
+
+- Ownership transfers at most once along a control-flow path.
+- A borrowed value is never released by the borrower.
+- An owned value must reach a valid release or transfer point.
+- Joins conservatively account for paths that may own.
+
+## Group-owned values
+
+- The group owns release responsibility for its allocation family.
+- Ordinary calls normally borrow group-owned storage.
+- An individual callee cannot release one group child merely because an owned bit exists.
+- Hidden destination allocation may produce a fresh result root directly in a group when every retained edge is legal for that destination.
+- Group-owned values may use grouped release rather than individual drop when the region ends.
+
+## Unified ownership ABI
+
+Ownership-aware lowering uses one calling convention rather than separate source-visible borrowed and owned function variants.
+
+Heap-managed or handle-based values that participate in ownership lowering carry ownership metadata with the runtime value. Scalar values may continue to use target-native representations.
+
+ABI behaviour:
+
+- Borrowed metadata → callee must not destroy the value.
+- Owned metadata → callee receives release responsibility.
+- Callee must release or safely transfer that responsibility before it ends.
+- Caller must not use a value again after a path that may have transferred ownership.
+- Source function signatures don't distinguish borrowed and owned variants.
+- Backend specialisation may remove redundant checks without changing the semantic ABI.
+
+The unified ABI keeps dispatch static without generating separate borrowed and owned function families. It also limits ownership-driven monomorphisation and binary-size growth, especially for Wasm, while still allowing static specialisation to remove redundant ownership checks.
+
+## Conditions for release
+
+Deterministic release is legal only when:
+
+- topology is already valid
+- no observable alias remains
+- responsibility is owned
+- the allocation is individually releasable or its owning region is ending
+
+## Conditional destruction
+
+`drop_if_owned` is inserted at possible destruction points. It checks ownership metadata and releases only when responsibility is owned.
+
+- It is a conditional responsibility check only.
+- It is not an alias count.
+- It is not a topology validator.
+- It is a no-op for borrowed state.
+- Under pure GC it can lower to no-op or be erased where allowed.
+- Region-owned values may use grouped release rather than individual drop.
+- It doesn't belong in source syntax.
+- Different backends may represent it differently while preserving behaviour.
+
+## Control-flow exits
+
+Possible destruction points include:
+
+- normal region or scope exits
+- function returns
+- error returns
+- loop `break` and other reachable loop-exit paths
+- branch edges that leave an owning region
+- region/group exits
+- return values that transfer responsibility out
+
+A non-exiting loop needs no exit destruction point. A loop that can exit must account for ownership on each reachable break, return, error-return or region-exit path.
+
+A control-flow join determines whether a later exit may own. The join itself is not a destruction point and is not automatically a release site.
+
+Deterministic release is enabled where analysis supports it. Where it does not, GC-backed or otherwise conservative representation remains legal for already-valid topology.
+
+## Aggregates and stored values
+
+Aggregates may contain shared and independently owned children.
+
+- Insertion follows ordinary borrow/copy/transfer rules.
+- Explicit copy is required for independent duplication.
+- Removal may transfer responsibility out under normal lifetime rules.
+- Aggregate destruction recursively follows validated child responsibility and topology.
+- Borrowed children are never destroyed through the aggregate.
+
+## Static specialisation
+
+Accepted effect categories:
+
+[codeblock, $code("text"):
+    MayConsume
+    NeverConsumes
+    AlwaysConsumes
+]
+
+These are analysis/lowering facts only, not required exact Rust enum names and not source-visible signature categories.
+
+- `MayConsume` retains conditional ownership handling.
+- `NeverConsumes` can omit drop responsibility.
+- `AlwaysConsumes` may remove ownership-condition branches only after call-path proof.
+- Specialisation must not create source-visible overloads or mandatory-consuming APIs.
+- Exact monomorphisation extent remains a backend and benchmarking decision.
+- The unified semantic contract remains fixed even if implementation encoding evolves.
+
+## Physical representations
+
+Internal reference counting is permitted as a backend representation for a statically legal topology. Source-visible RC, retain/release, weak ownership or dynamic shared-ownership semantics remain outside the language design.
+
+Compatible extension points within the accepted memory model:
+
+- stronger future-use precision
+- region-based allocation
+- place- and projection-based alias precision
+- drop elision through region knowledge
+- static ownership specialisation
+- retain elimination
+- escape analysis
+- GC elision for proven regions
+- internal RC for already-legal topology
+
+These must preserve source-language semantics, the unified ownership contract and GC as a legal representation for valid topology.
+
+## Common mistakes
+
+- Treating ownership as a source type.
+- Treating `~` as ownership transfer.
+- Using runtime ownership metadata to decide source legality.
+- Treating the ownership bit as uniqueness or observer count.
+- Treating individual owned bits as permission to free group-owned children.
+- Generating separate visible borrowed/owned functions.
+- Assuming every scalar is a tagged pointer.
+- Destroying borrowed values.
+- Using advisory sites as exact lifetimes or complete topology proof.
+- Requiring ownership proof for correctness.
+- Allowing ownership optimisation to change alias behaviour.
+- Introducing a source-visible mandatory-consuming API.
+
+## Related reading
+
+- @../ (Memory management): concise memory-model contract
+- @../access-and-aliasing (Access and aliasing): source semantics
+- @../borrow-validation (Borrow validation): optional transfer facts
+- @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): lifetime owners and topology
+- @../declared-memory-groups (Declared memory groups): group ownership of release families and reassignment
+- @../runtime-and-backend-lowering (Runtime and backend memory lowering): ABI realisation and representations
+- @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler borrow validation): transfer and drop facts
+- @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler Wasm lowering): ownership-aware backend seam

@@ -1,19 +1,19 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0057"]
+diagnostic_codes = ["MOTH-RULE-0057"]
 message_contains = ["Generic parameter 'T'", "Int", "String"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0057"
+code = "MOTH-RULE-0057"
 reason = "invalid_generic_instantiation.conflicting_inference"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 5
 column = 19
 count = 1
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 5
 column = 16

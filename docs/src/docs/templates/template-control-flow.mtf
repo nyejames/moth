@@ -1,0 +1,123 @@
+Templates support `if` and `loop` as final head suffixes.
+
+If the head already contains a value, helper or directive, add a comma before
+the control-flow suffix.
+
+[codeblock, $code("moth"):
+    [if show:
+        Visible
+    ]
+
+    [card, if show:
+        Visible inside card
+    ]
+]
+
+### Template `if`
+
+Template `if` supports:
+
+- `Bool` conditions
+- option-present capture with `is |name|`
+- standalone `else if` branches
+- one optional standalone `else`
+
+[codeblock, $code("moth"):
+    [if maybe_name is |name|:
+        Hello [name]
+    [else if use_fallback]
+        Hello fallback
+    [else]
+        Hello guest
+    ]
+]
+
+The selected branch is evaluated lazily at runtime.
+
+Full pattern-match arm chains are not template-head syntax.
+
+Use an ordinary statement or value-producing full match when pattern arms are
+needed.
+
+### Template loops
+
+Template loops use the ordinary loop-header families:
+
+- conditional loops
+- collection loops
+- numeric ranges
+
+[codeblock, $code("moth"):
+    [loop items |item, index|:
+        [index]: [item]
+    ]
+
+    [loop 0 to 10 |number|:
+        [number]
+    ]
+]
+
+Collection and range loops may bind the current value and optional zero-based
+index.
+
+Iterations concatenate directly. There is no implicit separator.
+
+Range and collection sources are evaluated once before iteration.
+
+A conditional loop checks its condition before every iteration.
+
+### Structural loop control
+
+Two standalone structural controls target the nearest active template loop.
+
+They are signals rather than rendered strings.
+
+[codeblock, $code("moth"):
+    [loop items |item|:
+        [if item.skip:
+            [continue]
+        ]
+
+        [item]
+
+        [if item.done:
+            [break]
+        ]
+    ]
+]
+
+Output produced before a control signal is preserved.
+
+An iteration with no output before `break` or `continue` does not count as
+emitted output.
+
+### Wrappers and no-output
+
+A wrapper in the owning loop head wraps the complete aggregate once.
+
+Place a per-iteration wrapper inside the loop body.
+
+These forms produce structural no-output:
+
+- a false `if` with no `else`
+- a false conditional loop
+- a zero-iteration collection or range loop
+
+Shared head wrappers and parent `$children(...)` wrappers are skipped when
+there is structural no-output.
+
+A selected empty branch is still selected, so its own head wrapper may render
+an empty wrapper.
+
+### Fallible work and slots
+
+Postfix `!` inside selected runtime template content propagates from the
+enclosing function.
+
+Catch blocks are not template expressions.
+
+Runtime slot applications remain valid inside template control flow after
+normal slot routing.
+
+Compile-time template control flow and iteration limits are specified by
+@../constants/#const-templates (Const templates).

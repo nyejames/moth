@@ -2,7 +2,7 @@
 //!
 //! WHAT: Detects patterns like `// comment`, `fn name(...)`, `let x = ...`,
 //! `match value {`, `else if`, and `struct Name { ... }` that users from other
-//! languages write when they first encounter Beanstalk.
+//! languages write when they first encounter Moth.
 //!
 //! WHY: Statement position is where most structural syntax lives (declarations,
 //! control flow, comments), so it is the richest source of language-mismatch errors.
@@ -43,7 +43,7 @@ pub(crate) fn check_statement_common_mistake(
 /// Check if a symbol is a common mistaken keyword from another language.
 ///
 /// WHAT: `fn`, `function`, `def`, `let`, `var`, `const`, `match`, and `struct`
-/// are not Beanstalk keywords, but newcomers often type them out of habit.
+/// are not Moth keywords, but newcomers often type them out of habit.
 ///
 /// Called from `parse_symbol_statement` before treating the symbol as a normal
 /// variable reference, declaration, or call.

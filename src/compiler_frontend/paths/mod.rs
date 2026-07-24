@@ -1,4 +1,4 @@
-//! Beanstalk path syntax, project-aware resolution, and rendered-path tracking.
+//! Moth path syntax, project-aware resolution, and rendered-path tracking.
 //!
 //! WHAT: keeps path parsing (`const_paths`), project/import resolution (`path_resolution`),
 //! compile-time path values (`compile_time_paths`), public/runtime formatting (`path_format`),

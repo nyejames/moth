@@ -8,11 +8,11 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = [
-    "__bs_float_validate",
-    "function __bs_float_validate(",
+    "__moth_float_validate",
+    "function __moth_float_validate(",
     "Float boundary",
 ]
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

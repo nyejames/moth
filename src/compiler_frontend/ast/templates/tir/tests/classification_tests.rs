@@ -57,7 +57,7 @@ fn string_expression(string_table: &mut StringTable, text: &str) -> Expression {
 }
 
 fn string_function_call_expression(string_table: &mut StringTable, name: &str) -> Expression {
-    let scope = InternedPath::from_single_str("main.bst", string_table);
+    let scope = InternedPath::from_single_str("main.moth", string_table);
     let name_id = string_table.intern(name);
 
     Expression::new(
@@ -292,7 +292,7 @@ fn tir_view_classification_returns_renderable_string_for_text_root() {
 #[test]
 fn tir_view_classification_rejects_reactive_text() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst/#reactive", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth/#reactive", &mut string_table);
     let subscription = ReactiveSubscription {
         source: ReactiveSource {
             path: source_path,

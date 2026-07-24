@@ -1,0 +1,48 @@
+Collections are ordered, zero-indexed, homogeneous groups.
+
+Collection types and literals use braces.
+
+[codeblock, $code("moth"):
+    values ~= {1, 2, 3}
+    names {String} = {"Priya", "Grace"}
+]
+
+### Literal inference
+
+- A non-empty literal infers one element type from its items.
+- Every item must be compatible with that element type.
+- A typed collection receiving site may apply normal contextual coercion to each item.
+- A mixed literal such as `{1, "bad"}` is invalid.
+- The element type is fixed when the literal is created.
+
+An empty literal needs an explicit collection type at its declaration or field
+default site.
+
+[codeblock, $code("moth"):
+    values ~{Int} = {}
+]
+
+The compiler does not infer an empty collection from:
+
+- a later `push`
+- later assignment
+- a loop
+- a function argument
+- HIR use
+- borrow analysis
+
+### Collection versus map literals
+
+A top-level key/value entry with `=` makes a non-empty brace literal a map
+literal.
+
+Every entry in that literal must then be a key/value pair.
+
+Collection items and map entries cannot be mixed.
+
+### Syntax boundaries
+
+- Collections do not use square-bracket indexing.
+- Square brackets belong to templates.
+- Element reads and writes use compiler-owned collection members.
+- `~` is binding or access mode. It is not part of collection type identity.

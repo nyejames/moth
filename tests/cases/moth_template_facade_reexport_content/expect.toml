@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["moth_template_facade_reexport_content facade export"]
+

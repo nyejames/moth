@@ -1,0 +1,21 @@
+Moth has an accepted but not yet implemented feature called declared memory
+groups. This page explains what they are so you know the concept exists.
+
+### What groups do
+
+A `group` lets you control where values are allocated and how long they live.
+When you put a value into a group, the compiler guarantees it lives at least as
+long as that group.
+
+### Current status
+
+Group syntax is **accepted but deferred**. Current programs don't use it. The
+compiler doesn't parse or validate group declarations yet.
+
+You don't need groups to write Moth programs today. The compiler handles
+memory safety through shared access, explicit `copy` and `~` exclusive access.
+
+### Read next
+
+- @#reference-semantics (Reference semantics)
+- @#copy-and-exclusive-access (Copy and exclusive access)

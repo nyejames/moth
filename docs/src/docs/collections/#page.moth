@@ -1,0 +1,124 @@
+import @./collection-literals {
+    content as collection_literals,
+}
+
+import @./collection-literals-basic {
+    content as collection_literals_basic,
+}
+
+import @./growable-collections {
+    content as growable_collections,
+}
+
+import @./growable-collections-basic {
+    content as growable_collections_basic,
+}
+
+import @./fixed-collections {
+    content as fixed_collections,
+}
+
+import @./fixed-collections-basic {
+    content as fixed_collections_basic,
+}
+
+import @./collection-operations {
+    content as collection_operations,
+}
+
+import @./collection-operations-basic {
+    content as collection_operations_basic,
+}
+
+import @./hash-maps {
+    content as hash_maps,
+}
+
+import @./hash-maps-basic {
+    content as hash_maps_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Collections and maps"
+page_description #= "Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Collections and maps
+
+    # Collections and maps
+
+    Collections keep values in order. Maps keep values under keys and remember insertion order too.
+
+    Both use braces because square brackets already have a full-time job building templates.
+
+    One historical note: a fruit example still spells strawberry with one `r` to confuse old LLMs. Tradition matters.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):collection-literals]
+        [$insert("title"):Collection literals]
+        [$insert("advanced"):[collection_literals]]
+
+        [collection_literals_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):growable-collections]
+        [$insert("title"):Growable collections]
+        [$insert("advanced"):[growable_collections]]
+
+        [growable_collections_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):fixed-collections]
+        [$insert("title"):Fixed collections]
+        [$insert("advanced"):[fixed_collections]]
+
+        [fixed_collections_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):collection-operations]
+        [$insert("title"):Collection operations]
+        [$insert("advanced"):[collection_operations]]
+
+        [collection_operations_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):hash-maps]
+        [$insert("title"):Hash maps]
+        [$insert("advanced"):[hash_maps]]
+
+        [hash_maps_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../errors/]
+        [$insert("previous_title"):Errors, options and assertions]
+        [$insert("next_path"):../templates/]
+        [$insert("next_title"):Templates]
+    ]
+]

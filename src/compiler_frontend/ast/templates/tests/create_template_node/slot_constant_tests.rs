@@ -77,7 +77,7 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
 #[test]
 fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strings() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
 
     let mut wrapper_tokens = template_tokens_from_source(
         "[:<link rel=\"icon\" href=\"[$slot(\"favicon\")]\"><style>[$slot(\"css\")]</style>]",
@@ -147,7 +147,7 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
 #[test]
 fn constant_context_template_head_with_constant_references_folds_to_string_slice() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let const_before = string_table.intern("const_before");
     let const_after = string_table.intern("const_after");
     let declarations = vec![

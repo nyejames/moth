@@ -39,7 +39,7 @@ impl<'hir> JsEmitter<'hir> {
         // representation. In ordinary expression contexts we snapshot them to a plain string.
         if self.value_is_reactive_template(expression.id) {
             let template_value = self.lower_reactive_template_value(expression)?;
-            return Ok(format!("__bs_template_snapshot({template_value})"));
+            return Ok(format!("__moth_template_snapshot({template_value})"));
         }
 
         self.lower_expr_without_reactive_snapshot(expression)
@@ -63,7 +63,7 @@ impl<'hir> JsEmitter<'hir> {
                 variant_index,
                 fields,
             } => self.lower_variant_construct(carrier, *variant_index, fields),
-            // Beanstalk `Float` is finite f64. HIR validation rejects non-finite literals, so
+            // Moth `Float` is finite f64. HIR validation rejects non-finite literals, so
             // reaching here with NaN/Infinity indicates a compiler invariant breach.
             HirExpressionKind::Float(value) => {
                 if !value.is_finite() {
@@ -114,7 +114,7 @@ impl<'hir> JsEmitter<'hir> {
 
                 if let Some(fixed_capacity) = collection_shape.fixed_capacity {
                     Ok(format!(
-                        "__bs_fixed_collection({}, {})",
+                        "__moth_fixed_collection({}, {})",
                         items, fixed_capacity
                     ))
                 } else {
@@ -184,7 +184,7 @@ impl<'hir> JsEmitter<'hir> {
     /// Lower an HIR place expression to a JS runtime field/index access expression.
     ///
     /// WHAT: maps `HirPlace` variants (local, field, index) to the corresponding JS runtime
-    /// helper calls (`__bs_field`, `__bs_index`) or a direct local name.
+    /// helper calls (`__moth_field`, `__moth_index`) or a direct local name.
     /// WHY: the JS backend uses runtime helpers for field and index access to support the
     /// reactive binding model.
     pub(crate) fn lower_place(&mut self, place: &HirPlace) -> Result<String, CompilerError> {
@@ -194,13 +194,13 @@ impl<'hir> JsEmitter<'hir> {
             HirPlace::Field { base, field } => {
                 let base = self.lower_place(base)?;
                 let field = escape_js_string(self.field_name(*field)?);
-                Ok(format!("__bs_field({base}, {field})"))
+                Ok(format!("__moth_field({base}, {field})"))
             }
 
             HirPlace::Index { base, index } => {
                 let base = self.lower_place(base)?;
                 let index = self.lower_expr(index)?;
-                Ok(format!("__bs_index({base}, {index})"))
+                Ok(format!("__moth_index({base}, {index})"))
             }
         }
     }
@@ -349,7 +349,7 @@ impl<'hir> JsEmitter<'hir> {
 
         if is_choice_equality {
             self.used_choice_equality = true;
-            let eq_expr = format!("__bs_choice_eq({left}, {right})");
+            let eq_expr = format!("__moth_choice_eq({left}, {right})");
             return match operator {
                 HirBinOp::Eq => Ok(eq_expr),
                 HirBinOp::Ne => Ok(format!("(!{eq_expr})")),
@@ -478,7 +478,7 @@ impl<'hir> JsEmitter<'hir> {
     ///
     /// WHAT: when both sides of an option comparison are `some`, this produces the
     /// inner equality expression. For choice-typed inner values, it uses the runtime
-    /// `__bs_choice_eq` helper; for other types, it uses JS `===`.
+    /// `__moth_choice_eq` helper; for other types, it uses JS `===`.
     /// WHY: choice types need structural equality rather than reference equality.
     pub(crate) fn lower_option_inner_equality(
         &mut self,
@@ -488,7 +488,7 @@ impl<'hir> JsEmitter<'hir> {
     ) -> String {
         if self.is_choice_type_id(inner_type) {
             self.used_choice_equality = true;
-            return format!("__bs_choice_eq({left}, {right})");
+            return format!("__moth_choice_eq({left}, {right})");
         }
 
         format!("({left} === {right})")
@@ -502,7 +502,7 @@ impl<'hir> JsEmitter<'hir> {
     ///
     /// WHAT: maps `HirUnaryOp::Neg` to `-` and `HirUnaryOp::Not` to `!`, wrapping the
     /// operand in parentheses for correct precedence.
-    /// WHY: JS unary operators have the same semantics as Beanstalk for these cases.
+    /// WHY: JS unary operators have the same semantics as Moth for these cases.
     fn lower_unary_op(
         &mut self,
         operator: HirUnaryOp,
@@ -521,10 +521,10 @@ impl<'hir> JsEmitter<'hir> {
     //  Map literal lowering
     // -----------------------
 
-    /// Lower a map literal expression into a `__bs_map_new` call.
+    /// Lower a map literal expression into a `__moth_map_new` call.
     ///
     /// WHAT: converts each `HirMapEntry` into a `[key, value]` pair and wraps the array in
-    /// `__bs_map_new` so the runtime constructs a branded ordered-map wrapper.
+    /// `__moth_map_new` so the runtime constructs a branded ordered-map wrapper.
     /// WHY: map literals are first-class compiler-owned values; the backend must not emit
     ///      raw JS `Map` constructors because the runtime helper layer owns the branded shape.
     fn lower_map_literal(
@@ -545,7 +545,7 @@ impl<'hir> JsEmitter<'hir> {
             lowered_entries.push(format!("[{key}, {value}]"));
         }
 
-        Ok(format!("__bs_map_new([{}])", lowered_entries.join(", ")))
+        Ok(format!("__moth_map_new([{}])", lowered_entries.join(", ")))
     }
     // -----------------------------
     //  Reactive template lowering
@@ -553,7 +553,7 @@ impl<'hir> JsEmitter<'hir> {
 
     /// Lower a reactive template value to the backend-owned template-string runtime representation.
     ///
-    /// WHAT: returns `__bs_template_string(() => snapshot, __bs_template_collect_dependencies(...))`
+    /// WHAT: returns `__moth_template_string(() => snapshot, __moth_template_collect_dependencies(...))`
     /// carrying a snapshot function and the transitive reactive source dependencies.
     /// WHY: template-string values must preserve dependency metadata for Phase 7 mounting and
     /// rerendering while still snapshotting to plain strings in ordinary string contexts.
@@ -574,7 +574,7 @@ impl<'hir> JsEmitter<'hir> {
         let nested_values = self.lower_reactive_template_nested_values(template)?;
 
         Ok(format!(
-            "__bs_template_string(() => {snapshot_body}, __bs_template_collect_dependencies({direct_dependencies}, {nested_values}))"
+            "__moth_template_string(() => {snapshot_body}, __moth_template_collect_dependencies({direct_dependencies}, {nested_values}))"
         ))
     }
 
@@ -591,12 +591,12 @@ impl<'hir> JsEmitter<'hir> {
         match &expression.kind {
             HirExpressionKind::Load(place) => {
                 let place_js = self.lower_place(place)?;
-                Ok(format!("__bs_template_snapshot(__bs_read({place_js}))"))
+                Ok(format!("__moth_template_snapshot(__moth_read({place_js}))"))
             }
 
             HirExpressionKind::Copy(place) => {
                 let place_js = self.lower_place(place)?;
-                Ok(format!("__bs_template_snapshot(__bs_read({place_js}))"))
+                Ok(format!("__moth_template_snapshot(__moth_read({place_js}))"))
             }
 
             _ => self.lower_expr_without_reactive_snapshot(expression),
@@ -632,7 +632,7 @@ impl<'hir> JsEmitter<'hir> {
         let mut values = Vec::with_capacity(template.template_value_parameters.len());
         for dependency in &template.template_value_parameters {
             let local_name = self.local_name(dependency.parameter)?;
-            values.push(format!("__bs_read({local_name})"));
+            values.push(format!("__moth_read({local_name})"));
         }
 
         Ok(format!("[{}]", values.join(", ")))
@@ -670,19 +670,19 @@ pub(crate) fn escape_js_string(value: &str) -> String {
 pub(super) fn js_cast_helper_for_policy(policy: BuiltinCastPolicyId) -> Option<&'static str> {
     match policy {
         BuiltinCastPolicyId::IntToFloat => None,
-        BuiltinCastPolicyId::IntToString => Some("__bs_cast_int_to_string"),
-        BuiltinCastPolicyId::FloatToString => Some("__bs_cast_float_to_string"),
-        BuiltinCastPolicyId::BoolToString => Some("__bs_cast_bool_to_string"),
-        BuiltinCastPolicyId::CharToString => Some("__bs_cast_char_to_string"),
-        BuiltinCastPolicyId::CharToInt => Some("__bs_cast_char_to_int"),
-        BuiltinCastPolicyId::StringToError => Some("__bs_cast_string_to_error"),
-        BuiltinCastPolicyId::ErrorToString => Some("__bs_cast_error_to_string"),
-        BuiltinCastPolicyId::FloatToInt => Some("__bs_cast_float_to_int"),
-        BuiltinCastPolicyId::IntToChar => Some("__bs_cast_int_to_char"),
-        BuiltinCastPolicyId::StringToInt => Some("__bs_cast_int"),
-        BuiltinCastPolicyId::StringToFloat => Some("__bs_cast_float"),
-        BuiltinCastPolicyId::StringToBool => Some("__bs_cast_string_to_bool"),
-        BuiltinCastPolicyId::StringToChar => Some("__bs_cast_string_to_char"),
+        BuiltinCastPolicyId::IntToString => Some("__moth_cast_int_to_string"),
+        BuiltinCastPolicyId::FloatToString => Some("__moth_cast_float_to_string"),
+        BuiltinCastPolicyId::BoolToString => Some("__moth_cast_bool_to_string"),
+        BuiltinCastPolicyId::CharToString => Some("__moth_cast_char_to_string"),
+        BuiltinCastPolicyId::CharToInt => Some("__moth_cast_char_to_int"),
+        BuiltinCastPolicyId::StringToError => Some("__moth_cast_string_to_error"),
+        BuiltinCastPolicyId::ErrorToString => Some("__moth_cast_error_to_string"),
+        BuiltinCastPolicyId::FloatToInt => Some("__moth_cast_float_to_int"),
+        BuiltinCastPolicyId::IntToChar => Some("__moth_cast_int_to_char"),
+        BuiltinCastPolicyId::StringToInt => Some("__moth_cast_int"),
+        BuiltinCastPolicyId::StringToFloat => Some("__moth_cast_float"),
+        BuiltinCastPolicyId::StringToBool => Some("__moth_cast_string_to_bool"),
+        BuiltinCastPolicyId::StringToChar => Some("__moth_cast_string_to_char"),
     }
 }
 

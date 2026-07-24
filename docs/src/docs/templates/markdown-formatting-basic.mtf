@@ -1,0 +1,16 @@
+Use `$md` when a template body should be formatted as Markdown.
+
+[codeblock, $code("moth"):
+    content = [$md:
+        # Welcome
+
+        This text becomes **formatted content**.
+    ]
+]
+
+Small inline code spans use one backtick on each side.
+
+Use `$code("moth")` or another language name for a full highlighted code block.
+
+Moth Markdown is deliberately small. It does not support fenced code
+blocks or pipe tables.

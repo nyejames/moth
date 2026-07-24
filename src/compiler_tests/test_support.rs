@@ -1,4 +1,4 @@
-//! Shared test utilities for the Beanstalk crate.
+//! Shared test utilities for the Moth crate.
 //!
 //! WHAT: common helpers used across unit and integration tests.
 //! WHY: avoids duplicating small utility functions in every test module.
@@ -33,7 +33,7 @@ pub fn temp_dir(prefix: &str) -> PathBuf {
         .as_nanos();
     let sequence = TEMP_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "beanstalk_{prefix}_{}_{}_{}",
+        "moth_{prefix}_{}_{}_{}",
         std::process::id(),
         unique,
         sequence

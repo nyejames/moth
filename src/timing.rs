@@ -12,12 +12,12 @@
 //! - `#[cfg(not(feature = "timers"))]` — timing APIs compile as no-ops with
 //!   zero runtime cost. Regular builds never touch `Instant`, atomics, or
 //!   mutexes.
-//! - `#[cfg(feature = "timers")]` — the collector is active and the `BST_TIMERS`
+//! - `#[cfg(feature = "timers")]` — the collector is active and the `MOTH_TIMERS`
 //!   environment variable controls timer output mode (off, summary, bench,
 //!   verbose). `detailed_timers` implies `timers` and additionally enables
 //!   verbose human timer prose and AST substage timings.
 //! - `#[cfg(feature = "benchmark_counters")]` — high-volume frontend/AST
-//!   counters are collected and the `BST_COUNTERS` environment variable
+//!   counters are collected and the `MOTH_COUNTERS` environment variable
 //!   controls counter output mode (off, summary, full). Counter storage
 //!   requires the collector, so counters are only recorded when `timers` is
 //!   also active. `detailed_timers` no longer enables counters by itself.
@@ -61,7 +61,7 @@ pub(crate) struct BenchmarkObservationMetric {
     pub(crate) name: String,
     pub(crate) value: f64,
     /// Optional attribution label for summary max display (e.g. slowest module).
-    /// Never appears in stable `BST_BENCH timing` lines.
+    /// Never appears in stable `MOTH_BENCH timing` lines.
     pub(crate) label: Option<String>,
 }
 
@@ -85,7 +85,7 @@ pub(crate) struct BenchmarkObservationSnapshot {
 
 /// Output mode controlling how timing information reaches the user.
 ///
-/// Parsed from the `BST_TIMERS` environment variable. When unset,
+/// Parsed from the `MOTH_TIMERS` environment variable. When unset,
 /// `detailed_timers` defaults to `Verbose` (preserving existing behavior),
 /// while `timers` alone defaults to `Summary`.
 #[cfg(feature = "timers")]
@@ -95,7 +95,7 @@ pub(crate) enum TimerOutputMode {
     Silent,
     /// Concise human-readable summary printed after compilation.
     Summary,
-    /// Stable machine-readable `BST_BENCH timing` lines for benchmark parsing.
+    /// Stable machine-readable `MOTH_BENCH timing` lines for benchmark parsing.
     Bench,
     /// Both human prose and stable benchmark lines.
     Verbose,
@@ -103,12 +103,12 @@ pub(crate) enum TimerOutputMode {
 
 #[cfg(feature = "timers")]
 impl TimerOutputMode {
-    /// Parse the output mode from the `BST_TIMERS` environment variable.
+    /// Parse the output mode from the `MOTH_TIMERS` environment variable.
     ///
-    /// When `BST_TIMERS` is unset, `detailed_timers` defaults to `Verbose`
+    /// When `MOTH_TIMERS` is unset, `detailed_timers` defaults to `Verbose`
     /// (backward compatible) and `timers` alone defaults to `Summary`.
     pub(crate) fn from_env() -> Self {
-        match std::env::var("BST_TIMERS").as_deref() {
+        match std::env::var("MOTH_TIMERS").as_deref() {
             Ok("silent") | Ok("none") | Ok("off") => Self::Silent,
             Ok("summary") => Self::Summary,
             Ok("bench") => Self::Bench,
@@ -128,7 +128,7 @@ impl TimerOutputMode {
         }
     }
 
-    /// Whether stable `BST_BENCH timing` lines should be printed.
+    /// Whether stable `MOTH_BENCH timing` lines should be printed.
     pub(crate) fn emits_bench_lines(self) -> bool {
         matches!(self, Self::Bench | Self::Verbose)
     }
@@ -150,15 +150,15 @@ impl TimerOutputMode {
 
 /// Output mode controlling how high-volume benchmark counters reach the user.
 ///
-/// Parsed from the `BST_COUNTERS` environment variable. Counters are always
+/// Parsed from the `MOTH_COUNTERS` environment variable. Counters are always
 /// collected into the central snapshot when `benchmark_counters` and `timers`
 /// are both active; this mode only controls what reaches stdout.
 ///
 /// - `Off` (default): collect counters but print nothing. Lets in-process
 ///   benchmark APIs read counters programmatically without flooding CLI output.
-/// - `Summary`: emit stable `BST_BENCH counter` lines and print a concise
+/// - `Summary`: emit stable `MOTH_BENCH counter` lines and print a concise
 ///   grouped counter summary after compilation.
-/// - `Full`: emit stable `BST_BENCH counter` lines and print the legacy
+/// - `Full`: emit stable `MOTH_BENCH counter` lines and print the legacy
 ///   per-counter human dump (the old `detailed_timers` behavior).
 #[cfg(feature = "benchmark_counters")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,19 +173,19 @@ pub(crate) enum CounterOutputMode {
 
 #[cfg(feature = "benchmark_counters")]
 impl CounterOutputMode {
-    /// Parse the output mode from the `BST_COUNTERS` environment variable.
+    /// Parse the output mode from the `MOTH_COUNTERS` environment variable.
     ///
     /// Unset or unrecognized values default to `Off` so regular benchmark
     /// builds do not flood stdout with counter prose.
     pub(crate) fn from_env() -> Self {
-        match std::env::var("BST_COUNTERS").as_deref() {
+        match std::env::var("MOTH_COUNTERS").as_deref() {
             Ok("summary") => Self::Summary,
             Ok("full") => Self::Full,
             _ => Self::Off,
         }
     }
 
-    /// Whether stable `BST_BENCH counter` lines should be printed.
+    /// Whether stable `MOTH_BENCH counter` lines should be printed.
     pub(crate) fn emits_bench_counter_lines(self) -> bool {
         matches!(self, Self::Summary | Self::Full)
     }
@@ -238,7 +238,7 @@ impl TimingMetricSummary {
 /// so that in-process benchmark APIs can read timings and counters directly
 /// instead of parsing stdout.
 /// WHY: subprocess-free frontend benchmarks need programmatic access to the same
-/// metrics that CLI benchmarks extract from stable `BST_BENCH` lines.
+/// metrics that CLI benchmarks extract from stable `MOTH_BENCH` lines.
 #[cfg(feature = "timers")]
 mod collector {
     use super::{BenchmarkObservationMetric, BenchmarkObservationSnapshot};
@@ -283,7 +283,7 @@ mod collector {
     /// Record one timing observation with an attribution label.
     ///
     /// The label is stored for summary max display only; it never appears in
-    /// stable `BST_BENCH timing` lines so benchmark parsing is unaffected.
+    /// stable `MOTH_BENCH timing` lines so benchmark parsing is unaffected.
     pub(crate) fn record_labeled_timing(name: &str, millis: f64, label: &str) {
         if let Ok(mut guard) = ACTIVE_COLLECTOR.lock()
             && let Some(collection) = guard.as_mut()
@@ -396,13 +396,13 @@ pub(crate) fn output_enabled() -> bool {
     collector::output_enabled()
 }
 
-/// The current timer output mode parsed from `BST_TIMERS`.
+/// The current timer output mode parsed from `MOTH_TIMERS`.
 #[cfg(feature = "timers")]
 pub(crate) fn current_output_mode() -> TimerOutputMode {
     TimerOutputMode::from_env()
 }
 
-/// The current counter output mode parsed from `BST_COUNTERS`.
+/// The current counter output mode parsed from `MOTH_COUNTERS`.
 ///
 /// Counters are collected regardless of this mode (when `timers` and
 /// `benchmark_counters` are both active); this only governs stdout.
@@ -411,14 +411,14 @@ pub(crate) fn current_counter_output_mode() -> CounterOutputMode {
     CounterOutputMode::from_env()
 }
 
-/// Emit one stable `BST_BENCH counter` line to stdout if the counter output
+/// Emit one stable `MOTH_BENCH counter` line to stdout if the counter output
 /// mode permits and output is not suppressed.
 ///
-/// WHAT: prints a plain `BST_BENCH counter <metric>=<value>` line that the
+/// WHAT: prints a plain `MOTH_BENCH counter <metric>=<value>` line that the
 ///      benchmark observation parser can grep without depending on human prose.
 /// WHY:  like the timing line, separating the stable counter metric from
 ///       human prose lets counter logging change its display without breaking
-///       benchmark attribution. The line is only emitted for `BST_COUNTERS`
+///       benchmark attribution. The line is only emitted for `MOTH_COUNTERS`
 ///       modes that request stdout (`summary` or `full`).
 #[cfg(feature = "benchmark_counters")]
 pub(crate) fn emit_bench_counter_line(name: &str, value: f64) {
@@ -429,7 +429,7 @@ pub(crate) fn emit_bench_counter_line(name: &str, value: f64) {
     let mode = CounterOutputMode::from_env();
 
     if output_enabled() && mode.emits_bench_counter_lines() {
-        saying::say!("BST_BENCH counter ", name, "=", #value);
+        saying::say!("MOTH_BENCH counter ", name, "=", #value);
     }
 }
 
@@ -586,7 +586,7 @@ const COUNTER_SUMMARY_GROUPS: &[CounterSummaryGroup] = &[
 ///
 /// Aggregates counter observations by metric name (summing repeated samples,
 /// e.g. per-module discovery counters) and returns a small fixed set of
-/// stage-oriented lines. Stable `BST_BENCH counter` output remains the full
+/// stage-oriented lines. Stable `MOTH_BENCH counter` output remains the full
 /// machine-readable path; the human summary is deliberately compact.
 #[cfg(feature = "benchmark_counters")]
 pub(crate) fn render_counter_summary(snapshot: &BenchmarkObservationSnapshot) -> Vec<String> {
@@ -615,7 +615,7 @@ pub(crate) fn render_counter_summary(snapshot: &BenchmarkObservationSnapshot) ->
 
     if other_nonzero_count > 0 {
         lines.push(format!(
-            "  other nonzero counters: {other_nonzero_count} (see BST_BENCH lines)"
+            "  other nonzero counters: {other_nonzero_count} (see MOTH_BENCH lines)"
         ));
     }
 
@@ -667,10 +667,10 @@ fn format_counter_summary_value(value: f64) -> String {
     }
 }
 
-/// Emit one stable `BST_BENCH timing` line to stdout if the output mode
+/// Emit one stable `MOTH_BENCH timing` line to stdout if the output mode
 /// permits and output is not suppressed.
 ///
-/// WHAT: prints a plain `BST_BENCH timing <metric>=<millis>ms` line that the
+/// WHAT: prints a plain `MOTH_BENCH timing <metric>=<millis>ms` line that the
 /// benchmark observation parser can grep without depending on human prose.
 /// WHY: separating the stable metric line from colored human output lets
 /// compiler logging change its prose without silently breaking attribution.
@@ -684,7 +684,7 @@ pub(crate) fn emit_bench_timing_line(name: &str, duration: Duration) {
 
     if output_enabled() && mode.emits_bench_lines() {
         let millis = duration.as_secs_f64() * 1000.0;
-        saying::say!("BST_BENCH timing ", name, "=", #millis, "ms");
+        saying::say!("MOTH_BENCH timing ", name, "=", #millis, "ms");
     }
 }
 
@@ -739,7 +739,7 @@ pub(crate) fn record_started_pipeline_timing(metric: &str, start: PipelineTiming
 ///      the observation so the concise summary can show the slowest contributor.
 /// WHY:  project-level frontend timings repeat per module; the label lets the
 ///       summary attribute the max sample without flooding output with per-module
-///       lines.  The label never appears in stable `BST_BENCH timing` lines.
+///       lines.  The label never appears in stable `MOTH_BENCH timing` lines.
 #[cfg(feature = "timers")]
 pub(crate) fn record_pipeline_timing_with_label(
     metric: &str,
@@ -910,7 +910,7 @@ pub(crate) fn start_command_timing() {
 ///      after normal diagnostics/success output so timer prose never obscures
 ///      compiler messages.
 /// WHY:  callers must print diagnostics first, then call this.  In `Bench` mode
-///      the summary is skipped (stable `BST_BENCH timing` lines were already
+///      the summary is skipped (stable `MOTH_BENCH timing` lines were already
 ///      emitted inline).  In `Silent` mode nothing is printed.  The collection
 ///      scope is always stopped to clean up even when no summary is shown.
 #[cfg(feature = "timers")]
@@ -926,7 +926,7 @@ pub(crate) fn print_command_timing_summary() {
     }
 
     // Counter summary is owned by `benchmark_counters` and reuses the snapshot
-    // just drained by the timing summary. It only prints when `BST_COUNTERS`
+    // just drained by the timing summary. It only prints when `MOTH_COUNTERS`
     // requests the concise summary view; the legacy full dump is printed inline
     // while counters are logged, not here.
     #[cfg(feature = "benchmark_counters")]
@@ -1037,7 +1037,7 @@ macro_rules! pipeline_timer {
 /// ```
 ///
 /// The human label is printed inline only in verbose mode. The stable
-/// `BST_BENCH timing` line is emitted in bench or verbose mode.
+/// `MOTH_BENCH timing` line is emitted in bench or verbose mode.
 ///
 /// When `timers` is off, the macro expands to the wrapped expression, so the
 /// metric name, label, and `Instant` path are not evaluated or imported.

@@ -1,4 +1,4 @@
-//! Template-aware lexer for raw Beanstalk source text.
+//! Template-aware lexer for raw Moth source text.
 //!
 //! WHAT: converts source text into token streams while switching modes for templates, strings, and directives.
 //! WHY: lexing owns the first precise source-location mapping and all delimiter-balancing rules;

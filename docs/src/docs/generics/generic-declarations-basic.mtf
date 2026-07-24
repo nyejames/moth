@@ -1,0 +1,31 @@
+A generic declaration describes a family of types or functions using a placeholder type.
+
+### A generic struct
+
+[codeblock, $code("moth"):
+    Box type A = |
+        value A,
+    |
+]
+
+`A` stands for some concrete type. Later you can make a `Box of Int`, a `Box of String`, and so on.
+
+### A generic function
+
+[codeblock, $code("moth"):
+    identity type A |value A| -> A:
+        return value
+    ;
+]
+
+`identity` returns whatever type it receives.
+
+### The placeholder is scoped
+
+The parameter name is meaningful only inside that declaration. You cannot use `A` as a value or refer to it from another declaration.
+
+### Remember
+
+- `type A` introduces the parameter after the declaration name.
+- Parameters use type-name casing.
+- Every parameter must be used somewhere in the declaration's public shape.

@@ -1,4 +1,4 @@
-//! Beanstalk path syntax parsing for path literals and imports.
+//! Moth path syntax parsing for path literals and imports.
 //!
 //! This parser sits directly on tokenizer tokens and returns typed `CompilerDiagnostic` values for
 //! user-authored path mistakes. Connected helpers and the public `parse_file_path` entry point

@@ -1,4 +1,4 @@
-//! Parse-time context helpers for the Beanstalk compiler frontend.
+//! Parse-time context helpers for the Moth compiler frontend.
 //!
 //! WHAT: determines what expected type should be threaded into expression
 //! parsing at assignment-like sites (declarations, mutations, struct fields,

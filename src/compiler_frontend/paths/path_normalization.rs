@@ -1,4 +1,4 @@
-//! Low-level Beanstalk path normalization helpers.
+//! Low-level Moth path normalization helpers.
 //!
 //! These helpers translate already-tokenized `InternedPath` components into filesystem candidate
 //! paths and public path values. They do not own import visibility, public-surface policy, or
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// A source-file import candidate derived from one extensionless import path.
 ///
 /// WHAT: carries the concrete filesystem candidate plus its typed source kind.
-/// WHY: Stage 0 must keep Beanstalk `.bst` and builder-supported kinds such as Beandown `.bd`
+/// WHY: Stage 0 must keep Moth `.moth` and builder-supported kinds such as Moth template `.mtf`
 ///      distinct before later frontend stages choose the right preparation path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ImportCandidate {
@@ -32,7 +32,7 @@ pub(crate) enum ImportCandidateSupport {
 }
 
 /// WHAT: checks whether an import path contains any `..` components.
-/// WHY: parent-directory traversal is not supported in Beanstalk imports.
+/// WHY: parent-directory traversal is not supported in Moth imports.
 pub(crate) fn import_contains_dotdot(
     import_path: &InternedPath,
     string_table: &StringTable,
@@ -143,7 +143,7 @@ pub(crate) fn build_public_path(
     base_kind: &CompileTimePathBase,
     string_table: &StringTable,
 ) -> InternedPath {
-    // An empty source/public path under a rooted base represents the Beanstalk public-root
+    // An empty source/public path under a rooted base represents the Moth public-root
     // literal (`@/`). This is site-root semantics, not OS-root semantics.
     match base_kind {
         // Relative paths keep their original form as the public path.

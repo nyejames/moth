@@ -108,7 +108,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     // Build the profiling compiler with debug info and frame pointers for Samply.
     println!("Building profiling compiler...");
     let profiling_binary = build_profiling_compiler_with_timers()?;
-    let bean_path = profiling_binary.as_path();
+    let moth_path = profiling_binary.as_path();
     let symbol_dirs = profiling_binary.symbol_dirs.clone();
 
     // Get the short commit hash for the run id.
@@ -138,10 +138,10 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         print!("  {} ", case.name);
 
         // Warmup pass.
-        run_warmup(bean_path, case)?;
+        run_warmup(moth_path, case)?;
 
         // Observation pass (timer/counter data without profiler overhead).
-        let observation = run_observation(bean_path, case)?;
+        let observation = run_observation(moth_path, case)?;
         print!("~{:.0}ms ", observation.wall_ms);
 
         // Write per-case artifacts (stdout, stderr, observations).
@@ -155,7 +155,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
 
         // Samply recording pass (stack samples for hotspot extraction).
         let samply_input = SamplyRunInput {
-            bean_path: bean_path.to_path_buf(),
+            moth_path: moth_path.to_path_buf(),
             command: case.command.clone(),
             args: case.args.clone(),
             output_path: case_paths.profile_json.clone(),

@@ -1,4 +1,4 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-TYPE-0002"]
+diagnostic_codes = ["MOTH-TYPE-0002"]

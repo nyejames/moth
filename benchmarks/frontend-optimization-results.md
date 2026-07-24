@@ -25,13 +25,13 @@ programme. Raw benchmark history and profiler output stay local-only under
 - `just bench-check`
 - `just bench-frontend` five recorded invocations
 - `just bench` five recorded invocations, then five refreshed recorded invocations after the
-  `template-stress.bst` fixture repair
+  `template-stress.moth` fixture repair
 - `just bench-report`
 - `just profile-build`
-- `samply record --save-only --output benchmarks/local-data/profiles/2026-06-18-docs-build.json.gz ./target/profiling/bean build docs --release`
-- `samply record --save-only --iteration-count 5 --output benchmarks/local-data/profiles/2026-06-18-docs-build.json.gz ./target/profiling/bean build docs --release`
-- `samply record --save-only --output benchmarks/local-data/profiles/2026-06-18-template-stress.json.gz ./target/profiling/bean check benchmarks/template-stress.bst`
-- `samply record --save-only --output benchmarks/local-data/profiles/2026-06-18-environment-stress.json.gz ./target/profiling/bean check benchmarks/environment-stress.bst`
+- `samply record --save-only --output benchmarks/local-data/profiles/2026-06-18-docs-build.json.gz ./target/profiling/moth build docs --release`
+- `samply record --save-only --iteration-count 5 --output benchmarks/local-data/profiles/2026-06-18-docs-build.json.gz ./target/profiling/moth build docs --release`
+- `samply record --save-only --output benchmarks/local-data/profiles/2026-06-18-template-stress.json.gz ./target/profiling/moth check benchmarks/template-stress.moth`
+- `samply record --save-only --output benchmarks/local-data/profiles/2026-06-18-environment-stress.json.gz ./target/profiling/moth check benchmarks/environment-stress.moth`
 
 ### Benchmark Suites
 
@@ -211,23 +211,23 @@ ordering, lowering, type identity, or emitted artifacts.
 Phase 2 added `benchmarks/adversarial/` with seven single-file compiler-churn fixtures and one
 small HTML project fixture:
 
-- `one-module-kitchen-sink.bst` combines imports, constants, aliases, nominal types, choices,
+- `one-module-kitchen-sink.moth` combines imports, constants, aliases, nominal types, choices,
   traits, generics, templates, collections, maps, receivers, and external package calls.
-- `deep-scope-churn.bst` targets nested function/block/loop scope-frame pressure.
-- `template-render-plan-churn.bst` targets slot routing, `$children` wrappers, repeated slot
+- `deep-scope-churn.moth` targets nested function/block/loop scope-frame pressure.
+- `template-render-plan-churn.moth` targets slot routing, `$children` wrappers, repeated slot
   replay, and runtime template rebuilding.
-- `constant-dag-churn.bst` targets compile-time dependency sorting and constant/template folding.
-- `expression-rpn-churn.bst` targets expression parsing/lowering, choice matching, mutable stack
+- `constant-dag-churn.moth` targets compile-time dependency sorting and constant/template folding.
+- `expression-rpn-churn.moth` targets expression parsing/lowering, choice matching, mutable stack
   operations, and checked arithmetic.
-- `generic-trait-churn.bst` targets generic instantiation, trait evidence, and bound-provided
+- `generic-trait-churn.moth` targets generic instantiation, trait evidence, and bound-provided
   receiver calls.
-- `collection-map-borrow-churn.bst` targets valid collection/map mutation, fallible operations,
+- `collection-map-borrow-churn.moth` targets valid collection/map mutation, fallible operations,
   receiver calls, and borrow-checker facts.
 - `import-external-churn/` targets project import fanout, core package calls, and external
   JavaScript free-function metadata.
 
 No generator was added. The initial adversarial set is clearer as hand-authored static source, and
-the committed `.bst`/`.js` files are the canonical benchmark inputs.
+the committed `.moth`/`.js` files are the canonical benchmark inputs.
 
 ### Validation Status
 
@@ -391,15 +391,15 @@ fixtures, so Phase 5 should tune formulas before using them as arena capacity se
   - `cargo clippy`: passed.
   - `cargo test --quiet scope_context`: passed.
   - `cargo test --quiet`: passed, `2677/2677`.
-  - `cargo run -- check benchmarks/environment-stress.bst`: passed.
-  - `cargo run -- check benchmarks/adversarial/deep-scope-churn.bst`: passed.
+  - `cargo run -- check benchmarks/environment-stress.moth`: passed.
+  - `cargo run -- check benchmarks/adversarial/deep-scope-churn.moth`: passed.
   - `just validate`: passed.
 - Parent validation after review corrections:
   - `cargo fmt`: passed.
   - `cargo check`: passed.
   - `cargo test --quiet scope_context`: passed, `17/17`.
-  - `cargo run -- check benchmarks/environment-stress.bst`: passed.
-  - `cargo run -- check benchmarks/adversarial/deep-scope-churn.bst`: passed.
+  - `cargo run -- check benchmarks/environment-stress.moth`: passed.
+  - `cargo run -- check benchmarks/adversarial/deep-scope-churn.moth`: passed.
   - `git diff --check`: passed.
   - `just validate`: passed. Clippy passed on native, Linux, and Windows targets; unit tests
     passed `2677/2677`; integration tests passed `1707/1707`; docs check passed; embedded
@@ -566,7 +566,7 @@ preparation, tokenization/header parsing, string-table merge/remap, and docs AST
 
 - `docs/compiler-design-overview.md` now records frontend arenas as stage/module-owned
   implementation details, with capacity estimates explicitly policy-only.
-- `docs/src/docs/progress/#page.bst` tracks "Frontend Arena + Semantic Invariant Optimisation" as
+- `docs/src/docs/progress/#page.moth` tracks "Frontend Arena + Semantic Invariant Optimisation" as
   `Partial`: scope-frame arenas, capacity estimates, external package clone reduction, and
   adversarial fixtures are implemented; deeper expression/template/HIR arenas remain deferred.
 - `benchmarks/README.md` records the five independent invocation protocol for optimization phase
@@ -655,7 +655,7 @@ Suites:
 - `cargo test compiler_frontend::ast::templates`
 - `cargo test compiler_frontend::ast::templates --features detailed_timers`
 - `just bench-frontend-check`
-- `cargo run --features detailed_timers -- check benchmarks/adversarial/template-render-plan-churn.bst`
+- `cargo run --features detailed_timers -- check benchmarks/adversarial/template-render-plan-churn.moth`
 - `just validate`
 
 Phase A1 adds stable AST benchmark counters only. It does not change template semantics, HIR,
@@ -675,7 +675,7 @@ validation-safe benchmark suite stayed inside the benchmark noise threshold.
 
 ### New Counter Baseline
 
-The detailed-timers check on `benchmarks/adversarial/template-render-plan-churn.bst` confirmed all
+The detailed-timers check on `benchmarks/adversarial/template-render-plan-churn.moth` confirmed all
 new stable metric names and produced these baseline values:
 
 | Counter | Value |
@@ -937,7 +937,7 @@ changes.
 
 End-to-end `just validate` benchmark check reported `**-4ms avg**; 9 faster, 0 slower; 25/25 cases`.
 
-The adversarial `template-render-plan-churn.bst` fixture still reports
+The adversarial `template-render-plan-churn.moth` fixture still reports
 `ast_template_content_clones_for_render_units=128`, which is expected because that fixture does not
 exercise control-flow content cloning.
 
@@ -1002,7 +1002,7 @@ Counter movement in the latest focused-frontend comparison:
 
 These output-byte counters move with normal fixture variance; they are not driven by the resolver
 change. The new `ast_template_fold_expression_owned_rewrites` counter reads `0` on the
-`template-render-plan-churn.bst` fixture, which exercises render-plan churn rather than binding
+`template-render-plan-churn.moth` fixture, which exercises render-plan churn rather than binding
 substitution.
 
 ### Decision

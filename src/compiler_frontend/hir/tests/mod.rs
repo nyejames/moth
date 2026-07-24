@@ -41,7 +41,7 @@ pub(super) fn symbol(name: &str, string_table: &mut StringTable) -> InternedPath
 pub(super) fn entry_path_and_start_name(
     string_table: &mut StringTable,
 ) -> (InternedPath, InternedPath) {
-    let entry_path = InternedPath::from_single_str("main.bst", string_table);
+    let entry_path = InternedPath::from_single_str("main.moth", string_table);
     let start_name = entry_path.join_str(IMPLICIT_START_FUNC_NAME, string_table);
     (entry_path, start_name)
 }

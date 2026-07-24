@@ -46,7 +46,7 @@ fn html_build_result() -> BuildResult {
             cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
         },
-        config: Config::new(PathBuf::from("main.bst")),
+        config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
         string_table: StringTable::new(),
     }
@@ -97,7 +97,7 @@ fn html_build_result_without_entry_page() -> BuildResult {
             cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
         },
-        config: Config::new(PathBuf::from("main.bst")),
+        config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
         string_table: StringTable::new(),
     }
@@ -120,7 +120,7 @@ fn html_build_result_with_warning() -> BuildResult {
             cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
         },
-        config: Config::new(PathBuf::from("main.bst")),
+        config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![warning],
         string_table,
     }
@@ -238,7 +238,8 @@ fn successful_build_marks_state_ok_and_uses_declared_entry_page() {
     let state = Arc::new(DevServerState::new(output_dir.clone()));
     let mut executor = FakeExecutor::new(vec![Ok(multi_page_html_build_result())]);
 
-    let report = run_single_build_cycle(&state, &mut executor, &root.join("main.bst"), &Vec::new());
+    let report =
+        run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
     assert!(report.build_ok);
     assert_eq!(report.version, 1);
 
@@ -269,7 +270,8 @@ fn failed_build_marks_state_and_stores_error_page() {
         CompilerMessages::from_error(CompilerError::compiler_error("boom"), StringTable::new());
     let mut executor = FakeExecutor::new(vec![Err(messages)]);
 
-    let report = run_single_build_cycle(&state, &mut executor, &root.join("main.bst"), &Vec::new());
+    let report =
+        run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
     assert!(!report.build_ok);
     assert_eq!(report.version, 1);
 
@@ -314,8 +316,9 @@ fn build_version_increments_on_each_attempt() {
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result()), Ok(html_build_result())]);
 
-    let first = run_single_build_cycle(&state, &mut executor, &root.join("main.bst"), &Vec::new());
-    let second = run_single_build_cycle(&state, &mut executor, &root.join("main.bst"), &Vec::new());
+    let first = run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
+    let second =
+        run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
 
     assert_eq!(first.version, 1);
     assert_eq!(second.version, 2);
@@ -326,13 +329,13 @@ fn build_version_increments_on_each_attempt() {
 fn queued_rebuild_runs_when_files_change_during_build() {
     let root = temp_dir("queued");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("main.bst"), "start").expect("should write initial source file");
+    fs::write(root.join("main.moth"), "start").expect("should write initial source file");
     let output_dir = root.join("dev");
     let state = Arc::new(DevServerState::new(output_dir.clone()));
     let (watch_session, watch_trigger) =
         watch::WatchSession::manual(watch_scope(&root, &output_dir));
 
-    let watched_file = root.join("main.bst");
+    let watched_file = root.join("main.moth");
     let mut executor = FakeExecutor::with_on_call(
         vec![Ok(html_build_result()), Ok(html_build_result())],
         Box::new(move |call_index| {
@@ -347,7 +350,7 @@ fn queued_rebuild_runs_when_files_change_during_build() {
     let builds = run_builds_until_stable(
         &state,
         &mut executor,
-        &root.join("main.bst"),
+        &root.join("main.moth"),
         &Vec::new(),
         &watch_session,
     )
@@ -364,7 +367,7 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
 
     let root = temp_dir("max_rebuilds");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("main.bst"), "start").expect("should write initial source file");
+    fs::write(root.join("main.moth"), "start").expect("should write initial source file");
     let output_dir = root.join("dev");
     let state = Arc::new(DevServerState::new(output_dir.clone()));
     let (watch_session, watch_trigger) =
@@ -375,7 +378,7 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
         .map(|_| Ok(html_build_result()))
         .collect();
 
-    let watched_file = root.join("main.bst");
+    let watched_file = root.join("main.moth");
     let counter = Arc::new(AtomicUsize::new(0));
     let counter_clone = counter.clone();
 
@@ -393,7 +396,7 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
     let _builds = run_builds_until_stable(
         &state,
         &mut executor,
-        &root.join("main.bst"),
+        &root.join("main.moth"),
         &Vec::new(),
         &watch_session,
     )
@@ -409,7 +412,7 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
 
 #[test]
 fn dev_server_error_messages_use_dev_server_error_type() {
-    let messages = dev_server_error_messages(Path::new("x.bst"), "oops");
+    let messages = dev_server_error_messages(Path::new("x.moth"), "oops");
     assert_eq!(messages.error_count(), 1);
     let (error_type, _message, _location) = messages
         .first_infrastructure_error_for_tests()
@@ -426,7 +429,7 @@ fn successful_build_with_warnings_preserves_structured_success_messages() {
 
     let outcome = build_once(
         &mut executor,
-        &root.join("main.bst"),
+        &root.join("main.moth"),
         &Vec::new(),
         &output_dir,
     );
@@ -455,7 +458,7 @@ fn successful_build_without_warnings_has_no_success_messages() {
 
     let outcome = build_once(
         &mut executor,
-        &root.join("main.bst"),
+        &root.join("main.moth"),
         &Vec::new(),
         &output_dir,
     );
@@ -473,7 +476,7 @@ fn successful_build_without_warnings_has_no_success_messages() {
 fn rebuild_loop_success_with_warnings_updates_summary() {
     let root = temp_dir("rebuild_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("main.bst"), "start").expect("should write initial source file");
+    fs::write(root.join("main.moth"), "start").expect("should write initial source file");
     let output_dir = root.join("dev");
     let state = Arc::new(DevServerState::new(output_dir.clone()));
     let (watch_session, _watch_trigger) =
@@ -484,7 +487,7 @@ fn rebuild_loop_success_with_warnings_updates_summary() {
     let report = run_builds_until_stable(
         &state,
         &mut executor,
-        &root.join("main.bst"),
+        &root.join("main.moth"),
         &Vec::new(),
         &watch_session,
     )
@@ -512,7 +515,7 @@ fn rebuild_loop_success_with_warnings_updates_summary() {
 fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let root = temp_dir("write_failure_preserves_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
-    let entry_file = root.join("main.bst");
+    let entry_file = root.join("main.moth");
     let output_dir = root.join("dev");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 

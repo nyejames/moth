@@ -1,7 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["beandown_facade_reexport_content facade export"]
-

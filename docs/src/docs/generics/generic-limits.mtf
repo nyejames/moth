@@ -1,0 +1,65 @@
+Unconstrained generic code can move values around but cannot assume type-specific behaviour.
+
+### What unconstrained generic code may do
+
+- pass values through
+- return them
+- store them in generic structs or choices
+- forward them to another generic function when immediate evidence solves the call
+- use generic parameters in local annotations
+
+### What unconstrained generic code cannot assume
+
+- arithmetic
+- equality or ordering
+- field access
+- string-like template interpolation
+- external or IO behaviour
+- arbitrary receiver methods
+
+A trait bound may enable the unique receiver behaviour provided by its static contract.
+
+[codeblock, $code("moth"):
+    DISPLAY_TEXT must:
+        display |This| -> String
+    ;
+
+    render type Item is DISPLAY_TEXT |item Item| -> String:
+        return item.display()
+    ;
+]
+
+### Rejected or deferred current Alpha surfaces
+
+- explicit call-site generic syntax
+- inline generic parameter sugar such as `|value type A|`
+- recursive generic types
+- receiver methods on concrete instances
+- generic external package functions and types
+- nested inline `of` applications beyond the accepted single application
+- public `Option`/`Result` constructors
+
+### Outside generic design scope
+
+- generic function values
+- higher-order polymorphism
+- type values
+- type-returning functions
+- type-level `#if`
+- compile-time type inspection
+- `where` clauses
+- file-local evidence-backed bound dispatch
+- parameterized aliases
+- partial type application
+- higher-kinded types
+- user const generics beyond fixed collection capacity
+- lifetime parameters
+- specialization
+- associated types
+
+Deferred surfaces may land in future Alpha iterations. Outside-scope surfaces require an explicit language-philosophy change before they can be added.
+
+### Related concepts
+
+- For trait bounds see @../traits/#generic-trait-bounds (Generic trait bounds).
+- For the current implementation status see @../../progress (Progress matrix).

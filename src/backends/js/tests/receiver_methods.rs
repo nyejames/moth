@@ -130,7 +130,7 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     );
 }
 
-/// Verifies that a receiver method with a fresh return emits __bs_assign_value. [receiver] [alias]
+/// Verifies that a receiver method with a fresh return emits __moth_assign_value. [receiver] [alias]
 #[test]
 fn receiver_method_call_assigns_value_for_fresh_return() {
     let mut string_table = StringTable::new();
@@ -225,12 +225,12 @@ fn receiver_method_call_assigns_value_for_fresh_return() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_assign_value({result_name}, {callee_name}(")),
-        "fresh-return receiver call must assign result with __bs_assign_value"
+            .contains(&format!("__moth_assign_value({result_name}, {callee_name}(")),
+        "fresh-return receiver call must assign result with __moth_assign_value"
     );
 }
 
-/// Verifies that a receiver method with an alias return emits __bs_assign_borrow. [receiver] [alias]
+/// Verifies that a receiver method with an alias return emits __moth_assign_borrow. [receiver] [alias]
 #[test]
 fn receiver_method_call_assigns_borrow_for_alias_return() {
     let mut string_table = StringTable::new();
@@ -331,8 +331,8 @@ fn receiver_method_call_assigns_borrow_for_alias_return() {
     assert!(
         output
             .source
-            .contains(&format!("__bs_assign_borrow({result_name}, {callee_name}(",)),
-        "alias-return receiver call must assign result with __bs_assign_borrow"
+            .contains(&format!("__moth_assign_borrow({result_name}, {callee_name}(",)),
+        "alias-return receiver call must assign result with __moth_assign_borrow"
     );
 }
 

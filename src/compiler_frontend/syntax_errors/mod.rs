@@ -1,6 +1,6 @@
 //! Helpful syntax-error detection for common language-mismatch mistakes.
 //!
-//! WHAT: Detects patterns that new Beanstalk users write when bringing habits from
+//! WHAT: Detects patterns that new Moth users write when bringing habits from
 //! C, Rust, Python, JavaScript, and other languages. These are not generic syntax
 //! errors — they are specific, actionable mistakes that deserve targeted guidance.
 //!

@@ -22,7 +22,7 @@ use std::str::Chars;
 /// `TokenizeMode` remains the current lexical state while tokenization is
 /// running. This type only decides which lexical state the stream starts in and
 /// how the initial frame should behave when the source is a synthetic template
-/// body such as Beandown.
+/// body such as Moth template.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenizerEntryMode {
     SourceFile,
@@ -43,13 +43,13 @@ impl TokenizerEntryMode {
     ///
     /// WHAT: maps source kinds that need tokenization to their entry policy.
     /// WHY: some compiler-recognized source kinds such as plain Markdown are content assets and
-    ///      must not be tokenized as Beanstalk syntax.
+    ///      must not be tokenized as Moth syntax.
     ///
     /// `None` means the source kind is compiler-recognized but has no tokenizer path.
     pub fn for_source_file_kind(source_kind: SourceFileKind) -> Option<Self> {
         match source_kind {
-            SourceFileKind::Beanstalk => Some(Self::SourceFile),
-            SourceFileKind::Beandown => Some(Self::TemplateBody {
+            SourceFileKind::Moth => Some(Self::SourceFile),
+            SourceFileKind::MothTemplate => Some(Self::TemplateBody {
                 initial_close_policy: InitialTemplateClosePolicy::RejectOuterClose { source_kind },
             }),
             SourceFileKind::PlainMarkdown => None,
@@ -270,7 +270,7 @@ impl FileTokens {
     /// WHAT: replaces `src_path`, `file_id`, `canonical_os_path`, every top-level token
     ///       location scope, and every `PathTokenItem` path/alias location scope with the
     ///       supplied logical path and file identity.
-    /// WHY: Stage 0 tokenizes each `.bst` file once against a filesystem identity. After the
+    /// WHY: Stage 0 tokenizes each `.moth` file once against a filesystem identity. After the
     ///      complete module file set is known, `SourceFileTable` assigns the module logical
     ///      path, deterministic `FileId`, and canonical OS path. Retained tokens must adopt
     ///      that identity so downstream header parsing, diagnostics, and import shells see the

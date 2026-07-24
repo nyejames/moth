@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>17. Backend lowering | Beanstalk</title>
+    <title>17. Backend lowering | Moth</title>
     <meta name="description" content="How target backends lower validated semantic inputs.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -318,15 +318,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -335,13 +335,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -352,9 +352,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -364,15 +364,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -396,112 +396,112 @@ body {
         </div>
     </nav>
     <section class="container"><p><a href="../">Compiler design</a> / 17. Backend lowering</p><h1>Turning HIR into JavaScript and Wasm</h1><p>Lowerers translate validated HIR into target code without reopening source or rewriting language meaning.</p></section>
-    <section class="container"><h1>Turning HIR into JavaScript and Wasm</h1><p>One HIR operation may become a JavaScript expression in one partition and a Wasm instruction sequence in another. The meaning stays Beanstalk. The spelling becomes target-native. Same source meaning, different host climates.</p><p><strong>Lowerers</strong> translate validated inputs. They are not second language frontends.</p><h2>Lowerer inputs</h2><p>A lowerer receives explicit records:</p><ul><li>selected HIR for module and generated functions</li><li>paired local or generated-local type environments</li><li>stable call targets</li><li>borrow facts</li><li>validated lifetime facts and summaries</li><li>external boundary classifications</li><li>builder lifecycle/runtime plan</li><li>per-function link facts</li><li>selected-function, import, capability and layout identities</li></ul><p>A lowerer does <strong>not</strong>:</p><ul><li>load or parse source</li><li>rebuild imports or visibility</li><li>infer generics or reconstruct traits</li><li>fold constants or interpret TIR</li><li>rediscover project topology</li><li>reconsider lifetime topology or source legality</li><li>choose command or route policy</li><li>write final project files directly</li></ul><p>If a lowerer needs a fact, an earlier owner should have recorded it.</p><p>For the walkthrough, target-labelled <code>start</code>, <code>greet</code> and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.</p><p><strong>Diagram placeholder:</strong> Selected target sends one HIR input to two target paths</p><p><em>Caption: exact frontend boundary simplified.</em> <em>Question: what stays shared?</em></p><h2>JavaScript lowering</h2><p>The JS backend speaks host values and functions. It leans on the host GC for reachability. Runtime helpers implement language operations the surface syntax made look primitive: checked numerics, certain casts, template runtime pieces, error plumbing.</p><p><code>greet</code> in JavaScript form is ordinary host code that preserves Beanstalk contracts. A more permissive JS primitive must not silently weaken checked arithmetic, finite-Float rules or error propagation.</p><h2>Wasm lowering</h2><p>Accepted Wasm design prefers a <strong>structured</strong> path:</p><ol><li>optionally derive a structured HIR view (not a second semantic authority)</li><li>lower into backend-owned structured <strong>LIR</strong> (a lower IR)</li><li>apply ABI, handles, layouts, memory and runtime imports</li></ol><p>Beginner picture:</p><ul><li><strong>ABI</strong> is the calling and data contract between sides</li><li><strong>handles</strong> name host or runtime objects without pretending every value is a raw integer the author meant</li><li><strong>layouts</strong> describe how composite values sit in memory</li><li><strong>runtime imports</strong> pull helpers the module refuses to reimplement alone</li></ul><p>Old dispatcher-loop LIR stories, <code>bst_start</code> bootstrap myths, <code>i64</code> Int bridges as the final story and per-module memory as the default are <strong>removed final-design paths</strong>. Teach them only as historical &quot;do not rebuild this&quot; notes, not as the architecture.</p><p><strong>Diagram placeholder:</strong> A derived backend view feeds structured blocks and ABI operations</p><p><em>Caption: accepted Wasm design, simplified records.</em> <em>Question: where does target structure enter?</em></p><h2>Shared runtime and wrappers</h2><p>Accepted HTML mixed-target design wants <strong>page-local shared Wasm runtime and memory</strong> rather than a scatter of isolated memories per module as the end state. Page-local shared Wasm runtime/memory applies to Beanstalk-linked variants only. Imported WIT components use component-private memory and value conversion.</p><p>JavaScript companion facades and wrappers call Wasm exports through explicit handles and layout rules. The bridge is data, not guesswork.</p><p><strong>Diagram placeholder:</strong> JavaScript companion calls a Wasm export through explicit handles and layout rules</p><p><em>Caption: teaching boundary.</em> <em>Question: how do targets communicate?</em></p><h2>External bindings and ownership facts</h2><p>Binding-backed calls lower through demand-driven glue. The binder&#39;s semantic interface already existed upstream. The lowerer maps stable external ids to imports, helpers or native operations.</p><p>Borrow facts may guide <strong>optional ownership-aware Wasm lowering</strong>: earlier drops, specialised paths, less GC traffic. GC backends may ignore ownership operations. They still required validation upstream. Optimisation must preserve observable behaviour and the same accepted program set.</p><p><strong>Diagram placeholder:</strong> Ownership side facts guide Wasm operations while GC can ignore them</p><p><em>Caption: semantic invariant.</em> <em>Question: what can optimisation change?</em></p><h2>What can fail here</h2><ul><li>missing runtime import</li><li>ABI mismatch</li><li>unsupported layout</li><li>invalid selected target input that planning should have rejected</li><li>internal lowerer failure on the <code>CompilerError</code> lane</li></ul><p>User-facing target failures preferably die in validation, not mid-emission.</p><h2>Why Beanstalk does it this way</h2><p><strong>Alternative:</strong> give each backend a source interpreter or separate frontend.</p><p><strong>Choice:</strong> one validated semantic HIR plus target-owned lowering.</p><p><strong>Benefit:</strong> source behaviour remains shared across JavaScript and Wasm.</p><p><strong>Cost:</strong> each backend needs a faithful ABI and runtime implementation.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> backend-neutral frontend, structured Wasm path and central output records.</li><li><strong>Current implementation:</strong> progress rows and experimental backend status where still labelled.</li><li><strong>Queued work:</strong> <code>html_project_backend_wasm_final_implementation_plan.md</code>.</li><li><strong>Deferred or removed:</strong> old bootstrap and dispatcher paths remain historical context only.</li></ul><h2>Exit state</h2><p>You leave with JavaScript, Wasm, wrappers, runtime modules and asset records as data. Next: how the HTML builder assembles and owns those outputs on disk, ending at <code>&lt;p&gt;Hello, Priya!&lt;/p&gt;</code>.</p></section>
+    <section class="container"><h1>Turning HIR into JavaScript and Wasm</h1><p>One HIR operation may become a JavaScript expression in one partition and a Wasm instruction sequence in another. The meaning stays Moth. The spelling becomes target-native. Same source meaning, different host climates.</p><p><strong>Lowerers</strong> translate validated inputs. They are not second language frontends.</p><h2>Lowerer inputs</h2><p>A lowerer receives explicit records:</p><ul><li>selected HIR for module and generated functions</li><li>paired local or generated-local type environments</li><li>stable call targets</li><li>borrow facts</li><li>validated lifetime facts and summaries</li><li>external boundary classifications</li><li>builder lifecycle/runtime plan</li><li>per-function link facts</li><li>selected-function, import, capability and layout identities</li></ul><p>A lowerer does <strong>not</strong>:</p><ul><li>load or parse source</li><li>rebuild imports or visibility</li><li>infer generics or reconstruct traits</li><li>fold constants or interpret TIR</li><li>rediscover project topology</li><li>reconsider lifetime topology or source legality</li><li>choose command or route policy</li><li>write final project files directly</li></ul><p>If a lowerer needs a fact, an earlier owner should have recorded it.</p><p>For the walkthrough, target-labelled <code>start</code>, <code>greet</code> and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.</p><p><strong>Diagram placeholder:</strong> Selected target sends one HIR input to two target paths</p><p><em>Caption: exact frontend boundary simplified.</em> <em>Question: what stays shared?</em></p><h2>JavaScript lowering</h2><p>The JS backend speaks host values and functions. It leans on the host GC for reachability. Runtime helpers implement language operations the surface syntax made look primitive: checked numerics, certain casts, template runtime pieces, error plumbing.</p><p><code>greet</code> in JavaScript form is ordinary host code that preserves Moth contracts. A more permissive JS primitive must not silently weaken checked arithmetic, finite-Float rules or error propagation.</p><h2>Wasm lowering</h2><p>Accepted Wasm design prefers a <strong>structured</strong> path:</p><ol><li>optionally derive a structured HIR view (not a second semantic authority)</li><li>lower into backend-owned structured <strong>LIR</strong> (a lower IR)</li><li>apply ABI, handles, layouts, memory and runtime imports</li></ol><p>Beginner picture:</p><ul><li><strong>ABI</strong> is the calling and data contract between sides</li><li><strong>handles</strong> name host or runtime objects without pretending every value is a raw integer the author meant</li><li><strong>layouts</strong> describe how composite values sit in memory</li><li><strong>runtime imports</strong> pull helpers the module refuses to reimplement alone</li></ul><p>Old dispatcher-loop LIR stories, <code>moth_start</code> bootstrap myths, <code>i64</code> Int bridges as the final story and per-module memory as the default are <strong>removed final-design paths</strong>. Teach them only as historical &quot;do not rebuild this&quot; notes, not as the architecture.</p><p><strong>Diagram placeholder:</strong> A derived backend view feeds structured blocks and ABI operations</p><p><em>Caption: accepted Wasm design, simplified records.</em> <em>Question: where does target structure enter?</em></p><h2>Shared runtime and wrappers</h2><p>Accepted HTML mixed-target design wants <strong>page-local shared Wasm runtime and memory</strong> rather than a scatter of isolated memories per module as the end state. Page-local shared Wasm runtime/memory applies to Moth-linked variants only. Imported WIT components use component-private memory and value conversion.</p><p>JavaScript companion facades and wrappers call Wasm exports through explicit handles and layout rules. The bridge is data, not guesswork.</p><p><strong>Diagram placeholder:</strong> JavaScript companion calls a Wasm export through explicit handles and layout rules</p><p><em>Caption: teaching boundary.</em> <em>Question: how do targets communicate?</em></p><h2>External bindings and ownership facts</h2><p>Binding-backed calls lower through demand-driven glue. The binder&#39;s semantic interface already existed upstream. The lowerer maps stable external ids to imports, helpers or native operations.</p><p>Borrow facts may guide <strong>optional ownership-aware Wasm lowering</strong>: earlier drops, specialised paths, less GC traffic. GC backends may ignore ownership operations. They still required validation upstream. Optimisation must preserve observable behaviour and the same accepted program set.</p><p><strong>Diagram placeholder:</strong> Ownership side facts guide Wasm operations while GC can ignore them</p><p><em>Caption: semantic invariant.</em> <em>Question: what can optimisation change?</em></p><h2>What can fail here</h2><ul><li>missing runtime import</li><li>ABI mismatch</li><li>unsupported layout</li><li>invalid selected target input that planning should have rejected</li><li>internal lowerer failure on the <code>CompilerError</code> lane</li></ul><p>User-facing target failures preferably die in validation, not mid-emission.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> give each backend a source interpreter or separate frontend.</p><p><strong>Choice:</strong> one validated semantic HIR plus target-owned lowering.</p><p><strong>Benefit:</strong> source behaviour remains shared across JavaScript and Wasm.</p><p><strong>Cost:</strong> each backend needs a faithful ABI and runtime implementation.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> backend-neutral frontend, structured Wasm path and central output records.</li><li><strong>Current implementation:</strong> progress rows and experimental backend status where still labelled.</li><li><strong>Queued work:</strong> <code>html_project_backend_wasm_final_implementation_plan.md</code>.</li><li><strong>Deferred or removed:</strong> old bootstrap and dispatcher paths remain historical context only.</li></ul><h2>Exit state</h2><p>You leave with JavaScript, Wasm, wrappers, runtime modules and asset records as data. Next: how the HTML builder assembles and owns those outputs on disk, ending at <code>&lt;p&gt;Hello, Priya!&lt;/p&gt;</code>.</p></section>
     <section class="container"><p><a href="../">Compiler design</a> / <a href="../target-planning-and-validation">Previous</a> / <a href="../html-assembly-and-output">Next</a></p></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -516,63 +516,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -582,36 +582,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -624,65 +624,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -690,10 +690,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

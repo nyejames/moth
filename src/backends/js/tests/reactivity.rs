@@ -291,16 +291,16 @@ fn runtime_prelude_omits_reactivity_helpers_for_non_reactive_module() {
     let source = lower_minimal_module("main");
 
     assert!(
-        !source.contains("function __bs_reactive_binding("),
-        "non-reactive modules must not emit __bs_reactive_binding"
+        !source.contains("function __moth_reactive_binding("),
+        "non-reactive modules must not emit __moth_reactive_binding"
     );
     assert!(
-        !source.contains("function __bs_reactive_schedule("),
-        "non-reactive modules must not emit __bs_reactive_schedule"
+        !source.contains("function __moth_reactive_schedule("),
+        "non-reactive modules must not emit __moth_reactive_schedule"
     );
     assert!(
-        !source.contains("function __bs_template_string("),
-        "non-reactive modules must not emit __bs_template_string"
+        !source.contains("function __moth_template_string("),
+        "non-reactive modules must not emit __moth_template_string"
     );
 }
 
@@ -311,9 +311,9 @@ fn placeholder_template_parameter_without_reactive_source_omits_helpers() {
     let source = lower_placeholder_template_parameter_module("main");
 
     assert!(
-        !source.contains("function __bs_template_string(")
-            && !source.contains("function __bs_template_snapshot(")
-            && !source.contains("function __bs_reactive_binding("),
+        !source.contains("function __moth_template_string(")
+            && !source.contains("function __moth_template_snapshot(")
+            && !source.contains("function __moth_reactive_binding("),
         "placeholder template metadata needs concrete reactive sources before emitting helpers"
     );
 }
@@ -324,16 +324,16 @@ fn runtime_prelude_contains_reactivity_helpers_for_reactive_source_module() {
     let source = lower_minimal_reactive_source_module("main");
 
     assert!(
-        source.contains("function __bs_reactive_binding("),
-        "reactive source modules must emit __bs_reactive_binding"
+        source.contains("function __moth_reactive_binding("),
+        "reactive source modules must emit __moth_reactive_binding"
     );
     assert!(
-        source.contains("function __bs_reactive_schedule("),
-        "reactive source modules must emit __bs_reactive_schedule"
+        source.contains("function __moth_reactive_schedule("),
+        "reactive source modules must emit __moth_reactive_schedule"
     );
     assert!(
-        source.contains("function __bs_reactive_flush("),
-        "reactive source modules must emit __bs_reactive_flush"
+        source.contains("function __moth_reactive_flush("),
+        "reactive source modules must emit __moth_reactive_flush"
     );
 }
 
@@ -343,12 +343,12 @@ fn reactive_source_module_omits_template_string_helpers() {
     let source = lower_minimal_reactive_source_module("main");
 
     assert!(
-        !source.contains("function __bs_template_string("),
-        "source-only reactive modules must not emit __bs_template_string"
+        !source.contains("function __moth_template_string("),
+        "source-only reactive modules must not emit __moth_template_string"
     );
     assert!(
-        !source.contains("function __bs_template_snapshot("),
-        "source-only reactive modules must not emit __bs_template_snapshot"
+        !source.contains("function __moth_template_snapshot("),
+        "source-only reactive modules must not emit __moth_template_snapshot"
     );
 }
 
@@ -360,9 +360,9 @@ fn reactive_source_local_uses_reactive_binding_initializer() {
     let local_name = expected_dev_local_name("x", 0);
     assert!(
         source.contains(&format!(
-            "let {local_name} = __bs_reactive_binding(0, undefined);"
+            "let {local_name} = __moth_reactive_binding(0, undefined);"
         )),
-        "reactive source locals must initialize with __bs_reactive_binding(sourceId, undefined)"
+        "reactive source locals must initialize with __moth_reactive_binding(sourceId, undefined)"
     );
 }
 
@@ -374,8 +374,8 @@ fn reactive_invalidation_fact_schedules_dirty_source() {
 
     let local_name = expected_dev_local_name("x", 0);
     assert!(
-        source.contains(&format!("__bs_assign_value({local_name}, 5);"))
-            && source.contains("__bs_reactive_schedule(0);"),
+        source.contains(&format!("__moth_assign_value({local_name}, 5);"))
+            && source.contains("__moth_reactive_schedule(0);"),
         "reactive source assignment must use normal storage assignment then schedule dirtying"
     );
 }
@@ -386,7 +386,7 @@ fn reactive_initialization_without_invalidation_does_not_schedule() {
     let source = lower_minimal_reactive_source_module("main");
 
     assert!(
-        !source.contains("__bs_reactive_schedule(0);"),
+        !source.contains("__moth_reactive_schedule(0);"),
         "reactive declaration initialization must not schedule source dirtying"
     );
 }
@@ -396,24 +396,24 @@ fn reactive_initialization_without_invalidation_does_not_schedule() {
 fn reactive_schedule_helper_batches_flushes() {
     let source = lower_minimal_reactive_source_module("main");
 
-    let helper = helper_source(&source, "__bs_reactive_schedule");
+    let helper = helper_source(&source, "__moth_reactive_schedule");
     assert!(
-        helper.contains("__bs_reactive_dirty_sources.add(sourceId)")
-            && helper.contains("__bs_reactive_flush_scheduled")
-            && helper.contains("__bs_reactive_flush"),
-        "__bs_reactive_schedule must mark the source dirty and arrange one flush"
+        helper.contains("__moth_reactive_dirty_sources.add(sourceId)")
+            && helper.contains("__moth_reactive_flush_scheduled")
+            && helper.contains("__moth_reactive_flush"),
+        "__moth_reactive_schedule must mark the source dirty and arrange one flush"
     );
 }
 
-/// Verifies that `__bs_write` remains unchanged for non-reactive programs.
+/// Verifies that `__moth_write` remains unchanged for non-reactive programs.
 #[test]
 fn write_helper_does_not_reference_reactivity_for_non_reactive_programs() {
     let source = lower_minimal_module("main");
 
-    let write = helper_source(&source, "__bs_write");
+    let write = helper_source(&source, "__moth_write");
     assert!(
-        !write.contains("__bs_source_id") && !write.contains("__bs_reactive_schedule"),
-        "__bs_write must not reference reactive scheduling in non-reactive bundles"
+        !write.contains("__moth_source_id") && !write.contains("__moth_reactive_schedule"),
+        "__moth_write must not reference reactive scheduling in non-reactive bundles"
     );
 }
 
@@ -422,16 +422,16 @@ fn write_helper_does_not_reference_reactivity_for_non_reactive_programs() {
 fn computed_place_helpers_do_not_carry_reactive_source_ids() {
     let source = lower_minimal_reactive_source_module("main");
 
-    let field = helper_source(&source, "__bs_field");
+    let field = helper_source(&source, "__moth_field");
     assert!(
         !field.contains("sourceId"),
-        "__bs_field must remain a general computed-place helper"
+        "__moth_field must remain a general computed-place helper"
     );
 
-    let index = helper_source(&source, "__bs_index");
+    let index = helper_source(&source, "__moth_index");
     assert!(
         !index.contains("sourceId"),
-        "__bs_index must remain a general computed-place helper"
+        "__moth_index must remain a general computed-place helper"
     );
 }
 
@@ -441,20 +441,20 @@ fn runtime_prelude_contains_template_string_helpers_for_reactive_template_module
     let source = lower_minimal_reactive_template_module("main");
 
     assert!(
-        source.contains("function __bs_template_string("),
-        "reactive template modules must emit __bs_template_string"
+        source.contains("function __moth_template_string("),
+        "reactive template modules must emit __moth_template_string"
     );
     assert!(
-        source.contains("function __bs_template_snapshot("),
-        "reactive template modules must emit __bs_template_snapshot"
+        source.contains("function __moth_template_snapshot("),
+        "reactive template modules must emit __moth_template_snapshot"
     );
     assert!(
-        source.contains("function __bs_template_dependencies("),
-        "reactive template modules must emit __bs_template_dependencies"
+        source.contains("function __moth_template_dependencies("),
+        "reactive template modules must emit __moth_template_dependencies"
     );
     assert!(
-        source.contains("function __bs_template_collect_dependencies("),
-        "reactive template modules must emit __bs_template_collect_dependencies"
+        source.contains("function __moth_template_collect_dependencies("),
+        "reactive template modules must emit __moth_template_collect_dependencies"
     );
 }
 
@@ -464,11 +464,11 @@ fn runtime_fragment_push_preserves_reactive_template_object() {
     let source = lower_minimal_reactive_template_module("main");
 
     assert!(
-        source.contains("push(__bs_template_string("),
+        source.contains("push(__moth_template_string("),
         "runtime fragment pushes must preserve reactive template objects for HTML mounting"
     );
     assert!(
-        !source.contains("push(__bs_template_snapshot(__bs_template_string("),
+        !source.contains("push(__moth_template_snapshot(__moth_template_string("),
         "runtime fragment pushes must not snapshot reactive template values before mounting"
     );
 }
@@ -479,12 +479,12 @@ fn runtime_fragment_push_preserves_reactive_template_object() {
 fn template_string_helper_constructs_value_with_snapshot_and_dependencies() {
     let source = lower_minimal_reactive_template_module("main");
 
-    let helper = helper_source(&source, "__bs_template_string");
+    let helper = helper_source(&source, "__moth_template_string");
     assert!(
-        helper.contains("__bs_template: true")
+        helper.contains("__moth_template: true")
             && helper.contains("snapshot,")
             && helper.contains("dependencies"),
-        "__bs_template_string must create a value with __bs_template, snapshot, and dependencies"
+        "__moth_template_string must create a value with __moth_template, snapshot, and dependencies"
     );
 }
 
@@ -493,10 +493,10 @@ fn template_string_helper_constructs_value_with_snapshot_and_dependencies() {
 fn template_snapshot_helper_returns_plain_string() {
     let source = lower_minimal_reactive_template_module("main");
 
-    let helper = helper_source(&source, "__bs_template_snapshot");
+    let helper = helper_source(&source, "__moth_template_snapshot");
     assert!(
         helper.contains("template.snapshot()") || helper.contains("return template;"),
-        "__bs_template_snapshot must invoke the snapshot function or pass through plain strings"
+        "__moth_template_snapshot must invoke the snapshot function or pass through plain strings"
     );
 }
 
@@ -505,12 +505,12 @@ fn template_snapshot_helper_returns_plain_string() {
 fn template_collect_dependencies_merges_direct_and_nested() {
     let source = lower_minimal_reactive_template_module("main");
 
-    let helper = helper_source(&source, "__bs_template_collect_dependencies");
+    let helper = helper_source(&source, "__moth_template_collect_dependencies");
     assert!(
         helper.contains("directIds")
             && helper.contains("nestedValues")
-            && helper.contains("__bs_template_dependencies"),
-        "__bs_template_collect_dependencies must merge direct ids with nested template dependencies"
+            && helper.contains("__moth_template_dependencies"),
+        "__moth_template_collect_dependencies must merge direct ids with nested template dependencies"
     );
 }
 
@@ -520,7 +520,7 @@ fn reactive_template_module_emits_mount_helper() {
     let source = lower_minimal_reactive_template_module("main");
 
     assert!(
-        source.contains("function __bs_mount_template_fragment("),
-        "reactive template modules must emit __bs_mount_template_fragment for HTML slot mounting"
+        source.contains("function __moth_mount_template_fragment("),
+        "reactive template modules must emit __moth_mount_template_fragment for HTML slot mounting"
     );
 }

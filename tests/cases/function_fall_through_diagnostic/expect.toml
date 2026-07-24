@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0055"]
+diagnostic_codes = ["MOTH-RULE-0055"]
 message_contains = ["fall through without returning on every path"]

@@ -5,9 +5,9 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_io_line", "console.log"]
+must_contain = ["__moth_io_line", "console.log"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

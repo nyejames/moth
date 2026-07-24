@@ -1,0 +1,128 @@
+import @./bindings {
+    content as bindings,
+}
+
+import @./bindings-basic {
+    content as bindings_basic,
+}
+
+import @./mutable-bindings {
+    content as mutable_bindings,
+}
+
+import @./mutable-bindings-basic {
+    content as mutable_bindings_basic,
+}
+
+import @./shared-access {
+    content as shared_access,
+}
+
+import @./shared-access-basic {
+    content as shared_access_basic,
+}
+
+import @./explicit-copies {
+    content as explicit_copies,
+}
+
+import @./explicit-copies-basic {
+    content as explicit_copies_basic,
+}
+
+import @./shadowing {
+    content as shadowing,
+}
+
+import @./shadowing-basic {
+    content as shadowing_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Values and bindings"
+page_description #= "Bindings, mutability, shared access, explicit copies and shadowing in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Values and bindings
+
+    # Values and bindings
+
+    Names are cheap. Copies aren't automatic. Existing values are shared by default, mutability is explicit and `copy` is the line between another view and an independent value.
+
+    These rules apply to every type. The memory-management pages explain how the compiler validates and lowers them.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):bindings]
+        [$insert("title"):Bindings]
+        [$insert("advanced"):[bindings]]
+
+        [bindings_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):mutable-bindings]
+        [$insert("title"):Mutable bindings]
+        [$insert("advanced"):[mutable_bindings]]
+
+        [mutable_bindings_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):shared-access]
+        [$insert("title"):Shared access]
+        [$insert("advanced"):[shared_access]]
+
+        [shared_access_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):explicit-copies]
+        [$insert("title"):Explicit copies]
+        [$insert("advanced"):[explicit_copies]]
+
+        [explicit_copies_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):shadowing]
+        [$insert("title"):Shadowing]
+        [$insert("advanced"):[shadowing]]
+
+        [shadowing_basic]
+    ]
+]
+
+#[section, $md:
+    ## Related design
+
+    See @../codebase/memory-management (Memory management) for borrow validation, ownership analysis and backend lowering.
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../language-overview/]
+        [$insert("previous_title"):Language basics]
+        [$insert("next_path"):../numbers/]
+        [$insert("next_title"):Numbers]
+    ]
+]

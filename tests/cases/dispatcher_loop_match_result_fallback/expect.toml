@@ -8,4 +8,4 @@ rendered_output_contains = ["dispatcher_loop_match_result_fallback sum=141"]
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["while (true)", "switch (", "__bs_result_fallback", "const __match_"]
+must_contain = ["while (true)", "switch (", "__moth_result_fallback", "const __match_"]

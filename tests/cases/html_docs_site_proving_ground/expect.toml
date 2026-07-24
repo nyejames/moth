@@ -49,17 +49,17 @@ must_contain = ["../../shared/docs.css", "<script src=\"./page.js\"></script>"]
 [[backends.html_wasm.artifact_assertions]]
 path = "page.js"
 kind = "js"
-must_contain = ["__bst_instantiate_wasm", "\"./page.wasm\""]
+must_contain = ["__moth_instantiate_wasm", "\"./page.wasm\""]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "docs/page.js"
 kind = "js"
-must_contain = ["__bst_instantiate_wasm", "\"./page.wasm\""]
+must_contain = ["__moth_instantiate_wasm", "\"./page.wasm\""]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "docs/getting-started/page.js"
 kind = "js"
-must_contain = ["__bst_instantiate_wasm", "\"./page.wasm\""]
+must_contain = ["__moth_instantiate_wasm", "\"./page.wasm\""]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "page.wasm"

@@ -31,31 +31,31 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
     )] = &[
         (
             "length",
-            "__bs_text_length",
+            "__moth_text_length",
             vec![text_param.clone()],
             ExternalAbiType::I32,
         ),
         (
             "is_empty",
-            "__bs_text_is_empty",
+            "__moth_text_is_empty",
             vec![text_param.clone()],
             ExternalAbiType::Bool,
         ),
         (
             "contains",
-            "__bs_text_contains",
+            "__moth_text_contains",
             vec![text_param.clone(), text_param.clone()],
             ExternalAbiType::Bool,
         ),
         (
             "starts_with",
-            "__bs_text_starts_with",
+            "__moth_text_starts_with",
             vec![text_param.clone(), text_param.clone()],
             ExternalAbiType::Bool,
         ),
         (
             "ends_with",
-            "__bs_text_ends_with",
+            "__moth_text_ends_with",
             vec![text_param.clone(), text_param],
             ExternalAbiType::Bool,
         ),

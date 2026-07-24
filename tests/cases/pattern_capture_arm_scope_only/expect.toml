@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "exact"
-diagnostic_codes = ["BST-RULE-0034"]
-warning_codes = ["BST-RULE-0022"]
+diagnostic_codes = ["MOTH-RULE-0034"]
+warning_codes = ["MOTH-RULE-0022"]

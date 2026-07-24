@@ -1,0 +1,93 @@
+The `export:` block is the only public API marker. It is valid only in a module root file and marks declarations as visible to other modules.
+
+### Syntax
+
+[codeblock, $code("moth"):
+    private_helper || -> String:
+        return "private"
+    ;
+
+    export:
+        public_name #= "Moth"
+
+        render || -> String:
+            return private_helper()
+        ;
+    ;
+]
+
+### Rules
+
+- `export:` is valid only in a module root file. An `export:` block in a normal source file is rejected with `MOTH-RULE-0077`.
+- A module root may contain at most one `export:` block. Duplicate blocks are rejected with `MOTH-RULE-0085`.
+- The block ends with normal Moth `;`.
+- An empty `export:` block is rejected with `MOTH-RULE-0080`.
+- Items inside the block are ordinary top-level module-root items marked public.
+- Items outside the block remain private to the module root file.
+
+### Allowed inside export:
+
+- grouped source imports (re-exports)
+- grouped external imports
+- functions
+- structs
+- choices
+- type aliases
+- traits
+- compile-time constants using `#`
+
+### Rejected inside export:
+
+- runtime bindings
+- mutable bindings
+- top-level executable statements
+- runtime templates
+- top-level const page fragments
+- trait conformances
+- trait incompatibility declarations
+- receiver methods as directly exported symbols
+- bare namespace imports or exports
+- wildcard exports
+- export lists
+- function alias exports
+- nested `export:` blocks
+- all legacy inline `export` forms
+
+Runtime statements inside the block are rejected with `MOTH-RULE-0080`. Legacy inline `export` syntax (without the `:` block delimiter) is rejected with `MOTH-SYNTAX-0001`.
+
+### Re-exports
+
+The export block can re-export grouped imports from other files:
+
+[codeblock, $code("moth"):
+    export:
+        import @components/card {
+            CardData as Card,
+            render_card,
+        }
+
+        import @core/math {
+            PI,
+            sin,
+        }
+    ;
+]
+
+The grouped alias becomes the public name. In this example cross-module consumers can import `Card`, not `CardData`, unless the export block lists `CardData` separately.
+
+### `#` constants are compile-time, not visibility
+
+The `#` marker on a binding means compile-time constant. It does not control cross-module visibility. Cross-module visibility is controlled exclusively by the `export:` block.
+
+### Same-module versus cross-module visibility
+
+- Normal declarations in any file within a module are visible to other files in the same module by default.
+- Cross-module imports can only access declarations marked public by the module root's `export:` block.
+- Private declarations in the module root file are not available to other modules.
+- A module root with no `export:` block exports nothing.
+
+### Related concepts
+
+- For module root rules see @#module-roots (Module roots).
+- For re-export syntax see @../packages/#public-reexports (Public re-exports).
+- For visibility rules see @../packages/#module-visibility (Module visibility).

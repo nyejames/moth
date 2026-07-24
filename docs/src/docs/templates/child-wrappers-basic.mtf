@@ -1,0 +1,20 @@
+`$children(...)` wraps every direct child in the same template.
+
+[codeblock, $code("moth"):
+    list #= [$children([:<li>[$slot]</li>]):
+        <ul>
+            [$slot]
+        </ul>
+    ]
+]
+
+This is useful for lists, table rows and repeated layout elements.
+
+Use `$fresh` when one child should skip the immediate wrapper:
+
+[codeblock, $code("moth"):
+    [list:
+        [: wrapped]
+        [$fresh: [: not wrapped]]
+    ]
+]

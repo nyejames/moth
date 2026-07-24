@@ -774,7 +774,7 @@ impl<'a> HirBuilder<'a> {
     ///
     /// WHAT: checks that the resolved success return list has one slot and that slot is the
     ///       builtin `Float` type.
-    /// WHY: external/backend boundaries must validate a scalar `Float` before ordinary Beanstalk
+    /// WHY: external/backend boundaries must validate a scalar `Float` before ordinary Moth
     ///      code observes it; multi-success or non-Float returns are handled elsewhere.
     fn result_type_ids_are_single_float(&self, result_type_ids: &[FrontendTypeId]) -> bool {
         let [single] = result_type_ids else {
@@ -962,9 +962,9 @@ impl<'a> HirBuilder<'a> {
         let mut prelude = Vec::new();
         let source = self.lower_child_expression_for_parent(&mut prelude, &cast.source)?;
 
-        // `Float -> String` is infallible at the source level because valid Beanstalk `Float` is
+        // `Float -> String` is infallible at the source level because valid Moth `Float` is
         // finite, but it must still lower through the shared `FormatFloat` statement so casts and
-        // templates use the same Beanstalk-owned formatter.
+        // templates use the same Moth-owned formatter.
         if policy == BuiltinCastPolicyId::FloatToString {
             for prelude_statement in prelude.drain(..) {
                 self.emit_statement_to_current_block(prelude_statement, location)?;

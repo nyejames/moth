@@ -32,7 +32,7 @@ pub(crate) use public_export_resolution::{
 pub(crate) use target_resolution::{
     ExternalPackageSymbolLookup, ExternalPackageSymbolResolutionInput, ImportTargetResolutionInput,
     NamespaceTargetResolutionInput, ResolvedImportTarget, ResolvedNamespaceTarget,
-    SourceImportAccess, has_explicit_bst_extension, resolve_external_package_symbol,
+    SourceImportAccess, has_explicit_moth_extension, resolve_external_package_symbol,
     resolve_import_target, resolve_namespace_target,
 };
 pub(crate) use visible_names::{VisibleNameBinding, VisibleNameRegistry, check_alias_case_warning};

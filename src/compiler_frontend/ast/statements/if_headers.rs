@@ -292,7 +292,7 @@ fn if_condition_parse_context(
 /// statement `if`, value `if`, full matches, and future template `if` suffixes.
 ///
 /// Validates:
-/// - No capture name shadows an existing visible local (Beanstalk no-shadowing rule).
+/// - No capture name shadows an existing visible local (Moth no-shadowing rule).
 pub(crate) fn build_option_present_capture_scope_and_pattern(
     match_context: &ScopeContext,
     capture_name: StringId,

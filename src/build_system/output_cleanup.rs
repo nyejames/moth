@@ -18,9 +18,9 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 /// Manifest file written to the output root to track which managed build artifacts exist.
-pub(crate) const BUILD_MANIFEST_FILENAME: &str = ".beanstalk_manifest";
-const BUILD_MANIFEST_HEADER_V2: &str = "# beanstalk-manifest v2";
-const BUILD_MANIFEST_HEADER_PREFIX: &str = "# beanstalk-manifest ";
+pub(crate) const BUILD_MANIFEST_FILENAME: &str = ".moth_manifest";
+const BUILD_MANIFEST_HEADER_V3: &str = "# moth-manifest v3";
+const BUILD_MANIFEST_HEADER_PREFIX: &str = "# moth-manifest ";
 const BUILD_MANIFEST_BUILDER_PREFIX: &str = "# builder: ";
 const BUILD_MANIFEST_MANAGED_EXTENSIONS_PREFIX: &str = "# managed_extensions: ";
 
@@ -114,7 +114,7 @@ pub(crate) struct PreparedOutputCleanup {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ManifestLoadResult {
-    ValidV2 {
+    Valid {
         paths: Vec<PathBuf>,
         builder_kind: BuilderKind,
     },
@@ -217,7 +217,7 @@ pub(crate) fn finalize_output_cleanup(
     };
 
     match manifest_load_result {
-        ManifestLoadResult::ValidV2 { paths, .. } => {
+        ManifestLoadResult::Valid { paths, .. } => {
             remove_manifest_tracked_stale_artifacts(
                 output_root,
                 current_managed_artifact_paths,
@@ -305,7 +305,7 @@ pub(crate) fn validate_output_root_is_safe(
             output_root,
             format!(
                 "Refusing to use '{}' as the build output root because it is a protected system path. \
-                 Configure a project-relative output folder in config.bst.",
+                 Configure a project-relative output folder in config.moth.",
                 output_root.display()
             ),
             string_table,
@@ -381,7 +381,7 @@ pub(crate) fn read_build_manifest(
         };
     }
 
-    if first_line != BUILD_MANIFEST_HEADER_V2 {
+    if first_line != BUILD_MANIFEST_HEADER_V3 {
         let reason = if first_line.starts_with(BUILD_MANIFEST_HEADER_PREFIX) {
             ManifestLimitedSafeModeReason::UnsupportedVersion
         } else {
@@ -390,7 +390,7 @@ pub(crate) fn read_build_manifest(
         return ManifestLoadResult::LimitedSafeMode { reason };
     }
 
-    read_v2_build_manifest(non_empty_lines, active_policy)
+    read_v3_build_manifest(non_empty_lines, active_policy)
 }
 
 /// Write the build manifest listing all current managed artifact paths.
@@ -413,7 +413,7 @@ pub(crate) fn write_build_manifest(
     sorted_paths.sort();
 
     let mut manifest_lines = vec![
-        String::from(BUILD_MANIFEST_HEADER_V2),
+        String::from(BUILD_MANIFEST_HEADER_V3),
         format!(
             "{BUILD_MANIFEST_BUILDER_PREFIX}{}",
             cleanup_policy.builder_kind.manifest_name()
@@ -449,7 +449,7 @@ pub(crate) fn write_build_manifest(
 /// Remove stale managed files tracked by the previous manifest.
 ///
 /// WHAT: deletes stale manifest-tracked files after revalidating each relative path for safety.
-/// WHY: v2 manifests are the supported ownership contract, so stale removal trusts the manifest's
+/// WHY: v3 manifests are the supported ownership contract, so stale removal trusts the manifest's
 /// emitted-path list instead of trying to infer ownership from extensions or route shapes.
 pub(crate) fn remove_manifest_tracked_stale_artifacts(
     output_root: &Path,
@@ -515,7 +515,7 @@ where
     paths
 }
 
-fn read_v2_build_manifest<'a, I>(
+fn read_v3_build_manifest<'a, I>(
     mut manifest_lines: I,
     active_policy: &CleanupPolicy,
 ) -> ManifestLoadResult
@@ -569,7 +569,7 @@ where
         };
     }
 
-    ManifestLoadResult::ValidV2 {
+    ManifestLoadResult::Valid {
         paths: parse_manifest_paths(manifest_lines),
         builder_kind: manifest_builder_kind,
     }
@@ -650,7 +650,7 @@ fn relative_path_extension(path: &Path) -> Option<String> {
 
 fn emit_limited_safe_mode_warning(reason: &ManifestLimitedSafeModeReason) {
     say!(Yellow format!(
-        "Warning: full manifest-based stale cleanup was unavailable because {}. Cleanup ran in limited safe mode; stale artifacts were preserved intentionally until a valid v2 manifest is available.",
+        "Warning: full manifest-based stale cleanup was unavailable because {}. Cleanup ran in limited safe mode; stale artifacts were preserved intentionally until a valid manifest is available.",
         reason.describe()
     ));
 }

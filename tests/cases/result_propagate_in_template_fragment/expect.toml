@@ -6,4 +6,4 @@ rendered_output_contains = ["ok_value"]
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_result_propagate", "propagate_template"]
+must_contain = ["__moth_result_propagate", "propagate_template"]

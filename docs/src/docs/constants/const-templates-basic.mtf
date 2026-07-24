@@ -1,0 +1,21 @@
+A constant template is finished during compilation.
+
+[codeblock, $code("moth"):
+    title #= "Moth"
+
+    heading #= [$md:
+        # [title]
+    ]
+]
+
+A direct top-level const template in an active HTML module root can also become part of the
+generated page:
+
+[codeblock, $code("moth"):
+    #[$md:
+        # Compile-time heading
+    ]
+]
+
+Const template loops have an iteration limit so an accidental build-time loop
+cannot run forever.

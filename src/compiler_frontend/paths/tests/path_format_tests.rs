@@ -57,13 +57,13 @@ fn entry_root_file_with_custom_origin() {
         &mut st,
     );
     let config = PathStringFormatConfig {
-        origin: String::from("/beanstalk"),
+        origin: String::from("/moth"),
         output_style: OutputPathStyle::Portable,
     };
 
     assert_eq!(
         format_compile_time_path(&path, &config, &st),
-        "/beanstalk/assets/images/logo.png"
+        "/moth/assets/images/logo.png"
     );
 }
 
@@ -77,14 +77,11 @@ fn directory_gets_trailing_slash() {
         &mut st,
     );
     let config = PathStringFormatConfig {
-        origin: String::from("/beanstalk"),
+        origin: String::from("/moth"),
         output_style: OutputPathStyle::Portable,
     };
 
-    assert_eq!(
-        format_compile_time_path(&path, &config, &st),
-        "/beanstalk/docs/"
-    );
+    assert_eq!(format_compile_time_path(&path, &config, &st), "/moth/docs/");
 }
 
 #[test]
@@ -97,7 +94,7 @@ fn relative_file_stays_relative_no_origin() {
         &mut st,
     );
     let config = PathStringFormatConfig {
-        origin: String::from("/beanstalk"),
+        origin: String::from("/moth"),
         output_style: OutputPathStyle::Portable,
     };
 
@@ -165,11 +162,11 @@ fn entry_root_empty_directory_with_custom_origin_formats_as_origin_root() {
         &mut st,
     );
     let config = PathStringFormatConfig {
-        origin: String::from("/beanstalk"),
+        origin: String::from("/moth"),
         output_style: OutputPathStyle::Portable,
     };
 
-    assert_eq!(format_compile_time_path(&path, &config, &st), "/beanstalk/");
+    assert_eq!(format_compile_time_path(&path, &config, &st), "/moth/");
 }
 
 // -----------------------------------------------------------------------

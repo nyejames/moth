@@ -1,0 +1,56 @@
+Project-local source-backed packages are scoped `+*.moth` support packages discovered structurally from the project source tree. No config folder scanning or `package_folders` setting exists.
+
+### Directory structure
+
+[codeblock, $code("text"):
+    project-root/
+    ├── config.moth
+    ├── src/
+    │   ├── #site.moth
+    │   ├── markdown/
+    │   │   ├── +package.moth
+    │   │   ├── parser/
+    │   │   │   └── #parser.moth
+    │   │   └── rendering/
+    │   │       └── #rendering.moth
+    │   └── pages/
+    │       └── #pages.moth
+    └── +package.moth
+]
+
+The `markdown` directory contains a `+package.moth` root, making `@markdown` a scoped support package visible to `#site`, `#pages` and their descendants.
+
+### Scoped visibility
+
+For a support package `S` whose nearest ancestor normal module is `P`:
+
+- `S` is visible to `P`
+- `S` is visible to normal sibling modules of `S` and their descendants
+- `S` is not visible above `P`
+- `S` is not visible outside `P`'s subtree
+- `S` is not visible inside its own private implementation subtree
+- another support package in the same owner scope cannot import `S`
+
+### Public surface
+
+Outside importers can only see declarations and grouped re-exports marked public by the support root's `export:` block. Internal implementation files are hidden unless the root re-exports them.
+
+### Private subtrees
+
+The support facade may import ordinary files it owns, any descendant module in its private subtree, support packages from a strictly outer scope and registered packages. It may not import its parent, normal sibling consumers or same-scope support siblings.
+
+Consumers see only the support facade's `export:` surface. They cannot address `@markdown/parser` or another implementation path.
+
+### Imported package roots do not produce routes
+
+A support package root is imported rather than activated as an HTML route. Its top-level runtime body and page fragments remain inactive in the consuming project. It exports declarations but produces no HTML artifact. See @../project-structure/#html-routing-and-artifacts (HTML routing and artifacts).
+
+### Origin and backing are separate
+
+Scoped `+*.moth` packages are ProjectLocal packages backed by Moth source. `@html` is also source-backed but has Builder origin. `@core/math` and `@web/canvas` are binding-backed packages with Core and Builder origins respectively. See @#package-origins-and-backing (Package origins and backing).
+
+### Related concepts
+
+- For module root rules see @../project-structure/#module-roots (Module roots).
+- For the export block see @../project-structure/#public-api (Public API).
+- For import path resolution see @#import-paths (Import paths).

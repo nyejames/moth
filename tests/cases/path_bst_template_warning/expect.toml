@@ -1,6 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "success"
-warnings = "exact"
-warning_codes = ["BST-RULE-0019"]

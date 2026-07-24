@@ -10,11 +10,11 @@ use crate::compiler_frontend::hir::ids::FunctionId;
 
 pub const CORE_IO_PACKAGE_PATH: &str = "@core/io";
 pub const IO_NAMESPACE_NAME: &str = "io";
-pub const COLLECTION_GET_HOST_NAME: &str = "__bs_collection_get";
-pub const COLLECTION_SET_HOST_NAME: &str = "__bs_collection_set";
-pub const COLLECTION_PUSH_HOST_NAME: &str = "__bs_collection_push";
-pub const COLLECTION_REMOVE_HOST_NAME: &str = "__bs_collection_remove";
-pub const COLLECTION_LENGTH_HOST_NAME: &str = "__bs_collection_length";
+pub const COLLECTION_GET_HOST_NAME: &str = "__moth_collection_get";
+pub const COLLECTION_SET_HOST_NAME: &str = "__moth_collection_set";
+pub const COLLECTION_PUSH_HOST_NAME: &str = "__moth_collection_push";
+pub const COLLECTION_REMOVE_HOST_NAME: &str = "__moth_collection_remove";
+pub const COLLECTION_LENGTH_HOST_NAME: &str = "__moth_collection_length";
 
 /// Stable identifier for an external package within one build.
 ///
@@ -61,26 +61,26 @@ impl ExternalFunctionId {
     /// Stable JS/helper-facing name for diagnostics and HIR display.
     pub fn name(&self) -> &'static str {
         match self {
-            Self::IoPrint => "__bs_io_print",
-            Self::IoLine => "__bs_io_line",
-            Self::IoDebug => "__bs_io_debug",
-            Self::IoWarn => "__bs_io_warn",
-            Self::IoError => "__bs_io_error",
-            Self::IoInputNew => "__bs_io_input_new",
-            Self::IoInputUpdate => "__bs_io_input_update",
-            Self::IoInputClose => "__bs_io_input_close",
-            Self::IoInputKeyDown => "__bs_io_input_key_down",
-            Self::IoInputKeyPressed => "__bs_io_input_key_pressed",
-            Self::IoInputKeyReleased => "__bs_io_input_key_released",
-            Self::IoInputPointerX => "__bs_io_input_pointer_x",
-            Self::IoInputPointerY => "__bs_io_input_pointer_y",
-            Self::IoInputPointerDown => "__bs_io_input_pointer_down",
-            Self::IoInputPointerPressed => "__bs_io_input_pointer_pressed",
-            Self::IoInputPointerReleased => "__bs_io_input_pointer_released",
-            Self::IoInputLastKeyPressed => "__bs_io_input_last_key_pressed",
-            Self::IoInputLastKeyReleased => "__bs_io_input_last_key_released",
-            Self::IoInputLastPointerPressed => "__bs_io_input_last_pointer_pressed",
-            Self::IoInputLastPointerReleased => "__bs_io_input_last_pointer_released",
+            Self::IoPrint => "__moth_io_print",
+            Self::IoLine => "__moth_io_line",
+            Self::IoDebug => "__moth_io_debug",
+            Self::IoWarn => "__moth_io_warn",
+            Self::IoError => "__moth_io_error",
+            Self::IoInputNew => "__moth_io_input_new",
+            Self::IoInputUpdate => "__moth_io_input_update",
+            Self::IoInputClose => "__moth_io_input_close",
+            Self::IoInputKeyDown => "__moth_io_input_key_down",
+            Self::IoInputKeyPressed => "__moth_io_input_key_pressed",
+            Self::IoInputKeyReleased => "__moth_io_input_key_released",
+            Self::IoInputPointerX => "__moth_io_input_pointer_x",
+            Self::IoInputPointerY => "__moth_io_input_pointer_y",
+            Self::IoInputPointerDown => "__moth_io_input_pointer_down",
+            Self::IoInputPointerPressed => "__moth_io_input_pointer_pressed",
+            Self::IoInputPointerReleased => "__moth_io_input_pointer_released",
+            Self::IoInputLastKeyPressed => "__moth_io_input_last_key_pressed",
+            Self::IoInputLastKeyReleased => "__moth_io_input_last_key_released",
+            Self::IoInputLastPointerPressed => "__moth_io_input_last_pointer_pressed",
+            Self::IoInputLastPointerReleased => "__moth_io_input_last_pointer_released",
             Self::CollectionGet => COLLECTION_GET_HOST_NAME,
             Self::CollectionSet => COLLECTION_SET_HOST_NAME,
             Self::CollectionPush => COLLECTION_PUSH_HOST_NAME,

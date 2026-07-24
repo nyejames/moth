@@ -7,4 +7,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_param_binding", "__bs_binding(", "console.log"]
+must_contain = ["__moth_param_binding", "__moth_binding(", "console.log"]

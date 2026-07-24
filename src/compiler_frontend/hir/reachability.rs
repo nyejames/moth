@@ -117,7 +117,7 @@ pub(crate) struct ReachableNumericOpUse {
 
 /// A reachable compiler-owned Float formatting or validation statement.
 ///
-/// WHY: backends that do not yet implement Beanstalk Float formatting or external-Float boundary
+/// WHY: backends that do not yet implement Moth Float formatting or external-Float boundary
 ///      validation must reject the reachable HIR operation before lowering instead of failing with a
 ///      backend-internal error.
 #[derive(Clone, Debug, PartialEq, Eq)]

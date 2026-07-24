@@ -1,0 +1,80 @@
+Collections use five compiler-owned member operations.
+
+### `get`
+
+[codeblock, $code("moth"):
+    value = items.get(index) catch:
+        then fallback
+    ;
+]
+
+- argument: `index Int`
+- success: the element value
+- failure: builtin `Error!`
+- receiver access: shared
+
+### `set`
+
+[codeblock, $code("moth"):
+    ~items.set(index, value) catch:
+    ;
+]
+
+- arguments: `index Int`, then one element value
+- success: no value
+- failure: builtin `Error!`
+- receiver access: mutable
+- replaces an existing element only
+- does not fill unused fixed capacity
+
+### `push`
+
+[codeblock, $code("moth"):
+    ~items.push(value) catch:
+    ;
+]
+
+- argument: one element value
+- success: no value
+- failure: builtin `Error!`
+- receiver access: mutable
+- appends after the current last element
+- fails when a fixed collection is full
+
+### `remove`
+
+[codeblock, $code("moth"):
+    removed = ~items.remove(index) catch:
+        then fallback
+    ;
+]
+
+- argument: `index Int`
+- success: the removed element
+- failure: builtin `Error!`
+- receiver access: mutable
+- shifts later elements down
+- frees one slot in a fixed collection
+
+### `length`
+
+[codeblock, $code("moth"):
+    count = items.length()
+]
+
+- no arguments
+- success: `Int`
+- infallible
+- receiver access: shared
+- returns logical length, not fixed capacity
+
+### Shared rules
+
+- `get`, `set`, `push` and `remove` must use postfix `!` or `catch`.
+- `set`, `push` and `remove` require `~receiver`.
+- Builtin member arguments are positional-only.
+- Assignment through `get` is removed.
+- Square-bracket indexing is not supported.
+- Invalid indices use the typed error path rather than a silent no-op.
+
+Error propagation and recovery are specified by @../errors (Errors, options and assertions).

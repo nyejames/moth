@@ -1,0 +1,94 @@
+The compiler owns a closed set of static cast traits. They provide source evidence for explicit `cast` and `cast!` conversions.
+
+### Trait table
+
+Each trait requires one receiver method:
+
+- `CASTABLE_TO_INT` requires `to_int |This| -> Int`
+- `TRY_CASTABLE_TO_INT` requires `try_to_int |This| -> Int, Error!`
+- `CASTABLE_TO_FLOAT` requires `to_float |This| -> Float`
+- `TRY_CASTABLE_TO_FLOAT` requires `try_to_float |This| -> Float, Error!`
+- `CASTABLE_TO_BOOL` requires `to_bool |This| -> Bool`
+- `TRY_CASTABLE_TO_BOOL` requires `try_to_bool |This| -> Bool, Error!`
+- `CASTABLE_TO_STRING` requires `to_string |This| -> String`
+- `TRY_CASTABLE_TO_STRING` requires `try_to_string |This| -> String, Error!`
+- `CASTABLE_TO_CHAR` requires `to_char |This| -> Char`
+- `TRY_CASTABLE_TO_CHAR` requires `try_to_char |This| -> Char, Error!`
+- `CASTABLE_TO_ERROR` requires `to_error |This| -> Error`
+- `TRY_CASTABLE_TO_ERROR` requires `try_to_error |This| -> Error, Error!`
+
+### Contract
+
+- These traits resolve without imports.
+- They cannot be redeclared, imported, exported, aliased or shadowed.
+- They cannot be used as values.
+- The compiler registers builtin evidence for the builtin cast table.
+- Same-file nominal source types and aligned generic constructors may provide evidence.
+- Source method implementations use lowercase `this` and the concrete receiver type.
+- Explicit conformance is required.
+- Infallible and fallible pairs for one target are incompatible.
+- Evidence resolves before HIR.
+- The traits prove source evidence only.
+- They do not create user-defined target types or a general conversion framework.
+
+### Example
+
+[codeblock, $code("moth"):
+    Label = |
+        text String,
+    |
+
+    to_string |this Label| -> String:
+        return this.text
+    ;
+
+    Label must CASTABLE_TO_STRING
+
+    value String = cast Label("docs")
+]
+
+### Infallible versus fallible
+
+[codeblock, $code("moth"):
+    -- Infallible: source always produces the target
+    Label must CASTABLE_TO_STRING
+
+    -- Fallible: source may produce the target or an error
+    Label must TRY_CASTABLE_TO_INT
+]
+
+A fallible conformance requires the matching `try_to_*` method. The method returns success with `return` and failure with `return!`:
+
+[codeblock, $code("moth"):
+    Label = |
+        text String,
+    |
+
+    try_to_int |this Label| -> Int, Error!:
+        value Int = cast! this.text
+        return value
+    ;
+
+    Label must TRY_CASTABLE_TO_INT
+
+    -- Local recovery with `cast ... catch`.
+    number Int = cast Label("42") catch |err|:
+        then 0
+    ;
+]
+
+Propagation through a compatible `Error!` function uses `cast!`:
+
+[codeblock, $code("moth"):
+    parse_label |label Label| -> Int, Error!:
+        value Int = cast! label
+        return value
+    ;
+]
+
+`cast!` and `catch` are mutually exclusive. `cast! ... catch` is rejected.
+
+### Related concepts
+
+- For cast target selection and fallible handling see @../casts (Casts).
+- For trait incompatibility see @#trait-incompatibility (Trait incompatibility).

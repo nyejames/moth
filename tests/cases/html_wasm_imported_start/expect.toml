@@ -8,4 +8,4 @@ warnings = "forbid"
 path = "page.wasm"
 kind = "wasm"
 validate_wasm = true
-must_export = ["memory", "bst_str_ptr", "bst_str_len", "bst_release", "bst_start", "bst_vec_new", "bst_vec_push", "bst_vec_len", "bst_vec_get"]
+must_export = ["memory", "moth_str_ptr", "moth_str_len", "moth_release", "moth_start", "moth_vec_new", "moth_vec_push", "moth_vec_len", "moth_vec_get"]

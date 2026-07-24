@@ -1,7 +1,7 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0020"]
+diagnostic_codes = ["MOTH-SYNTAX-0020"]
 message_contains = [
     "Generic parameter bounds use `is`.",
     "type T is TRAIT",

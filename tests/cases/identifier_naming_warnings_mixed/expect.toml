@@ -2,9 +2,9 @@
 mode = "success"
 warnings = "exact"
 warning_codes = [
-    "BST-RULE-0021",
-    "BST-RULE-0021",
-    "BST-RULE-0021",
-    "BST-RULE-0021",
-    "BST-RULE-0021",
+    "MOTH-RULE-0021",
+    "MOTH-RULE-0021",
+    "MOTH-RULE-0021",
+    "MOTH-RULE-0021",
+    "MOTH-RULE-0021",
 ]

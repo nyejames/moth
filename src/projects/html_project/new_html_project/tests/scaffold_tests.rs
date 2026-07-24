@@ -1,4 +1,4 @@
-//! Tests for the `bean new html` file-writing scaffold.
+//! Tests for the `moth new html` file-writing scaffold.
 //!
 //! Each test owns one distinct scaffold contract. Same-family decision pairs
 //! and inventories share one labelled owner so failure localization stays clear,
@@ -46,10 +46,10 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
 
     // Scaffold-owned files are the exact conflict set, in declared order.
     for file in [
-        "config.bst",
-        "src/#page.bst",
-        "dev/.beanstalk_manifest",
-        "release/.beanstalk_manifest",
+        "config.moth",
+        "src/#page.moth",
+        "dev/.moth_manifest",
+        "release/.moth_manifest",
     ] {
         if let Some(parent) = project_dir.join(file).parent() {
             fs::create_dir_all(parent).unwrap();
@@ -59,10 +59,10 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
     assert_eq!(
         find_scaffold_conflicts(&project_dir),
         vec![
-            "config.bst",
-            "src/#page.bst",
-            "dev/.beanstalk_manifest",
-            "release/.beanstalk_manifest",
+            "config.moth",
+            "src/#page.moth",
+            "dev/.moth_manifest",
+            "release/.moth_manifest",
         ]
     );
 
@@ -80,7 +80,7 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
 fn preflight_rejects_conflicts_without_force() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().to_path_buf();
-    fs::write(project_dir.join("config.bst"), b"old").unwrap();
+    fs::write(project_dir.join("config.moth"), b"old").unwrap();
 
     let target = empty_target(project_dir);
     let mut prompt = ScriptedPrompt::new(Vec::new());
@@ -88,7 +88,7 @@ fn preflight_rejects_conflicts_without_force() {
     let error = run_preflight_checks(&target, false, &mut prompt).unwrap_err();
 
     assert!(error.contains("Cannot create project"));
-    assert!(error.contains("config.bst"));
+    assert!(error.contains("config.moth"));
     assert!(error.contains("--force"));
 }
 
@@ -108,14 +108,14 @@ fn preflight_succeeds_without_prompt_when_no_conflicts_exist() {
 fn preflight_force_confirmation_confirms_or_cancels() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().to_path_buf();
-    fs::write(project_dir.join("config.bst"), b"old").unwrap();
+    fs::write(project_dir.join("config.moth"), b"old").unwrap();
 
     // Confirming proceeds and the warning lists the conflicting file.
     let target = empty_target(project_dir.clone());
     let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
     assert!(run_preflight_checks(&target, true, &mut prompt).is_ok());
     assert!(prompt.messages[0].contains("WARNING: --force"));
-    assert!(prompt.messages[0].contains("config.bst"));
+    assert!(prompt.messages[0].contains("config.moth"));
 
     // Declining cancels project creation.
     let mut prompt = ScriptedPrompt::new(vec![String::from("n")]);
@@ -146,7 +146,7 @@ fn preflight_non_empty_warning_confirms_or_cancels() {
 fn end_to_end_conflict_without_force_performs_no_writes() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().to_path_buf();
-    fs::write(project_dir.join("config.bst"), b"original").unwrap();
+    fs::write(project_dir.join("config.moth"), b"original").unwrap();
 
     let options = NewHtmlProjectOptions {
         raw_path: Some(project_dir.to_string_lossy().to_string()),
@@ -157,7 +157,7 @@ fn end_to_end_conflict_without_force_performs_no_writes() {
     let error = create_html_project_template_with_prompt(options, &mut prompt).unwrap_err();
     assert!(error.contains("Cannot create project"));
 
-    let content = fs::read_to_string(project_dir.join("config.bst")).unwrap();
+    let content = fs::read_to_string(project_dir.join("config.moth")).unwrap();
     assert_eq!(content, "original");
 }
 
@@ -165,7 +165,7 @@ fn end_to_end_conflict_without_force_performs_no_writes() {
 fn end_to_end_force_overwrites_scaffold_owned_files_only() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().to_path_buf();
-    fs::write(project_dir.join("config.bst"), b"original").unwrap();
+    fs::write(project_dir.join("config.moth"), b"original").unwrap();
     fs::write(project_dir.join("user-file.txt"), b"keep me").unwrap();
 
     let options = NewHtmlProjectOptions {
@@ -182,7 +182,7 @@ fn end_to_end_force_overwrites_scaffold_owned_files_only() {
     let result = create_html_project_template_with_prompt(options, &mut prompt);
     assert!(result.is_ok(), "expected success, got: {result:?}");
 
-    let config_content = fs::read_to_string(project_dir.join("config.bst")).unwrap();
+    let config_content = fs::read_to_string(project_dir.join("config.moth")).unwrap();
     assert!(config_content.contains("name #= "));
 
     let user_content = fs::read_to_string(project_dir.join("user-file.txt")).unwrap();
@@ -199,26 +199,26 @@ fn creates_full_default_scaffold_and_reports_every_path() {
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
 
     // Every scaffold-owned path exists on disk.
-    assert!(project_dir.join("config.bst").exists());
-    assert!(project_dir.join("src/#page.bst").exists());
+    assert!(project_dir.join("config.moth").exists());
+    assert!(project_dir.join("src/#page.moth").exists());
     assert!(project_dir.join("lib").exists());
-    assert!(project_dir.join("dev/.beanstalk_manifest").exists());
-    assert!(project_dir.join("release/.beanstalk_manifest").exists());
+    assert!(project_dir.join("dev/.moth_manifest").exists());
+    assert!(project_dir.join("release/.moth_manifest").exists());
     assert!(project_dir.join(".gitignore").exists());
 
     // The default scaffold creates every path and replaces, updates, or skips nothing.
-    assert!(report.created.contains(&PathBuf::from("config.bst")));
-    assert!(report.created.contains(&PathBuf::from("src/#page.bst")));
+    assert!(report.created.contains(&PathBuf::from("config.moth")));
+    assert!(report.created.contains(&PathBuf::from("src/#page.moth")));
     assert!(report.created.contains(&PathBuf::from("lib")));
     assert!(
         report
             .created
-            .contains(&PathBuf::from("dev/.beanstalk_manifest"))
+            .contains(&PathBuf::from("dev/.moth_manifest"))
     );
     assert!(
         report
             .created
-            .contains(&PathBuf::from("release/.beanstalk_manifest"))
+            .contains(&PathBuf::from("release/.moth_manifest"))
     );
     assert!(report.created.contains(&PathBuf::from(".gitignore")));
     assert!(report.replaced.is_empty());
@@ -240,19 +240,19 @@ fn generated_files_exactly_match_templates() {
     write_scaffold(&target, false, &mut prompt).unwrap();
 
     assert_eq!(
-        fs::read_to_string(project_dir.join("config.bst")).unwrap(),
+        fs::read_to_string(project_dir.join("config.moth")).unwrap(),
         start_page_scaffolding::config_template("Test Site")
     );
     assert_eq!(
-        fs::read_to_string(project_dir.join("src/#page.bst")).unwrap(),
+        fs::read_to_string(project_dir.join("src/#page.moth")).unwrap(),
         start_page_scaffolding::page_template()
     );
     assert_eq!(
-        fs::read_to_string(project_dir.join("dev/.beanstalk_manifest")).unwrap(),
+        fs::read_to_string(project_dir.join("dev/.moth_manifest")).unwrap(),
         start_page_scaffolding::manifest_template()
     );
     assert_eq!(
-        fs::read_to_string(project_dir.join("release/.beanstalk_manifest")).unwrap(),
+        fs::read_to_string(project_dir.join("release/.moth_manifest")).unwrap(),
         start_page_scaffolding::manifest_template()
     );
 }
@@ -298,7 +298,7 @@ fn gitignore_appends_when_present_without_dev_block_or_skips_when_declined() {
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
     let content = fs::read_to_string(project_dir.join(".gitignore")).unwrap();
     assert!(content.contains("node_modules/"));
-    assert!(content.contains("# Beanstalk"));
+    assert!(content.contains("# Moth"));
     assert!(content.contains("/dev"));
     assert!(report.updated.contains(&PathBuf::from(".gitignore")));
 
@@ -348,7 +348,7 @@ fn project_name_is_escaped_in_config() {
 
     write_scaffold(&target, false, &mut prompt).unwrap();
 
-    let content = fs::read_to_string(project_dir.join("config.bst")).unwrap();
+    let content = fs::read_to_string(project_dir.join("config.moth")).unwrap();
     assert!(content.contains(r#"name #= "Say \"hello\"\\back""#));
 }
 
@@ -360,14 +360,10 @@ fn force_replaces_scaffold_owned_files_only() {
     fs::create_dir(project_dir.join("src")).unwrap();
     fs::create_dir(project_dir.join("dev")).unwrap();
     fs::create_dir(project_dir.join("release")).unwrap();
-    fs::write(project_dir.join("config.bst"), b"old config").unwrap();
-    fs::write(project_dir.join("src/#page.bst"), b"old page").unwrap();
-    fs::write(project_dir.join("dev/.beanstalk_manifest"), b"old manifest").unwrap();
-    fs::write(
-        project_dir.join("release/.beanstalk_manifest"),
-        b"old manifest",
-    )
-    .unwrap();
+    fs::write(project_dir.join("config.moth"), b"old config").unwrap();
+    fs::write(project_dir.join("src/#page.moth"), b"old page").unwrap();
+    fs::write(project_dir.join("dev/.moth_manifest"), b"old manifest").unwrap();
+    fs::write(project_dir.join("release/.moth_manifest"), b"old manifest").unwrap();
     fs::write(project_dir.join("user-file.txt"), b"keep me").unwrap();
 
     let target = named_target(project_dir.clone(), "Test Site", true);
@@ -375,17 +371,17 @@ fn force_replaces_scaffold_owned_files_only() {
 
     let report = write_scaffold(&target, true, &mut prompt).unwrap();
 
-    assert!(report.replaced.contains(&PathBuf::from("config.bst")));
-    assert!(report.replaced.contains(&PathBuf::from("src/#page.bst")));
+    assert!(report.replaced.contains(&PathBuf::from("config.moth")));
+    assert!(report.replaced.contains(&PathBuf::from("src/#page.moth")));
     assert!(
         report
             .replaced
-            .contains(&PathBuf::from("dev/.beanstalk_manifest"))
+            .contains(&PathBuf::from("dev/.moth_manifest"))
     );
     assert!(
         report
             .replaced
-            .contains(&PathBuf::from("release/.beanstalk_manifest"))
+            .contains(&PathBuf::from("release/.moth_manifest"))
     );
 
     let user_content = fs::read_to_string(project_dir.join("user-file.txt")).unwrap();
@@ -430,7 +426,7 @@ fn existing_contains_dev_block_recognizes_exact_rules_and_rejects_near_matches()
         assert!(existing_contains_dev_block(present), "{present:?}");
     }
 
-    // Near matches that must not be treated as the Beanstalk /dev rule.
+    // Near matches that must not be treated as the Moth /dev rule.
     for absent in [
         "/device\n",
         "prefix/dev\n",

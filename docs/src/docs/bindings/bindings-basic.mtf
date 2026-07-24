@@ -1,0 +1,19 @@
+A binding is a name for a value.
+
+[codeblock, $code("moth"):
+    score = 10
+    player_name = "Priya"
+]
+
+Moth usually infers the type from the value.
+
+Write the type when it makes the code clearer or gives the compiler needed
+context:
+
+[codeblock, $code("moth"):
+    score Int = 10
+    player_name String = "Priya"
+]
+
+Bindings are immutable unless you mark them as mutable. An immutable binding
+cannot be assigned a different value later.

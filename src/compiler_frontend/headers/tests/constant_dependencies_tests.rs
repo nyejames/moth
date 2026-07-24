@@ -13,7 +13,7 @@ use std::path::PathBuf;
 fn missing_constant_position_produces_infrastructure_error() {
     let mut string_table = StringTable::new();
     let constant_path = InternedPath::try_from_filesystem_path(
-        &PathBuf::from("src/missing.bst"),
+        &PathBuf::from("src/missing.moth"),
         &mut string_table,
     )
     .expect("test path should be UTF-8");

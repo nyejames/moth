@@ -143,8 +143,8 @@ fn render_payload_message(
         | DiagnosticPayload::ExplicitSourceExtension { .. }
         | DiagnosticPayload::UnsupportedSourceFileKind { .. }
         | DiagnosticPayload::InvalidSourceFileEntry { .. }
-        | DiagnosticPayload::InvalidBeandownApiScopeItem { .. }
-        | DiagnosticPayload::DuplicateBeandownInputPath { .. }
+        | DiagnosticPayload::InvalidMothTemplateApiScopeItem { .. }
+        | DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
         | DiagnosticPayload::UnsupportedExternalExtension { .. }
         | DiagnosticPayload::InvalidExternalModule { .. } => {
             import_payload_message(payload, string_table)
@@ -181,7 +181,7 @@ fn render_payload_message(
         }
         DiagnosticPayload::UnreachableMatchArm => "Unreachable match arm".to_owned(),
         DiagnosticPayload::BstFilePathInTemplateOutput { path } => format!(
-            "Beanstalk source path '{}' is being inserted into template output",
+            "Moth source path '{}' is being inserted into template output",
             string_table.resolve(*path)
         ),
         DiagnosticPayload::LargeTrackedAsset { path, byte_size } => {
@@ -559,8 +559,8 @@ fn render_payload_message(
 
 fn source_kind_name(source_kind: SourceFileKind) -> &'static str {
     match source_kind {
-        SourceFileKind::Beanstalk => "Beanstalk `.bst` source",
-        SourceFileKind::Beandown => "Beandown `.bd` source",
+        SourceFileKind::Moth => "Moth `.moth` source",
+        SourceFileKind::MothTemplate => "Moth template `.mtf` source",
         SourceFileKind::PlainMarkdown => "plain Markdown `.md` source",
     }
 }
@@ -842,7 +842,7 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
             member_name,
         } => duplicate_import_surface_member_message(surface_path, *member_name, string_table),
         DiagnosticPayload::ExplicitBstExtension { path } => {
-            explicit_bst_extension_message(path, string_table)
+            explicit_moth_extension_message(path, string_table)
         }
         DiagnosticPayload::ExplicitSourceExtension { path, extension } => {
             explicit_source_extension_message(path, *extension, string_table)
@@ -853,11 +853,11 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
         DiagnosticPayload::InvalidSourceFileEntry { path, extension } => {
             invalid_source_file_entry_message(path, *extension, string_table)
         }
-        DiagnosticPayload::InvalidBeandownApiScopeItem { path } => {
-            invalid_beandown_api_scope_item_message(path, string_table)
+        DiagnosticPayload::InvalidMothTemplateApiScopeItem { path } => {
+            invalid_moth_template_api_scope_item_message(path, string_table)
         }
-        DiagnosticPayload::DuplicateBeandownInputPath { path, .. } => {
-            duplicate_beandown_input_path_message(path, string_table)
+        DiagnosticPayload::DuplicateMothTemplateInputPath { path, .. } => {
+            duplicate_moth_template_input_path_message(path, string_table)
         }
         DiagnosticPayload::UnsupportedExternalExtension { path, extension } => {
             unsupported_external_extension_message(path, *extension, string_table)

@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Language basics | Beanstalk</title>
-    <meta name="description" content="Blocks, comments, naming, core values, strings and characters in Beanstalk.">
+    <title>Language basics | Moth</title>
+    <meta name="description" content="Blocks, comments, naming, core values, strings and characters in Moth.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -668,7 +668,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Language basics</p><h1>Language basics</h1><p>Beanstalk is a language with a small semantic surface.  Each bit of puncuation or keyword represents a single concept. </p><p>This page is all about the syntax you will see all over Beanstalk codebases.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Language basics</p><h1>Language basics</h1><p>Moth is a language with a small semantic surface.  Each bit of puncuation or keyword represents a single concept. </p><p>This page is all about the syntax you will see all over Moth codebases.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Blocks and statements
@@ -718,25 +718,25 @@ body {
 
 
 
-            <p>Most Beanstalk blocks have a colon at the start and a semicolon at the end.</p><pre style=""><code class='codeblock'>
-    greet <span class='bst-code-operator'>|</span>name <span class='bst-code-type'>String</span><span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Hello,</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span>
+            <p>Most Moth blocks have a colon at the start and a semicolon at the end.</p><pre style=""><code class='codeblock'>
+    greet <span class='moth-code-operator'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><p>The colon opens the function body. The semicolon closes it.</p><p>Semicolons do not end every line. Add one only when the surrounding block is finished.</p><p>Use indentation to make nesting easy to see:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-keyword'>if</span> ready<span class='bst-code-operator'>:</span>
-        io.line<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;Ready!&quot;</span><span class='bst-code-parenthesis'>)</span>
+    <span class='moth-code-keyword'>if</span> ready<span class='moth-code-operator'>:</span>
+        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ready!&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Beanstalk uses explicit block delimiters.</p><p>A colon opens a block. A semicolon closes that block.</p><pre style=""><code class='codeblock'>
-    clamp_to_zero <span class='bst-code-operator'>|</span>value <span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>Int</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>if</span> value <span class='bst-code-operator'>&lt;</span> <span class='bst-code-number'>0</span><span class='bst-code-operator'>:</span>
-            <span class='bst-code-keyword'>return</span> <span class='bst-code-number'>0</span>
+        <p>Moth uses explicit block delimiters.</p><p>A colon opens a block. A semicolon closes that block.</p><pre style=""><code class='codeblock'>
+    clamp_to_zero <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>if</span> value <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>0</span><span class='moth-code-operator'>:</span>
+            <span class='moth-code-keyword'>return</span> <span class='moth-code-number'>0</span>
         ;
 
-        <span class='bst-code-keyword'>return</span> value
+        <span class='moth-code-keyword'>return</span> value
     ;
     </code></pre><h3>Contract</h3><ul><li><code>:</code> opens a function body, branch, loop or another block-form construct.</li><li><code>;</code> closes the active block.</li><li>A semicolon does not terminate an ordinary statement.</li><li>Statements inside a block are evaluated in source order unless control flow exits or redirects the block.</li><li>Child blocks create child scopes.</li><li>Indentation is for readability. Explicit delimiters define block boundaries.</li></ul><h3>Reading the shape</h3><p>The final semicolon in the example closes the function. The earlier semicolon closes the <code>if</code> block.</p><p>Nested language features may add their own structural rules. Branching, loops, functions and template control flow document those forms in detail.</p>
     </div>
@@ -790,36 +790,36 @@ body {
 
 
 
-            <p>In ordinary Beanstalk code, comments begin with two minus signs:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- This source-code line is ignored by the compiler.</span>
-    score <span class='bst-code-operator'>=</span> <span class='bst-code-number'>10</span>
-    </code></pre><p>Template and Beandown bodies are content. Two minus signs inside those bodies are text rather than source comments.</p><p>Use <code>regular_snake_case</code> for values and functions:</p><pre style=""><code class='codeblock'>
-    player_score <span class='bst-code-operator'>=</span> <span class='bst-code-number'>10</span>
+            <p>In ordinary Moth code, comments begin with two minus signs:</p><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- This source-code line is ignored by the compiler.</span>
+    score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>
+    </code></pre><p>Template and moth template bodies are content. Two minus signs inside those bodies are text rather than source comments.</p><p>Use <code>regular_snake_case</code> for values and functions:</p><pre style=""><code class='codeblock'>
+    player_score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>
 
-    double_score <span class='bst-code-operator'>|</span>score <span class='bst-code-type'>Int</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>Int</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> score <span class='bst-code-operator'>*</span> <span class='bst-code-number'>2</span>
+    double_score <span class='moth-code-operator'>|</span>score <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> score <span class='moth-code-operator'>*</span> <span class='moth-code-number'>2</span>
     ;
     </code></pre><p>Use <code>PascalCase</code> for named types:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-struct'>PlayerScore</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        value <span class='bst-code-struct'>Int,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>PlayerScore</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        value <span class='moth-code-struct'>Int,</span>
+    <span class='moth-code-operator'>|</span>
     </code></pre><p>Clear names beat short names. <code>player_score</code> is easier to understand than <code>ps</code>, especially when the code grows.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>In ordinary Beanstalk code, <code>--</code> starts a single-line comment.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- Explain why this value exists.</span>
-    retry_count <span class='bst-code-operator'>=</span> <span class='bst-code-number'>3</span>
-    </code></pre><p>Everything after <code>--</code> on that source-code line is comment text.</p><h3>Template and Beandown text</h3><p>Template bodies are content, not ordinary code-token context.</p><p>Inside a template body, <code>--</code> is ordinary body text. A Beandown <code>.bd</code> file is the body of an implicit compile-time Markdown template, so <code>--</code> is text there too.</p><p>Use template directives such as <code>$note</code> or <code>$todo</code> when template-authored content should be ignored.</p><h3>Naming conventions</h3><ul><li>Variables and functions use <code>regular_snake_case</code>.</li><li>Structs, choices, type aliases and generic parameters use <code>PascalCase</code>.</li><li>Trait names use all-caps identifiers such as <code>DISPLAY_TEXT</code>.</li><li>Names should describe their role rather than their storage or implementation detail.</li></ul><pre style=""><code class='codeblock'>
-    retry_count <span class='bst-code-operator'>=</span> <span class='bst-code-number'>3</span>
+        <p>In ordinary Moth code, <code>--</code> starts a single-line comment.</p><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- Explain why this value exists.</span>
+    retry_count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
+    </code></pre><p>Everything after <code>--</code> on that source-code line is comment text.</p><h3>Template and moth template text</h3><p>Template bodies are content, not ordinary code-token context.</p><p>Inside a template body, <code>--</code> is ordinary body text. A moth template <code>.mtf</code> file is the body of an implicit compile-time Markdown template, so <code>--</code> is text there too.</p><p>Use template directives such as <code>$note</code> or <code>$todo</code> when template-authored content should be ignored.</p><h3>Naming conventions</h3><ul><li>Variables and functions use <code>regular_snake_case</code>.</li><li>Structs, choices, type aliases and generic parameters use <code>PascalCase</code>.</li><li>Trait names use all-caps identifiers such as <code>DISPLAY_TEXT</code>.</li><li>Names should describe their role rather than their storage or implementation detail.</li></ul><pre style=""><code class='codeblock'>
+    retry_count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
 
-    load_profile <span class='bst-code-operator'>|</span>user_id <span class='bst-code-type'>String</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-string'>&quot;profile&quot;</span>
+    load_profile <span class='moth-code-operator'>|</span>user_id <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;profile&quot;</span>
     ;
 
-    <span class='bst-code-struct'>UserProfile</span> <span class='bst-code-operator'>=</span> <span class='bst-code-operator'>|</span>
-        display_name <span class='bst-code-struct'>String,</span>
-    <span class='bst-code-operator'>|</span>
+    <span class='moth-code-struct'>UserProfile</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        display_name <span class='moth-code-struct'>String,</span>
+    <span class='moth-code-operator'>|</span>
     </code></pre><h3>Name collisions</h3><p>A visible name cannot be redeclared while it remains in scope.</p><p>The complete no-shadowing contract is documented by <a href="../bindings/#shadowing">Values and bindings</a>. Import aliases and module API names have additional collision rules in the Packages documentation.</p>
     </div>
     </fieldset></section>
@@ -872,32 +872,32 @@ body {
 
 
 
-            <p>Beanstalk can usually work out a value&#39;s type from the value itself.</p><pre style=""><code class='codeblock'>
-    enabled <span class='bst-code-operator'>=</span> true
-    count <span class='bst-code-operator'>=</span> <span class='bst-code-number'>42</span>
-    ratio <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0.5</span>
-    letter <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&#39;🌱&#39;</span>
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Beanstalk&quot;</span>
+            <p>Moth can usually work out a value&#39;s type from the value itself.</p><pre style=""><code class='codeblock'>
+    enabled <span class='moth-code-operator'>=</span> true
+    count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+    ratio <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
+    letter <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;ʚĭɞ&#39;</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
     </code></pre><p>You can write the type when it helps the reader or gives the compiler needed context:</p><pre style=""><code class='codeblock'>
-    count <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>42</span>
-    ratio <span class='bst-code-type'>Float</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0.5</span>
-    name <span class='bst-code-type'>String</span> <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Beanstalk&quot;</span>
+    count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+    ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
+    name <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
     </code></pre><p>The most common core types are:</p><ul><li><code>Bool</code> for <code>true</code> and <code>false</code></li><li><code>Int</code> for whole numbers</li><li><code>Float</code> for decimal numbers</li><li><code>Char</code> for one character</li><li><code>String</code> for text</li></ul><p>Collections, structs, choices and options build larger values from these ideas.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Values have a semantic type. A binding may infer that type from its initializer or state it explicitly.</p><pre style=""><code class='codeblock'>
-    enabled <span class='bst-code-operator'>=</span> true
-    count <span class='bst-code-type'>Int</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>42</span>
-    ratio <span class='bst-code-type'>Float</span> <span class='bst-code-operator'>=</span> <span class='bst-code-number'>0.5</span>
-    letter <span class='bst-code-struct'>Char</span> <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&#39;🌱&#39;</span>
-    label <span class='bst-code-type'>String</span> <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Beanstalk&quot;</span>
+    enabled <span class='moth-code-operator'>=</span> true
+    count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+    ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
+    letter <span class='moth-code-struct'>Char</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;ʚĭɞ&#39;</span>
+    label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
     </code></pre><h3>Core forms</h3><ul><li><code>true</code> and <code>false</code> are <code>Bool</code> values.</li><li>Whole-number literals are naturally <code>Int</code>.</li><li>Decimal-point literals are naturally <code>Float</code>.</li><li>Single-quoted literals create <code>Char</code> values.</li><li>Quoted slices and string templates use the <code>String</code> type.</li><li><code>none</code> requires an optional <code>T?</code> receiving context.</li></ul><p>The Numbers documentation owns exact numeric grammar and arithmetic behaviour. The Strings and characters section owns the implemented string source forms. Options are documented with Errors and options.</p><h3>Composite values</h3><p>Collections use braces. String templates use square brackets.</p><pre style=""><code class='codeblock'>
-    names <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>{</span><span class='bst-code-string'>&quot;Priya&quot;</span>, <span class='bst-code-string'>&quot;Grace&quot;</span><span class='bst-code-parenthesis'>}</span>
+    names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-    message <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Hello</span> from a template.
-    <span class='bst-code-parenthesis'>]</span>
+    message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Hello</span> from a template.
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Structs, choices, collections, maps and generic instances add richer value shapes without changing the basic annotation form.</p><p>Binding mutability and access mode are separate from semantic type identity. See <a href="../bindings">Values and bindings</a> for that contract.</p>
     </div>
     </fieldset></section>
@@ -951,68 +951,68 @@ body {
 
 
             <p>Use double quotes for normal text:</p><pre style=""><code class='codeblock'>
-    greeting <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Hello&quot;</span>
+    greeting <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello&quot;</span>
     </code></pre><p>Expression-position backtick strings aren&#39;t implemented. Use an ordinary string with escapes when the text contains backslashes:</p><pre style=""><code class='codeblock'>
-    windows_path <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;C:\\docs\\site&quot;</span>
+    windows_path <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;C:\\docs\\site&quot;</span>
     </code></pre><p>Use single quotes for one character:</p><pre style=""><code class='codeblock'>
-    seedling <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&#39;🌱&#39;</span>
+    seedling <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;ʚĭɞ&#39;</span>
     </code></pre><p>Use a template when text needs values or a larger structure:</p><pre style=""><code class='codeblock'>
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Priya&quot;</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 
-    greeting <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Hello,</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Joining strings</h3><p>Use templates to join strings together. Put the parts inside square brackets:</p><pre style=""><code class='codeblock'>
-    first <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Hello, &quot;</span>
-    second <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;world&quot;</span>
-    message <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span>first, second<span class='bst-code-parenthesis'>]</span>
+    first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
+    second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;world&quot;</span>
+    message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>first, second<span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Don&#39;t use <code>+</code> to join strings. <code>+</code> is for numbers only:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- WRONG: this won&#39;t compile</span>
-    <span class='bst-code-comment'>-- message = first + second</span>
+    <span class='moth-code-comment'>-- WRONG: this won&#39;t compile</span>
+    <span class='moth-code-comment'>-- message = first + second</span>
     </code></pre><h3>Strings are read-only</h3><p>A quoted string like <code>&quot;Hello&quot;</code> is read-only content. You can reassign a mutable binding to point at a different string, but you can&#39;t change the string itself.</p><p>Square brackets belong to templates. Collections use curly braces instead.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Beanstalk has two string source forms and one character form. Both string forms share one semantic <code>String</code> type at ordinary typed boundaries.</p><pre style=""><code class='codeblock'>
-    escaped_slice <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Hello\nworld&quot;</span>
-    letter <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&#39;🌱&#39;</span>
+        <p>Moth has two string source forms and one character form. Both string forms share one semantic <code>String</code> type at ordinary typed boundaries.</p><pre style=""><code class='codeblock'>
+    escaped_slice <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello\nworld&quot;</span>
+    letter <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;ʚĭɞ&#39;</span>
 
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Priya&quot;</span>
-    message <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Hello,</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+    message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Quoted string slices</h3><p>Double quotes create escaped string slices. They support exactly these escapes:</p><ul><li><code>\\</code> for a backslash</li><li><code>\&quot;</code> for a double quote</li><li><code>\n</code> for a newline</li><li><code>\r</code> for a carriage return</li><li><code>\t</code> for a tab</li></ul><p>Every other escape is invalid. A backslash can&#39;t continue a quoted string across a physical newline.</p><p>A quoted string slice is read-only content. It has no character or substring mutation surface and isn&#39;t concatenated with <code>+</code>. A slice may be read, compared, passed, returned, stored and inserted into templates. A mutable binding that currently holds a slice may be reassigned. That doesn&#39;t make the slice contents mutable.</p><pre style=""><code class='codeblock'>
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Priya&quot;</span>
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Aisha&quot;</span>  <span class='bst-code-comment'>-- reassigns the binding, doesn&#39;t mutate the slice</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Aisha&quot;</span>  <span class='moth-code-comment'>-- reassigns the binding, doesn&#39;t mutate the slice</span>
     </code></pre><h3>Characters</h3><p>Single quotes create <code>Char</code> values.</p><h3>Template strings</h3><p>Square brackets create string templates. Templates produce owned string values and may fold at compile time or lower to runtime string construction.</p><p>Templates are the idiomatic and canonical way to:</p><ul><li>concatenate strings</li><li>interpolate values</li><li>build runtime or compile-time text</li><li>produce strings that need full template composition</li></ul><pre style=""><code class='codeblock'>
-    first <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Hello, &quot;</span>
-    second <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;world&quot;</span>
-    message <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span>first, second<span class='bst-code-parenthesis'>]</span>
+    first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
+    second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;world&quot;</span>
+    message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>first, second<span class='moth-code-parenthesis'>]</span>
 
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Priya&quot;</span>
-    greeting <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Hello,</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+    greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Use [left, right] for concatenation. Don&#39;t use <code>+</code>:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- VALID: template concatenation</span>
-    joined <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span>left, right<span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-comment'>-- VALID: template concatenation</span>
+    joined <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>left, right<span class='moth-code-parenthesis'>]</span>
 
-    <span class='bst-code-comment'>-- INVALID: + is a numeric operator only</span>
-    joined <span class='bst-code-operator'>=</span> left <span class='bst-code-operator'>+</span> right
+    <span class='moth-code-comment'>-- INVALID: + is a numeric operator only</span>
+    joined <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
     </code></pre><p>The compiler rejects <code>String + String</code> and every mixed string <code>+</code> form with the ordinary invalid-operator diagnostic.</p><h3>One semantic <code>String</code> type</h3><p>Quoted slices and template-produced strings share one <code>String</code> type at ordinary typed boundaries. They share:</p><ul><li>parameter and return compatibility</li><li>equality</li><li>choice payload equality</li><li>collection and map value use</li><li><code>String</code> map-key use</li><li>casts</li><li>IO and external <code>StringContent</code> boundaries</li><li>template insertion</li><li>aliases and generic use where <code>String</code> is concrete</li></ul><p>Construction origin doesn&#39;t create hidden equality, hashing, map-key or call-compatibility rules.</p><h3>Equality</h3><p><code>String</code> supports <code>is</code> and <code>is not</code>. <code>String</code> doesn&#39;t support ordering operators (<code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>).</p><pre style=""><code class='codeblock'>
-    slice <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;hello&quot;</span>
-    template <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> hello<span class='bst-code-parenthesis'>]</span>
+    slice <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;hello&quot;</span>
+    template <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> hello<span class='moth-code-parenthesis'>]</span>
 
-    <span class='bst-code-comment'>-- VALID: equality across both forms</span>
-    same <span class='bst-code-operator'>=</span> slice is template
+    <span class='moth-code-comment'>-- VALID: equality across both forms</span>
+    same <span class='moth-code-operator'>=</span> slice is template
 
-    <span class='bst-code-comment'>-- INVALID: ordering is not supported</span>
-    <span class='bst-code-comment'>-- ordered = slice &lt; template</span>
+    <span class='moth-code-comment'>-- INVALID: ordering is not supported</span>
+    <span class='moth-code-comment'>-- ordered = slice &lt; template</span>
     </code></pre><h3>Binding reassignment versus content mutation</h3><p>A mutable binding that holds a string can be reassigned. The string content itself is always read-only. There is no in-place string mutation API.</p><pre style=""><code class='codeblock'>
-    text <span class='bst-code-operator'>~</span><span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;initial&quot;</span>
-    text <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;replacement&quot;</span>  <span class='bst-code-comment'>-- valid: reassigns the binding</span>
+    text <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;initial&quot;</span>
+    text <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;replacement&quot;</span>  <span class='moth-code-comment'>-- valid: reassigns the binding</span>
 
-    <span class='bst-code-comment'>-- No mutation API exists:</span>
-    <span class='bst-code-comment'>-- text.append(&quot;more&quot;)  -- invalid</span>
-    <span class='bst-code-comment'>-- text[0] = &#39;X&#39;        -- invalid</span>
+    <span class='moth-code-comment'>-- No mutation API exists:</span>
+    <span class='moth-code-comment'>-- text.append(&quot;more&quot;)  -- invalid</span>
+    <span class='moth-code-comment'>-- text[0] = &#39;X&#39;        -- invalid</span>
     </code></pre><h3>Templates</h3><p>Templates own interpolation, formatting, slots, wrappers and structured content. See <a href="../templates">Templates</a> for the complete system.</p><p>Quoted slices and templates both participate in the language&#39;s <code>String</code> surface. Expression-position raw backtick slices aren&#39;t implemented. Inside a template body, backticks, backslashes and physical newlines are ordinary body text available to the active formatter.</p>
     </div>
     </fieldset></section>
@@ -1041,109 +1041,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1158,63 +1158,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1224,36 +1224,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1266,65 +1266,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1332,10 +1332,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

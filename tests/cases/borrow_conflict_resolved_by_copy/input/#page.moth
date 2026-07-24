@@ -1,0 +1,11 @@
+-- Resolves a shared/mutable access conflict by copying the shared value before
+-- the mutable access. The copy is independent, so the mutable access does not
+-- conflict with the later read (MOTH-BORROW-0003 is avoided).
+
+data ~= 42
+shared = data
+independent = copy shared
+mutable_ref ~= data
+mutable_ref = 7
+result = independent
+io.line([:borrow_conflict_resolved_by_copy result=[result] mutable=[mutable_ref]])

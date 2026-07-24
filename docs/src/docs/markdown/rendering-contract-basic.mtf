@@ -1,0 +1,19 @@
+Plain Markdown supports common formatting through a CommonMark-compatible renderer.
+
+### Supported forms
+
+- Headings, paragraphs, emphasis, bold
+- Links, ordered and unordered lists, nested lists
+- Inline code and fenced code blocks
+- Tables, task lists, strikethrough, footnotes
+- Raw HTML is preserved
+
+### One clear limitation
+
+Moth template syntax is not interpreted. Dollar-prefixed directives are just text. Bracket-delimited template bodies are just text. Use moth template files if you need Moth-aware content.
+
+### Remember
+
+- The renderer is CommonMark-compatible with GFM extensions.
+- It is not the same as a moth template's md renderer.
+- Smart punctuation is disabled.

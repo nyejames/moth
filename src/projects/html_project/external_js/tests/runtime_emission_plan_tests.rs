@@ -13,7 +13,7 @@ use std::path::PathBuf;
 #[test]
 fn plan_collects_js_assets_by_canonical_path() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.bst"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
     module.link_facts.module_external_imports = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
         runtime_asset: Some(RuntimeAssetIdentity {
@@ -35,7 +35,7 @@ fn plan_collects_js_assets_by_canonical_path() {
 #[test]
 fn plan_ignores_non_js_assets() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.bst"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
     module.link_facts.module_external_imports = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
         runtime_asset: Some(RuntimeAssetIdentity {
@@ -53,29 +53,26 @@ fn plan_ignores_non_js_assets() {
 #[test]
 fn plan_collects_runtime_module_specifiers() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.bst"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
     module.link_facts.module_external_imports = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
         runtime_asset: None,
         required_runtime_imports: vec![RequiredRuntimeImport {
-            module_name: "@beanstalk/runtime".to_owned(),
-            imported_names: vec!["bstOk".to_owned()],
+            module_name: "@moth/runtime".to_owned(),
+            imported_names: vec!["mothOk".to_owned()],
         }],
     }];
 
     let plan = HtmlExternalRuntimeEmissionPlan::from_modules(&[module]);
 
     assert_eq!(plan.runtime_module_specifiers().len(), 1);
-    assert!(
-        plan.runtime_module_specifiers()
-            .contains("@beanstalk/runtime")
-    );
+    assert!(plan.runtime_module_specifiers().contains("@moth/runtime"));
 }
 
 #[test]
 fn plan_dedupes_js_assets_across_modules() {
     let mut string_table = StringTable::new();
-    let mut module_a = create_test_module(PathBuf::from("#page.bst"), &mut string_table);
+    let mut module_a = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
     module_a.link_facts.module_external_imports = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
         runtime_asset: Some(RuntimeAssetIdentity {
@@ -85,7 +82,7 @@ fn plan_dedupes_js_assets_across_modules() {
         required_runtime_imports: vec![],
     }];
 
-    let mut module_b = create_test_module(PathBuf::from("docs/#page.bst"), &mut string_table);
+    let mut module_b = create_test_module(PathBuf::from("docs/#page.moth"), &mut string_table);
     module_b.link_facts.module_external_imports = vec![ModuleExternalImport {
         package_id: ExternalPackageId(2),
         runtime_asset: Some(RuntimeAssetIdentity {
@@ -103,23 +100,23 @@ fn plan_dedupes_js_assets_across_modules() {
 #[test]
 fn plan_dedupes_runtime_specifiers_across_modules() {
     let mut string_table = StringTable::new();
-    let mut module_a = create_test_module(PathBuf::from("#page.bst"), &mut string_table);
+    let mut module_a = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
     module_a.link_facts.module_external_imports = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
         runtime_asset: None,
         required_runtime_imports: vec![RequiredRuntimeImport {
-            module_name: "@beanstalk/runtime".to_owned(),
-            imported_names: vec!["bstOk".to_owned()],
+            module_name: "@moth/runtime".to_owned(),
+            imported_names: vec!["mothOk".to_owned()],
         }],
     }];
 
-    let mut module_b = create_test_module(PathBuf::from("docs/#page.bst"), &mut string_table);
+    let mut module_b = create_test_module(PathBuf::from("docs/#page.moth"), &mut string_table);
     module_b.link_facts.module_external_imports = vec![ModuleExternalImport {
         package_id: ExternalPackageId(2),
         runtime_asset: None,
         required_runtime_imports: vec![RequiredRuntimeImport {
-            module_name: "@beanstalk/runtime".to_owned(),
-            imported_names: vec!["bstErr".to_owned()],
+            module_name: "@moth/runtime".to_owned(),
+            imported_names: vec!["mothErr".to_owned()],
         }],
     }];
 

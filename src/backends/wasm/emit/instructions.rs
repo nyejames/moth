@@ -248,7 +248,7 @@ pub(crate) fn emit_statement(
         }
         WasmLirStmt::IntToFloatDiv { dst, lhs, rhs } => {
             // Convert I64 operands to F64, then divide.
-            // WHY: Beanstalk Int / Int always yields Float; conversion is the emitter's responsibility.
+            // WHY: Moth Int / Int always yields Float; conversion is the emitter's responsibility.
             function.instruction(&Instruction::LocalGet(local_index(*lhs, context)?));
             function.instruction(&Instruction::F64ConvertI64S);
             function.instruction(&Instruction::LocalGet(local_index(*rhs, context)?));

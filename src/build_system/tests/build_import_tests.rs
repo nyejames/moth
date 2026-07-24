@@ -14,12 +14,12 @@ fn build_single_file_project_includes_reachable_import_files() {
     fs::create_dir_all(&root).expect("should create temp root");
     fs::create_dir_all(root.join("utils")).expect("should create utils directory");
     fs::write(
-        root.join("main.bst"),
+        root.join("main.moth"),
         "import @utils/helper { greet }\ngreet()\n",
     )
     .expect("should write main file");
     fs::write(
-        root.join("utils/helper.bst"),
+        root.join("utils/helper.moth"),
         "greet||:\n    io.line([: [\"hello\"]])\n;\n",
     )
     .expect("should write helper file");
@@ -28,7 +28,7 @@ fn build_single_file_project_includes_reachable_import_files() {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
         let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-        let result = build_project(&builder, "main.bst", &[]).expect("build should succeed");
+        let result = build_project(&builder, "main.moth", &[]).expect("build should succeed");
 
         assert!(
             !result.project.output_files.is_empty(),
@@ -43,15 +43,15 @@ fn build_single_file_project_includes_reachable_import_files() {
 fn build_html_project_local_js_import_emits_generated_glue() {
     let root = temp_dir("html_project_local_js_glue");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("config.bst"), "project #= \"html\"\n").expect("should write config");
+    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
-        root.join("#page.bst"),
+        root.join("#page.moth"),
         "import @./drawing.js { draw }\nvalue = draw()\n",
     )
     .expect("should write page");
     fs::write(
         root.join("drawing.js"),
-        "/**\n * @bst.sig draw || -> Int\n */\nexport function draw() { return 7; }\n",
+        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 7; }\n",
     )
     .expect("should write js");
 
@@ -73,8 +73,8 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         })
         .expect("build should emit HTML");
     assert!(html.contains("<script type=\"module\">"));
-    assert!(html.contains("import { __bs_glue_fn"));
-    assert!(html.contains("from \"./_beanstalk/js/glue/module-"));
+    assert!(html.contains("import { __moth_glue_fn"));
+    assert!(html.contains("from \"./_moth/js/glue/module-"));
 
     let glue = result
         .project
@@ -82,7 +82,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         .iter()
         .find_map(|file| {
             let path = file.relative_output_path().to_string_lossy();
-            if !path.contains("_beanstalk/js/glue/") {
+            if !path.contains("_moth/js/glue/") {
                 return None;
             }
             match file.file_kind() {
@@ -91,8 +91,8 @@ fn build_html_project_local_js_import_emits_generated_glue() {
             }
         })
         .expect("build should emit generated glue");
-    assert!(glue.contains("import { draw as __bs_external_fn"));
-    assert!(glue.contains("return __bs_external_fn"));
+    assert!(glue.contains("import { draw as __moth_external_fn"));
+    assert!(glue.contains("return __moth_external_fn"));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -101,15 +101,15 @@ fn build_html_project_local_js_import_emits_generated_glue() {
 fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map() {
     let root = temp_dir("html_project_fallible_js_runtime");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("config.bst"), "project #= \"html\"\n").expect("should write config");
+    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
-        root.join("#page.bst"),
+        root.join("#page.moth"),
         "import @./drawing.js { get_number }\nvalue = get_number() catch:\n    then 0\n;\n",
     )
     .expect("should write page");
     fs::write(
         root.join("drawing.js"),
-        "import { bstOk } from \"@beanstalk/runtime\";\n/**\n * @bst.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return bstOk(7); }\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
 
@@ -130,7 +130,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     assert!(
         output_paths
             .iter()
-            .any(|path| path.ends_with("_beanstalk/js/runtime/beanstalk-runtime.js")),
+            .any(|path| path.ends_with("_moth/js/runtime/moth-runtime.js")),
         "JS files that import runtime helpers should emit the registered runtime module"
     );
 
@@ -144,8 +144,8 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
         })
         .expect("build should emit HTML");
     assert!(html.contains("<script type=\"importmap\">"));
-    assert!(html.contains("\"@beanstalk/runtime\""));
-    assert!(html.contains("\"./_beanstalk/js/runtime/beanstalk-runtime.js\""));
+    assert!(html.contains("\"@moth/runtime\""));
+    assert!(html.contains("\"./_moth/js/runtime/moth-runtime.js\""));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -154,15 +154,15 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
 fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module() {
     let root = temp_dir("html_project_non_fallible_js_runtime");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("config.bst"), "project #= \"html\"\n").expect("should write config");
+    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
-        root.join("#page.bst"),
+        root.join("#page.moth"),
         "import @./drawing.js { get_number }\nvalue = get_number()\nio.line([: [value]])\n",
     )
     .expect("should write page");
     fs::write(
         root.join("drawing.js"),
-        "import { bstOk } from \"@beanstalk/runtime\";\n/**\n * @bst.sig get_number || -> Int\n */\nexport function getNumber() { return bstOk(7).value; }\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int\n */\nexport function getNumber() { return mothOk(7).value; }\n",
     )
     .expect("should write js");
 
@@ -183,7 +183,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     assert!(
         output_paths
             .iter()
-            .any(|path| path.ends_with("_beanstalk/js/runtime/beanstalk-runtime.js")),
+            .any(|path| path.ends_with("_moth/js/runtime/moth-runtime.js")),
         "non-fallible JS with runtime helper import should emit the registered runtime module"
     );
 
@@ -197,7 +197,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
         })
         .expect("build should emit HTML");
     assert!(html.contains("<script type=\"importmap\">"));
-    assert!(html.contains("\"@beanstalk/runtime\""));
+    assert!(html.contains("\"@moth/runtime\""));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -206,15 +206,15 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
 fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_module() {
     let root = temp_dir("html_project_fallible_no_runtime");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("config.bst"), "project #= \"html\"\n").expect("should write config");
+    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
-        root.join("#page.bst"),
+        root.join("#page.moth"),
         "import @./drawing.js { get_number }\nvalue = get_number() catch:\n    then 0\n;\n",
     )
     .expect("should write page");
     fs::write(
         root.join("drawing.js"),
-        "/**\n * @bst.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return { ok: true, value: 7 }; }\n",
+        "/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return { ok: true, value: 7 }; }\n",
     )
     .expect("should write js");
 
@@ -235,7 +235,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.ends_with("_beanstalk/js/runtime/beanstalk-runtime.js")),
+            .any(|path| path.ends_with("_moth/js/runtime/moth-runtime.js")),
         "fallible JS without runtime helper import should not emit the registered runtime module"
     );
 
@@ -246,15 +246,15 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
 fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artifacts() {
     let root = temp_dir("html_project_unreachable_provider_js");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("config.bst"), "project #= \"html\"\n").expect("should write config");
+    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
-        root.join("#page.bst"),
+        root.join("#page.moth"),
         "import @./drawing.js { get_number }\nunused || -> Int, Error!:\n    return get_number()!\n;\nvalue = 1\n",
     )
     .expect("should write page");
     fs::write(
         root.join("drawing.js"),
-        "import { bstOk } from \"@beanstalk/runtime\";\n/**\n * @bst.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return bstOk(7); }\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
 
@@ -275,13 +275,13 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.to_string_lossy().contains("_beanstalk/js/glue/")),
+            .any(|path| path.to_string_lossy().contains("_moth/js/glue/")),
         "unreachable provider-created JS calls should not emit generated glue"
     );
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.ends_with("_beanstalk/js/runtime/beanstalk-runtime.js")),
+            .any(|path| path.ends_with("_moth/js/runtime/moth-runtime.js")),
         "unreachable provider-created JS calls should not emit runtime modules"
     );
 
@@ -299,7 +299,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
         "unreachable provider-created JS calls should not force a module script"
     );
     assert!(
-        !html.contains("import { __bs_glue_fn"),
+        !html.contains("import { __moth_glue_fn"),
         "unreachable provider-created JS calls should not add a glue preamble"
     );
     assert!(
@@ -314,9 +314,9 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
 fn build_html_project_unreachable_html_canvas_helper_import_does_not_emit_runtime_artifacts() {
     let root = temp_dir("html_project_unreachable_html_canvas_helper");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("config.bst"), "project #= \"html\"\n").expect("should write config");
+    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
-        root.join("#page.bst"),
+        root.join("#page.moth"),
         r#"import @html { canvas, get_canvas_context }
 #[canvas:
   [$insert("id"):unused_canvas]
@@ -346,19 +346,19 @@ fn build_html_project_unreachable_html_canvas_helper_import_does_not_emit_runtim
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.to_string_lossy().starts_with("_beanstalk/js/canvas-")),
+            .any(|path| path.to_string_lossy().starts_with("_moth/js/canvas-")),
         "unused @html canvas helper should not emit the built-in canvas asset"
     );
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.to_string_lossy().contains("_beanstalk/js/glue/")),
+            .any(|path| path.to_string_lossy().contains("_moth/js/glue/")),
         "unused @html canvas helper should not emit generated glue"
     );
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.ends_with("_beanstalk/js/runtime/beanstalk-runtime.js")),
+            .any(|path| path.ends_with("_moth/js/runtime/moth-runtime.js")),
         "unused @html canvas helper should not emit the registered runtime module"
     );
 
@@ -382,9 +382,9 @@ fn build_html_project_unreachable_html_canvas_helper_import_does_not_emit_runtim
 fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     let root = temp_dir("html_project_web_canvas_asset");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("config.bst"), "project #= \"html\"\n").expect("should write config");
+    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
-        root.join("#page.bst"),
+        root.join("#page.moth"),
         "import @web/canvas\nrun |id String| -> String, Error!:\n    canvas_ref = canvas.get_canvas(id)!\n    ctx ~= canvas.context_2d(canvas_ref)!\n    canvas.set_line_width(~ctx, 2.0)\n    gradient ~= canvas.create_linear_gradient(ctx, 0.0, 0.0, 10.0, 0.0)!\n    canvas.add_color_stop(~gradient, 0.0, \"red\")!\n    canvas.set_fill_gradient(~ctx, gradient)\n    canvas.fill_rect(~ctx, 0.0, 0.0, 10.0, 10.0)\n    return \"ok\"\n;\nresult = run(\"game\") catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
@@ -403,7 +403,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
         .iter()
         .find_map(|file| {
             let path = file.relative_output_path().to_string_lossy();
-            if !path.starts_with("_beanstalk/js/canvas-") {
+            if !path.starts_with("_moth/js/canvas-") {
                 return None;
             }
             match file.file_kind() {
@@ -413,8 +413,8 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
         })
         .expect("@web/canvas should emit its built-in JS asset");
     assert!(canvas_asset.contains("export function getCanvas"));
-    assert!(canvas_asset.contains("@bst.opaque Canvas2d"));
-    assert!(canvas_asset.contains("@bst.opaque CanvasGradient"));
+    assert!(canvas_asset.contains("@moth.opaque Canvas2d"));
+    assert!(canvas_asset.contains("@moth.opaque CanvasGradient"));
     assert!(canvas_asset.contains("export function createLinearGradient"));
     assert!(canvas_asset.contains("export function imageDataSetPixel"));
 
@@ -424,7 +424,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
         .iter()
         .find_map(|file| {
             let path = file.relative_output_path().to_string_lossy();
-            if !path.contains("_beanstalk/js/glue/") {
+            if !path.contains("_moth/js/glue/") {
                 return None;
             }
             match file.file_kind() {
@@ -433,11 +433,11 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
             }
         })
         .expect("@web/canvas calls should emit generated glue");
-    assert!(glue.contains("getCanvas as __bs_external_fn"));
-    assert!(glue.contains("fillRect as __bs_external_fn"));
-    assert!(glue.contains("createLinearGradient as __bs_external_fn"));
-    assert!(glue.contains("addColorStop as __bs_external_fn"));
-    assert!(glue.contains("setFillGradient as __bs_external_fn"));
+    assert!(glue.contains("getCanvas as __moth_external_fn"));
+    assert!(glue.contains("fillRect as __moth_external_fn"));
+    assert!(glue.contains("createLinearGradient as __moth_external_fn"));
+    assert!(glue.contains("addColorStop as __moth_external_fn"));
+    assert!(glue.contains("setFillGradient as __moth_external_fn"));
     assert!(
         glue.contains("from \"../canvas-"),
         "glue imports should be relative to the glue module"
@@ -457,7 +457,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
         "reachable @web/canvas glue should make the inline bundle a module script"
     );
     assert!(
-        html.contains("import { __bs_glue_"),
+        html.contains("import { __moth_glue_"),
         "reachable @web/canvas calls should add a glue import preamble"
     );
     assert!(
@@ -474,7 +474,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     assert!(
         output_paths
             .iter()
-            .any(|path| path.ends_with("_beanstalk/js/runtime/beanstalk-runtime.js")),
+            .any(|path| path.ends_with("_moth/js/runtime/moth-runtime.js")),
         "@web/canvas imports runtime helpers, so the registered runtime module should be emitted"
     );
 
@@ -485,9 +485,9 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
 fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     let root = temp_dir("html_project_html_canvas_helper_asset");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join("config.bst"), "project #= \"html\"\n").expect("should write config");
+    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
-        root.join("#page.bst"),
+        root.join("#page.moth"),
         "import @html { get_canvas_context }\ndraw || -> String, Error!:\n    context = get_canvas_context(\"game_canvas\")!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
@@ -506,7 +506,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
         .iter()
         .find_map(|file| {
             let path = file.relative_output_path().to_string_lossy();
-            if !path.starts_with("_beanstalk/js/canvas-") {
+            if !path.starts_with("_moth/js/canvas-") {
                 return None;
             }
             match file.file_kind() {
@@ -524,7 +524,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
         .iter()
         .find_map(|file| {
             let path = file.relative_output_path().to_string_lossy();
-            if !path.contains("_beanstalk/js/glue/") {
+            if !path.contains("_moth/js/glue/") {
                 return None;
             }
             match file.file_kind() {
@@ -533,8 +533,8 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
             }
         })
         .expect("reachable @html canvas helper should emit generated glue");
-    assert!(glue.contains("getCanvas as __bs_external_fn"));
-    assert!(glue.contains("context2d as __bs_external_fn"));
+    assert!(glue.contains("getCanvas as __moth_external_fn"));
+    assert!(glue.contains("context2d as __moth_external_fn"));
     assert!(
         glue.contains("from \"../canvas-"),
         "glue imports should be relative to the glue module"
@@ -550,7 +550,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
         })
         .expect("build should emit HTML");
     assert!(html.contains("<script type=\"module\">"));
-    assert!(html.contains("import { __bs_glue_"));
+    assert!(html.contains("import { __moth_glue_"));
     assert!(html.contains("<script type=\"importmap\">"));
 
     let output_paths = result
@@ -562,7 +562,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     assert!(
         output_paths
             .iter()
-            .any(|path| path.ends_with("_beanstalk/js/runtime/beanstalk-runtime.js")),
+            .any(|path| path.ends_with("_moth/js/runtime/moth-runtime.js")),
         "@html canvas helper imports runtime helpers, so the registered runtime module should be emitted"
     );
 
@@ -575,9 +575,9 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
     let src_dir = root.join("src");
     let docs_dir = src_dir.join("docs");
     fs::create_dir_all(&docs_dir).expect("should create docs directory");
-    fs::write(root.join("config.bst"), "entry_root #= \"src\"\n").expect("should write config");
-    fs::write(src_dir.join("#page.bst"), "value = 1\n").expect("should write homepage");
-    fs::write(docs_dir.join("#page.bst"), "value = 2\n").expect("should write docs page");
+    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(src_dir.join("#page.moth"), "value = 1\n").expect("should write homepage");
+    fs::write(docs_dir.join("#page.moth"), "value = 2\n").expect("should write docs page");
 
     let builder = ProjectBuilder::new(Box::new(MultiModuleDiagnosticBuilder));
     let Err(messages) = build_project(
@@ -601,7 +601,7 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
                 .to_path_buf(&messages.string_table)
         ),
         normalize_path(
-            &fs::canonicalize(src_dir.join("#page.bst")).expect("homepage should canonicalize")
+            &fs::canonicalize(src_dir.join("#page.moth")).expect("homepage should canonicalize")
         )
     );
     assert_eq!(
@@ -612,7 +612,7 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
                 .to_path_buf(&messages.string_table)
         ),
         normalize_path(
-            &fs::canonicalize(docs_dir.join("#page.bst")).expect("docs page should canonicalize")
+            &fs::canonicalize(docs_dir.join("#page.moth")).expect("docs page should canonicalize")
         )
     );
 

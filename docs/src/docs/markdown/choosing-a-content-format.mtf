@@ -1,0 +1,37 @@
+Choose the content format based on what the content needs.
+
+### Use `.md` when
+
+- The content is ordinary Markdown.
+- No Moth values, captures or templates are needed.
+- Portability matters. The file can be used with any Markdown tool.
+- Fenced code blocks, pipe tables or raw HTML preservation are needed.
+- The content should not see Moth scope.
+
+### Use `.mtf` when
+
+- The content needs compile-time Moth constants from the same-directory module root.
+- Nested templates or builder helpers such as `codeblock` are needed.
+- The `$md` Markdown subset is sufficient for the content's formatting needs.
+- Moth-aware link syntax `@path (label)` is useful.
+
+### Use `.moth` templates when
+
+- Runtime values or runtime control flow are needed.
+- Full slot and wrapper composition is needed.
+- The content is part of broader program logic.
+- Imports, declarations or page fragments are needed in the same file.
+
+### Distinguishing raw asset files
+
+Raw asset files such as images, stylesheets or JavaScript files are not content imports. They are tracked assets handled by the builder. Use normal Moth asset paths when a file should participate in tracked-asset output.
+
+### Distinguishing package source
+
+Core packages and project-local source-backed packages are not content formats. They provide typed declarations and functions. See @../packages/#package-origins-and-backing (Package origins and backing).
+
+### Related concepts
+
+- For Moth template files see @../moth-templates/#moth-template-files (Moth template files).
+- For plain Markdown see @#markdown-files (Markdown files).
+- For templates see @../templates/#template-basics (Template basics).

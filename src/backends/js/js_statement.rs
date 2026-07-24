@@ -62,7 +62,7 @@ impl<'hir> JsEmitter<'hir> {
                 let call = format!("{helper}({source_expr})");
                 if let Some(result_local) = result {
                     let result_name = self.local_name(*result_local)?;
-                    self.emit_line(&format!("__bs_assign_value({result_name}, {call});"));
+                    self.emit_line(&format!("__moth_assign_value({result_name}, {call});"));
                 } else {
                     self.emit_line(&format!("{call};"));
                 }
@@ -101,11 +101,11 @@ impl<'hir> JsEmitter<'hir> {
                 result,
             } => {
                 // WHAT: dispatch a finite-Float formatting operation to the JS runtime helper that
-                //       implements Beanstalk's formatting contract, then either wrap the carrier for
+                //       implements Moth's formatting contract, then either wrap the carrier for
                 //       trap mode or assign the carrier directly for builtin-Error recovery mode.
                 // WHY: Float formatting is a language builtin with an explicit failure mode; the
                 //      backend must map it to the helper that normalizes JS number text to the
-                //      Beanstalk contract instead of using target-native stringification directly.
+                //      Moth contract instead of using target-native stringification directly.
                 self.emit_format_float_statement(*failure_mode, source, *result)?;
             }
 
@@ -117,7 +117,7 @@ impl<'hir> JsEmitter<'hir> {
                 // WHAT: dispatch a finite-Float boundary check to the JS runtime helper, then either
                 //       wrap the carrier for trap mode or assign the carrier directly for
                 //       builtin-Error recovery mode.
-                // WHY: Beanstalk `Float` is finite `f64`; values from external/backend boundaries
+                // WHY: Moth `Float` is finite `f64`; values from external/backend boundaries
                 //      must be validated before use, and the backend must expose that check through
                 //      the same carrier contract as other checked numeric operations.
                 self.emit_validate_float_statement(*failure_mode, source, *result)?;
@@ -135,13 +135,13 @@ impl<'hir> JsEmitter<'hir> {
             HirStatementKind::PushRuntimeFragment { vec_local, value } => {
                 // WHAT: lower a fragment push into a JS vec push call against the unwrapped array.
                 // WHY: locals are stored as binding wrappers `{ value: ... }` so `.push` cannot be
-                //      called on the binding itself. __bs_read returns the underlying array.
+                //      called on the binding itself. __moth_read returns the underlying array.
                 //      Assignment value context preserves reactive template objects for Phase 7
                 //      mounting instead of snapshotting them to plain strings here.
                 let vec_name = self.local_name(*vec_local)?.to_owned();
                 let value_expr =
                     self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
-                self.emit_line(&format!("__bs_read({vec_name}).push({value_expr});"));
+                self.emit_line(&format!("__moth_read({vec_name}).push({value_expr});"));
             }
         }
 
@@ -153,7 +153,7 @@ impl<'hir> JsEmitter<'hir> {
     /// Lower a `HirStatementKind::MapOp` into the appropriate runtime helper call.
     ///
     /// WHAT: dispatches `get`, `contains`, `set`, `remove`, `clear`, and `length` to their
-    /// corresponding `__bs_map_*` helpers, validates arity against the HIR contract, and emits
+    /// corresponding `__moth_map_*` helpers, validates arity against the HIR contract, and emits
     /// a result assignment when the statement carries a destination local.
     /// WHY: map operations are language builtins, not external calls; the backend must map them
     ///      to the JS runtime helpers that enforce the branded-map representation.
@@ -169,12 +169,12 @@ impl<'hir> JsEmitter<'hir> {
 
         // Select the JS helper and its HIR arity contract.
         let (helper_name, expected_arity) = match op {
-            HirMapOp::Get => ("__bs_map_get", 1),
-            HirMapOp::Contains => ("__bs_map_contains", 1),
-            HirMapOp::Set => ("__bs_map_set", 2),
-            HirMapOp::Remove => ("__bs_map_remove", 1),
-            HirMapOp::Clear => ("__bs_map_clear", 0),
-            HirMapOp::Length => ("__bs_map_length", 0),
+            HirMapOp::Get => ("__moth_map_get", 1),
+            HirMapOp::Contains => ("__moth_map_contains", 1),
+            HirMapOp::Set => ("__moth_map_set", 2),
+            HirMapOp::Remove => ("__moth_map_remove", 1),
+            HirMapOp::Clear => ("__moth_map_clear", 0),
+            HirMapOp::Length => ("__moth_map_length", 0),
         };
 
         // Guard against arity mismatch between HIR and the backend.
@@ -205,7 +205,7 @@ impl<'hir> JsEmitter<'hir> {
         // Emit either an assignment to a destination local or a standalone call.
         if let Some(result_local) = result {
             let result_name = self.local_name(*result_local)?;
-            self.emit_line(&format!("__bs_assign_value({result_name}, {call});"));
+            self.emit_line(&format!("__moth_assign_value({result_name}, {call});"));
         } else {
             self.emit_line(&format!("{call};"));
         }
@@ -215,9 +215,9 @@ impl<'hir> JsEmitter<'hir> {
 
     /// Lower a `HirStatementKind::NumericOp` into the appropriate checked runtime helper call.
     ///
-    /// WHAT: dispatches `Int*` and `Float*` operations to their `__bs_int_*` / `__bs_float_*`
+    /// WHAT: dispatches `Int*` and `Float*` operations to their `__moth_int_*` / `__moth_float_*`
     ///       helpers, validates operand arity against the HIR contract, and emits the result
-    ///       assignment. Trap mode wraps the helper's fallible carrier in `__bs_numeric_trap` so
+    ///       assignment. Trap mode wraps the helper's fallible carrier in `__moth_numeric_trap` so
     ///       the result local receives only the scalar success value; ReturnError mode assigns the
     ///       carrier directly.
     /// WHY: numeric operations are compiler-owned builtins with explicit failure modes; the backend
@@ -255,9 +255,9 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
-    /// Lower a `HirStatementKind::FormatFloat` into the Beanstalk Float formatting helper call.
+    /// Lower a `HirStatementKind::FormatFloat` into the Moth Float formatting helper call.
     ///
-    /// WHAT: emits `__bs_format_float(source)` and assigns either the scalar formatted string
+    /// WHAT: emits `__moth_format_float(source)` and assigns either the scalar formatted string
     ///       (trap mode) or the fallible carrier (return-error mode) to the result local.
     /// WHY: formatting shares the same result-local carrier contract as `NumericOp`; trap mode
     ///      extracts the success value or throws, while return-error mode keeps the carrier for
@@ -269,13 +269,13 @@ impl<'hir> JsEmitter<'hir> {
         result: LocalId,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
-        let helper_call = format!("__bs_format_float({source_expr})");
+        let helper_call = format!("__moth_format_float({source_expr})");
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
     /// Lower a `HirStatementKind::ValidateFloat` into the finite-Float validation helper call.
     ///
-    /// WHAT: emits `__bs_float_validate(source)` and assigns either the scalar finite `Float`
+    /// WHAT: emits `__moth_float_validate(source)` and assigns either the scalar finite `Float`
     ///       (trap mode) or the fallible carrier (return-error mode) to the result local.
     /// WHY: Float boundary validation shares the same result-local carrier contract as
     ///      `NumericOp`; trap mode extracts the success value or throws, while return-error mode
@@ -287,13 +287,13 @@ impl<'hir> JsEmitter<'hir> {
         result: LocalId,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
-        let helper_call = format!("__bs_float_validate({source_expr})");
+        let helper_call = format!("__moth_float_validate({source_expr})");
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
     /// Emit the result assignment shared by checked numeric helper calls.
     ///
-    /// WHAT: wraps `helper_call` in `__bs_numeric_trap` for trap mode or assigns the carrier
+    /// WHAT: wraps `helper_call` in `__moth_numeric_trap` for trap mode or assigns the carrier
     ///       directly for return-error mode, then assigns the value to `result`.
     /// WHY: `NumericOp`, `FormatFloat`, and `ValidateFloat` all use the same result-local carrier
     ///      contract; keeping the assignment logic in one helper prevents near-duplicate lowering
@@ -305,13 +305,13 @@ impl<'hir> JsEmitter<'hir> {
         result: LocalId,
     ) -> Result<(), CompilerError> {
         let assigned_value = match failure_mode {
-            NumericFailureMode::Trap => format!("__bs_numeric_trap({helper_call})"),
+            NumericFailureMode::Trap => format!("__moth_numeric_trap({helper_call})"),
             NumericFailureMode::ReturnError => helper_call,
         };
 
         let result_name = self.local_name(result)?;
         self.emit_line(&format!(
-            "__bs_assign_value({result_name}, {assigned_value});"
+            "__moth_assign_value({result_name}, {assigned_value});"
         ));
 
         Ok(())
@@ -329,7 +329,7 @@ impl<'hir> JsEmitter<'hir> {
                 let target_ref = self.lower_place(target)?;
                 let emitted_value =
                     self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
-                self.emit_line(&format!("__bs_write({target_ref}, {emitted_value});"));
+                self.emit_line(&format!("__moth_write({target_ref}, {emitted_value});"));
 
                 Ok(())
             }
@@ -352,20 +352,20 @@ impl<'hir> JsEmitter<'hir> {
                     // Reactive declarations own stable source storage. Assignment updates that
                     // storage with the source's current value rather than rebinding it as an alias.
                     self.emit_line(&format!(
-                        "__bs_assign_value({local_name}, __bs_read({source}));",
+                        "__moth_assign_value({local_name}, __moth_read({source}));",
                     ));
                 } else if alias_only {
-                    self.emit_line(&format!("__bs_write({local_name}, __bs_read({source}));",));
+                    self.emit_line(&format!("__moth_write({local_name}, __moth_read({source}));",));
                 } else {
-                    self.emit_line(&format!("__bs_assign_borrow({local_name}, {source});"));
+                    self.emit_line(&format!("__moth_assign_borrow({local_name}, {source});"));
                 }
             }
             _ => {
                 let lowered = self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
                 if alias_only {
-                    self.emit_line(&format!("__bs_write({local_name}, {lowered});"));
+                    self.emit_line(&format!("__moth_write({local_name}, {lowered});"));
                 } else {
-                    self.emit_line(&format!("__bs_assign_value({local_name}, {lowered});"));
+                    self.emit_line(&format!("__moth_assign_value({local_name}, {lowered});"));
                 }
             }
         }
@@ -393,7 +393,7 @@ impl<'hir> JsEmitter<'hir> {
         // Borrow validation owns conservative invalidation detection. JS lowering only schedules
         // the dirty sources after the statement's ordinary semantics have run.
         for source_id in source_ids {
-            self.emit_line(&format!("__bs_reactive_schedule({source_id});"));
+            self.emit_line(&format!("__moth_reactive_schedule({source_id});"));
         }
     }
 
@@ -846,25 +846,25 @@ impl<'hir> JsEmitter<'hir> {
 
 /// Returns the JS runtime helper name for a checked numeric HIR operation.
 ///
-/// WHAT: maps each `HirNumericOp` to the `__bs_int_*` or `__bs_float_*` helper emitted by
+/// WHAT: maps each `HirNumericOp` to the `__moth_int_*` or `__moth_float_*` helper emitted by
 ///       `emit_runtime_numeric_helpers`.
 /// WHY: keeps the helper name decision in one place so statement lowering and runtime emission
 ///      cannot drift.
 fn js_numeric_helper_for_op(op: HirNumericOp) -> &'static str {
     match op {
-        HirNumericOp::IntAdd => "__bs_int_add",
-        HirNumericOp::IntSub => "__bs_int_sub",
-        HirNumericOp::IntMul => "__bs_int_mul",
-        HirNumericOp::IntDiv => "__bs_int_div",
-        HirNumericOp::IntMod => "__bs_int_mod",
-        HirNumericOp::IntPow => "__bs_int_pow",
-        HirNumericOp::IntNeg => "__bs_int_neg",
-        HirNumericOp::FloatAdd => "__bs_float_add",
-        HirNumericOp::FloatSub => "__bs_float_sub",
-        HirNumericOp::FloatMul => "__bs_float_mul",
-        HirNumericOp::FloatDiv => "__bs_float_div",
-        HirNumericOp::FloatMod => "__bs_float_mod",
-        HirNumericOp::FloatPow => "__bs_float_pow",
-        HirNumericOp::FloatNeg => "__bs_float_neg",
+        HirNumericOp::IntAdd => "__moth_int_add",
+        HirNumericOp::IntSub => "__moth_int_sub",
+        HirNumericOp::IntMul => "__moth_int_mul",
+        HirNumericOp::IntDiv => "__moth_int_div",
+        HirNumericOp::IntMod => "__moth_int_mod",
+        HirNumericOp::IntPow => "__moth_int_pow",
+        HirNumericOp::IntNeg => "__moth_int_neg",
+        HirNumericOp::FloatAdd => "__moth_float_add",
+        HirNumericOp::FloatSub => "__moth_float_sub",
+        HirNumericOp::FloatMul => "__moth_float_mul",
+        HirNumericOp::FloatDiv => "__moth_float_div",
+        HirNumericOp::FloatMod => "__moth_float_mod",
+        HirNumericOp::FloatPow => "__moth_float_pow",
+        HirNumericOp::FloatNeg => "__moth_float_neg",
     }
 }

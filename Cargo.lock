@@ -15,24 +15,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
-name = "beanstalk"
-version = "0.1.12"
-dependencies = [
- "notify",
- "pulldown-cmark",
- "rayon",
- "rustc-hash",
- "ryu",
- "saying",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
- "wasm-encoder 0.247.0",
- "wasmparser 0.247.0",
-]
-
-[[package]]
 name = "bitflags"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -290,6 +272,24 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "moth"
+version = "0.1.12"
+dependencies = [
+ "notify",
+ "pulldown-cmark",
+ "rayon",
+ "rustc-hash",
+ "ryu",
+ "saying",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "wasm-encoder 0.247.0",
+ "wasmparser 0.247.0",
 ]
 
 [[package]]
@@ -875,8 +875,8 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "beanstalk",
  "flate2",
+ "moth",
  "serde_json",
  "tempfile",
 ]

@@ -1,7 +1,7 @@
 //! Vec-handle runtime helper emission.
 //!
-//! WHAT: synthesizes the four vec-handle helpers used by the bst_start() -> Vec<String> ABI:
-//!   bst_vec_new, bst_vec_push, bst_vec_len, bst_vec_get
+//! WHAT: synthesizes the four vec-handle helpers used by the moth_start() -> Vec<String> ABI:
+//!   moth_vec_new, moth_vec_push, moth_vec_len, moth_vec_get
 //!
 //! WHY: separated from helpers.rs to keep per-helper emission focused on one handle type.
 //! Vec handles are the runtime accumulator for entry start() fragment strings only — this is

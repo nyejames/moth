@@ -1,0 +1,75 @@
+`$md` applies Moth's small Markdown flavour.
+
+It is intentionally not a full CommonMark implementation.
+
+[codeblock, $code("moth"):
+    content = [$md:
+        # Title
+
+        Use **clear names** and @./other-page (helpful links).
+    ]
+]
+
+### Supported block forms
+
+- headings: `#` through `######`
+- paragraphs separated by blank lines
+- unordered lists: `-` items
+- ordered lists: `1.` items
+- links: `@./path (link text)`
+- emphasis: `**bold**` and `*italic*`
+
+### Inline code
+
+Inline code uses paired isolated single backticks on one Markdown line.
+
+It renders as a normal HTML `code` element.
+
+Inside an inline code span:
+
+- authored whitespace is preserved
+- HTML-sensitive authored characters are escaped
+- emphasis is not parsed
+- links are not parsed
+
+Not supported:
+
+- empty code spans
+- repeated backtick runs
+- unmatched backticks
+- multiline code spans
+- variable-length delimiters
+- fenced code blocks
+- Markdown-level backtick escaping
+
+Use `$code(language)` for highlighted code blocks.
+
+### Dynamic content boundaries
+
+A dynamic expression anchor may appear inside a parent-authored code span.
+
+`$md` does not inspect that expression's rendered output.
+
+A child template is an opaque formatting boundary.
+
+A parent Markdown span cannot begin before a child and end after it.
+
+### Tables
+
+Markdown pipe-table syntax is not part of Moth Markdown.
+
+Inside `.mtf` content, use a structured list.
+
+When a website page genuinely needs a visual table, build it in the owning
+`.moth` page with Moth table helpers.
+
+Do not rely on pipe-table text rendering as a table.
+
+### Related content formats
+
+Moth template `.mtf` files use an implicit compile-time `$md` template.
+
+Plain `.md` files use the separate raw Markdown content path.
+
+See @../moth-templates (Moth template files) and @../markdown (Plain Markdown) for those file
+contracts.

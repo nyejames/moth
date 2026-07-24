@@ -1,0 +1,20 @@
+Some conversions can fail. Text might not contain a number and a `Float` might
+not fit inside `Int`.
+
+Use `cast!` when the current function already returns `Error!`:
+
+[codeblock, $code("moth"):
+    parse_count |text String| -> Int, Error!:
+        return cast! text
+    ;
+]
+
+Use `catch` when this part of the program has a sensible fallback:
+
+[codeblock, $code("moth"):
+    count Int = cast text catch:
+        then 0
+    ;
+]
+
+Choose one path. A cast cannot use `!` and `catch` at the same time.

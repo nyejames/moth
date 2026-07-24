@@ -9,11 +9,11 @@ rendered_output_contains = [
 path = "index.html"
 kind = "html"
 must_contain = [
-    "__bs_fixed_collection([], 2)",
-    "__bst_kind: \"fixed_collection\"",
+    "__moth_fixed_collection([], 2)",
+    "__moth_kind: \"fixed_collection\"",
     "fixedCapacity: fixedCapacity",
     "Fixed collection capacity exceeded",
 ]
 must_not_contain = [
-    "__bs_result_propagate(__bs_collection_length(",
+    "__moth_result_propagate(__moth_collection_length(",
 ]

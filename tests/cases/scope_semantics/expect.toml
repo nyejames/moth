@@ -5,4 +5,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["if (", "} else {", "__bs_binding"]
+must_contain = ["if (", "} else {", "__moth_binding"]

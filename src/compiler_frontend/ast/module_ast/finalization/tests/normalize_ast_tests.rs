@@ -3169,7 +3169,7 @@ fn synchronize_receiver_secondary_indexes_copies_signatures_and_preserves_order(
     let mut string_table = StringTable::new();
     let struct_a = InternedPath::from_single_str("StructA", &mut string_table);
     let struct_b = InternedPath::from_single_str("StructB", &mut string_table);
-    let source_file = InternedPath::from_single_str("root.bst", &mut string_table);
+    let source_file = InternedPath::from_single_str("root.moth", &mut string_table);
 
     // Both methods share the bare method name "shared" but live on different receivers, so
     // by_method_name holds two entries under one name while by_receiver_and_name splits them
@@ -3289,7 +3289,7 @@ fn synchronize_receiver_secondary_indexes_copies_signatures_and_preserves_order(
 fn synchronize_receiver_secondary_indexes_rejects_missing_by_receiver_and_name_entry() {
     let mut string_table = StringTable::new();
     let struct_a = InternedPath::from_single_str("StructA", &mut string_table);
-    let source_file = InternedPath::from_single_str("root.bst", &mut string_table);
+    let source_file = InternedPath::from_single_str("root.moth", &mut string_table);
     let method_a = InternedPath::from_single_str("method", &mut string_table);
     let method_name = method_a.name().expect("single-component path has a name");
 
@@ -3325,7 +3325,7 @@ fn synchronize_receiver_secondary_indexes_rejects_missing_by_receiver_and_name_e
 fn synchronize_receiver_secondary_indexes_rejects_duplicate_by_receiver_and_name_entry() {
     let mut string_table = StringTable::new();
     let struct_a = InternedPath::from_single_str("StructA", &mut string_table);
-    let source_file = InternedPath::from_single_str("root.bst", &mut string_table);
+    let source_file = InternedPath::from_single_str("root.moth", &mut string_table);
     let method_a = InternedPath::from_single_str("method", &mut string_table);
     let method_name = method_a.name().expect("single-component path has a name");
 
@@ -3371,7 +3371,7 @@ fn synchronize_receiver_secondary_indexes_rejects_wrong_receiver_key() {
     let mut string_table = StringTable::new();
     let struct_a = InternedPath::from_single_str("StructA", &mut string_table);
     let struct_b = InternedPath::from_single_str("StructB", &mut string_table);
-    let source_file = InternedPath::from_single_str("root.bst", &mut string_table);
+    let source_file = InternedPath::from_single_str("root.moth", &mut string_table);
     let method_a = InternedPath::from_single_str("method", &mut string_table);
     let method_name = method_a.name().expect("single-component path has a name");
 
@@ -3422,7 +3422,7 @@ fn synchronize_receiver_secondary_indexes_rejects_primary_path_key_mismatch() {
     let receiver_path = InternedPath::from_single_str("Counter", &mut string_table);
     let indexed_path = InternedPath::from_single_str("indexed", &mut string_table);
     let claimed_path = InternedPath::from_single_str("claimed", &mut string_table);
-    let source_file = InternedPath::from_single_str("root.bst", &mut string_table);
+    let source_file = InternedPath::from_single_str("root.moth", &mut string_table);
 
     let primary = receiver_entry(
         claimed_path,
@@ -3447,7 +3447,7 @@ fn synchronize_receiver_secondary_indexes_rejects_extra_secondary_entry() {
     let mut string_table = StringTable::new();
     let struct_a = InternedPath::from_single_str("StructA", &mut string_table);
     let struct_b = InternedPath::from_single_str("StructB", &mut string_table);
-    let source_file = InternedPath::from_single_str("root.bst", &mut string_table);
+    let source_file = InternedPath::from_single_str("root.moth", &mut string_table);
     let method_a = InternedPath::from_single_str("method", &mut string_table);
     let orphan = InternedPath::from_single_str("orphan", &mut string_table);
     let method_name = method_a.name().expect("single-component path has a name");

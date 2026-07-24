@@ -1,7 +1,7 @@
 //! Backend-agnostic ABI types for the external-call boundary.
 //!
 //! WHAT: defines the type system that external functions use to describe their parameters
-//! and return values to the frontend. This is a narrower vocabulary than the full Beanstalk
+//! and return values to the frontend. This is a narrower vocabulary than the full Moth
 //! type system because host boundaries are intentionally restricted.
 //! WHY: the frontend needs to know how to validate and lower arguments without embedding
 //! backend-specific knowledge into the AST.
@@ -63,7 +63,7 @@ impl ExternalAbiType {
 
 /// Frontend-visible type used by external function signatures.
 ///
-/// WHAT: separates the backend ABI category from the Beanstalk language type expected
+/// WHAT: separates the backend ABI category from the Moth language type expected
 ///       at call sites. Builtin scalar parameters use `Abi(...)`, provider-owned
 ///       opaque types use `External(...)`, and reusable language-level content
 ///       policies such as string content use dedicated variants.
@@ -159,7 +159,7 @@ impl From<ExternalAbiType> for ExternalSignatureType {
 /// A single external-call parameter definition.
 #[derive(Debug)]
 pub struct ExternalParameter {
-    /// What the Beanstalk language accepts.
+    /// What the Moth language accepts.
     ///
     /// WHAT: `ExternalSignatureType` so exact package-scoped opaque type identity can be
     ///       carried for provider-created types, while builtin scalars wrap through `Abi(...)`.

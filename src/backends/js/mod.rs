@@ -1,4 +1,4 @@
-//! JavaScript backend for Beanstalk.
+//! JavaScript backend for Moth.
 //!
 //! This backend lowers HIR into readable JavaScript using GC semantics.
 //! Borrowing and ownership are optimization concerns and therefore ignored here.
@@ -133,8 +133,8 @@ impl JsLoweringConfig {
 /// WHY: the JS backend and the HTML glue generator must agree without duplicating naming logic.
 pub(crate) fn external_module_export_glue_function_name(id: ExternalFunctionId) -> String {
     match id {
-        ExternalFunctionId::Synthetic(n) => format!("__bs_glue_fn{n}"),
-        other => format!("__bs_glue_{}", other.name()),
+        ExternalFunctionId::Synthetic(n) => format!("__moth_glue_fn{n}"),
+        other => format!("__moth_glue_{}", other.name()),
     }
 }
 

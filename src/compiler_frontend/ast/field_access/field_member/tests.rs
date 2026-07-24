@@ -99,7 +99,7 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
     // must point at that offending token, not the authored dot or the receiver start. This
     // complements the integration case, which pins the EOF location at the authored dot.
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("test.bst", &mut string_table);
+    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let offending_position = CharPosition {
         line_number: 4,

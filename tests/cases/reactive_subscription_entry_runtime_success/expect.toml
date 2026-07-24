@@ -7,6 +7,6 @@ rendered_output_contains = ["reactive_subscription_entry_runtime_success Count: 
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_mount_template_fragment(",
-    "__bs_mount_template_fragment(el, bst_frags[i])",
+    "function __moth_mount_template_fragment(",
+    "__moth_mount_template_fragment(el, moth_frags[i])",
 ]

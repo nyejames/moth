@@ -1,28 +1,28 @@
-# Beanstalk Compiler Design Overview
+# Moth Compiler Design Overview
 
-Beanstalk is a high-level language with first-class string templates. Its compiler is a staged, backend-neutral library used by the project tool, development server, tooling overlays and backend builders.
+Moth is a high-level language with first-class string templates. Its compiler is a staged, backend-neutral library used by the project tool, development server, tooling overlays and backend builders.
 
 This document is the single source of truth for accepted core compiler architecture, semantic ownership and cross-stage compiler contracts. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
 
 `docs/build-system-design.md` owns project bootstrap, Stage 0 graph construction, config, module and package topology, command policy, project builders, linking and output ownership. Read both documents when a task crosses the compiler and build-system boundary.
 
-`docs/src/docs/codebase/compiler-design/**` is an educational explanation layer for compiler concepts and their relationship to Beanstalk. It does not override this architecture document, `docs/build-system-design.md`, the language authorities or the progress matrix.
+`docs/src/docs/codebase/compiler-design/**` is an educational explanation layer for compiler concepts and their relationship to Moth. It does not override this architecture document, `docs/build-system-design.md`, the language authorities or the progress matrix.
 
 Companion authorities:
 
 - `docs/build-system-design.md` for project and build orchestration
 - `docs/language-overview.md` and `docs/src/docs/codebase/language/**` for source syntax and language semantics
-- `docs/src/docs/codebase/design-scope/overview.bd` for design bias and scope boundaries
-- `docs/src/docs/codebase/memory-management/overview.bd` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
-- `docs/src/docs/codebase/style-guide/style-guide.bd` for implementation standards
-- `docs/src/docs/progress/#page.bst` for current support and backend coverage
+- `docs/src/docs/codebase/design-scope/overview.mtf` for design bias and scope boundaries
+- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
+- `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards
+- `docs/src/docs/progress/#page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
 
 User-facing pages under `docs/src/docs/**` teach the language. They do not replace this architecture reference.
 
 ## Architectural invariants
 
-- One directory-scoped `#*.bst` or `+*.bst` module is the canonical semantic compilation unit.
+- One directory-scoped `#*.moth` or `+*.moth` module is the canonical semantic compilation unit.
 - A physical module is compiled once per project or package compilation boundary and owns local type, HIR, borrow and lifetime-analysis identity/facts.
 - Every normal module included in a command's semantic graph has its dormant root work parsed, type-checked, lowered, borrow-validated and lifetime-analysed before any entry can activate it.
 - Tokenization and declaration-shell parsing happen once. Later phases bind and consume retained syntax rather than reparsing source.
@@ -313,7 +313,7 @@ External parameters with no frontend mapping use an explicit unknown-external st
 
 Compiler-owned builtins are neither source declarations nor builder-provided bindings. They own language-defined operations, builtin type policies, runtime error identities and compiler-defined cast evidence.
 
-Binding-backed packages are typed semantic interfaces rather than Beanstalk modules. They:
+Binding-backed packages are typed semantic interfaces rather than Moth modules. They:
 
 - use stable package and symbol identities
 - may expose opaque types, constants and free functions
@@ -507,8 +507,8 @@ Frontend-owned directives are always present. Builder directives may extend the 
 
 `TokenizerEntryMode` selects the initial lexical state:
 
-- ordinary `.bst` starts in code mode
-- Beandown `.bd` starts in an implicit template body while preserving original source locations
+- ordinary `.moth` starts in code mode
+- Moth template `.mtf` starts in an implicit template body while preserving original source locations
 - plain Markdown `.md` is prepared before tokenization and has no tokenizer entry mode
 
 The tokenizer does not resolve imports, types or declarations.
@@ -584,19 +584,19 @@ Declaration-shell parsers are shared with AST body-local declaration parsing so 
 
 #### Source-kind adapters
 
-Beandown `.bd` preparation contributes one private synthetic `content #String` declaration. Its initializer is a structurally built `$md` template over the original body tokens. Nested templates without an explicit directive inherit the Beandown Markdown formatter. An explicit directive overrides that default.
+Moth template `.mtf` preparation contributes one private synthetic `content #String` declaration. Its initializer is a structurally built `$md` template over the original body tokens. Nested templates without an explicit directive inherit the Moth template Markdown formatter. An explicit directive overrides that default.
 
 Plain Markdown `.md` preparation renders raw Markdown to HTML and contributes the same private `content #String` declaration shape with a synthetic string-literal initializer.
 
-Later ordering and AST folding treat both as ordinary compile-time constants. There is no Beandown-specific or Markdown-specific AST, HIR, borrow or backend path.
+Later ordering and AST folding treat both as ordinary compile-time constants. There is no Moth-template-specific or Markdown-specific AST, HIR, borrow or backend path.
 
 A recognised source kind unsupported by the active builder is rejected with a typed import diagnostic. Resolution does not silently fall through to another extension candidate.
 
-#### Direct Beandown service
+#### Direct Moth template service
 
-The direct Beandown compiler service uses the same tokenizer, synthetic-header preparation, local declaration ordering and AST folding owners as integrated `.bd` imports. It extracts the folded `content` constant and stops before HIR generation, borrow validation, target validation, backend lowering and output writing.
+The direct Moth template compiler service uses the same tokenizer, synthetic-header preparation, local declaration ordering and AST folding owners as integrated `.mtf` imports. It extracts the folded `content` constant and stops before HIR generation, borrow validation, target validation, backend lowering and output writing.
 
-This service is a narrow compiler entry point, not a second Beandown parser or compiler mode.
+This service is a narrow compiler entry point, not a second Moth template parser or compiler mode.
 
 ### Stage 3: local declaration ordering
 
@@ -941,7 +941,7 @@ Borrow validation reads validated HIR and writes read-only side tables. It does 
 
 Optional inferred transfer is an optimisation path. When proof is unavailable on every relevant path, the operation remains a borrow. Failure to prove transfer must not reject an otherwise valid program. Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site.
 
-Closed external boundary profiles override this general rule. WIT value-only calls and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Beanstalk storage through the ordinary Beanstalk ownership ABI.
+Closed external boundary profiles override this general rule. WIT value-only calls and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.
 
 Public function interfaces export:
 
@@ -1062,7 +1062,7 @@ Backend lowerers do not:
 - reconsider source legality, borrow facts or lifetime topology
 - write final project outputs directly
 
-A lowerer may implement a language-owned HIR operation with a target-native instruction or runtime helper only when the result preserves the full Beanstalk contract.
+A lowerer may implement a language-owned HIR operation with a target-native instruction or runtime helper only when the result preserves the full Moth contract.
 
 Numeric checks, cast failure, finite-Float validation, map behaviour, error propagation and reactive semantics are not weakened because a target provides a more permissive primitive.
 

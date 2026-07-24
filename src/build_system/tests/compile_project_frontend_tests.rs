@@ -352,9 +352,9 @@ fn builder_surface_with_dummy_js_provider_with_lowering(calls: Arc<AtomicUsize>)
 fn provider_created_package_registry_survives_into_module() {
     let dir = temp_dir("provider_registry_survives");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { draw }\nvalue = draw()\n",
     )
     .expect("should write page");
@@ -407,14 +407,14 @@ fn provider_created_package_registry_survives_into_module() {
 fn provider_runtime_assets_deduped_for_repeated_imports() {
     let dir = temp_dir("provider_runtime_assets_deduped");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { draw }\nimport @./other { run }\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
     fs::write(
-        dir.join("other.bst"),
+        dir.join("other.moth"),
         "import @./drawing.js { draw as render }\nrun || -> Int:\n    return render()\n;\n",
     )
     .expect("should write helper");
@@ -462,20 +462,20 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
 fn provider_runtime_metadata_ignores_unreachable_external_calls() {
     let dir = temp_dir("provider_runtime_metadata_unreachable");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./other { run }\nvalue = 1\n",
     )
     .expect("should write entry");
     fs::write(
-        dir.join("other.bst"),
+        dir.join("other.moth"),
         "import @./drawing.js { get_number }\nrun || -> Int, Error!:\n    return get_number()!\n;\n",
     )
     .expect("should write helper source");
     fs::write(
         dir.join("drawing.js"),
-        "import { bstOk } from \"@beanstalk/runtime\";\n/**\n * @bst.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return bstOk(7); }\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
 
@@ -510,9 +510,9 @@ fn provider_runtime_metadata_ignores_unreachable_external_calls() {
 fn builder_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     let dir = temp_dir("builder_runtime_metadata_unreachable");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @html { canvas }\npage_canvas_id #= canvas\nvalue = 1\n",
     )
     .expect("should write page");
@@ -562,9 +562,9 @@ fn builder_runtime_metadata_ignores_unreachable_source_package_wrappers() {
 fn provider_backed_import_with_js_lowering_passes_html_build() {
     let dir = temp_dir("provider_js_lowering_html");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { draw }\nvalue = draw()\n",
     )
     .expect("should write page");
@@ -603,14 +603,14 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
 fn single_file_remaps_module_type_environment_nominal_fields() {
     let dir = temp_dir("single_file_type_env_remap");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    let bst_path = dir.join("test.bst");
+    let moth_path = dir.join("test.moth");
     fs::write(
-        &bst_path,
+        &moth_path,
         "Point = |\n    value Int,\n|\npoint = Point(1)\n",
     )
-    .expect("should write .bst");
+    .expect("should write .moth");
 
-    let mut config = Config::new(bst_path.clone());
+    let mut config = Config::new(moth_path.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
     string_table.intern("preexisting");
@@ -625,7 +625,7 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
     .expect("expected Ok for nominal type module");
 
     let module = modules.first().expect("expected compiled module");
-    let point_path = InternedPath::from_single_str("test.bst", &mut string_table)
+    let point_path = InternedPath::from_single_str("test.moth", &mut string_table)
         .join_str("Point", &mut string_table);
     let nominal_id = module
         .executable
@@ -695,8 +695,8 @@ fn single_file_rejects_wrong_extension() {
         DiagnosticRenderContext::new(&messages.string_table),
     );
     assert!(
-        error_text.contains(".bst"),
-        "expected error to mention .bst, got: {error_text}"
+        error_text.contains(".moth"),
+        "expected error to mention .moth, got: {error_text}"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
@@ -706,7 +706,7 @@ fn single_file_rejects_wrong_extension() {
 fn single_file_rejects_missing_file() {
     let dir = temp_dir("single_file_missing");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    let missing_path = dir.join("does_not_exist.bst");
+    let missing_path = dir.join("does_not_exist.moth");
 
     let mut config = Config::new(missing_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -733,14 +733,14 @@ fn single_file_rejects_missing_file() {
 fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
     let dir = temp_dir("single_file_optional_core_not_exposed");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    let bst_path = dir.join("test.bst");
+    let moth_path = dir.join("test.moth");
     fs::write(
-        &bst_path,
+        &moth_path,
         "import @core/text {length}\nvalue = length(\"abc\")\n",
     )
-    .expect("should write .bst");
+    .expect("should write .moth");
 
-    let mut config = Config::new(bst_path);
+    let mut config = Config::new(moth_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
@@ -776,9 +776,9 @@ fn directory_project_discovers_multiple_entry_modules() {
     let dir = temp_dir("dir_multi_module");
     fs::create_dir_all(dir.join("page")).expect("should create page dir");
     fs::create_dir_all(dir.join("layout")).expect("should create layout dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
-    fs::write(dir.join("page/#page.bst"), "x ~= 10\n").expect("should write page");
-    fs::write(dir.join("layout/#layout.bst"), "y ~= 20\n").expect("should write layout");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(dir.join("page/#page.moth"), "x ~= 10\n").expect("should write page");
+    fs::write(dir.join("layout/#layout.moth"), "y ~= 20\n").expect("should write layout");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -810,14 +810,14 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     let dir = temp_dir("dir_delta_remap_collision");
     fs::create_dir_all(dir.join("first")).expect("should create first module dir");
     fs::create_dir_all(dir.join("second")).expect("should create second module dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("first/#a.bst"),
+        dir.join("first/#a.moth"),
         "Item = |\n    shared Int,\n    first_only String,\n|\nitem = Item(1, \"first\")\n",
     )
     .expect("should write first entry");
     fs::write(
-        dir.join("second/#b.bst"),
+        dir.join("second/#b.moth"),
         "Item = |\n    shared Int,\n    second_only String,\n|\nitem = Item(1, \"second\")\n",
     )
     .expect("should write second entry");
@@ -843,11 +843,11 @@ fn directory_project_remaps_delta_collisions_across_modules() {
                 .entry_point
                 .file_name()
                 .and_then(|name| name.to_str())
-                == Some("#b.bst")
+                == Some("#b.moth")
         })
-        .expect("expected #b.bst module");
+        .expect("expected #b.moth module");
     let item_path =
-        InternedPath::try_from_filesystem_path(Path::new("second/#b.bst"), &mut string_table)
+        InternedPath::try_from_filesystem_path(Path::new("second/#b.moth"), &mut string_table)
             .expect("test path should be UTF-8")
             .join_str("Item", &mut string_table);
     let nominal_id = second_module
@@ -887,14 +887,14 @@ fn directory_project_remaps_delta_collisions_across_modules() {
 fn provider_backed_grouped_import_compiles_and_reuses_cache() {
     let dir = temp_dir("provider_grouped_import_cache");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { draw as render }\nimport @./other { run }\nvalue = render()\nother_value = run()\n",
     )
     .expect("should write page");
     fs::write(
-        dir.join("other.bst"),
+        dir.join("other.moth"),
         "import @./drawing.js { draw as render_again }\nrun || -> Int:\n    return render_again()\n;\n",
     )
     .expect("should write helper source");
@@ -932,9 +932,9 @@ fn provider_backed_grouped_import_compiles_and_reuses_cache() {
 fn provider_backed_namespace_import_exposes_function_and_type_members() {
     let dir = temp_dir("provider_namespace_import");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js\nwidget drawing.Widget = drawing.make_widget()\nvalue = drawing.draw()\n",
     )
     .expect("should write page");
@@ -973,19 +973,19 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     let dir = temp_dir("provider_same_bare_name_distinct_dirs");
     fs::create_dir_all(dir.join("a")).expect("should create a dir");
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./a/use { run_a }\nimport @./b/use { run_b }\nvalue_a = run_a()\nvalue_b = run_b()\n",
     )
     .expect("should write page");
     fs::write(
-        dir.join("a/use.bst"),
+        dir.join("a/use.moth"),
         "import @./helper.js { draw as draw_a }\nrun_a || -> Int:\n    return draw_a()\n;\n",
     )
     .expect("should write a source");
     fs::write(
-        dir.join("b/use.bst"),
+        dir.join("b/use.moth"),
         "import @./helper.js { draw as draw_b }\nrun_b || -> Int:\n    return draw_b()\n;\n",
     )
     .expect("should write b source");
@@ -1024,9 +1024,9 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
 fn provider_backed_opaque_type_passes_to_same_package_function() {
     let dir = temp_dir("provider_opaque_same_package");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { make_widget, use_widget }\nwidget = make_widget()\nvalue = use_widget(widget)\n",
     )
     .expect("should write page");
@@ -1060,9 +1060,9 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     let dir = temp_dir("provider_opaque_cross_package_rejected");
     fs::create_dir_all(dir.join("a")).expect("should create a dir");
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./a/drawing.js { make_widget }\nimport @./b/drawing.js { use_widget }\nwidget = make_widget()\nvalue = use_widget(widget)\n",
     )
     .expect("should write page");
@@ -1101,7 +1101,7 @@ fn directory_project_rejects_missing_entry_root() {
     let dir = temp_dir("dir_missing_entry_root");
     fs::create_dir_all(&dir).expect("should create temp dir");
     // Config declares an entry_root that does not exist.
-    fs::write(dir.join("config.bst"), "entry_root #= \"nonexistent\"\n")
+    fs::write(dir.join("config.moth"), "entry_root #= \"nonexistent\"\n")
         .expect("should write config");
 
     let mut config = Config::new(dir.clone());
@@ -1109,7 +1109,7 @@ fn directory_project_rejects_missing_entry_root() {
     let mut string_table = StringTable::new();
 
     // Parse config so entry_root is applied to Config.
-    let config_path = dir.join("config.bst");
+    let config_path = dir.join("config.moth");
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let services = crate::build_system::project_config::ProjectConfigParseServices {
         style_directives: &style_directives,
@@ -1165,15 +1165,15 @@ fn builder_surface_with_html_js_provider() -> BuilderSurface {
 fn html_js_provider_namespace_import_resolves() {
     let dir = temp_dir("html_js_provider_namespace");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js\nvalue = drawing.draw()\n",
     )
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @bst.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 
@@ -1205,15 +1205,15 @@ fn html_js_provider_namespace_import_resolves() {
 fn html_js_provider_grouped_import_resolves() {
     let dir = temp_dir("html_js_provider_grouped");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { draw as render }\nvalue = render()\n",
     )
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @bst.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 
@@ -1245,15 +1245,15 @@ fn html_js_provider_grouped_import_resolves() {
 fn html_js_provider_grouped_alias_for_function_and_opaque_type_resolves() {
     let dir = temp_dir("html_js_provider_grouped_alias");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { Widget as Canvas, draw as render }\nvalue = render()\n",
     )
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @bst.opaque Widget\n */\n/**\n * @bst.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.opaque Widget\n */\n/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 
@@ -1285,15 +1285,15 @@ fn html_js_provider_grouped_alias_for_function_and_opaque_type_resolves() {
 fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     let dir = temp_dir("html_js_provider_receiver_method_rejected");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { make_canvas, fill_rect }\ncanvas ~= make_canvas()\n~canvas.fill_rect(0.0, 0.0, 1.0, 1.0)\n",
     )
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @bst.opaque Canvas\n */\n/**\n * @bst.sig make_canvas || -> Canvas\n */\nexport function makeCanvas() {\n    return {};\n}\n/**\n * @bst.sig fill_rect |this ~Canvas, x Float, y Float, width Float, height Float|\n */\nexport function fillRect(ctx, x, y, width, height) {}\n",
+        "/**\n * @moth.opaque Canvas\n */\n/**\n * @moth.sig make_canvas || -> Canvas\n */\nexport function makeCanvas() {\n    return {};\n}\n/**\n * @moth.sig fill_rect |this ~Canvas, x Float, y Float, width Float, height Float|\n */\nexport function fillRect(ctx, x, y, width, height) {}\n",
     )
     .expect("should write js with receiver-style signature");
 
@@ -1317,7 +1317,7 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
         messages.has_errors(),
         "expected at least one error diagnostic for project-local JS receiver-style signature"
     );
-    assert_has_diagnostic_code(&messages, "BST-IMPORT-0022");
+    assert_has_diagnostic_code(&messages, "MOTH-IMPORT-0022");
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
@@ -1326,20 +1326,20 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
 fn html_js_provider_repeated_imports_reuse_cache() {
     let dir = temp_dir("html_js_provider_cache_reuse");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { draw }\nimport @./other { run }\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
     fs::write(
-        dir.join("other.bst"),
+        dir.join("other.moth"),
         "import @./drawing.js { draw as render_again }\nrun || -> Int:\n    return render_again()\n;\n",
     )
     .expect("should write helper source");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @bst.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 
@@ -1372,18 +1372,21 @@ fn html_js_provider_repeated_imports_reuse_cache() {
 fn html_js_provider_js_import_from_source_package_resolves() {
     let dir = temp_dir("html_js_provider_source_package");
     fs::create_dir_all(dir.join("lib").join("ui")).expect("should create lib/ui dir");
-    fs::write(dir.join("config.bst"), "package_folders #= {\"lib\"}\n")
+    fs::write(dir.join("config.moth"), "package_folders #= {\"lib\"}\n")
         .expect("should write config");
-    fs::write(dir.join("#page.bst"), "import @ui { run }\nvalue = run()\n")
-        .expect("should write page");
     fs::write(
-        dir.join("lib/ui/#mod.bst"),
+        dir.join("#page.moth"),
+        "import @ui { run }\nvalue = run()\n",
+    )
+    .expect("should write page");
+    fs::write(
+        dir.join("lib/ui/#mod.moth"),
         "import @./helper.js { draw }\n\nexport:\n    run || -> Int:\n        return draw()\n    ;\n;\n",
     )
     .expect("should write module root");
     fs::write(
         dir.join("lib/ui/helper.js"),
-        "/**\n * @bst.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 
@@ -1414,15 +1417,15 @@ fn html_js_provider_js_import_from_source_package_resolves() {
 fn html_js_provider_fallible_function_with_error_return_compiles() {
     let dir = temp_dir("html_js_provider_fallible");
     fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::write(dir.join("config.bst"), "").expect("should write config");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.bst"),
+        dir.join("#page.moth"),
         "import @./drawing.js { Canvas, get_canvas }\nrun || -> Canvas, Error!:\n    return get_canvas(\"game\")!\n;\n",
     )
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "import { bstOk } from \"@beanstalk/runtime\";\n/**\n * @bst.opaque Canvas\n */\n/**\n * @bst.sig get_canvas |id String| -> Canvas, Error!\n */\nexport function getCanvas(id) {\n    return bstOk({});\n}\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.opaque Canvas\n */\n/**\n * @moth.sig get_canvas |id String| -> Canvas, Error!\n */\nexport function getCanvas(id) {\n    return mothOk({});\n}\n",
     )
     .expect("should write js");
 
@@ -1451,19 +1454,19 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
 }
 
 #[test]
-fn single_file_rejects_source_package_bst_folder_collision() {
+fn single_file_rejects_source_package_moth_folder_collision() {
     let dir = temp_dir("single_file_source_package_collision");
     fs::create_dir_all(&dir).expect("should create temp dir");
 
-    // Source-backed package with one valid hash root plus a .bst/folder collision.
+    // Source-backed package with one valid hash root plus a .moth/folder collision.
     let widget_lib = dir.join("lib").join("widgets");
     fs::create_dir_all(widget_lib.join("widget")).expect("should create widget folder sibling");
-    fs::write(widget_lib.join("widget.bst"), "value #= 1\n")
-        .expect("should write colliding widget.bst");
-    fs::write(widget_lib.join("#mod.bst"), "value #= 2\n").expect("should write valid hash root");
+    fs::write(widget_lib.join("widget.moth"), "value #= 1\n")
+        .expect("should write colliding widget.moth");
+    fs::write(widget_lib.join("#mod.moth"), "value #= 2\n").expect("should write valid hash root");
 
     // Main single file that does NOT import the ambiguous source-backed package path.
-    let main_path = dir.join("main.bst");
+    let main_path = dir.join("main.moth");
     fs::write(&main_path, "x ~= 1\n").expect("should write main file");
 
     let mut config = Config::new(main_path.clone());
@@ -1487,7 +1490,7 @@ fn single_file_rejects_source_package_bst_folder_collision() {
 
     assert!(
         result.is_err(),
-        "single-file build should reject source-backed package .bst/folder collision"
+        "single-file build should reject source-backed package .moth/folder collision"
     );
     let messages = result.err().expect("checked above");
 

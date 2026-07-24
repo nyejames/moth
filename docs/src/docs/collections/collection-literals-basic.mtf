@@ -1,0 +1,19 @@
+Collections use curly braces and keep their values in order.
+
+[codeblock, $code("moth"):
+    scores = {10, 20, 30}
+    names = {"Priya", "Grace"}
+]
+
+Every item has the same element type.
+
+An empty collection needs an explicit type:
+
+[codeblock, $code("moth"):
+    scores ~{Int} = {}
+]
+
+Collections start at index `0`.
+
+Use collection methods such as `get`, `set`, `push` and `remove` instead of
+square-bracket indexing.

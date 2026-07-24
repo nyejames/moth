@@ -1,4 +1,4 @@
-//! Per-module frontend compilation pipeline for Beanstalk projects.
+//! Per-module frontend compilation pipeline for Moth projects.
 //!
 //! Drives a single discovered module through the full frontend pipeline:
 //! provider-independent source preparation → provider binding → dependency sort → AST → HIR →
@@ -295,8 +295,8 @@ impl ModulePreparationContext<'_> {
             entry_file_path,
         )?;
 
-        // 2. Prepare all files against one local string-table per worker chunk. Beanstalk files
-        //    parse retained Stage 0 tokens, Beandown tokenizes its body once and plain Markdown
+        // 2. Prepare all files against one local string-table per worker chunk. Moth files
+        //    parse retained Stage 0 tokens, Moth template tokenizes its body once and plain Markdown
         //    bypasses tokenization. Merge/remap once before aggregating header syntax.
         let (prepared_header_syntax, file_warnings) = timed_frontend_stage(
             "frontend.file_prepare",
@@ -738,18 +738,18 @@ impl ModulePreparationContext<'_> {
         for file_index in plan.file_range.clone() {
             let file = &module[file_index];
             let source = match file {
-                PreparedSourceInput::Beanstalk {
+                PreparedSourceInput::Moth {
                     source_path,
                     tokens,
                     ..
-                } => FrontendFilePrepareSource::Beanstalk {
+                } => FrontendFilePrepareSource::Moth {
                     source_path,
                     tokens: tokens.as_ref(),
                 },
-                PreparedSourceInput::Beandown {
+                PreparedSourceInput::MothTemplate {
                     source_code,
                     source_path,
-                } => FrontendFilePrepareSource::Beandown {
+                } => FrontendFilePrepareSource::MothTemplate {
                     source_code,
                     source_path,
                 },
@@ -1592,7 +1592,7 @@ fn collect_source_logical_paths_from_table(
 ///
 /// WHAT: combines the entry path, source file count, and source byte count into a
 ///      short label suitable for the concise timing summary's "slowest module" line.
-/// WHY:  the label stays out of stable `BST_BENCH timing` lines; it is display-only
+/// WHY:  the label stays out of stable `MOTH_BENCH timing` lines; it is display-only
 ///       evidence so the summary can attribute the max sample without per-module listing.
 pub(super) fn module_timing_label(
     entry_file_path: &Path,

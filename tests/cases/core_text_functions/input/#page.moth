@@ -1,0 +1,10 @@
+import @core/text {length, is_empty, contains, starts_with, ends_with}
+
+text = "mothball"
+len = length("abc")
+empty = is_empty("")
+has_ball = contains(text, "ball")
+has_prefix = starts_with(text, "moth")
+has_suffix = ends_with(text, "ball")
+
+io.line([:core_text len=[len] empty=[empty] has=[has_ball] prefix=[has_prefix] suffix=[has_suffix]])

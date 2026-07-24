@@ -1,6 +1,6 @@
 //! Profile owner bucket mapping.
 //!
-//! WHAT: Maps function names to Beanstalk source-owner buckets based on
+//! WHAT: Maps function names to Moth source-owner buckets based on
 //! module prefix patterns. Each bucket has a label and suggested source
 //! paths for agent-directed investigation.
 //!
@@ -11,7 +11,7 @@
 //! # What this module owns
 //! - `ProfileOwnerBucket` definition with label, prefixes, and paths
 //! - `match_owner_bucket()` that maps a function name to a bucket
-//! - Initial bucket definitions for Beanstalk compiler modules
+//! - Initial bucket definitions for Moth compiler modules
 //!
 //! # What this module does NOT own
 //! - Profile parsing (see `parse.rs`)
@@ -53,62 +53,62 @@ pub(crate) struct ProfileOwnerBucketMatch {
 /// The order matters: more specific prefixes should come before general
 /// ones so the first match is the most relevant bucket.
 ///
-/// WHAT: Beanstalk compiler module buckets plus fallback buckets for
+/// WHAT: Moth compiler module buckets plus fallback buckets for
 /// std, core, alloc, rayon, samply/profiler, unknown, and other.
 ///
-/// WHY: These buckets cover the Beanstalk codebase structure and common
+/// WHY: These buckets cover the Moth codebase structure and common
 /// third-party function patterns seen in Samply profiles.
 fn owner_buckets() -> Vec<ProfileOwnerBucket> {
     vec![
-        // Beanstalk compiler modules (ordered by specificity)
+        // Moth compiler modules (ordered by specificity)
         ProfileOwnerBucket {
             label: "Tokenization",
-            prefixes: &["beanstalk::compiler_frontend::tokenizer"],
+            prefixes: &["moth::compiler_frontend::tokenizer"],
             suggested_paths: &["src/compiler_frontend/tokenizer/"],
         },
         ProfileOwnerBucket {
             label: "Header parsing",
-            prefixes: &["beanstalk::compiler_frontend::headers"],
+            prefixes: &["moth::compiler_frontend::headers"],
             suggested_paths: &["src/compiler_frontend/headers/"],
         },
         ProfileOwnerBucket {
             label: "Dependency sorting",
-            prefixes: &["beanstalk::compiler_frontend::module_dependencies"],
+            prefixes: &["moth::compiler_frontend::module_dependencies"],
             suggested_paths: &["src/compiler_frontend/module_dependencies.rs"],
         },
         ProfileOwnerBucket {
             label: "AST",
-            prefixes: &["beanstalk::compiler_frontend::ast"],
+            prefixes: &["moth::compiler_frontend::ast"],
             suggested_paths: &["src/compiler_frontend/ast/"],
         },
         ProfileOwnerBucket {
             label: "HIR",
-            prefixes: &["beanstalk::compiler_frontend::hir"],
+            prefixes: &["moth::compiler_frontend::hir"],
             suggested_paths: &["src/compiler_frontend/hir/"],
         },
         ProfileOwnerBucket {
             label: "Borrow validation",
-            prefixes: &["beanstalk::compiler_frontend::analysis::borrow_checker"],
+            prefixes: &["moth::compiler_frontend::analysis::borrow_checker"],
             suggested_paths: &["src/compiler_frontend/analysis/borrow_checker/"],
         },
         ProfileOwnerBucket {
             label: "Build system",
-            prefixes: &["beanstalk::build_system"],
+            prefixes: &["moth::build_system"],
             suggested_paths: &["src/build_system/"],
         },
         ProfileOwnerBucket {
             label: "JS backend",
-            prefixes: &["beanstalk::backends::js"],
+            prefixes: &["moth::backends::js"],
             suggested_paths: &["src/backends/js/"],
         },
         ProfileOwnerBucket {
             label: "Wasm backend",
-            prefixes: &["beanstalk::backends::wasm"],
+            prefixes: &["moth::backends::wasm"],
             suggested_paths: &["src/backends/wasm/"],
         },
         ProfileOwnerBucket {
             label: "HTML project builder",
-            prefixes: &["beanstalk::projects::html_project"],
+            prefixes: &["moth::projects::html_project"],
             suggested_paths: &["src/projects/html_project/"],
         },
         // Third-party and runtime fallback buckets
@@ -146,8 +146,8 @@ fn owner_buckets() -> Vec<ProfileOwnerBucket> {
 /// bucket whose prefix matches the function name. Falls back to "unknown"
 /// for empty names and "other" for unmatched non-empty names.
 ///
-/// WHY: The first-match strategy ensures more specific Beanstalk modules
-/// (e.g., AST) take priority over general fallbacks (e.g., beanstalk::).
+/// WHY: The first-match strategy ensures more specific Moth modules
+/// (e.g., AST) take priority over general fallbacks (e.g., moth::).
 pub(crate) fn match_owner_bucket(function_name: &str) -> ProfileOwnerBucketMatch {
     if function_name.trim().is_empty() || function_name == "unknown" {
         return ProfileOwnerBucketMatch {

@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-IMPORT-0022"]
+diagnostic_codes = ["MOTH-IMPORT-0022"]
 message_contains = ["External package functions cannot be generic"]

@@ -17,7 +17,7 @@
 //! CompilerError
 //!   -> target ownership: internal/tooling/compiler failure only
 //!   -> printed through one central helper
-//!   -> no normal Beanstalk source, syntax, type, rule, import, config-source,
+//!   -> no normal Moth source, syntax, type, rule, import, config-source,
 //!      or borrow diagnostics
 //! ```
 //!

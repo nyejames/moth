@@ -128,7 +128,7 @@ Rounding mode is round half to even. Rounding and canonicalisation happen at eve
 - `NumberN -> NumberM` with `M > N` infallible scale widening
 - `NumberN -> NumberM` with `M < N` fallible exact scale narrowing, no rounding
 - `NumberN -> String` infallible canonical decimal formatting
-- `String -> NumberN` fallible exact parse using Beanstalk numeric text grammar
+- `String -> NumberN` fallible exact parse using Moth numeric text grammar
 - `Float -> NumberN` deferred named helper or method
 - `NumberN -> Float` deferred named helper or method
 

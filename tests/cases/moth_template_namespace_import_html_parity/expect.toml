@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["moth_template_namespace_import_html_parity intro namespace content"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.js"
+kind = "js"
+must_contain = ["moth_template_namespace_import_html_parity intro namespace content"]

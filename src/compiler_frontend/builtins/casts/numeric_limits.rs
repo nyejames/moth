@@ -2,7 +2,7 @@
 //!
 //! WHAT: defines the signed 32-bit integer range that explicit builtin casts to `Int` are
 //!      allowed to materialize for the current Alpha runtime target.
-//! WHY: Beanstalk Alpha `Int` is a signed `i32`. Keeping one source of truth for the cast
+//! WHY: Moth Alpha `Int` is a signed `i32`. Keeping one source of truth for the cast
 //!      range in the compiler lets AST folding and JS helper emission agree instead of
 //!      duplicating magic values in two stages.
 //! NOTE: this is an explicit cast materialization policy, not a general numeric-limit

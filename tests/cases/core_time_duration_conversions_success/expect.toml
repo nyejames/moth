@@ -16,6 +16,6 @@ must_contain = [
     "Math.min(Math.max(",
 ]
 must_not_contain = [
-    "function __bs_time_duration_from_seconds(",
-    "function __bs_time_duration_from_milliseconds(",
+    "function __moth_time_duration_from_seconds(",
+    "function __moth_time_duration_from_milliseconds(",
 ]

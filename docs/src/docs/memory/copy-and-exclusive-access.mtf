@@ -1,0 +1,62 @@
+### Explicit `copy`
+
+`copy` creates an independent value graph. Ordinary assignment and argument passing don't clone existing values. Fresh aggregates built from shared inputs don't implicitly copy those inputs.
+
+[codeblock, $code("moth"):
+    original ~= {1, 2, 3}
+    independent = copy original
+
+    ~independent.push(4)
+    -- original is unchanged
+]
+
+`copy` performs a semantic deep copy of the complete copyable runtime value graph reachable from the place. Internal alias topology is preserved, same-region cycles are preserved and the copied graph shares no mutable allocation with the source.
+
+`copy` accepts a visible binding, field projection or parenthesised place. Literals, templates, calls and computed expressions aren't copy places and are rejected.
+
+### Exclusive access with `~`
+
+`~place` requests temporary mutation-capable access to an existing mutable place. It excludes conflicting access while active.
+
+[codeblock, $code("moth"):
+    values ~= {1, 2, 3}
+    ~values.push(4)
+]
+
+`~` isn't a move marker or a type constructor. It applies to an existing mutable place and requests exclusive access for one operation.
+
+### Mutable aliases versus fresh mutable slots
+
+`alias ~= source` creates an exclusive write-through mutable alias to an existing place. Assignment through a mutable alias writes through to the referent.
+
+A mutable declaration initialized from a fresh value creates an independent mutable slot.
+
+[codeblock, $code("moth"):
+    original ~= 10
+    alias ~= original  -- mutable alias
+    alias = 20         -- writes through to original
+
+    fresh ~= 0         -- independent mutable slot
+    fresh = 1          -- doesn't affect original
+]
+
+### Mutable receivers
+
+Mutable receiver calls require explicit mutable/exclusive receiver syntax:
+
+[codeblock, $code("moth"):
+    items ~= {1, 2, 3}
+    ~items.push(4)     -- valid: explicit mutable access
+
+    -- items.push(4)   -- invalid: missing ~
+]
+
+Fresh rvalues can satisfy mutable parameters without `~`. Existing places still require explicit `~`.
+
+### Read next
+
+- @#reference-semantics (Reference semantics)
+- @#lifetimes-and-result-shapes (Lifetimes and result shapes)
+
+For the formal access rules, see
+@../../codebase/memory-management/access-and-aliasing (Access and aliasing).

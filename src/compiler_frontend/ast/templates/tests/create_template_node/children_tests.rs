@@ -75,7 +75,7 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
 #[test]
 fn children_directive_accepts_const_string_reference() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let prefix_name = string_table.intern("prefix");
     let declarations = vec![Declaration {
         id: scope.append(prefix_name),
@@ -248,7 +248,7 @@ fn nested_inline_templates_inside_table_cells_do_not_become_extra_cells() {
 fn children_directive_argument_ending_at_template_boundary_uses_children_reason() {
     // The `]` closes the outer template before any argument expression is
     // authored. This stays on the directive owner (`InvalidChildrenArgument`),
-    // not true file EOF, which header balancing owns as `BST-SYNTAX-0017`.
+    // not true file EOF, which header balancing owns as `MOTH-SYNTAX-0017`.
     let mut string_table = StringTable::new();
     let mut token_stream = template_tokens_from_source("[$children(]", &mut string_table);
     let context = new_constant_context(token_stream.src_path.to_owned());

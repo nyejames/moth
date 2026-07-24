@@ -1,0 +1,142 @@
+import @./reactive-sources {
+    content as reactive_sources,
+}
+
+import @./reactive-sources-basic {
+    content as reactive_sources_basic,
+}
+
+import @./subscriptions {
+    content as subscriptions,
+}
+
+import @./subscriptions-basic {
+    content as subscriptions_basic,
+}
+
+import @./reactive-parameters {
+    content as reactive_parameters,
+}
+
+import @./reactive-parameters-basic {
+    content as reactive_parameters_basic,
+}
+
+import @./mutation-and-invalidation {
+    content as mutation_and_invalidation,
+}
+
+import @./mutation-and-invalidation-basic {
+    content as mutation_and_invalidation_basic,
+}
+
+import @./runtime-sinks {
+    content as runtime_sinks,
+}
+
+import @./runtime-sinks-basic {
+    content as runtime_sinks_basic,
+}
+
+import @./reactivity-scope {
+    content as reactivity_scope,
+}
+
+import @./reactivity-scope-basic {
+    content as reactivity_scope_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Reactivity"
+page_description #= "Reactive sources, template subscriptions and live sinks in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Reactivity
+
+    # Reactivity
+
+    Reactivity lets a template observe a stable source without turning Moth
+    into a callback language.
+
+    Sources are explicit. Subscriptions are explicit. Mutation still follows the
+    ordinary type and access rules.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):reactive-sources]
+        [$insert("title"):Reactive sources]
+        [$insert("advanced"):[reactive_sources]]
+
+        [reactive_sources_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):subscriptions]
+        [$insert("title"):Subscriptions]
+        [$insert("advanced"):[subscriptions]]
+
+        [subscriptions_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):reactive-parameters]
+        [$insert("title"):Reactive parameters]
+        [$insert("advanced"):[reactive_parameters]]
+
+        [reactive_parameters_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):mutation-and-invalidation]
+        [$insert("title"):Mutation and invalidation]
+        [$insert("advanced"):[mutation_and_invalidation]]
+
+        [mutation_and_invalidation_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):runtime-sinks]
+        [$insert("title"):Runtime sinks]
+        [$insert("advanced"):[runtime_sinks]]
+
+        [runtime_sinks_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):reactivity-scope]
+        [$insert("title"):Reactivity scope]
+        [$insert("advanced"):[reactivity_scope]]
+
+        [reactivity_scope_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../traits/]
+        [$insert("previous_title"):Traits]
+        [$insert("next_path"):../memory/]
+        [$insert("next_title"):Memory and lifetimes]
+    ]
+]

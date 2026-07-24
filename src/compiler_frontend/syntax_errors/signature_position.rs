@@ -1,11 +1,11 @@
 //! Common language-mismatch mistakes in declaration/signature position.
 //!
 //! WHAT: Detects patterns like `name(a, b)` and `name(a: Int)` that users from
-//! C-family languages write when declaring functions or structs in Beanstalk,
+//! C-family languages write when declaring functions or structs in Moth,
 //! and misplaced `as` in variable declarations.
 //!
 //! WHY: Parameter and field delimiters are one of the most visually striking
-//! differences between Beanstalk and other languages, so they deserve targeted
+//! differences between Moth and other languages, so they deserve targeted
 //! guidance at the point of failure. `as` is also rejected here because it is
 //! called from both signature-members and body-local declaration parsers.
 

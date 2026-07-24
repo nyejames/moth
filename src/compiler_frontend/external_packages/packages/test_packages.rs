@@ -48,7 +48,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__bs_test_pkg_a_open".to_owned(),
+                        "__moth_test_pkg_a_open".to_owned(),
                     )),
                     wasm: None,
                 },
@@ -140,7 +140,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__bs_test_pkg_b_open".to_owned(),
+                        "__moth_test_pkg_b_open".to_owned(),
                     )),
                     wasm: None,
                 },

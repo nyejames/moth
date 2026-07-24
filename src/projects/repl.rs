@@ -1,4 +1,4 @@
-//! Template-focused REPL helper for experimenting with Beanstalk template syntax.
+//! Template-focused REPL helper for experimenting with Moth template syntax.
 //!
 //! This is not the default CLI entrypoint and it is narrower than a full language REPL: input is
 //! tokenized from template-head mode and only compile-time template evaluation is supported today.
@@ -11,8 +11,8 @@ use std::io::{self, Write};
 #[allow(dead_code)] // Intentionally kept as pre-alpha placeholder for upcoming CLI REPL wiring.
 pub fn start_repl_session() {
     say!(Red "REPL not yet implemented.");
-    say!("Beanstalk string template REPL");
-    say!(Green "Enter Beanstalk template snippets.");
+    say!("Moth string template REPL");
+    say!(Green "Enter Moth template snippets.");
     say!(Bright Black
         "Type 'exit' to quit. and 'clear' to restart the REPL or type 'show' to see the current code."
     );

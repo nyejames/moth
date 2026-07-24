@@ -11,5 +11,5 @@ rendered_output_contains = [
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_time_timestamp_from_iso_string(",
+    "function __moth_time_timestamp_from_iso_string(",
 ]

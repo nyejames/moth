@@ -1,0 +1,34 @@
+A reactive parameter lets a function receive a live source instead of a snapshot.
+
+### Reactive parameter
+
+[codeblock, $code("moth"):
+    counter_view |count $Int| -> String:
+        return [: Count: [$(count)]]
+    ;
+
+    count $Int = 0
+    view = counter_view(count)
+]
+
+`$Int` means the function receives a reactive source of `Int`. Inside the function, a subscription to the parameter can stay live.
+
+### Ordinary parameter
+
+[codeblock, $code("moth"):
+    show |count Int| -> String:
+        return [: Count: [count]]
+    ;
+
+    count $Int = 0
+    view = show(count)
+]
+
+An ordinary `Int` parameter reads the current value once.
+
+### Remember
+
+- Reactive parameters keep source identity.
+- They do not grant mutation permission.
+- A plain value cannot be passed where a reactive source is required.
+- Reactive parameters cannot have defaults.

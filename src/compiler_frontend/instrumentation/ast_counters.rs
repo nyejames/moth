@@ -181,8 +181,8 @@ mod detailed {
     }
 
     pub(crate) fn log_ast_counters() {
-        // The legacy per-counter human dump only prints in `BST_COUNTERS=full`.
-        // Stable `BST_BENCH counter` lines (summary/full) are emitted inside
+        // The legacy per-counter human dump only prints in `MOTH_COUNTERS=full`.
+        // Stable `MOTH_BENCH counter` lines (summary/full) are emitted inside
         // `log_benchmark_counter`, so `off` and `summary` stay quiet of per-line
         // prose here.
         let print_human_counters =

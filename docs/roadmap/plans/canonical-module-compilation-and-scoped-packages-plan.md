@@ -891,7 +891,7 @@ Implementation:
 
 - update all fixtures and source imports to module-root-relative syntax
 - remove `@./`, `package_folders` and `/lib` examples
-- update `bean new` scaffolding
+- update `moth new` scaffolding
 - update language, project-structure, packages, imports and compiler educational pages
 - add complete normal/support/facade project trees and legal/illegal topology examples
 - update the progress matrix only for behavior that is now implemented

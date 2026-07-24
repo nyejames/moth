@@ -1,7 +1,7 @@
 //! Common language-mismatch mistakes in expression position.
 //!
 //! WHAT: Detects patterns like `==`, `!=`, `&&`, `||`, `!expr`, `&expr` that
-//! users from C-family languages write when they first encounter Beanstalk.
+//! users from C-family languages write when they first encounter Moth.
 //!
 //! WHY: These are unambiguous syntax errors at the token level. Catching them
 //! early with specific guidance prevents confusion before generic "invalid token"
@@ -14,7 +14,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 /// Check for common expression-position mistakes before falling back to a generic error.
 ///
 /// WHAT: inspects the current token (and sometimes the next token) for patterns
-/// that are valid in other languages but not in Beanstalk.
+/// that are valid in other languages but not in Moth.
 ///
 /// Returns `Some(diagnostic)` when a known mistake is detected, `None` otherwise.
 pub(crate) fn check_expression_common_mistake(

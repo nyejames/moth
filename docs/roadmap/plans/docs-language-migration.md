@@ -1,10 +1,10 @@
-# Beanstalk language documentation completion and compiler semantic realignment
+# Moth language documentation completion and compiler semantic realignment
 
 ## 1. Purpose and required order
 
 This plan completes the focused language documentation migration and then realigns the compiler with the accepted language contract.
 
-Commit `d707782fcb92a3e73dbc7ee9371820a6344e198f` is the reviewed documentation baseline. It added useful route scaffolding and established the accepted direction for strings, matching, Beandown collisions, memory and design scope. It did not complete the parity migration.
+Commit `d707782fcb92a3e73dbc7ee9371820a6344e198f` is the reviewed documentation baseline. It added useful route scaffolding and established the accepted direction for strings, matching, Moth Templates collisions, memory and design scope. It did not complete the parity migration.
 
 The remaining work has three ordered stages:
 
@@ -28,7 +28,7 @@ The remaining work has three ordered stages:
 
 Stage A may update the monolith, focused documentation, compiler-design wording, build-system wording, memory links, the progress matrix and generated documentation. It must not change Rust source, compiler tests, executable fixtures, manifests or build behaviour.
 
-Beanstalk is early Alpha. Stage B removes obsolete design completely. It does not retain compatibility syntax, deprecation periods, legacy diagnostics, dormant adapters or redundant internal data shapes.
+Moth is early Alpha. Stage B removes obsolete design completely. It does not retain compatibility syntax, deprecation periods, legacy diagnostics, dormant adapters or redundant internal data shapes.
 
 ---
 
@@ -46,7 +46,7 @@ The following work is complete enough to treat as foundation rather than an acti
 - the initial public Design Scope route
 - the accepted removal of general match capture from the documented design
 - the accepted removal of string relational ordering from the documented design
-- the accepted Beandown no-shadowing direction
+- the accepted Moth Templates no-shadowing direction
 - the accepted template-based string concatenation direction
 - generated route creation for the new pages
 
@@ -146,7 +146,7 @@ When Stage B lands, remove the temporary implementation-gap note and update the 
 - Follow `docs/src/docs/codebase/style-guide/style-guide.bd`.
 - Use straight apostrophes.
 - Avoid em dashes.
-- Use exact Beanstalk syntax.
+- Use exact Moth syntax.
 - Label invalid examples clearly.
 - Keep every code example type coherent.
 - Do not address the reader as an agent or LLM.
@@ -168,13 +168,13 @@ Function signatures declare return value types and return channels only.
 
 Forms such as:
 
-```beanstalk
+```moth
 choose |first String, fallback String| -> first or fallback:
     return first
 ;
 ```
 
-are not Beanstalk syntax.
+are not Moth syntax.
 
 Return aliasing remains compiler-owned semantic information:
 
@@ -213,13 +213,13 @@ This plan does not add an in-place string mutation API or a second public `Strin
 
 Source-level string concatenation uses templates:
 
-```beanstalk
+```moth
 joined = [left, right]
 ```
 
 This is invalid in the accepted language:
 
-```beanstalk
+```moth
 joined = left + right
 ```
 
@@ -251,7 +251,7 @@ Valid binding patterns remain:
 
 An unknown bare name in choice pattern position is an unknown choice variant. A bare name in another full-match pattern position is invalid.
 
-### 4.6 Beandown implicit scope does not shadow
+### 4.6 Moth Templates implicit scope does not shadow
 
 A `.bd` body may receive implicit compile-time constants from:
 
@@ -262,7 +262,7 @@ If both surfaces expose the same visible name, compilation fails with the ordina
 
 ### 4.7 Assertions in teaching examples
 
-`assert` is Beanstalk's explicit source-level invariant-failure or panic statement. It is not normal expected-failure handling.
+`assert` is Moth's explicit source-level invariant-failure or panic statement. It is not normal expected-failure handling.
 
 A documentation example may use `assert(false, "message")` inside a `catch` when:
 
@@ -272,7 +272,7 @@ A documentation example may use `assert(false, "message")` inside a `catch` when
 
 For example:
 
-```beanstalk
+```moth
 ~items.push(4) catch:
     assert(false, "unexpected push failure")
 ;
@@ -280,7 +280,7 @@ For example:
 
 A value-producing handler may also terminate with an assertion:
 
-```beanstalk
+```moth
 first = items.get(0) catch:
     assert(false, "index was checked")
 ;
@@ -348,9 +348,9 @@ Required outcomes:
 - unknown choice names are described consistently
 - current compiler acceptance of removed forms is recorded as an implementation gap until Stage B
 
-#### Beandown consistency
+#### Moth Templates consistency
 
-Review the monolith, Beandown pages, package visibility wording and generated output.
+Review the monolith, Moth Templates pages, package visibility wording and generated output.
 
 Required outcomes:
 
@@ -369,19 +369,19 @@ Required corrections include:
 - a value mutated through a receiver is held in a mutable binding
 - `push`, `get`, `set` and `remove` use `!`, meaningful `catch` or the assertion policy in section 4.7
 - postfix `!` appears only inside a compatible fallible function
-- symbolic `==` is not presented as a Beanstalk operator
+- symbolic `==` is not presented as a Moth operator
 - shared aliases are not named `copy_of`
 - invalid examples are commented or placed in clearly labelled invalid blocks
 - examples do not depend on undeclared values, imports, methods or result channels
 
 Recommended corrected forms:
 
-```beanstalk
+```moth
 name ~= "Priya"
 name = "Aisha"
 ```
 
-```beanstalk
+```moth
 independent ~= copy original
 
 ~independent.push(4) catch:
@@ -389,7 +389,7 @@ independent ~= copy original
 ;
 ```
 
-```beanstalk
+```moth
 first = original.get(0) catch:
     assert(false, "known valid index")
 ;
@@ -590,7 +590,7 @@ Advanced content must preserve:
 - the exact deferred versus outside-scope distinction
 - every excluded language family
 - the rationale for each family
-- the constrained Beanstalk mechanism used instead
+- the constrained Moth mechanism used instead
 - source-visible lifetime, reference-category and ownership annotations as outside scope
 - backend-specific observable semantics as outside scope
 - expected failure through `Error!`, invariants through `assert` and explicit result-like domain values through ordinary choices
@@ -646,7 +646,7 @@ A section is complete only when its Advanced owner is direct-read complete and i
 | Project Structure | Add build inputs, entry config and facade ownership |
 | Packages and Imports | Correct support-root legality and complete package boundaries |
 | Core and Builder Packages | Convert to Basic and Advanced semantic owners |
-| Beandown | Rewrite collision example and mark temporary compiler drift |
+| Moth Templates | Rewrite collision example and mark temporary compiler drift |
 | Plain Markdown | Final boundary and link audit |
 | Design Scope | Become the complete exact focused owner |
 | Language monolith | Synchronise every accepted decision and gap note |
@@ -661,7 +661,7 @@ Stage A is documentation-only.
 Use the documentation-only final gate from the style guide:
 
 ```sh
-bean build docs --release
+moth build docs --release
 ```
 
 or, when a suitable release compiler is unavailable:
@@ -673,7 +673,7 @@ cargo run --quiet -- build docs --release
 Targeted iteration may use:
 
 ```sh
-bean check docs
+moth check docs
 ```
 
 or focused compiler probes for examples.
@@ -792,7 +792,7 @@ Required outcomes:
 
 Update unit tests, HIR tests, integration fixtures, backend tests and benchmarks.
 
-### 6.4 Align Beandown implicit collisions
+### 6.4 Align Moth Templates implicit collisions
 
 Required outcomes:
 
@@ -832,7 +832,7 @@ For every code-bearing semantic slice:
 ```sh
 cargo fmt
 just validate
-bean build docs --release
+moth build docs --release
 ```
 
 Use the equivalent Cargo docs build when necessary.

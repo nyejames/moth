@@ -243,10 +243,10 @@ impl FrontendProject {
 fn compiles_single_file_program_through_borrow_check() {
     let mut project = FrontendProject::new(
         &[(
-            "src/#page.bst",
+            "src/#page.moth",
             "Point = |\n    value Int,\n|\npoint = Point(1)\nloop 0 to 2 |i|:\n    io.line([: [point.value]])\n;\n",
         )],
-        "src/#page.bst",
+        "src/#page.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -261,15 +261,15 @@ fn compiles_multi_file_import_program_through_borrow_check() {
     let mut project = FrontendProject::new(
         &[
             (
-                "src/#page.bst",
+                "src/#page.moth",
                 "import @helper { add }\nresult = add(1, 2)\nio.line([: [result]])\n",
             ),
             (
-                "src/helper.bst",
+                "src/helper.moth",
                 "add|left Int, right Int| -> Int:\n    return left + right\n;\n",
             ),
         ],
-        "src/#page.bst",
+        "src/#page.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -282,8 +282,8 @@ fn compiles_multi_file_import_program_through_borrow_check() {
 #[test]
 fn frontend_diagnostics_preserve_string_table_context() {
     let mut project = FrontendProject::new(
-        &[("src/#page.bst", "bad #= io.line(\"runtime host call\")\n")],
-        "src/#page.bst",
+        &[("src/#page.moth", "bad #= io.line(\"runtime host call\")\n")],
+        "src/#page.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -306,7 +306,7 @@ fn frontend_diagnostics_preserve_string_table_context() {
         .scope
         .to_portable_string(&messages.string_table);
     let expected_scope = project
-        .logical_path("src/#page.bst")
+        .logical_path("src/#page.moth")
         .to_portable_string(&messages.string_table);
     assert!(
         resolved_scope == expected_scope,
@@ -315,10 +315,10 @@ fn frontend_diagnostics_preserve_string_table_context() {
 
     let mut project = FrontendProject::new(
         &[(
-            "src/#page.bst",
+            "src/#page.moth",
             "data ~= [\"shared data\"]\nref1 ~= data\nref2 ~= data\nresult = [ref1, ref2]\n",
         )],
-        "src/#page.bst",
+        "src/#page.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -337,7 +337,7 @@ fn frontend_diagnostics_preserve_string_table_context() {
         .scope
         .to_portable_string(&messages.string_table);
     let expected_scope = project
-        .logical_path("src/#page.bst")
+        .logical_path("src/#page.moth")
         .to_portable_string(&messages.string_table);
     assert!(
         resolved_scope == expected_scope,
@@ -372,8 +372,8 @@ fn html_style_directive_available_during_header_parsing() {
         .expect("merged directive registry should build");
 
     let mut project = FrontendProject::new(
-        &[("src/#page.bst", "head #= [$html: <div>Hello</div>]\n")],
-        "src/#page.bst",
+        &[("src/#page.moth", "head #= [$html: <div>Hello</div>]\n")],
+        "src/#page.moth",
         directives,
     );
 

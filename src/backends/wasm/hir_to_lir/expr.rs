@@ -78,7 +78,7 @@ pub(crate) fn lower_expression(
                 }
             }
         }
-        // Beanstalk `Float` is finite f64. HIR validation rejects non-finite literals before
+        // Moth `Float` is finite f64. HIR validation rejects non-finite literals before
         // any backend sees them, so this path trusts the invariant without rechecking.
         HirExpressionKind::Float(value) => {
             let dst = context.alloc_temp(WasmAbiType::F64);

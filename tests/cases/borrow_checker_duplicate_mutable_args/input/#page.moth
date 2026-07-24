@@ -1,0 +1,11 @@
+-- Multiple mutable borrows of the same place in one call (should fail)
+-- Passing the same mutable place to two mutable parameters triggers
+-- MOTH-BORROW-0002: Multiple mutable borrows.
+
+touch |a ~Int, b ~Int|:
+    io.line("ok")
+;
+
+x ~= 1
+touch(~x, ~x)
+result = x

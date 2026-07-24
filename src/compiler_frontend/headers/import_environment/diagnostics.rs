@@ -36,7 +36,7 @@ pub(super) fn not_exported_by_public_surface(
     )
 }
 
-/// Diagnostic when an import path directly references a hash root or canonical `config.bst`.
+/// Diagnostic when an import path directly references a hash root or canonical `config.moth`.
 pub(super) fn direct_special_file_import(
     path: &InternedPath,
     location: SourceLocation,

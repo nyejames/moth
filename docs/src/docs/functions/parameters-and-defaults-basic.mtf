@@ -1,0 +1,23 @@
+Parameters describe the values a function needs.
+
+[codeblock, $code("moth"):
+    greet |name String, excited Bool|:
+        if excited:
+            io.line([: Hello, [name]!])
+        ;
+    ;
+]
+
+Each parameter has a name and a type.
+
+A default makes a parameter optional at the call site:
+
+[codeblock, $code("moth"):
+    describe |prefix String = "item", subject String| -> String:
+        return [prefix, ": ", subject]
+    ;
+
+    label = describe(subject = "apple")
+]
+
+The call supplies `subject` by name and keeps the default prefix.

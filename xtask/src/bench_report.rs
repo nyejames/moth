@@ -470,7 +470,7 @@ fn calculate_unattributed_cases(
 fn attributed_wall_time_ms(case: &BenchmarkCaseResult) -> Option<f64> {
     // Top-level non-nested pipeline phases for each command. These are the
     // dotted metrics emitted by the concise `timers` feature under
-    // BST_TIMERS=bench. We deliberately exclude `.total` and `_total`
+    // MOTH_TIMERS=bench. We deliberately exclude `.total` and `_total`
     // wrapper metrics (e.g. command.check.total, build_project.total,
     // output.write_total) because they nest the sub-phases listed here and
     // would double-count if summed alongside them.

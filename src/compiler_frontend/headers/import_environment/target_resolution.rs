@@ -107,7 +107,7 @@ pub(crate) fn resolve_external_package_symbol(
 
 /// Resolve an `@path/to/symbol` to its concrete target.
 ///
-/// WHAT: performs source-symbol resolution (exact match and suffix match with optional `.bst`
+/// WHAT: performs source-symbol resolution (exact match and suffix match with optional `.moth`
 /// extension), file→symbol inference, and virtual-package lookup.
 ///
 /// Returns `DirectSourceExport` for all source targets because this function does not know whether
@@ -218,8 +218,8 @@ enum ImportPathMatch {
 ///
 /// WHAT: first tries exact component match (with optional source-file extensions), then tries
 /// suffix match with the same source-file extension rules.
-/// WHY: `@path/to/symbol` may match `@path/to/symbol.bst` or a generated content asset symbol
-/// such as `@path/to/file.bd/content` or `@path/to/file.md/content` while user import syntax stays
+/// WHY: `@path/to/symbol` may match `@path/to/symbol.moth` or a generated content asset symbol
+/// such as `@path/to/file.mtf/content` or `@path/to/file.md/content` while user import syntax stays
 /// extensionless.
 fn resolve_import_target_path(
     requested_path: &InternedPath,
@@ -367,11 +367,11 @@ fn source_components_match(
     requested: &[StringId],
     string_table: &StringTable,
 ) -> bool {
-    components_match_with_optional_bst_extension(candidate, requested, string_table)
+    components_match_with_optional_moth_extension(candidate, requested, string_table)
         || components_match_with_optional_content_file_extension(candidate, requested, string_table)
 }
 
-fn components_match_with_optional_bst_extension(
+fn components_match_with_optional_moth_extension(
     candidate_components: &[crate::compiler_frontend::symbols::string_interning::StringId],
     requested_components: &[crate::compiler_frontend::symbols::string_interning::StringId],
     string_table: &StringTable,
@@ -391,9 +391,9 @@ fn components_match_with_optional_bst_extension(
             let candidate_str = string_table.resolve(*candidate_component);
             let requested_str = string_table.resolve(*requested_component);
 
-            candidate_str.strip_suffix(SourceFileKind::Beanstalk.extension_suffix())
+            candidate_str.strip_suffix(SourceFileKind::Moth.extension_suffix())
                 == Some(requested_str)
-                || requested_str.strip_suffix(SourceFileKind::Beanstalk.extension_suffix())
+                || requested_str.strip_suffix(SourceFileKind::Moth.extension_suffix())
                     == Some(candidate_str)
         })
 }
@@ -418,7 +418,7 @@ fn components_match_with_optional_content_file_extension(
             let candidate_str = string_table.resolve(*candidate_component);
             let requested_str = string_table.resolve(*requested_component);
 
-            candidate_str.strip_suffix(SourceFileKind::Beandown.extension_suffix())
+            candidate_str.strip_suffix(SourceFileKind::MothTemplate.extension_suffix())
                 == Some(requested_str)
                 || candidate_str.strip_suffix(SourceFileKind::PlainMarkdown.extension_suffix())
                     == Some(requested_str)
@@ -448,7 +448,7 @@ pub(crate) struct NamespaceTargetResolutionInput<'a> {
 
 /// Resolve a bare `import @path` to its namespace target.
 ///
-/// WHAT: first checks whether the path matches a known source file (with optional `.bst`
+/// WHAT: first checks whether the path matches a known source file (with optional `.moth`
 /// extension), then checks whether it matches a known external package exactly.
 /// WHY: namespace imports create field-access-only records; they must resolve to a concrete
 /// file or package surface, not to individual symbols.
@@ -479,12 +479,12 @@ pub(crate) fn resolve_namespace_target(
     None
 }
 
-/// True when any component of the import path ends with `.bst`.
+/// True when any component of the import path ends with `.moth`.
 ///
-/// WHAT: Beanstalk imports must not include the `.bst` extension. This helper detects
-/// explicit `.bst` usage so callers can emit `ExplicitBstExtension`.
-pub(crate) fn has_explicit_bst_extension(path: &InternedPath, string_table: &StringTable) -> bool {
+/// WHAT: Moth imports must not include the `.moth` extension. This helper detects
+/// explicit `.moth` usage so callers can emit `ExplicitBstExtension`.
+pub(crate) fn has_explicit_moth_extension(path: &InternedPath, string_table: &StringTable) -> bool {
     path.as_components()
         .iter()
-        .any(|&component| string_table.resolve(component).ends_with(".bst"))
+        .any(|&component| string_table.resolve(component).ends_with(".moth"))
 }

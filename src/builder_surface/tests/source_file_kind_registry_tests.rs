@@ -6,31 +6,31 @@ use crate::builder_surface::source_file_kind_registry::{SourceFileKind, SourceFi
 fn empty_registry_has_no_supported_kinds() {
     let registry = SourceFileKindRegistry::new();
 
-    assert!(!registry.is_supported("bd"));
+    assert!(!registry.is_supported("mtf"));
     assert!(!registry.is_supported("md"));
-    assert!(!registry.is_supported("bst"));
+    assert!(!registry.is_supported("moth"));
     assert_eq!(registry.supported_kinds().len(), 0);
 }
 
 #[test]
-fn register_beandown_lookup_succeeds() {
+fn register_moth_template_lookup_succeeds() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
 
-    assert!(registry.is_supported("bd"));
+    assert!(registry.is_supported("mtf"));
     assert_eq!(
-        registry.kind_for_extension("bd"),
-        Some(SourceFileKind::Beandown)
+        registry.kind_for_extension("mtf"),
+        Some(SourceFileKind::MothTemplate)
     );
 }
 
 #[test]
-fn compiler_owned_beanstalk_is_supported_without_registration() {
+fn compiler_owned_moth_is_supported_without_registration() {
     let registry = SourceFileKindRegistry::new();
 
-    assert!(registry.supports_recognized_extension("bst"));
-    assert!(!registry.is_supported("bst"));
-    assert!(!registry.supports_recognized_extension("bd"));
+    assert!(registry.supports_recognized_extension("moth"));
+    assert!(!registry.is_supported("moth"));
+    assert!(!registry.supports_recognized_extension("mtf"));
 }
 
 #[test]
@@ -68,14 +68,14 @@ fn register_plain_markdown_makes_it_supported() {
 fn supported_kinds_sorts_multiple_kinds_deterministically() {
     let mut registry = SourceFileKindRegistry::new();
     registry.register("md", SourceFileKind::PlainMarkdown);
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
 
     let kinds = registry.supported_kinds();
     assert_eq!(kinds.len(), 2);
-    assert_eq!(kinds[0].extension, "bd");
-    assert_eq!(kinds[0].kind, SourceFileKind::Beandown);
-    assert_eq!(kinds[1].extension, "md");
-    assert_eq!(kinds[1].kind, SourceFileKind::PlainMarkdown);
+    assert_eq!(kinds[0].extension, "md");
+    assert_eq!(kinds[0].kind, SourceFileKind::PlainMarkdown);
+    assert_eq!(kinds[1].extension, "mtf");
+    assert_eq!(kinds[1].kind, SourceFileKind::MothTemplate);
 }
 
 #[test]
@@ -91,12 +91,12 @@ fn plain_markdown_extension_round_trips() {
 #[test]
 fn registry_is_cloneable() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
 
     let cloned = registry.clone();
-    assert!(cloned.is_supported("bd"));
+    assert!(cloned.is_supported("mtf"));
     assert_eq!(
-        cloned.kind_for_extension("bd"),
-        Some(SourceFileKind::Beandown)
+        cloned.kind_for_extension("mtf"),
+        Some(SourceFileKind::MothTemplate)
     );
 }

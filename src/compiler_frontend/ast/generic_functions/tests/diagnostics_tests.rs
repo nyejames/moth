@@ -54,8 +54,8 @@ fn instantiation_context(
 #[test]
 fn with_generic_instantiation_context_changes_primary_location_to_call_site() {
     let mut string_table = StringTable::new();
-    let body_location = make_location("body.bst", 10, 5, &mut string_table);
-    let call_location = make_location("call.bst", 20, 8, &mut string_table);
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
         builtin_type_ids::INT,
@@ -75,8 +75,8 @@ fn with_generic_instantiation_context_changes_primary_location_to_call_site() {
 #[test]
 fn with_generic_instantiation_context_first_label_is_primary_call_site() {
     let mut string_table = StringTable::new();
-    let body_location = make_location("body.bst", 10, 5, &mut string_table);
-    let call_location = make_location("call.bst", 20, 8, &mut string_table);
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
         builtin_type_ids::INT,
@@ -105,8 +105,8 @@ fn with_generic_instantiation_context_first_label_is_primary_call_site() {
 #[test]
 fn with_generic_instantiation_context_adds_secondary_body_site_label() {
     let mut string_table = StringTable::new();
-    let body_location = make_location("body.bst", 10, 5, &mut string_table);
-    let call_location = make_location("call.bst", 20, 8, &mut string_table);
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
         builtin_type_ids::INT,
@@ -136,9 +136,9 @@ fn with_generic_instantiation_context_adds_secondary_body_site_label() {
 #[test]
 fn with_generic_instantiation_context_preserves_existing_secondary_labels() {
     let mut string_table = StringTable::new();
-    let body_location = make_location("body.bst", 10, 5, &mut string_table);
-    let call_location = make_location("call.bst", 20, 8, &mut string_table);
-    let extra_location = make_location("extra.bst", 15, 3, &mut string_table);
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
+    let extra_location = make_location("extra.moth", 15, 3, &mut string_table);
 
     let diagnostic = CompilerDiagnostic::new(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
@@ -174,8 +174,8 @@ fn with_generic_instantiation_context_preserves_existing_secondary_labels() {
 #[test]
 fn with_generic_instantiation_context_avoids_duplicate_body_secondary_label() {
     let mut string_table = StringTable::new();
-    let body_location = make_location("body.bst", 10, 5, &mut string_table);
-    let call_location = make_location("call.bst", 20, 8, &mut string_table);
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
 
     // Create a diagnostic where the body location is already a secondary label.
     let diagnostic = CompilerDiagnostic::new(
@@ -213,8 +213,8 @@ fn with_generic_instantiation_context_avoids_duplicate_body_secondary_label() {
 #[test]
 fn with_generic_instantiation_context_drops_original_primary_label() {
     let mut string_table = StringTable::new();
-    let body_location = make_location("body.bst", 10, 5, &mut string_table);
-    let call_location = make_location("call.bst", 20, 8, &mut string_table);
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
 
     // Create a diagnostic that already has a primary label at the body location.
     let diagnostic = CompilerDiagnostic::new(
@@ -253,9 +253,9 @@ fn with_generic_instantiation_context_drops_original_primary_label() {
 #[test]
 fn with_generic_instantiation_context_adds_declaration_site_label() {
     let mut string_table = StringTable::new();
-    let body_location = make_location("body.bst", 10, 5, &mut string_table);
-    let call_location = make_location("call.bst", 20, 8, &mut string_table);
-    let declaration_location = make_location("declaration.bst", 2, 1, &mut string_table);
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
+    let declaration_location = make_location("declaration.moth", 2, 1, &mut string_table);
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
         builtin_type_ids::INT,
@@ -286,9 +286,9 @@ fn with_generic_instantiation_context_adds_declaration_site_label() {
 #[test]
 fn with_generic_instantiation_context_adds_structured_substitution_label() {
     let mut string_table = StringTable::new();
-    let body_location = make_location("body.bst", 10, 5, &mut string_table);
-    let call_location = make_location("call.bst", 20, 8, &mut string_table);
-    let declaration_location = make_location("declaration.bst", 2, 1, &mut string_table);
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
+    let declaration_location = make_location("declaration.moth", 2, 1, &mut string_table);
     let parameter_name = string_table.intern("T");
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
@@ -335,8 +335,8 @@ fn with_generic_instantiation_context_adds_structured_substitution_label() {
 #[test]
 fn conflicting_generic_function_argument_keeps_current_evidence_primary_label() {
     let mut string_table = StringTable::new();
-    let current_location = make_location("call.bst", 12, 4, &mut string_table);
-    let previous_location = make_location("call.bst", 12, 1, &mut string_table);
+    let current_location = make_location("call.moth", 12, 4, &mut string_table);
+    let previous_location = make_location("call.moth", 12, 1, &mut string_table);
     let function_name = string_table.intern("same");
     let parameter_name = string_table.intern("T");
 

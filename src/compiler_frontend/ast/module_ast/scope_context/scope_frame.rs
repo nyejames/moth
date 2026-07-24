@@ -125,7 +125,7 @@ impl ScopeArena {
     ///
     /// WHAT: checks the current frame first so the most recent local binding wins,
     ///       then walks parent frames until the name is found or the chain ends.
-    /// WHY: Beanstalk forbids shadowing, so there is never more than one visible binding
+    /// WHY: Moth forbids shadowing, so there is never more than one visible binding
     ///      for a name; "latest" simply means "nearest ancestor that declares it".
     pub(crate) fn lookup(
         &self,

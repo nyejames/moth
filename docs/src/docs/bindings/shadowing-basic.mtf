@@ -1,0 +1,23 @@
+A visible name cannot be declared again.
+
+[codeblock, $code("moth"):
+    score = 10
+
+    if score > 0:
+        -- Invalid: score already exists.
+        score Int = 20
+    ;
+]
+
+Choose a different name instead:
+
+[codeblock, $code("moth"):
+    score = 10
+
+    if score > 0:
+        doubled_score = score * 2
+    ;
+]
+
+Reassigning a mutable binding is different. That changes the existing binding
+instead of creating another one.

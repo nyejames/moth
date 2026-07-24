@@ -1,4 +1,4 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0015"]
+diagnostic_codes = ["MOTH-SYNTAX-0015"]

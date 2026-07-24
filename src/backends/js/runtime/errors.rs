@@ -13,7 +13,7 @@ impl<'hir> JsEmitter<'hir> {
     ///
     /// WHAT: normalises location paths, constructs canonical error records, and provides hidden
     /// context helpers used by backend-generated propagation paths.
-    /// WHY: public Beanstalk code accesses `Error.message` and `Error.code` through the lowered
+    /// WHY: public Moth code accesses `Error.message` and `Error.code` through the lowered
     /// struct-field symbols. Backend-created errors must therefore construct those same fields.
     pub(crate) fn emit_runtime_error_helpers(&mut self) {
         let release_build = !self.config.pretty;
@@ -22,7 +22,7 @@ impl<'hir> JsEmitter<'hir> {
         let message_field_literal = format!("{message_field:?}");
         let code_field_literal = format!("{code_field:?}");
 
-        self.emit_line("function __bs_error_normalize_file(file) {");
+        self.emit_line("function __moth_error_normalize_file(file) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (typeof file !== \"string\") {");
             emitter.with_indent(|em| em.emit_line("return \"\";"));
@@ -44,30 +44,30 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_make_error(message, code, location, trace) {");
+        self.emit_line("function __moth_make_error(message, code, location, trace) {");
         self.with_indent(|emitter| {
             emitter.emit_line("return {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!("{message_field}: message,"));
                 em.emit_line(&format!("{code_field}: code,"));
-                em.emit_line("__bst_location: location ?? null,");
-                em.emit_line("__bst_trace: trace ?? null");
+                em.emit_line("__moth_location: location ?? null,");
+                em.emit_line("__moth_trace: trace ?? null");
             });
             emitter.emit_line("};");
         });
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_error_result(message, code) {");
+        self.emit_line("function __moth_error_result(message, code) {");
         self.with_indent(|emitter| {
             emitter.emit_line(
-                "return { tag: \"err\", value: __bs_make_error(message, code, null, null) };",
+                "return { tag: \"err\", value: __moth_make_error(message, code, null, null) };",
             );
         });
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_error_message(error) {");
+        self.emit_line("function __moth_error_message(error) {");
         self.with_indent(|emitter| {
             emitter.emit_line(&format!(
                 "const message = error && error[{message_field_literal}] !== undefined ? error[{message_field_literal}] : error && error.message;",
@@ -77,7 +77,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_error_code(error) {");
+        self.emit_line("function __moth_error_code(error) {");
         self.with_indent(|emitter| {
             emitter.emit_line(&format!(
                 "const code = error && error[{code_field_literal}] !== undefined ? error[{code_field_literal}] : error && error.code;",
@@ -87,40 +87,40 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_error_with_location(error, location) {");
+        self.emit_line("function __moth_error_with_location(error, location) {");
         self.with_indent(|emitter| {
             emitter.emit_line(
-                "return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);",
+                "return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);",
             );
         });
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_error_push_trace(error, frame) {");
+        self.emit_line("function __moth_error_push_trace(error, frame) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];");
+            emitter.emit_line("const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];");
             emitter.emit_line(
-                "return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);",
+                "return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);",
             );
         });
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __bs_error_bubble(error, file, line, column, functionName) {");
+        self.emit_line("function __moth_error_bubble(error, file, line, column, functionName) {");
         self.with_indent(|emitter| {
             emitter.emit_line("const safeFunction = typeof functionName === \"string\" && functionName.length > 0 ? functionName : \"<unknown>\";");
             emitter.emit_line("const location = {");
             emitter.with_indent(|em| {
-                em.emit_line("file: __bs_error_normalize_file(file),");
+                em.emit_line("file: __moth_error_normalize_file(file),");
                 em.emit_line("line,");
                 em.emit_line("column,");
                 em.emit_line("function: safeFunction === \"<unknown>\" ? null : safeFunction");
             });
             emitter.emit_line("};");
             emitter.emit_line("const frame = { function: safeFunction, location };");
-            emitter.emit_line("const nextLocation = error.__bst_location ?? location;");
-            emitter.emit_line("const located = __bs_error_with_location(error, nextLocation);");
-            emitter.emit_line("return __bs_error_push_trace(located, frame);");
+            emitter.emit_line("const nextLocation = error.__moth_location ?? location;");
+            emitter.emit_line("const located = __moth_error_with_location(error, nextLocation);");
+            emitter.emit_line("return __moth_error_push_trace(located, frame);");
         });
         self.emit_line("}");
         self.emit_line("");

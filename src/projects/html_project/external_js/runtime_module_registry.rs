@@ -1,7 +1,7 @@
 //! Builder-owned registry of core JS runtime modules.
 //!
 //! WHAT: tracks which JS module specifiers are allowed in `import ... from "..."`
-//!       statements inside Beanstalk JS module files, and holds their authored source
+//!       statements inside Moth JS module files, and holds their authored source
 //!       for later emission by the HTML builder.
 //! WHY: the HTML builder owns the set of core runtime modules; the parser only validates
 //!      that JS imports match the registered set. Keeping the registry in `external_js`
@@ -23,31 +23,31 @@ pub struct CoreJsRuntimeModule {
 }
 
 impl CoreJsRuntimeModule {
-    /// Creates a v1 `@beanstalk/runtime` module with `bstOk` and `bstErr` exports.
+    /// Creates a v1 `@moth/runtime` module with `mothOk` and `mothErr` exports.
     ///
     /// WHAT: provides the small plain JS source that fallible JS module functions
     ///       import to return structured success/error wrappers.
     /// WHY: the runtime wrapper contract must match the glue the backend generates.
-    pub fn beanstalk_runtime_v1() -> Self {
+    pub fn moth_runtime_v1() -> Self {
         Self {
-            specifier: "@beanstalk/runtime".to_owned(),
-            source: BEANSTALK_RUNTIME_V1_SOURCE.to_owned(),
-            exported_names: vec!["bstOk".to_owned(), "bstErr".to_owned()],
+            specifier: "@moth/runtime".to_owned(),
+            source: MOTH_RUNTIME_SOURCE_V1.to_owned(),
+            exported_names: vec!["mothOk".to_owned(), "mothErr".to_owned()],
         }
     }
 }
 
-/// v1 source for `@beanstalk/runtime`.
+/// v1 source for `@moth/runtime`.
 ///
-/// `bstOk(value)` produces a success wrapper.
-/// `bstOk()` with no argument also succeeds; `value` is `undefined`.
-/// `bstErr(code, message)` produces an error wrapper with enough shape for later
+/// `mothOk(value)` produces a success wrapper.
+/// `mothOk()` with no argument also succeeds; `value` is `undefined`.
+/// `mothErr(code, message)` produces an error wrapper with enough shape for later
 /// dev/debug glue validation.
-const BEANSTALK_RUNTIME_V1_SOURCE: &str = r#"export function bstOk(value) {
+const MOTH_RUNTIME_SOURCE_V1: &str = r#"export function mothOk(value) {
     return { ok: true, value: value };
 }
 
-export function bstErr(code, message) {
+export function mothErr(code, message) {
     return { ok: false, error: { code, message } };
 }
 "#;
@@ -55,7 +55,7 @@ export function bstErr(code, message) {
 /// Builder-owned registry of allowed core JS runtime module imports.
 ///
 /// WHAT: holds the set of registered core JS runtime modules and their sources.
-/// WHY: v1 registers only `@beanstalk/runtime`, but the shape is kept extensible
+/// WHY: v1 registers only `@moth/runtime`, but the shape is kept extensible
 ///      so future phases can register additional core runtime modules without
 ///      changing the scanner logic.
 pub struct RuntimeModuleRegistry {
@@ -71,10 +71,10 @@ impl RuntimeModuleRegistry {
         }
     }
 
-    /// Creates the v1 registry containing only `@beanstalk/runtime`.
+    /// Creates the v1 registry containing only `@moth/runtime`.
     pub fn v1() -> Self {
         Self {
-            modules: vec![CoreJsRuntimeModule::beanstalk_runtime_v1()],
+            modules: vec![CoreJsRuntimeModule::moth_runtime_v1()],
         }
     }
 

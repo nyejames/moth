@@ -1,7 +1,7 @@
 //! Profile observation logging
 //!
 //! WHAT: Runs warmup and observation passes for each benchmark case,
-//! parses stable `BST_BENCH` stdout into `BenchmarkCaseObservations`,
+//! parses stable `MOTH_BENCH` stdout into `BenchmarkCaseObservations`,
 //! and writes per-case artifacts (stdout/stderr logs, observations JSON,
 //! summary markdown).
 //!
@@ -13,8 +13,8 @@
 //!
 //! # What this module owns
 //! - `ProfileObservation` struct wrapping per-case run data
-//! - Warmup execution via `run_bean_command`
-//! - Observation execution via `run_bean_command`
+//! - Warmup execution via `run_moth_command`
+//! - Observation execution via `run_moth_command`
 //! - Parsing observation stdout with `bench_observations::parse_stdout_observations`
 //!
 //! # What this module does NOT own
@@ -26,7 +26,7 @@
 use crate::bench_observations::parse_stdout_observations;
 use crate::bench_types::BenchmarkCaseObservations;
 use crate::case_parser::BenchmarkCase;
-use crate::process_runner::run_bean_command;
+use crate::process_runner::run_moth_command;
 use std::path::Path;
 
 /// Observation data collected from one benchmark case run.
@@ -56,11 +56,11 @@ pub(crate) struct ProfileObservation {
 
 /// Run one warmup pass for a case to prime caches and stabilize timing.
 ///
-/// WHAT: Executes `run_bean_command` once and checks for success.
+/// WHAT: Executes `run_moth_command` once and checks for success.
 /// WHY: The first run often has cold-cache effects; warming up gives
 /// the observation pass more stable measurements.
-pub(crate) fn run_warmup(bean_path: &Path, case: &BenchmarkCase) -> Result<(), String> {
-    let run = run_bean_command(bean_path, &case.command, &case.args)?;
+pub(crate) fn run_warmup(moth_path: &Path, case: &BenchmarkCase) -> Result<(), String> {
+    let run = run_moth_command(moth_path, &case.command, &case.args)?;
     if !run.success {
         return Err(format!(
             "Warmup failed for case '{}': {}",
@@ -72,16 +72,16 @@ pub(crate) fn run_warmup(bean_path: &Path, case: &BenchmarkCase) -> Result<(), S
 
 /// Run one observation pass for a case, parse stdout, and collect artifacts.
 ///
-/// WHAT: Executes `run_bean_command`, parses `BST_BENCH timing` and
-/// `BST_BENCH counter` lines from stdout, and returns a `ProfileObservation`.
+/// WHAT: Executes `run_moth_command`, parses `MOTH_BENCH timing` and
+/// `MOTH_BENCH counter` lines from stdout, and returns a `ProfileObservation`.
 /// WHY: This is the measured pass that provides the timer/counter data
 /// written beside Samply profiles. The wall time here is used for
 /// hotspot estimation in later phases.
 pub(crate) fn run_observation(
-    bean_path: &Path,
+    moth_path: &Path,
     case: &BenchmarkCase,
 ) -> Result<ProfileObservation, String> {
-    let run = run_bean_command(bean_path, &case.command, &case.args)?;
+    let run = run_moth_command(moth_path, &case.command, &case.args)?;
     if !run.success {
         return Err(format!(
             "Observation pass failed for case '{}': {}",

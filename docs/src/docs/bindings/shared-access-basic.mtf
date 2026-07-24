@@ -1,0 +1,14 @@
+A new name for an existing value does not automatically copy that value.
+
+[codeblock, $code("moth"):
+    names = {"Priya", "Grace"}
+    same_names = names
+]
+
+`same_names` is another read-only view of the existing value.
+
+This keeps ordinary code cheap. You can pass values around without copying
+them first.
+
+Shared access cannot be used to change the value. Mutation needs a mutable
+binding and an explicit exclusive operation.

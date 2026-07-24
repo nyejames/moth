@@ -29,7 +29,7 @@ use super::{
     PublicExportResolutionInput, ResolvedImportTarget, SourceImportAccess,
     SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
     check_alias_case_warning, check_module_boundary, check_source_package_boundary,
-    has_explicit_bst_extension, resolve_external_package_symbol, resolve_import_target,
+    has_explicit_moth_extension, resolve_external_package_symbol, resolve_import_target,
     resolve_namespace_target, resolve_public_export_boundary,
 };
 
@@ -327,10 +327,10 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             }
         }
 
-        // 8. Add Beandown's compiler-integrated implicit constant scope.
-        // WHY: `.bd` bodies are synthetic constant initializers, so they need the same
+        // 8. Add Moth template's compiler-integrated implicit constant scope.
+        // WHY: `.mtf` bodies are synthetic constant initializers, so they need the same
         // file-local visibility maps as authored constants without a user-visible import record.
-        self.register_implicit_beandown_constant_scope(&mut file_visibility, source_file);
+        self.register_implicit_moth_template_constant_scope(&mut file_visibility, source_file);
 
         // Sort receiver method paths for deterministic lookup ordering.
         // WHY: same method name from different sources must resolve consistently
@@ -349,17 +349,17 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         Ok(())
     }
 
-    fn register_implicit_beandown_constant_scope(
+    fn register_implicit_moth_template_constant_scope(
         &self,
         file_visibility: &mut FileVisibility,
         source_file: &InternedPath,
     ) {
-        if !self.is_beandown_source_file(source_file) {
+        if !self.is_moth_template_source_file(source_file) {
             return;
         }
 
         let mut implicit_constants = FxHashMap::default();
-        self.remove_beandown_generated_self_constants(file_visibility, source_file);
+        self.remove_moth_template_generated_self_constants(file_visibility, source_file);
 
         // Layer 1: exported constants from the HTML source-backed package public surface.
         self.collect_html_public_export_constants(&mut implicit_constants);
@@ -377,7 +377,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         }
     }
 
-    fn remove_beandown_generated_self_constants(
+    fn remove_moth_template_generated_self_constants(
         &self,
         file_visibility: &mut FileVisibility,
         source_file: &InternedPath,
@@ -498,7 +498,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         origin.to_path_buf(self.string_table) == *canonical_source_path
     }
 
-    fn is_beandown_source_file(&self, source_file: &InternedPath) -> bool {
+    fn is_moth_template_source_file(&self, source_file: &InternedPath) -> bool {
         let Some(path) = self
             .module_symbols
             .canonical_os_path_by_source
@@ -509,17 +509,17 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 .extension()
                 .and_then(|extension| extension.to_str())
                 .and_then(SourceFileKind::from_extension)
-                == Some(SourceFileKind::Beandown);
+                == Some(SourceFileKind::MothTemplate);
         };
 
         path.extension()
             .and_then(|extension| extension.to_str())
             .and_then(SourceFileKind::from_extension)
-            == Some(SourceFileKind::Beandown)
+            == Some(SourceFileKind::MothTemplate)
     }
 
     fn same_directory_root_file(&self, source_file: &InternedPath) -> Option<InternedPath> {
-        let beandown_directory = self.source_directory(source_file)?;
+        let moth_template_directory = self.source_directory(source_file)?;
 
         self.module_symbols
             .file_roles_by_source
@@ -530,7 +530,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 }
 
                 let candidate_directory = self.source_directory(candidate_source)?;
-                if candidate_directory == beandown_directory {
+                if candidate_directory == moth_template_directory {
                     Some(candidate_source.clone())
                 } else {
                     None
@@ -735,7 +735,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     ///
     /// WHAT: `import @web/canvas { get_canvas }` is parsed as a grouped import whose
     /// individual entry path is `web/canvas/get_canvas`. That path may also look like a
-    /// a path into a module public surface if the project has a `web/canvas/#*.bst` root-file shape.
+    /// a path into a module public surface if the project has a `web/canvas/#*.moth` root-file shape.
     /// Checking external metadata here keeps virtual packages out of source public-surface privacy
     /// rules while leaving all source imports on normal public-surface-first resolution.
     fn resolve_and_register_external_package_grouped_import(
@@ -777,9 +777,9 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         source_file: &InternedPath,
         importable_symbol_paths: &FxHashSet<InternedPath>,
     ) -> BuilderResult<()> {
-        // Reject explicit `.bst` extension in import paths.
-        if has_explicit_bst_extension(&import.provider.path, self.string_table) {
-            return Err(Box::new(CompilerDiagnostic::explicit_bst_extension(
+        // Reject explicit `.moth` extension in import paths.
+        if has_explicit_moth_extension(&import.provider.path, self.string_table) {
+            return Err(Box::new(CompilerDiagnostic::explicit_moth_extension(
                 import.provider.path.clone(),
                 import.location.clone(),
             )));

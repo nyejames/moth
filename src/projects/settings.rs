@@ -11,11 +11,28 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-pub const BEANSTALK_FILE_EXTENSION: &str = "bst";
+/// The canonical language source file extension (without dot).
+pub const LANGUAGE_SOURCE_EXTENSION: &str = "moth";
+
+/// Dotted language source extension.
+pub const LANGUAGE_SOURCE_SUFFIX: &str = ".moth";
+
+/// The canonical content/template file extension (without dot).
+pub const CONTENT_EXTENSION: &str = "mtf";
+
+/// Dotted content extension.
+pub const CONTENT_SUFFIX: &str = ".mtf";
+
+/// The canonical Markdown file extension (without dot).
+pub const MARKDOWN_EXTENSION: &str = "md";
+
+/// Dotted Markdown extension.
+pub const MARKDOWN_SUFFIX: &str = ".md";
+
 pub const COMP_PAGE_KEYWORD: &str = "#page";
 pub const GLOBAL_PAGE_KEYWORD: &str = "#global";
 pub const INDEX_PAGE_NAME: &str = "index.html";
-pub const CONFIG_FILE_NAME: &str = "config.bst";
+pub const CONFIG_FILE_NAME: &str = "config.moth";
 
 /// Special reserved names for functions and variables created by the compiler
 pub const TOP_LEVEL_TEMPLATE_NAME: &str = "#template";
@@ -38,7 +55,7 @@ pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // (Maybe) About 1/20 tokens f
 pub const TOKEN_TO_NODE_RATIO: usize = 10; // (Maybe) About 1/10 tokens to AstNode ratio
 pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols the smallest common Ast blocks will likely have
 
-/// WHAT: project configuration loaded from config.bst that controls build behavior.
+/// WHAT: project configuration loaded from config.moth that controls build behavior.
 /// WHY: config is the control plane for the build system; it must be validated early
 ///      and provide precise error locations for all settings.
 ///
@@ -70,7 +87,7 @@ pub struct Config {
     pub release_folder: PathBuf,
     /// Top-level project folders scanned for project-local source-backed packages.
     pub package_folders: Vec<PathBuf>,
-    /// Whether `package_folders` was explicitly configured in `config.bst`.
+    /// Whether `package_folders` was explicitly configured in `config.moth`.
     pub has_explicit_package_folders: bool,
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
@@ -106,7 +123,7 @@ impl Config {
         }
     }
 
-    /// Resolve the most specific location for a config key, falling back to `config.bst`.
+    /// Resolve the most specific location for a config key, falling back to `config.moth`.
     ///
     /// WHAT: uses the recorded setting location when available, otherwise creates a file-level
     /// location for the config file itself.

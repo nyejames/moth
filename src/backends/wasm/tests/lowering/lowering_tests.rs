@@ -184,7 +184,7 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
 fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
-    let runtime_path = InternedPath::from_single_str("__bst_frag_0", &mut string_table);
+    let runtime_path = InternedPath::from_single_str("__moth_frag_0", &mut string_table);
 
     let concat = expression(
         202,
@@ -268,7 +268,7 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
 fn lowers_runtime_template_with_cfg_before_final_return() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
-    let runtime_path = InternedPath::from_single_str("__bst_frag_cfg", &mut string_table);
+    let runtime_path = InternedPath::from_single_str("__moth_frag_cfg", &mut string_table);
 
     let entry_block = HirBlock {
         id: BlockId(0),
@@ -1151,7 +1151,7 @@ fn multi_fragment_template_produces_all_push_operations() {
     // produces the correct sequence: NewBuffer, PushLiteral, PushHandle, PushLiteral, PushHandle, Finish.
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
-    let runtime_path = InternedPath::from_single_str("__bst_frag_0", &mut string_table);
+    let runtime_path = InternedPath::from_single_str("__moth_frag_0", &mut string_table);
 
     // Build: "prefix" + param0 + "middle" + param1 + "suffix"
     let inner_concat_1 = expression(

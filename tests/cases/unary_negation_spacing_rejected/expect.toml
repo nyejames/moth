@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0031"]
+diagnostic_codes = ["MOTH-SYNTAX-0031"]
 message_contains = ["Unary negation", "attached"]

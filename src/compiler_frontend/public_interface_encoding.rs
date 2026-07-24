@@ -51,7 +51,7 @@ pub(crate) fn encode_public_interface_draft(
     draft: &PublicInterfaceDraft,
 ) -> Result<Vec<u8>, CompilerError> {
     let mut encoder = CanonicalEncoder::new();
-    encoder.write_bytes(b"beanstalk.public-interface-draft");
+    encoder.write_bytes(b"moth.public-interface-draft");
     encoder.write_u16(1);
 
     encode_module_origin(&mut encoder, &draft.module_origin);

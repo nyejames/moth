@@ -1,0 +1,22 @@
+import @./tokenization {content as reference_content}
+import @styles/docs {navbar, section, theme_head}
+
+page_title #= "05. Tokenization"
+page_description #= "How Moth recognises source boundaries and preserves locations."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Compiler design) / 05. Tokenization
+
+    # From characters to located tokens
+
+    Lexical analysis cuts character streams into located tokens and prepares document source kinds for shared later stages.
+]
+
+#[section, reference_content]
+
+#[section, $md:
+    @../ (Compiler design) / @../project-graphs-and-modules (Previous) / @../declarations-imports-and-ordering (Next)
+]

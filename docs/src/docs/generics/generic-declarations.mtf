@@ -1,0 +1,75 @@
+Generics are declaration-site type abstractions for top-level structs, choices and free functions. A generic parameter is a compile-time placeholder that stands for a concrete type selected later.
+
+### Syntax
+
+[codeblock, $code("moth"):
+    identity type A |value A| -> A:
+        return value
+    ;
+
+    Box type A = |
+        value A,
+    |
+
+    Maybe type A ::
+        Some | value A |,
+        Empty,
+    ;
+]
+
+Generic parameters follow the declaration name after `type`. Multiple parameters are separated by commas.
+
+### Exact contract
+
+- Generic parameters are introduced with `type` after the declaration name.
+- Supported declaration owners are top-level structs, choices and free functions.
+- Parameter names use type-name casing.
+- Parameters are scoped to the declaration.
+- Parameters are compile-time placeholders, not runtime values.
+- Each parameter name must be unique within the declaration.
+- Parameters cannot collide with visible concrete types, type aliases, external package types, builtins or other type-position names.
+- A generic body may use active parameters in local type annotations.
+- Inline parameter sugar such as `|value type A|` is rejected.
+- Generic parameters do not create type values.
+- Generic declarations are resolved before HIR.
+
+### Multiple parameters
+
+[codeblock, $code("moth"):
+    Pair type A, B = |
+        first A,
+        second B,
+    |
+]
+
+### Unused parameters
+
+A generic parameter must be used in the public type shape of the declaration. An unused parameter is rejected.
+
+[codeblock, $code("moth"):
+    -- Error: parameter 'A' is declared but never used
+    identity type A |value String| -> String:
+        return value
+    ;
+]
+
+### No inline parameter sugar
+
+Generic parameters belong in the declaration header, not inside ordinary parameter lists.
+
+[codeblock, $code("moth"):
+    -- Error
+    identity |value type A| -> A:
+        return value
+    ;
+]
+
+### Compiler stage note
+
+Header parsing records generic parameter lists and declaration metadata. AST resolves generic signatures to canonical type identities, validates generic bodies against unconstrained parameters and emits concrete instances before HIR generation. HIR never carries unresolved generic calls.
+
+### Related concepts
+
+- For applying concrete type arguments see @#type-application (Type application).
+- For call-site inference see @#generic-inference (Generic inference).
+- For trait bounds see @../traits/#generic-trait-bounds (Generic trait bounds).

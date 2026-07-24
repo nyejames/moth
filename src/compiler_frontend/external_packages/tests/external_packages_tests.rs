@@ -152,10 +152,10 @@ fn builtin_packages_resolve_by_path_and_symbol_name() {
         "@core/io/line should resolve by path and name"
     );
 
-    let get = registry.resolve_package_function("@core/collections", "__bs_collection_get");
+    let get = registry.resolve_package_function("@core/collections", "__moth_collection_get");
     assert!(
         get.is_some(),
-        "@core/collections/__bs_collection_get should resolve"
+        "@core/collections/__moth_collection_get should resolve"
     );
 }
 
@@ -964,7 +964,7 @@ fn core_io_input_last_key_pressed_returns_optional_string() {
 /// `PackageBacking::ExternalBinding` and preserves the supplied origin.
 ///
 /// WHAT: the `ExternalPackageRegistry` API only accepts `PackageOrigin`, constructing
-///       `PackageMetadata::binding(origin)` internally so a `BeanstalkSource`-backed
+///       `PackageMetadata::binding(origin)` internally so a `MothSource`-backed
 ///       package is unrepresentable through this API.
 /// WHY: protects the boundary between source-backed packages (owned by
 ///      `SourcePackageRegistry`) and binding-backed packages (owned here).

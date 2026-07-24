@@ -1,0 +1,43 @@
+Runtime numeric operations are checked.
+
+Failures include:
+
+- integer overflow
+- division or modulo by zero
+- invalid integer exponents
+- non-finite `Float` results
+
+### Failure mode
+
+When the enclosing function has builtin `Error!` as its error return slot,
+checked numeric failures use that error channel.
+
+[codeblock, $code("moth"):
+    divide |left Int, right Int| -> Float, Error!:
+        return left / right
+    ;
+
+    ratio = divide(10, 0) catch:
+        then 0.0
+    ;
+]
+
+Custom fallible channels, non-fallible functions and active-root top-level
+runtime code use trap mode for checked numeric failure.
+
+Numeric operators remain ordinary source expressions. The compiler lowers
+their failure path. They are not source-visible `Error!` values that can be
+handled in the middle of an arbitrary expression.
+
+### Compile-time failures
+
+A statically known numeric failure is a compile-time diagnostic.
+
+This remains true inside a function with builtin `Error!`.
+
+### Related behaviour
+
+Range-loop counter updates use the same checked numeric operations.
+
+Conversions that may lose information, such as `Float -> Int`, belong to the
+Casts documentation rather than implicit arithmetic coercion.

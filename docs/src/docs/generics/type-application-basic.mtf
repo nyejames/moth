@@ -1,0 +1,37 @@
+Use `of` to choose the concrete type for a generic declaration.
+
+### One argument
+
+[codeblock, $code("moth"):
+    Box type A = |
+        value A,
+    |
+
+    text_box Box of String = Box("hello")
+]
+
+### Several arguments
+
+[codeblock, $code("moth"):
+    Pair type A, B = |
+        first A,
+        second B,
+    |
+
+    item Pair of String, Int = Pair("count", 3)
+]
+
+### Concrete aliases
+
+When a type would need nested `of` applications, name an intermediate alias.
+
+[codeblock, $code("moth"):
+    StringIntPair as Pair of String, Int
+    value Box of StringIntPair = Box(Pair("count", 3))
+]
+
+### Remember
+
+- `of` goes in type position, not in ordinary expressions.
+- The number of arguments must match the declaration.
+- Different concrete arguments make different types.

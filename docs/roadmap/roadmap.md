@@ -1,5 +1,5 @@
-# Beanstalk Roadmap
-This is the main todo list and future design / implementation roadmap for Beanstalk.
+# Moth Roadmap
+This is the main todo list and future design / implementation roadmap for Moth.
 
 The next major plans are kept inside [plans](docs/roadmap/plans) and linked here in top to bottom order under the `Plans` heading.
 
@@ -24,7 +24,6 @@ Use the [Progress Matrix](docs/src/docs/progress/#page.bst) as a reference for w
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
-- [FULL PROJECT RENAME](tmp/beanleaf-migration-kit)
 
 Diagnostics may continue independently. The queued implementation chain remains ordered by hard dependency.
 
@@ -58,7 +57,7 @@ work remains in the
 
 ## Code-block highlighting follow-ups
 
-The built-in `$code` formatter already supports generic and plain-text blocks plus Beanstalk,
+The built-in `$code` formatter already supports generic and plain-text blocks plus Moth,
 JavaScript, TypeScript, Python, Rust and shell profiles. Future formats should extend the single
 `CodeLanguage` owner in `src/projects/html_project/styles/code.rs`, including its aliases,
 comment syntax, keyword/type rules, supported-values diagnostic and focused formatter tests.
@@ -78,7 +77,7 @@ rendered span classes.
 
 ## Genuinely deferred items
 
-- final builder selection syntax and a possible Beanstalk-native build script system
+- final builder selection syntax and a possible Moth-native build script system
 - package declaration syntax, registries, remote fetching, version solving and lockfiles
 - persistent artefact serialisation and precompiled package caches
 - explicit output transformation pipeline syntax
@@ -91,7 +90,7 @@ rendered span classes.
 - ownership optimisation deferred until after GC-first correctness
 - external non-scalar constant design: string slices, collections and opaque-type external constants in const contexts
 - private const and config follow-ups: consume HIR const metadata in borrow checking, temporary-local reduction and constant propagation
-- `bean new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup
+- `moth new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup
 - benchmarking and profiling deferred tooling: CI performance gates, public dashboards, source-backed package HIR caching, ownership, drop and ABI specialisation, JS minification and tree shaking, package-manager caching, broad Criterion benchmark suites, tracing and allocation profiler integrations, and tracked-summary counter expansion
 
 ## Reactivity follow-ups
@@ -181,5 +180,5 @@ These surfaces are intentionally not roadmap items unless the language philosoph
     2. Silver dependencies only have golden dependencies
     3. Bronze dependencies only have silver or gold dependencies
     4. Lead dependencies do not meet these criteria and there is additional friction and checks before they can be added to a project.
-- Lead dependencies may not be eligible for the future official Beanstalk package registry and will not be supported automatically by the package manager.
+- Lead dependencies may not be eligible for the future official Moth package registry and will not be supported automatically by the package manager.
 - The package manager should be extremely strict about security and other things before something can become an official "package". Maybe the source code must pass a series of quality checks and be run through various bits of compiler tooling before it can be added.

@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Plain Markdown | Beanstalk</title>
+    <title>Plain Markdown | Moth</title>
     <meta name="description" content="Plain Markdown content imports for HTML projects.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -668,7 +668,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Plain Markdown</p><h1>Plain Markdown</h1><p>Plain Markdown is the least magical content format in a Beanstalk project.</p><p>The compiler can import it, render it and hand the result to the HTML builder. It never pretends the file contains Beanstalk code.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Plain Markdown</p><h1>Plain Markdown</h1><p>Plain Markdown is the least magical content format in a Moth project.</p><p>The compiler can import it, render it and hand the result to the HTML builder. It never pretends the file contains Moth code.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Markdown files
@@ -722,13 +722,13 @@ body {
         # Welcome
 
         This is **plain Markdown**.
-    </code></pre><h3>Why it is portable</h3><p>No Beanstalk syntax is interpreted. The file is pure Markdown. You can use it with any Markdown tool.</p><h3>Remember</h3><ul><li><code>.md</code> uses a separate renderer, not Beandown&#39;s <code>$md</code>.</li><li>No Beanstalk captures, directives or templates.</li><li>The result is a <code>content #String</code> constant.</li></ul>
+    </code></pre><h3>Why it is portable</h3><p>No Moth syntax is interpreted. The file is pure Markdown. You can use it with any Markdown tool.</p><h3>Remember</h3><ul><li><code>.md</code> uses a separate renderer, not a moth template&#39;s <code>$md</code>.</li><li>No Moth captures, directives or templates.</li><li>The result is a <code>content #String</code> constant.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A <code>.md</code> file is plain Markdown content. It uses a separate plain-Markdown renderer and is not Beandown.</p><h3>What it is</h3><p>A <code>.md</code> file is rendered to HTML at compile time and exposed as one generated constant:</p><pre style=""><code class='codeblock'>
-    content <span class='bst-code-operator'>#</span><span class='bst-code-type'>String</span> <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;&lt;rendered html&gt;&quot;</span>
-    </code></pre><p>The renderer is CommonMark-compatible with GFM extensions. It is not the Beanstalk md renderer used by Beandown.</p><h3>What it is not</h3><ul><li>It is not Beandown. Beanstalk template syntax is not interpreted.</li><li>It has no captures, directives or declarations.</li><li>It does not see same-directory module root constants or <code>@html</code> constants.</li><li>It has no Beanstalk scope at all.</li></ul><h3>Beanstalk syntax is not interpreted</h3><ul><li>Double-dash is Markdown text, not a Beanstalk comment.</li><li>Dollar-prefixed text is text, not a template directive.</li><li>Double-bracket template bodies and single-bracket insertions are text, not template syntax.</li><li>Template delimiters, insertions and directives are literal text.</li></ul><h3>Compile-time imported content</h3><p>The rendered HTML is a compile-time String constant. It folds before the importing file uses it. It is not a runtime value.</p><h3>Output type</h3><p>The exported field is <code>content</code>, a compile-time String constant. It is the only generated member.</p><h3>Target and builder availability</h3><p>Plain Markdown is available in HTML project builds. The renderer is registered by the HTML builder.</p><h3>File ownership and relative path</h3><p>A <code>.md</code> file belongs to the module that contains its directory. It follows the same import path resolution as <code>.bst</code> and <code>.bd</code> files.</p><h3>Related concepts</h3><ul><li>For import syntax see <a href="#markdown-imports">Markdown imports</a>.</li><li>For renderer features see <a href="#rendering-contract">Rendering contract</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For Beandown see <a href="../beandown/#beandown-files">Beandown files</a>.</li></ul>
+        <p>A <code>.md</code> file is plain Markdown content. It uses a separate plain-Markdown renderer and is not a moth template file.</p><h3>What it is</h3><p>A <code>.md</code> file is rendered to HTML at compile time and exposed as one generated constant:</p><pre style=""><code class='codeblock'>
+    content <span class='moth-code-operator'>#</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;&lt;rendered html&gt;&quot;</span>
+    </code></pre><p>The renderer is CommonMark-compatible with GFM extensions. It is not the Moth md renderer used by moth template files.</p><h3>What it is not</h3><ul><li>It is not a moth template file. Moth template syntax is not interpreted.</li><li>It has no captures, directives or declarations.</li><li>It does not see same-directory module root constants or <code>@html</code> constants.</li><li>It has no Moth scope at all.</li></ul><h3>Moth syntax is not interpreted</h3><ul><li>Double-dash is Markdown text, not a Moth comment.</li><li>Dollar-prefixed text is text, not a template directive.</li><li>Double-bracket template bodies and single-bracket insertions are text, not template syntax.</li><li>Template delimiters, insertions and directives are literal text.</li></ul><h3>Compile-time imported content</h3><p>The rendered HTML is a compile-time String constant. It folds before the importing file uses it. It is not a runtime value.</p><h3>Output type</h3><p>The exported field is <code>content</code>, a compile-time String constant. It is the only generated member.</p><h3>Target and builder availability</h3><p>Plain Markdown is available in HTML project builds. The renderer is registered by the HTML builder.</p><h3>File ownership and relative path</h3><p>A <code>.md</code> file belongs to the module that contains its directory. It follows the same import path resolution as <code>.moth</code> and <code>.mtf</code> files.</p><h3>Related concepts</h3><ul><li>For import syntax see <a href="#markdown-imports">Markdown imports</a>.</li><li>For renderer features see <a href="#rendering-contract">Rendering contract</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For Moth template files see <a href="../moth-templates/#moth-template-files">Moth template files</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -781,24 +781,24 @@ body {
 
 
             <p>Import a <code>.md</code> file the same way as any other source file.</p><h3>Import and use</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>docs<span class='bst-code-operator'>/</span>intro <span class='bst-code-parenthesis'>{</span>content <span class='bst-code-keyword'>as</span> intro_html<span class='bst-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro <span class='moth-code-parenthesis'>{</span>content <span class='moth-code-keyword'>as</span> intro_html<span class='moth-code-parenthesis'>}</span>
 
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>intro_html<span class='bst-code-parenthesis'>]</span> <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro_html<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>The <code>content</code> constant is the rendered HTML string.</p><h3>Do not include the extension</h3><p><code>import @docs/intro.md</code> is rejected. Use <code>import @docs/intro</code>.</p><h3>Remember</h3><ul><li><code>content</code> is the only exported name.</li><li>The result is compile-time HTML, not a runtime value.</li><li>Links and images are literal, not tracked assets.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Plain Markdown content is imported with the same extensionless source import syntax as Beanstalk and Beandown source assets.</p><h3>Import syntax</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>docs<span class='bst-code-operator'>/</span>intro
+        <p>Plain Markdown content is imported with the same extensionless source import syntax as Moth and moth template source assets.</p><h3>Import syntax</h3><pre style=""><code class='codeblock'>
+    import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro
 
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>intro.content<span class='bst-code-parenthesis'>]</span> <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro.content<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>A namespace import exposes <code>content</code> as a field. A grouped import brings it directly:</p><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>docs<span class='bst-code-operator'>/</span>intro <span class='bst-code-parenthesis'>{</span>content <span class='bst-code-keyword'>as</span> intro_html<span class='bst-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro <span class='moth-code-parenthesis'>{</span>content <span class='moth-code-keyword'>as</span> intro_html<span class='moth-code-parenthesis'>}</span>
 
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>intro_html<span class='bst-code-parenthesis'>]</span> <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro_html<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Aliases</h3><p>Use <code>as</code> to give the imported content a local name. This is the standard form when multiple content files are imported into the same page.</p><h3>Insertion into templates and pages</h3><p>Insert the imported content into a template body. The caller decides where it appears. Imported content does not become a page fragment automatically.</p><h3>Import path and module visibility</h3><p>Content imports follow the same path resolution and module visibility rules as normal source imports. <code>@./intro</code> resolves from the importing file&#39;s directory. <code>@docs/intro</code> resolves from the entry root. Cross-module imports require the module root&#39;s <code>export:</code> block to re-export the content.</p><h3>No automatic page fragment</h3><p>Importing a <code>.md</code> file and inserting its content into a template does not create a page fragment. Only direct top-level templates in the active module root become page fragments.</p><h3>Direct extension imports are rejected</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>docs<span class='bst-code-operator'>/</span>intro.md <span class='bst-code-parenthesis'>{</span>content<span class='bst-code-parenthesis'>}</span>
-    </code></pre><p>This is rejected with <code>BST-IMPORT-0024</code>. Use <code>import @docs/intro</code> without the <code>.md</code> extension.</p><h3>Dependency tracking</h3><p>Imported content participates in normal dependency tracking. The <code>.md</code> file is compiled before the importing file uses its <code>content</code> constant.</p><h3>Distinction from asset imports</h3><p><code>.md</code> content imports are not asset imports. They produce a compile-time <code>content #String</code> constant, not a tracked asset path. Markdown links and images render literal <code>href</code> and <code>src</code> values. They are not tracked assets and are not rewritten. Use normal Beanstalk asset paths when a file should participate in tracked-asset output.</p><h3>Related concepts</h3><ul><li>For the rendering contract see <a href="#rendering-contract">Rendering contract</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For import path resolution see <a href="../packages/#import-paths">Import paths</a>.</li></ul>
+    import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro.md <span class='moth-code-parenthesis'>{</span>content<span class='moth-code-parenthesis'>}</span>
+    </code></pre><p>This is rejected with <code>MOTH-IMPORT-0024</code>. Use <code>import @docs/intro</code> without the <code>.md</code> extension.</p><h3>Dependency tracking</h3><p>Imported content participates in normal dependency tracking. The <code>.md</code> file is compiled before the importing file uses its <code>content</code> constant.</p><h3>Distinction from asset imports</h3><p><code>.md</code> content imports are not asset imports. They produce a compile-time <code>content #String</code> constant, not a tracked asset path. Markdown links and images render literal <code>href</code> and <code>src</code> values. They are not tracked assets and are not rewritten. Use normal Moth asset paths when a file should participate in tracked-asset output.</p><h3>Related concepts</h3><ul><li>For the rendering contract see <a href="#rendering-contract">Rendering contract</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For import path resolution see <a href="../packages/#import-paths">Import paths</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -850,11 +850,11 @@ body {
 
 
 
-            <p>Plain Markdown supports common formatting through a CommonMark-compatible renderer.</p><h3>Supported forms</h3><ul><li>Headings, paragraphs, emphasis, bold</li><li>Links, ordered and unordered lists, nested lists</li><li>Inline code and fenced code blocks</li><li>Tables, task lists, strikethrough, footnotes</li><li>Raw HTML is preserved</li></ul><h3>One clear limitation</h3><p>Beanstalk template syntax is not interpreted. Dollar-prefixed directives are just text. Bracket-delimited template bodies are just text. Use Beandown if you need Beanstalk-aware content.</p><h3>Remember</h3><ul><li>The renderer is CommonMark-compatible with GFM extensions.</li><li>It is not the same as Beandown&#39;s md renderer.</li><li>Smart punctuation is disabled.</li></ul>
+            <p>Plain Markdown supports common formatting through a CommonMark-compatible renderer.</p><h3>Supported forms</h3><ul><li>Headings, paragraphs, emphasis, bold</li><li>Links, ordered and unordered lists, nested lists</li><li>Inline code and fenced code blocks</li><li>Tables, task lists, strikethrough, footnotes</li><li>Raw HTML is preserved</li></ul><h3>One clear limitation</h3><p>Moth template syntax is not interpreted. Dollar-prefixed directives are just text. Bracket-delimited template bodies are just text. Use moth template files if you need Moth-aware content.</p><h3>Remember</h3><ul><li>The renderer is CommonMark-compatible with GFM extensions.</li><li>It is not the same as a moth template&#39;s md renderer.</li><li>Smart punctuation is disabled.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>The plain Markdown renderer uses a CommonMark-compatible parser with GFM extensions. This is a different renderer from Beanstalk&#39;s md renderer.</p><h3>Supported features</h3><ul><li>Headings: <code>#</code>, <code>##</code>, <code>###</code> and deeper render as <code>&lt;h1&gt;</code>, <code>&lt;h2&gt;</code>, <code>&lt;h3&gt;</code> etc.</li><li>Paragraphs: separated by blank lines, rendered as <code>&lt;p&gt;</code>.</li><li>Emphasis: <code>*italic*</code> renders as <code>&lt;em&gt;</code>, <code>**bold**</code> renders as <code>&lt;strong&gt;</code>.</li><li>Links: standard Markdown link syntax renders as <code>&lt;a href=&quot;...&quot;&gt;</code>.</li><li>Unordered lists: <code>- item</code> renders as <code>&lt;ul&gt;&lt;li&gt;</code>.</li><li>Ordered lists: <code>1. item</code> renders as <code>&lt;ol&gt;&lt;li&gt;</code>.</li><li>Nested lists: indentation creates nested <code>&lt;ul&gt;</code> or <code>&lt;ol&gt;</code>.</li><li>Inline code: single backticks render as <code>&lt;code&gt;</code>.</li><li>Fenced code blocks: triple backticks render as pre and code elements. A language tag adds a class attribute.</li><li>Tables: pipe table syntax renders as <code>&lt;table&gt;</code> with <code>&lt;thead&gt;</code>, <code>&lt;th&gt;</code>, <code>&lt;tbody&gt;</code> and <code>&lt;td&gt;</code>.</li><li>Task lists: bracketed checkbox syntax renders as disabled checkboxes.</li><li>Strikethrough: <code>~~text~~</code> renders as <code>&lt;del&gt;</code>.</li><li>Footnotes: caret-bracketed syntax renders footnote anchors and text.</li><li>Raw HTML: HTML tags in the source are preserved in the output.</li></ul><h3>Unsupported extensions</h3><ul><li>Beanstalk template syntax is not interpreted. Dollar-prefixed directives, double-bracket template bodies and single-bracket insertions are literal text.</li><li>Smart punctuation is disabled. <code>--</code> remains <code>--</code>, not an em dash.</li><li>There is no sanitizer or raw-HTML policy key. Raw HTML is preserved as-is.</li></ul><h3>Ordinary Markdown links versus Beanstalk md links</h3><p>In plain Markdown, links use ordinary Markdown syntax. The href and src values are rendered literally. They are not rewritten or tracked as assets.</p><p>In Beanstalk&#39;s md renderer (used by Beandown), at-path link syntax creates Beanstalk-aware links. This syntax is not available in plain Markdown.</p><h3>Renderer configuration</h3><p>The renderer uses <code>pulldown-cmark</code> with the following options enabled:</p><ul><li><code>ENABLE_TABLES</code></li><li><code>ENABLE_TASKLISTS</code></li><li><code>ENABLE_STRIKETHROUGH</code></li><li><code>ENABLE_FOOTNOTES</code></li><li><code>ENABLE_GFM</code></li></ul><p>Smart punctuation is not enabled. The renderer is registered by the HTML builder.</p><h3>Related concepts</h3><ul><li>For Beandown&#39;s md renderer see <a href="../beandown/#implicit-markdown">Implicit Markdown</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For Markdown file structure see <a href="#markdown-files">Markdown files</a>.</li></ul>
+        <p>The plain Markdown renderer uses a CommonMark-compatible parser with GFM extensions. This is a different renderer from Moth&#39;s md renderer.</p><h3>Supported features</h3><ul><li>Headings: <code>#</code>, <code>##</code>, <code>###</code> and deeper render as <code>&lt;h1&gt;</code>, <code>&lt;h2&gt;</code>, <code>&lt;h3&gt;</code> etc.</li><li>Paragraphs: separated by blank lines, rendered as <code>&lt;p&gt;</code>.</li><li>Emphasis: <code>*italic*</code> renders as <code>&lt;em&gt;</code>, <code>**bold**</code> renders as <code>&lt;strong&gt;</code>.</li><li>Links: standard Markdown link syntax renders as <code>&lt;a href=&quot;...&quot;&gt;</code>.</li><li>Unordered lists: <code>- item</code> renders as <code>&lt;ul&gt;&lt;li&gt;</code>.</li><li>Ordered lists: <code>1. item</code> renders as <code>&lt;ol&gt;&lt;li&gt;</code>.</li><li>Nested lists: indentation creates nested <code>&lt;ul&gt;</code> or <code>&lt;ol&gt;</code>.</li><li>Inline code: single backticks render as <code>&lt;code&gt;</code>.</li><li>Fenced code blocks: triple backticks render as pre and code elements. A language tag adds a class attribute.</li><li>Tables: pipe table syntax renders as <code>&lt;table&gt;</code> with <code>&lt;thead&gt;</code>, <code>&lt;th&gt;</code>, <code>&lt;tbody&gt;</code> and <code>&lt;td&gt;</code>.</li><li>Task lists: bracketed checkbox syntax renders as disabled checkboxes.</li><li>Strikethrough: <code>~~text~~</code> renders as <code>&lt;del&gt;</code>.</li><li>Footnotes: caret-bracketed syntax renders footnote anchors and text.</li><li>Raw HTML: HTML tags in the source are preserved in the output.</li></ul><h3>Unsupported extensions</h3><ul><li>Moth template syntax is not interpreted. Dollar-prefixed directives, double-bracket template bodies and single-bracket insertions are literal text.</li><li>Smart punctuation is disabled. <code>--</code> remains <code>--</code>, not an em dash.</li><li>There is no sanitizer or raw-HTML policy key. Raw HTML is preserved as-is.</li></ul><h3>Ordinary Markdown links versus Moth md links</h3><p>In plain Markdown, links use ordinary Markdown syntax. The href and src values are rendered literally. They are not rewritten or tracked as assets.</p><p>In Moth&#39;s md renderer (used by moth template files), at-path link syntax creates Moth-aware links. This syntax is not available in plain Markdown.</p><h3>Renderer configuration</h3><p>The renderer uses <code>pulldown-cmark</code> with the following options enabled:</p><ul><li><code>ENABLE_TABLES</code></li><li><code>ENABLE_TASKLISTS</code></li><li><code>ENABLE_STRIKETHROUGH</code></li><li><code>ENABLE_FOOTNOTES</code></li><li><code>ENABLE_GFM</code></li></ul><p>Smart punctuation is not enabled. The renderer is registered by the HTML builder.</p><h3>Related concepts</h3><ul><li>For moth template md rendering see <a href="../moth-templates/#implicit-markdown">Implicit Markdown</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For Markdown file structure see <a href="#markdown-files">Markdown files</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -906,21 +906,21 @@ body {
 
 
 
-            <p>Three formats, one choice.</p><h3><code>.md</code> for plain Markdown</h3><p>Use when the content is ordinary Markdown with no Beanstalk syntax needed.</p><h3><code>.bd</code> for Beanstalk-aware Markdown</h3><p>Use when the content needs compile-time constants, nested templates or builder helpers.</p><h3><code>.bst</code> for full Beanstalk</h3><p>Use when runtime values, control flow, imports or page fragments are needed.</p><h3>Remember</h3><ul><li><code>.md</code> is portable. <code>.bd</code> is Beanstalk-aware. <code>.bst</code> is full power.</li><li>Start with <code>.md</code> or <code>.bd</code> for content. Reach for <code>.bst</code> when content becomes logic.</li></ul>
+            <p>Three formats, one choice.</p><h3><code>.md</code> for plain Markdown</h3><p>Use when the content is ordinary Markdown with no Moth syntax needed.</p><h3><code>.mtf</code> for Moth-aware Markdown</h3><p>Use when the content needs compile-time constants, nested templates or builder helpers.</p><h3><code>.moth</code> for full Moth</h3><p>Use when runtime values, control flow, imports or page fragments are needed.</p><h3>Remember</h3><ul><li><code>.md</code> is portable. <code>.mtf</code> is Moth-aware. <code>.moth</code> is full power.</li><li>Start with <code>.md</code> or <code>.mtf</code> for content. Reach for <code>.moth</code> when content becomes logic.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Choose the content format based on what the content needs.</p><h3>Use <code>.md</code> when</h3><ul><li>The content is ordinary Markdown.</li><li>No Beanstalk values, captures or templates are needed.</li><li>Portability matters. The file can be used with any Markdown tool.</li><li>Fenced code blocks, pipe tables or raw HTML preservation are needed.</li><li>The content should not see Beanstalk scope.</li></ul><h3>Use <code>.bd</code> when</h3><ul><li>The content needs compile-time Beanstalk constants from the same-directory module root.</li><li>Nested templates or builder helpers such as <code>codeblock</code> are needed.</li><li>The <code>$md</code> Markdown subset is sufficient for the content&#39;s formatting needs.</li><li>Beanstalk-aware link syntax <code>@path (label)</code> is useful.</li></ul><h3>Use <code>.bst</code> templates when</h3><ul><li>Runtime values or runtime control flow are needed.</li><li>Full slot and wrapper composition is needed.</li><li>The content is part of broader program logic.</li><li>Imports, declarations or page fragments are needed in the same file.</li></ul><h3>Distinguishing raw asset files</h3><p>Raw asset files such as images, stylesheets or JavaScript files are not content imports. They are tracked assets handled by the builder. Use normal Beanstalk asset paths when a file should participate in tracked-asset output.</p><h3>Distinguishing package source</h3><p>Core packages and project-local source-backed packages are not content formats. They provide typed declarations and functions. See <a href="../packages/#package-origins-and-backing">Package origins and backing</a>.</p><h3>Related concepts</h3><ul><li>For Beandown see <a href="../beandown/#beandown-files">Beandown files</a>.</li><li>For plain Markdown see <a href="#markdown-files">Markdown files</a>.</li><li>For templates see <a href="../templates/#template-basics">Template basics</a>.</li></ul>
+        <p>Choose the content format based on what the content needs.</p><h3>Use <code>.md</code> when</h3><ul><li>The content is ordinary Markdown.</li><li>No Moth values, captures or templates are needed.</li><li>Portability matters. The file can be used with any Markdown tool.</li><li>Fenced code blocks, pipe tables or raw HTML preservation are needed.</li><li>The content should not see Moth scope.</li></ul><h3>Use <code>.mtf</code> when</h3><ul><li>The content needs compile-time Moth constants from the same-directory module root.</li><li>Nested templates or builder helpers such as <code>codeblock</code> are needed.</li><li>The <code>$md</code> Markdown subset is sufficient for the content&#39;s formatting needs.</li><li>Moth-aware link syntax <code>@path (label)</code> is useful.</li></ul><h3>Use <code>.moth</code> templates when</h3><ul><li>Runtime values or runtime control flow are needed.</li><li>Full slot and wrapper composition is needed.</li><li>The content is part of broader program logic.</li><li>Imports, declarations or page fragments are needed in the same file.</li></ul><h3>Distinguishing raw asset files</h3><p>Raw asset files such as images, stylesheets or JavaScript files are not content imports. They are tracked assets handled by the builder. Use normal Moth asset paths when a file should participate in tracked-asset output.</p><h3>Distinguishing package source</h3><p>Core packages and project-local source-backed packages are not content formats. They provide typed declarations and functions. See <a href="../packages/#package-origins-and-backing">Package origins and backing</a>.</p><h3>Related concepts</h3><ul><li>For Moth template files see <a href="../moth-templates/#moth-template-files">Moth template files</a>.</li><li>For plain Markdown see <a href="#markdown-files">Markdown files</a>.</li><li>For templates see <a href="../templates/#template-basics">Template basics</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><nav class="doc-pager" aria-label="Language documentation">
         <a
             class="doc-pager__link doc-pager__link--previous"
-            href="../beandown/"
+            href="../moth-templates/"
                 rel="prev"
             >
                 <span class="doc-pager__direction">← Previous</span>
-                <span class="doc-pager__title">Beandown</span>
+                <span class="doc-pager__title">Moth template files</span>
             </a>
 
             <a
@@ -938,109 +938,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1055,63 +1055,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1121,36 +1121,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1163,65 +1163,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1229,10 +1229,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

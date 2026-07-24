@@ -1,0 +1,24 @@
+Use `catch` when the current code has a useful fallback.
+
+[codeblock, $code("moth"):
+    count = parse_number(text) catch:
+        then 0
+    ;
+]
+
+Use `catch |err|:` when the message or code matters:
+
+[codeblock, $code("moth"):
+    count = parse_number(text) catch |err|:
+        io.line(err.message)
+        then 0
+    ;
+]
+
+A short fallback can stay on one line:
+
+[codeblock, $code("moth"):
+    count = parse_number(text) catch then 0
+]
+
+Use `then` to provide the value expected by the surrounding assignment.

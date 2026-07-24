@@ -1,4 +1,4 @@
-//! Shared numeric text grammar for the Beanstalk frontend.
+//! Shared numeric text grammar for the Moth frontend.
 //!
 //! WHAT: classifies and parses numeric literal text without depending on AST, HIR,
 //!       or backend concepts.

@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
-const CORE_CSS: &str = include_str!("bs-css-core.css");
+const CORE_CSS: &str = include_str!("moth-css-core.css");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResolvedHtmlDocument {

@@ -7,4 +7,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_clone_value", "__bs_read", "console.log"]
+must_contain = ["__moth_clone_value", "__moth_read", "console.log"]

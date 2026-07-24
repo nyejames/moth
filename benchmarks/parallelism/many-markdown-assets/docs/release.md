@@ -1,3 +1,3 @@
 # Release
 
-Release notes are simple markdown and should not enter Beanstalk tokenization.
+Release notes are simple markdown and should not enter Moth tokenization.

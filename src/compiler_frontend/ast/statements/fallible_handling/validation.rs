@@ -51,7 +51,7 @@ pub(super) fn validate_catch_fallible_handler_binding(
 /// Validates that a catch-handler binding does not collide with an existing scope reference.
 ///
 /// WHAT: rejects handlers whose error name is already visible in the current scope.
-/// WHY: Beanstalk has a strict no-shadowing rule; catch handlers are not exempt.
+/// WHY: Moth has a strict no-shadowing rule; catch handlers are not exempt.
 pub(super) fn validate_catch_fallible_handler_conflict(
     context: &ScopeContext,
     handler_name: StringId,

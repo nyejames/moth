@@ -82,67 +82,67 @@ fn descriptor_codes_are_stable_and_non_empty() {
     let cases = [
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedToken),
-            "BST-SYNTAX-0001",
+            "MOTH-SYNTAX-0001",
             "Expected token",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken),
-            "BST-SYNTAX-0002",
+            "MOTH-SYNTAX-0002",
             "Unexpected token",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedTrailingComma),
-            "BST-SYNTAX-0003",
+            "MOTH-SYNTAX-0003",
             "Unexpected trailing comma",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-            "BST-RULE-0001",
+            "MOTH-RULE-0001",
             "Unknown name",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
-            "BST-RULE-0010",
+            "MOTH-RULE-0010",
             "Unused variable",
             DiagnosticSeverity::Warning,
         ),
         (
             DiagnosticKind::Type(TypeDiagnosticKind::TypeMismatch),
-            "BST-TYPE-0001",
+            "MOTH-TYPE-0001",
             "Type mismatch",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
-            "BST-IMPORT-0005",
+            "MOTH-IMPORT-0005",
             "Missing import target",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::Borrow(BorrowDiagnosticKind::BorrowConflict),
-            "BST-BORROW-0001",
+            "MOTH-BORROW-0001",
             "Access conflict",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::Config(ConfigDiagnosticKind::InvalidConfig),
-            "BST-CONFIG-0001",
+            "MOTH-CONFIG-0001",
             "Invalid config",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::Infrastructure(InfrastructureDiagnosticKind::InfrastructureFailure),
-            "BST-INFRA-0001",
+            "MOTH-INFRA-0001",
             "Infrastructure failure",
             DiagnosticSeverity::Error,
         ),
         (
             DiagnosticKind::DeferredFeature(DeferredFeatureDiagnosticKind::DeferredFeature),
-            "BST-DEFERRED-0001",
+            "MOTH-DEFERRED-0001",
             "Deferred feature",
             DiagnosticSeverity::Error,
         ),
@@ -199,14 +199,14 @@ fn old_error_payload_has_been_removed_from_diagnostic_payloads() {
 
 fn expected_code_prefix(category: DiagnosticCategory) -> &'static str {
     match category {
-        DiagnosticCategory::Syntax => "BST-SYNTAX-",
-        DiagnosticCategory::Type => "BST-TYPE-",
-        DiagnosticCategory::Rule => "BST-RULE-",
-        DiagnosticCategory::Import => "BST-IMPORT-",
-        DiagnosticCategory::Borrow => "BST-BORROW-",
-        DiagnosticCategory::Config => "BST-CONFIG-",
-        DiagnosticCategory::Infrastructure => "BST-INFRA-",
-        DiagnosticCategory::DeferredFeature => "BST-DEFERRED-",
+        DiagnosticCategory::Syntax => "MOTH-SYNTAX-",
+        DiagnosticCategory::Type => "MOTH-TYPE-",
+        DiagnosticCategory::Rule => "MOTH-RULE-",
+        DiagnosticCategory::Import => "MOTH-IMPORT-",
+        DiagnosticCategory::Borrow => "MOTH-BORROW-",
+        DiagnosticCategory::Config => "MOTH-CONFIG-",
+        DiagnosticCategory::Infrastructure => "MOTH-INFRA-",
+        DiagnosticCategory::DeferredFeature => "MOTH-DEFERRED-",
     }
 }
 
@@ -226,7 +226,7 @@ fn category_and_default_severity_derive_from_kind() {
 #[test]
 fn explicit_severity_can_override_descriptor_default() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let diagnostic = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         DiagnosticSeverity::Warning,
@@ -243,7 +243,7 @@ fn explicit_severity_can_override_descriptor_default() {
 #[test]
 fn diagnostic_identity_uses_descriptor_code_actual_severity_and_typed_reason() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let diagnostic = CompilerDiagnostic::with_severity(
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCollectionType),
         DiagnosticSeverity::Warning,
@@ -255,7 +255,7 @@ fn diagnostic_identity_uses_descriptor_code_actual_severity_and_typed_reason() {
 
     let identity = diagnostic.identity();
 
-    assert_eq!(identity.code, "BST-SYNTAX-0016");
+    assert_eq!(identity.code, "MOTH-SYNTAX-0016");
     assert_eq!(identity.severity, DiagnosticSeverity::Warning);
     assert_eq!(
         identity.reason_key,
@@ -266,14 +266,14 @@ fn diagnostic_identity_uses_descriptor_code_actual_severity_and_typed_reason() {
 #[test]
 fn unsupported_backend_feature_exposes_stable_reason_key() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern("Wasm"),
         UnsupportedBackendFeatureReason::HashmapOperation,
         location(source_path),
     );
 
-    assert_eq!(diagnostic.identity().code, "BST-RULE-0064");
+    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0064");
     assert_eq!(
         diagnostic.identity().reason_key,
         Some("unsupported_backend_feature.hashmap_operation")
@@ -333,7 +333,7 @@ fn stable_reason_key_format_rejects_unqualified_or_noncanonical_keys() {
 #[test]
 fn reasonless_payloads_have_no_reason_key() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let diagnostic = CompilerDiagnostic::new(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         location(source_path),
@@ -349,7 +349,7 @@ fn reasonless_payloads_have_no_reason_key() {
 #[test]
 fn reason_key_dispatch_covers_distinct_typed_reason_families() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let location = location(source_path);
     let diagnostics = [
         CompilerDiagnostic::invalid_type_annotation(
@@ -384,7 +384,7 @@ fn reason_key_dispatch_covers_distinct_typed_reason_families() {
 #[test]
 fn diagnostic_bag_tracks_errors_warnings_and_order() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let first = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
@@ -415,7 +415,7 @@ fn diagnostic_bag_tracks_errors_warnings_and_order() {
 #[test]
 fn compiler_messages_counts_and_order_come_from_structured_diagnostics() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let error = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
@@ -447,7 +447,7 @@ fn compiler_messages_counts_and_order_come_from_structured_diagnostics() {
 #[test]
 fn compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let error = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
@@ -478,7 +478,7 @@ fn compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors() {
 #[test]
 fn compiler_messages_with_infrastructure_error_preserve_warning_production_order() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         DiagnosticSeverity::Warning,
@@ -500,7 +500,7 @@ fn compiler_messages_with_infrastructure_error_preserve_warning_production_order
         messages.diagnostics[1].kind,
         DiagnosticKind::Infrastructure(InfrastructureDiagnosticKind::InfrastructureFailure),
     );
-    assert_eq!(messages.diagnostics[1].kind.code(), "BST-INFRA-0001");
+    assert_eq!(messages.diagnostics[1].kind.code(), "MOTH-INFRA-0001");
 }
 
 #[test]
@@ -575,8 +575,8 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
 #[test]
 fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
     let mut local_table = StringTable::new();
-    let main_path = InternedPath::from_single_str("main.bst", &mut local_table);
-    let import_path = InternedPath::from_single_str("lib.bst", &mut local_table);
+    let main_path = InternedPath::from_single_str("main.moth", &mut local_table);
+    let import_path = InternedPath::from_single_str("lib.moth", &mut local_table);
     let name = local_table.intern("Button");
     let alias = local_table.intern("AliasButton");
     let label_text = local_table.intern("temporary label");
@@ -632,7 +632,7 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
             let item = items
                 .first()
                 .expect("path token item should remain present");
-            assert_eq!(item.path.to_string(&merged_table), "lib.bst");
+            assert_eq!(item.path.to_string(&merged_table), "lib.moth");
             assert_eq!(
                 item.alias.map(|id| merged_table.resolve(id)),
                 Some("AliasButton")
@@ -652,7 +652,7 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
                 .expect("explicit import should carry a previous location");
             assert_eq!(
                 previous_location.scope.to_string(&merged_table),
-                String::from("lib.bst")
+                String::from("lib.moth")
             );
         }
         payload => panic!("unexpected duplicate payload: {payload:?}"),
@@ -688,7 +688,7 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
 #[test]
 fn remap_string_ids_updates_missing_at_prefix_authored_path() {
     let mut local_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut local_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut local_table);
     let authored_path = local_table.intern("vendor/drawing.js");
 
     let diagnostic = CompilerDiagnostic::common_syntax_mistake(
@@ -719,11 +719,11 @@ fn remap_string_ids_updates_missing_at_prefix_authored_path() {
 #[test]
 fn duplicate_declaration_with_previous_location_keeps_secondary_label() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let declaration_name = string_table.intern("Button");
     let previous_location = location(source_path);
     let duplicate_location = location(InternedPath::from_single_str(
-        "other.bst",
+        "other.moth",
         &mut string_table,
     ));
 
@@ -762,7 +762,7 @@ fn duplicate_declaration_with_previous_location_keeps_secondary_label() {
 #[test]
 fn duplicate_declaration_without_previous_location_omits_secondary_label() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let declaration_name = string_table.intern("print");
     let duplicate_location = location(source_path);
 
@@ -800,7 +800,7 @@ fn duplicate_declaration_without_previous_location_omits_secondary_label() {
 #[test]
 fn type_mismatch_constructor_carries_type_ids_without_rendering() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
         builtin_type_ids::INT,
@@ -828,7 +828,7 @@ fn type_mismatch_constructor_carries_type_ids_without_rendering() {
 #[test]
 fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let type_environment = TypeEnvironment::new();
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
@@ -850,7 +850,7 @@ fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
 #[test]
 fn type_mismatch_terse_renderer_renders_type_names_with_context() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let type_environment = TypeEnvironment::new();
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
@@ -873,7 +873,7 @@ fn type_mismatch_terse_renderer_renders_type_names_with_context() {
 #[test]
 fn invalid_string_escape_renderer_preserves_the_authored_escape_spelling() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     for (escaped, expected) in [
@@ -894,7 +894,7 @@ fn invalid_string_escape_renderer_preserves_the_authored_escape_spelling() {
 #[test]
 fn invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_backslashes() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     for (reason, expected) in [
@@ -919,7 +919,7 @@ fn invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_b
 #[test]
 fn rule_renderers_use_user_facing_messages_not_reason_debug_names() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let value_name = string_table.intern("value");
 
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
@@ -950,7 +950,7 @@ fn rule_renderers_use_user_facing_messages_not_reason_debug_names() {
 #[test]
 fn immutable_binding_diagnostic_carries_secondary_declaration_label() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let value_name = string_table.intern("value");
     let declaration_location = location(source_path.clone());
 
@@ -986,7 +986,7 @@ fn immutable_binding_diagnostic_carries_secondary_declaration_label() {
 #[test]
 fn syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let choice_name = string_table.intern("Status");
     let variant_name = string_table.intern("Ready");
 
@@ -1048,7 +1048,7 @@ fn syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names()
 #[test]
 fn choice_variant_unknown_variant_suggests_close_candidate() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let choice_name = string_table.intern("Status");
     let misspelled = string_table.intern("Reay");
     let ready = string_table.intern("Ready");
@@ -1087,7 +1087,7 @@ fn choice_variant_unknown_variant_suggests_close_candidate() {
 #[test]
 fn choice_variant_unknown_variant_no_suggestion_for_unrelated_name() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let choice_name = string_table.intern("Status");
     let unrelated = string_table.intern("Xyzzy");
     let ready = string_table.intern("Ready");
@@ -1126,7 +1126,7 @@ fn choice_variant_unknown_variant_no_suggestion_for_unrelated_name() {
 #[test]
 fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let literal = string_table.intern("1.");
     let style_directive = string_table.intern("unknown");
     let supported_directives = string_table.intern("'$html', '$css'");
@@ -1378,7 +1378,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
 #[test]
 fn invalid_expression_renderers_keep_structured_reason_prose() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
 
     let diagnostics = [
         (
@@ -1426,7 +1426,7 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
 #[test]
 fn phase_1_2_renderers_keep_source_language_terminology() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let config_key = string_table.intern("homepage");
     let diagnostics = vec![
         CompilerDiagnostic::invalid_standalone_statement(
@@ -1521,8 +1521,8 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
 #[test]
 fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
-    let import_path = InternedPath::from_single_str("missing.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let import_path = InternedPath::from_single_str("missing.moth", &mut string_table);
     let value_name = string_table.intern("value");
     let config_key = string_table.intern("homepage");
     let feature_name = string_table.intern("traits");
@@ -1604,7 +1604,7 @@ fn assert_rendered_diagnostic_hides_internal_names(rendered: &str) {
 #[test]
 fn incompatible_choice_comparison_renderer_hides_reason_debug_names() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let diagnostic = CompilerDiagnostic::incompatible_choice_comparison(
         IncompatibleChoiceComparisonReason::ChoiceWithNonChoice,
         builtin_type_ids::BOOL,
@@ -1636,7 +1636,7 @@ fn render_invalid_call_shape(
     reason: InvalidCallShapeReason,
     callee_name: &str,
 ) -> String {
-    let source_path = InternedPath::from_single_str("main.bst", string_table);
+    let source_path = InternedPath::from_single_str("main.moth", string_table);
     let callee = string_table.intern(callee_name);
     let diagnostic =
         CompilerDiagnostic::invalid_call_shape(reason, Some(callee), location(source_path));
@@ -1876,7 +1876,7 @@ fn mutable_access_not_allowed_tells_author_to_remove_authored_marker() {
 #[test]
 fn invalid_call_shape_remap_updates_binding_name_and_parameter_name() {
     let mut local_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut local_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut local_table);
     let parameter = local_table.intern("values");
     let binding = local_table.intern("values");
     let callee = local_table.intern("consume");
@@ -1921,7 +1921,7 @@ fn render_invalid_receiver_call(
     receiver_kind: Option<ReceiverCallKind>,
     receiver_binding_name: Option<&str>,
 ) -> String {
-    let source_path = InternedPath::from_single_str("main.bst", string_table);
+    let source_path = InternedPath::from_single_str("main.moth", string_table);
     let method = string_table.intern(method_name);
     let binding = receiver_binding_name.map(|name| string_table.intern(name));
     let diagnostic = CompilerDiagnostic::invalid_receiver_call(
@@ -2194,7 +2194,7 @@ fn const_record_runtime_call_renders_current_source_term() {
 #[test]
 fn invalid_receiver_call_remap_updates_receiver_binding_name() {
     let mut local_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut local_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut local_table);
     let method = local_table.intern("move");
     let binding = local_table.intern("p");
 
@@ -2228,7 +2228,7 @@ fn invalid_receiver_call_remap_updates_receiver_binding_name() {
 #[test]
 fn type_mismatch_renderer_fallback_uses_stable_type_id_text() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
         builtin_type_ids::INT,
@@ -2342,7 +2342,7 @@ fn builtin_cast_shape_diagnostic_preserves_stable_code_and_rendering() {
     let render_context = DiagnosticRenderContext::new(&string_table);
     let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
-    assert_eq!(diagnostic.kind.descriptor().code, "BST-RULE-0046");
+    assert_eq!(diagnostic.kind.descriptor().code, "MOTH-RULE-0046");
     assert!(
         terse_line.contains("'Int' cast requires exactly one argument"),
         "{terse_line}"
@@ -2412,7 +2412,7 @@ fn borrow_conflict_rendering_hides_payload_debug_names() {
 #[test]
 fn diagnostic_display_order_buckets_errors_before_warnings_before_notes() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
 
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
@@ -2450,7 +2450,7 @@ fn diagnostic_display_order_buckets_errors_before_warnings_before_notes() {
 #[test]
 fn diagnostic_display_order_preserves_original_order_within_each_severity_bucket() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let mut make = |name: &str, severity| {
         CompilerDiagnostic::with_severity(
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
@@ -2551,7 +2551,7 @@ fn diagnostic_display_order_keeps_type_context_lookups_aligned_with_original_ind
 #[test]
 fn terse_renderer_outputs_errors_before_warnings_in_display_order() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let mut make = |name: &str, severity| {
         CompilerDiagnostic::with_severity(
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
@@ -2575,12 +2575,12 @@ fn terse_renderer_outputs_errors_before_warnings_in_display_order() {
 
     assert_eq!(rendered.len(), 2);
     assert!(
-        rendered[0].contains("BST-RULE-0001") && rendered[0].contains("error"),
+        rendered[0].contains("MOTH-RULE-0001") && rendered[0].contains("error"),
         "first terse line should be the error, got: {}",
         rendered[0]
     );
     assert!(
-        rendered[1].contains("BST-RULE-0001") && rendered[1].contains("warning"),
+        rendered[1].contains("MOTH-RULE-0001") && rendered[1].contains("warning"),
         "second terse line should be the warning, got: {}",
         rendered[1]
     );
@@ -2591,7 +2591,7 @@ fn dev_server_html_renderer_outputs_error_card_before_warning_card() {
     use crate::compiler_frontend::compiler_messages::render::dev_server;
 
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let mut make = |name: &str, severity| {
         CompilerDiagnostic::with_severity(
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
@@ -2623,23 +2623,23 @@ fn dev_server_html_renderer_outputs_error_card_before_warning_card() {
 #[test]
 fn terse_descriptor_only_diagnostics_use_descriptor_title() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     let diagnostics = [
         (
             CompilerDiagnostic::unterminated_string_literal(location(source_path.clone())),
-            "BST-SYNTAX-0006",
+            "MOTH-SYNTAX-0006",
             "Unterminated string literal",
         ),
         (
             CompilerDiagnostic::invalid_char_literal(location(source_path.clone())),
-            "BST-SYNTAX-0009",
+            "MOTH-SYNTAX-0009",
             "Invalid character literal",
         ),
         (
             CompilerDiagnostic::export_outside_module_root(location(source_path)),
-            "BST-RULE-0077",
+            "MOTH-RULE-0077",
             "`export:` is only valid in a module root file",
         ),
     ];
@@ -2665,7 +2665,7 @@ fn terse_descriptor_only_diagnostics_use_descriptor_title() {
 #[test]
 fn terse_message_field_is_never_empty() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     for kind in DiagnosticKind::all() {
@@ -2729,7 +2729,7 @@ fn symbolic_spacing_renders_exact_construct_and_side() {
                 error: SymbolicSpacingError { construct, missing },
             },
             SourceLocation::new(
-                InternedPath::from_single_str("test.bst", &mut StringTable::new()),
+                InternedPath::from_single_str("test.moth", &mut StringTable::new()),
                 CharPosition { line_number: 1, char_column: 1 },
                 CharPosition { line_number: 1, char_column: 2 },
             ),

@@ -1,7 +1,7 @@
-//! Beanstalk finite `Float` formatting contract.
+//! Moth finite `Float` formatting contract.
 //!
 //! WHAT: converts a finite `f64` value into the shortest round-trippable decimal
-//!       string defined by the Beanstalk language contract.
+//!       string defined by the Moth language contract.
 //! WHY: AST constant folding, builtin casts, and compile-time template
 //!      interpolation must all agree on Float stringification without relying on
 //!      Rust, JavaScript, or host-native formatting quirks.
@@ -17,15 +17,15 @@
 
 use std::fmt;
 
-/// Threshold above which Beanstalk always uses exponent notation.
+/// Threshold above which Moth always uses exponent notation.
 const EXPONENT_THRESHOLD_HIGH: f64 = 1e21;
 
-/// Threshold below which Beanstalk always uses exponent notation (but not for zero).
+/// Threshold below which Moth always uses exponent notation (but not for zero).
 const EXPONENT_THRESHOLD_LOW: f64 = 1e-6;
 
 /// The only failure mode for the finite-Float formatter.
 ///
-/// WHAT: the formatter promises to produce the Beanstalk contract only for
+/// WHAT: the formatter promises to produce the Moth contract only for
 ///       finite inputs. Non-finite values are rejected so callers can decide
 ///       whether this is an internal invariant violation or a user-facing
 ///       diagnostic.
@@ -44,7 +44,7 @@ impl fmt::Display for FloatFormatError {
 
 impl std::error::Error for FloatFormatError {}
 
-/// Format a finite `f64` according to the Beanstalk Float contract.
+/// Format a finite `f64` according to the Moth Float contract.
 ///
 /// Returns [`FloatFormatError::NonFiniteFloat`] for `NaN` or infinities.
 /// All finite values, including `-0.0`, produce a deterministic decimal string.
@@ -63,7 +63,7 @@ pub fn format_finite_float(value: f64) -> Result<String, FloatFormatError> {
     let ryu_output = buffer.format_finite(value);
 
     // Ryū returns the shortest round-trippable decimal, but its exponent
-    // thresholds and sign rules differ from Beanstalk's. Parse its output into
+    // thresholds and sign rules differ from Moth's. Parse its output into
     // an exact integer-mantissa / decimal-exponent form so we can re-render it
     // with the correct thresholds and decorations.
     let (is_negative, mantissa_digits, fractional_digit_count, scientific_exponent) =

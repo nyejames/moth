@@ -33,7 +33,7 @@ fn assert_free_functions(
     let names: Vec<&str> = parsed
         .free_functions
         .iter()
-        .map(|f| f.beanstalk_name.as_str())
+        .map(|f| f.moth_name.as_str())
         .collect();
     assert_eq!(names, expected, "free functions mismatch");
 }
@@ -45,7 +45,7 @@ fn assert_receiver_methods(
     let names: Vec<&str> = parsed
         .receiver_methods
         .iter()
-        .map(|f| f.beanstalk_name.as_str())
+        .map(|f| f.moth_name.as_str())
         .collect();
     assert_eq!(names, expected, "receiver methods mismatch");
 }
@@ -126,8 +126,8 @@ fn assert_no_diagnostics(
 fn opaque_type_declarations_are_parsed() {
     let source = r#"
 /**
- * @bst.opaque Canvas
- * @bst.opaque Canvas2d
+ * @moth.opaque Canvas
+ * @moth.opaque Canvas2d
  */
 "#;
     let parsed = parse(source);
@@ -137,7 +137,7 @@ fn opaque_type_declarations_are_parsed() {
 
 #[test]
 fn opaque_type_single_line_block() {
-    let source = r#"/** @bst.opaque Handle */"#;
+    let source = r#"/** @moth.opaque Handle */"#;
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
     assert_opaque_types(&parsed, &["Handle"]);
@@ -151,11 +151,11 @@ fn opaque_type_single_line_block() {
 fn free_function_signature_parsed() {
     let source = r#"
 /**
- * @bst.opaque Canvas
- * @bst.sig get_canvas |id String| -> Canvas, Error!
+ * @moth.opaque Canvas
+ * @moth.sig get_canvas |id String| -> Canvas, Error!
  */
 export function getCanvas(id) {
-    return bstOk(document.getElementById(id));
+    return mothOk(document.getElementById(id));
 }
 "#;
     let parsed = parse(source);
@@ -177,7 +177,7 @@ export function getCanvas(id) {
 fn free_function_no_return() {
     let source = r#"
 /**
- * @bst.sig log_message |msg String|
+ * @moth.sig log_message |msg String|
  */
 export function logMessage(msg) {
     console.log(msg);
@@ -195,10 +195,10 @@ export function logMessage(msg) {
 fn free_function_error_only_return() {
     let source = r#"
 /**
- * @bst.sig do_fallible || -> Error!
+ * @moth.sig do_fallible || -> Error!
  */
 export function doFallible() {
-    return bstOk();
+    return mothOk();
 }
 "#;
     let parsed = parse(source);
@@ -212,7 +212,7 @@ export function doFallible() {
 fn const_arrow_export_parsed() {
     let source = r#"
 /**
- * @bst.sig add |a Int, b Int| -> Int
+ * @moth.sig add |a Int, b Int| -> Int
  */
 export const add = (a, b) => {
     return a + b;
@@ -229,7 +229,7 @@ export const add = (a, b) => {
 fn const_export_must_be_arrow_function() {
     let source = r#"
 /**
- * @bst.sig answer || -> Int
+ * @moth.sig answer || -> Int
  */
 export const answer = 42;
 "#;
@@ -251,11 +251,11 @@ export const answer = 42;
 fn receiver_method_signature_parsed() {
     let source = r#"
 /**
- * @bst.opaque Canvas2d
+ * @moth.opaque Canvas2d
  */
 
 /**
- * @bst.sig fill_rect |this ~Canvas2d, x Float, y Float, width Float, height Float|
+ * @moth.sig fill_rect |this ~Canvas2d, x Float, y Float, width Float, height Float|
  */
 export function fillRect(ctx, x, y, width, height) {
     ctx.fillRect(x, y, width, height);
@@ -278,7 +278,7 @@ export function fillRect(ctx, x, y, width, height) {
 fn receiver_method_immutable_receiver() {
     let source = r#"
 /**
- * @bst.sig describe |this String| -> String
+ * @moth.sig describe |this String| -> String
  */
 export const describe = (self) => {
     return self;
@@ -294,8 +294,8 @@ export const describe = (self) => {
 fn regular_mutable_parameter_marker_is_parsed() {
     let source = r#"
 /**
- * @bst.opaque Buffer
- * @bst.sig write |buffer ~Buffer, text String|
+ * @moth.opaque Buffer
+ * @moth.sig write |buffer ~Buffer, text String|
  */
 export function write(buffer, text) {
     buffer.value = text;
@@ -319,8 +319,8 @@ export function write(buffer, text) {
 fn receiver_parameter_must_be_first() {
     let source = r#"
 /**
- * @bst.opaque Canvas2d
- * @bst.sig bad |x Float, this ~Canvas2d|
+ * @moth.opaque Canvas2d
+ * @moth.sig bad |x Float, this ~Canvas2d|
  */
 export function bad(x, ctx) {}
 "#;
@@ -336,8 +336,8 @@ export function bad(x, ctx) {}
 fn duplicate_receiver_parameter_rejected() {
     let source = r#"
 /**
- * @bst.opaque Canvas2d
- * @bst.sig bad |this ~Canvas2d, this Canvas2d|
+ * @moth.opaque Canvas2d
+ * @moth.sig bad |this ~Canvas2d, this Canvas2d|
  */
 export function bad(ctx, other) {}
 "#;
@@ -357,8 +357,8 @@ export function bad(ctx, other) {}
 fn receiver_parameter_after_recovered_invalid_parameter_is_rejected() {
     let source = r#"
 /**
- * @bst.opaque Canvas2d
- * @bst.sig bad |...values, this Canvas2d|
+ * @moth.opaque Canvas2d
+ * @moth.sig bad |...values, this Canvas2d|
  */
 export function bad(values, ctx) {}
 "#;
@@ -377,7 +377,7 @@ export function bad(values, ctx) {}
 fn receiver_parameter_missing_type_annotation_still_reported() {
     let source = r#"
 /**
- * @bst.sig bad |this|
+ * @moth.sig bad |this|
  */
 export function bad(ctx) {}
 "#;
@@ -394,11 +394,11 @@ export function bad(ctx) {}
 fn arity_mismatch_reported() {
     let source = r#"
 /**
- * @bst.opaque Canvas
- * @bst.sig get_canvas |id String, extra String| -> Canvas, Error!
+ * @moth.opaque Canvas
+ * @moth.sig get_canvas |id String, extra String| -> Canvas, Error!
  */
 export function getCanvas(id) {
-    return bstOk(id);
+    return mothOk(id);
 }
 "#;
     let parsed = parse(source);
@@ -410,8 +410,8 @@ export function getCanvas(id) {
 fn receiver_this_counts_in_arity() {
     let source = r#"
 /**
- * @bst.opaque Canvas2d
- * @bst.sig fill_rect |this ~Canvas2d, x Float|
+ * @moth.opaque Canvas2d
+ * @moth.sig fill_rect |this ~Canvas2d, x Float|
  */
 export function fillRect(ctx, x, y) {
     ctx.fillRect(x, y);
@@ -423,14 +423,14 @@ export function fillRect(ctx, x, y) {
 }
 
 // ------------------------
-//  Missing export after @bst.sig
+//  Missing export after @moth.sig
 // ------------------------
 
 #[test]
 fn missing_export_after_sig_reported() {
     let source = r#"
 /**
- * @bst.sig orphaned |id String| -> String
+ * @moth.sig orphaned |id String| -> String
  */
 // no export here
 "#;
@@ -443,10 +443,10 @@ fn missing_export_after_sig_reported() {
 fn unknown_external_type_reported() {
     let source = r#"
 /**
- * @bst.sig get_canvas |id String| -> Canvas, Error!
+ * @moth.sig get_canvas |id String| -> Canvas, Error!
  */
 export function getCanvas(id) {
-    return bstOk(id);
+    return mothOk(id);
 }
 "#;
     let parsed = parse(source);
@@ -457,7 +457,7 @@ export function getCanvas(id) {
 fn unknown_receiver_type_reported() {
     let source = r#"
 /**
- * @bst.sig fill_rect |this ~Canvas2d, x Float|
+ * @moth.sig fill_rect |this ~Canvas2d, x Float|
  */
 export function fillRect(ctx, x) {
     ctx.fillRect(x, x);
@@ -473,32 +473,32 @@ export function fillRect(ctx, x) {
 // ------------------------
 
 #[test]
-fn duplicate_beanstalk_name_reported() {
+fn duplicate_moth_name_reported() {
     let source = r#"
 /**
- * @bst.sig get_canvas |id String| -> String
+ * @moth.sig get_canvas |id String| -> String
  */
 export function getCanvas1(id) { return id; }
 
 /**
- * @bst.sig get_canvas |name String| -> String
+ * @moth.sig get_canvas |name String| -> String
  */
 export function getCanvas2(name) { return name; }
 "#;
     let parsed = parse(source);
-    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::DuplicateBeanstalkName]);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::DuplicateMothName]);
 }
 
 #[test]
 fn duplicate_js_export_name_reported() {
     let source = r#"
 /**
- * @bst.sig first |id String| -> String
+ * @moth.sig first |id String| -> String
  */
 export function getCanvas(id) { return id; }
 
 /**
- * @bst.sig second |name String| -> String
+ * @moth.sig second |name String| -> String
  */
 export function getCanvas(name) { return name; }
 "#;
@@ -510,12 +510,12 @@ export function getCanvas(name) { return name; }
 fn duplicate_opaque_type_name_reported() {
     let source = r#"
 /**
- * @bst.opaque Handle
- * @bst.opaque Handle
+ * @moth.opaque Handle
+ * @moth.opaque Handle
  */
 "#;
     let parsed = parse(source);
-    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::DuplicateBeanstalkName]);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::DuplicateMothName]);
 }
 
 // ------------------------
@@ -537,7 +537,7 @@ export function helper(x) {
 fn unannotated_and_annotated_exports_mixed() {
     let source = r#"
 /**
- * @bst.sig public_fn |x Int| -> Int
+ * @moth.sig public_fn |x Int| -> Int
  */
 export function publicFn(x) { return x; }
 
@@ -549,14 +549,14 @@ export function privateHelper(x) { return x; }
 }
 
 // ------------------------
-//  @bst.package rejection
+//  @moth.package rejection
 // ------------------------
 
 #[test]
-fn bst_package_rejected() {
+fn moth_package_rejected() {
     let source = r#"
 /**
- * @bst.package my_package
+ * @moth.package my_package
  */
 export function foo() {}
 "#;
@@ -571,10 +571,10 @@ export function foo() {}
 }
 
 #[test]
-fn unknown_bst_directive_rejected() {
+fn unknown_moth_directive_rejected() {
     let source = r#"
 /**
- * @bst.future value
+ * @moth.future value
  */
 export function foo() {}
 "#;
@@ -582,7 +582,7 @@ export function foo() {}
     assert_diagnostic_kinds(
         &parsed,
         &[
-            JsDiagnosticKind::UnknownBstDirective,
+            JsDiagnosticKind::UnknownMothDirective,
             JsDiagnosticKind::UnannotatedExport,
         ],
     );
@@ -692,13 +692,13 @@ import "./helper.js";
 #[test]
 fn registered_runtime_import_accepted() {
     let source = r#"
-import { bstOk, bstErr } from "@beanstalk/runtime";
+import { mothOk, mothErr } from "@moth/runtime";
 
 /**
- * @bst.sig do_thing || -> Error!
+ * @moth.sig do_thing || -> Error!
  */
 export function doThing() {
-    return bstOk();
+    return mothOk();
 }
 "#;
     let parsed = parse(source);
@@ -709,58 +709,58 @@ export function doThing() {
 #[test]
 fn unregistered_runtime_looking_module_is_rejected() {
     let source = r#"
-import { foo } from "@beanstalk/other-runtime";
+import { foo } from "@moth/other-runtime";
 "#;
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ArbitraryImport]);
 }
 
 #[test]
-fn v1_runtime_registry_contains_only_beanstalk_runtime() {
+fn v1_runtime_registry_contains_only_moth_runtime() {
     let registry = RuntimeModuleRegistry::v1();
-    assert!(registry.is_registered("@beanstalk/runtime"));
-    assert!(!registry.is_registered("@beanstalk/other-runtime"));
+    assert!(registry.is_registered("@moth/runtime"));
+    assert!(!registry.is_registered("@moth/other-runtime"));
     assert!(!registry.is_registered("./helper.js"));
     let modules = registry.registered_modules();
     assert_eq!(modules.len(), 1);
-    assert_eq!(modules[0].specifier, "@beanstalk/runtime");
+    assert_eq!(modules[0].specifier, "@moth/runtime");
 }
 
 #[test]
 fn runtime_named_import_is_recorded() {
     let source = r#"
-import { bstOk, bstErr } from "@beanstalk/runtime";
+import { mothOk, mothErr } from "@moth/runtime";
 
 /**
- * @bst.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> Int, Error!
  */
 export function doThing() {
-    return bstOk(7);
+    return mothOk(7);
 }
 "#;
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
-    assert_runtime_imports(&parsed, &[("@beanstalk/runtime", &["bstErr", "bstOk"])]);
+    assert_runtime_imports(&parsed, &[("@moth/runtime", &["mothErr", "mothOk"])]);
 }
 
 #[test]
 fn multiline_registered_runtime_import_accepted() {
     let source = r#"
 import {
-    bstOk,
-    bstErr,
-} from "@beanstalk/runtime";
+    mothOk,
+    mothErr,
+} from "@moth/runtime";
 
 /**
- * @bst.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> Int, Error!
  */
 export function doThing() {
-    return bstOk(7);
+    return mothOk(7);
 }
 "#;
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
-    assert_runtime_imports(&parsed, &[("@beanstalk/runtime", &["bstErr", "bstOk"])]);
+    assert_runtime_imports(&parsed, &[("@moth/runtime", &["mothErr", "mothOk"])]);
 }
 
 #[test]
@@ -779,26 +779,26 @@ import {
 #[test]
 fn non_fallible_function_with_runtime_import_records_import() {
     let source = r#"
-import { bstOk } from "@beanstalk/runtime";
+import { mothOk } from "@moth/runtime";
 
 /**
- * @bst.sig get_number || -> Int
+ * @moth.sig get_number || -> Int
  */
 export function getNumber() {
-    return bstOk(7).value;
+    return mothOk(7).value;
 }
 "#;
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
     assert_eq!(parsed.free_functions.len(), 1);
     assert!(!parsed.free_functions[0].signature.has_error_return);
-    assert_runtime_imports(&parsed, &[("@beanstalk/runtime", &["bstOk"])]);
+    assert_runtime_imports(&parsed, &[("@moth/runtime", &["mothOk"])]);
 }
 
 #[test]
 fn runtime_import_alias_rejected() {
     let source = r#"
-import { bstOk as ok } from "@beanstalk/runtime";
+import { mothOk as ok } from "@moth/runtime";
 "#;
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::UnsupportedRuntimeImportForm]);
@@ -808,7 +808,7 @@ import { bstOk as ok } from "@beanstalk/runtime";
 #[test]
 fn runtime_default_import_rejected() {
     let source = r#"
-import runtime from "@beanstalk/runtime";
+import runtime from "@moth/runtime";
 "#;
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::UnsupportedRuntimeImportForm]);
@@ -818,7 +818,7 @@ import runtime from "@beanstalk/runtime";
 #[test]
 fn runtime_namespace_import_rejected() {
     let source = r#"
-import * as runtime from "@beanstalk/runtime";
+import * as runtime from "@moth/runtime";
 "#;
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::UnsupportedRuntimeImportForm]);
@@ -828,7 +828,7 @@ import * as runtime from "@beanstalk/runtime";
 #[test]
 fn unknown_runtime_import_name_rejected() {
     let source = r#"
-import { nope } from "@beanstalk/runtime";
+import { nope } from "@moth/runtime";
 "#;
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::UnknownRuntimeImportName]);
@@ -838,56 +838,56 @@ import { nope } from "@beanstalk/runtime";
 #[test]
 fn duplicate_runtime_imports_deduplicate() {
     let source = r#"
-import { bstOk } from "@beanstalk/runtime";
-import { bstErr } from "@beanstalk/runtime";
+import { mothOk } from "@moth/runtime";
+import { mothErr } from "@moth/runtime";
 
 /**
- * @bst.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> Int, Error!
  */
 export function doThing() {
-    return bstOk(7);
+    return mothOk(7);
 }
 "#;
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
     assert_eq!(parsed.runtime_imports.len(), 1);
-    assert_eq!(parsed.runtime_imports[0].module_name, "@beanstalk/runtime");
+    assert_eq!(parsed.runtime_imports[0].module_name, "@moth/runtime");
     assert_eq!(
         parsed.runtime_imports[0].imported_names,
-        vec!["bstErr", "bstOk"]
+        vec!["mothErr", "mothOk"]
     );
 }
 
 #[test]
 fn runtime_import_duplicate_names_are_deduplicated() {
     let source = r#"
-import { bstOk } from "@beanstalk/runtime";
-import { bstOk } from "@beanstalk/runtime";
+import { mothOk } from "@moth/runtime";
+import { mothOk } from "@moth/runtime";
 
 /**
- * @bst.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> Int, Error!
  */
 export function doThing() {
-    return bstOk(7);
+    return mothOk(7);
 }
 "#;
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
     assert_eq!(parsed.runtime_imports.len(), 1);
-    assert_eq!(parsed.runtime_imports[0].module_name, "@beanstalk/runtime");
-    assert_eq!(parsed.runtime_imports[0].imported_names, vec!["bstOk"]);
+    assert_eq!(parsed.runtime_imports[0].module_name, "@moth/runtime");
+    assert_eq!(parsed.runtime_imports[0].imported_names, vec!["mothOk"]);
 }
 
 #[test]
 fn explicit_registry_injected_into_parser() {
     let source = r#"
-import { bstOk } from "@beanstalk/runtime";
+import { mothOk } from "@moth/runtime";
 
 /**
- * @bst.sig do_thing || -> Error!
+ * @moth.sig do_thing || -> Error!
  */
 export function doThing() {
-    return bstOk();
+    return mothOk();
 }
 "#;
     let registry = RuntimeModuleRegistry::v1();
@@ -903,7 +903,7 @@ export function doThing() {
 #[test]
 fn explicit_empty_registry_rejects_all_imports() {
     let source = r#"
-import { bstOk } from "@beanstalk/runtime";
+import { mothOk } from "@moth/runtime";
 "#;
     let registry = RuntimeModuleRegistry::empty();
     let parsed = parse_js_module(source, &registry);
@@ -934,7 +934,7 @@ export function blockCommented() {}
 fn export_body_with_brace_in_string_does_not_break_scanning() {
     let source = r#"
 /**
- * @bst.sig tricky || -> String
+ * @moth.sig tricky || -> String
  */
 export function tricky() {
     const text = "} export function fake() {}";
@@ -942,7 +942,7 @@ export function tricky() {
 }
 
 /**
- * @bst.sig next || -> Int
+ * @moth.sig next || -> Int
  */
 export function next() {
     return 1;
@@ -957,7 +957,7 @@ export function next() {
 fn export_body_with_import_in_string_does_not_emit_import_diagnostic() {
     let source = r#"
 /**
- * @bst.sig tricky || -> String
+ * @moth.sig tricky || -> String
  */
 export function tricky() {
     const text = "import { foo } from './bar.js';";
@@ -1017,7 +1017,7 @@ fn template_literal_at_top_level_before_export() {
 const hint = `}; export function fake() {}`;
 
 /**
- * @bst.sig real || -> Int
+ * @moth.sig real || -> Int
  */
 export function real() {
     return 1;
@@ -1032,27 +1032,27 @@ export function real() {
 fn import_statement_with_comment_containing_semicolon() {
     let source = r#"
 import {
-    bstOk, // this is ok;
-    bstErr // this is err;
-} from "@beanstalk/runtime";
+    mothOk, // this is ok;
+    mothErr // this is err;
+} from "@moth/runtime";
 
 /**
- * @bst.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> Int, Error!
  */
 export function doThing() {
-    return bstOk(7);
+    return mothOk(7);
 }
 "#;
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
-    assert_runtime_imports(&parsed, &[("@beanstalk/runtime", &["bstErr", "bstOk"])]);
+    assert_runtime_imports(&parsed, &[("@moth/runtime", &["mothErr", "mothOk"])]);
 }
 
 #[test]
 fn export_body_comments_containing_export_are_ignored() {
     let source = r#"
 /**
- * @bst.sig tricky || -> Int
+ * @moth.sig tricky || -> Int
  */
 export function tricky() {
     // export function fake() {}
@@ -1069,7 +1069,7 @@ export function tricky() {
 fn template_literal_with_braces_does_not_break_scanning() {
     let source = r#"
 /**
- * @bst.sig tricky || -> String
+ * @moth.sig tricky || -> String
  */
 export function tricky() {
     const text = `value ${"{ }"}`;
@@ -1085,7 +1085,7 @@ export function tricky() {
 fn arrow_block_body_with_brace_in_string_handled() {
     let source = r#"
 /**
- * @bst.sig tricky || -> String
+ * @moth.sig tricky || -> String
  */
 export const tricky = () => {
     const text = "}";
@@ -1101,7 +1101,7 @@ export const tricky = () => {
 fn expression_bodied_arrow_export_rejected() {
     let source = r#"
 /**
- * @bst.sig add |a Int, b Int| -> Int
+ * @moth.sig add |a Int, b Int| -> Int
  */
 export const add = (a, b) => a + b;
 "#;
@@ -1124,7 +1124,7 @@ export const add = (a, b) => a + b;
 fn rest_parameter_rejected() {
     let source = r#"
 /**
- * @bst.sig sum |...values| -> Int
+ * @moth.sig sum |...values| -> Int
  */
 export function sum(...values) {
     return values.reduce((a, b) => a + b, 0);
@@ -1144,7 +1144,7 @@ export function sum(...values) {
 fn default_parameter_rejected() {
     let source = r#"
 /**
- * @bst.sig greet |name String| -> String
+ * @moth.sig greet |name String| -> String
  */
 export function greet(name = "world") {
     return name;
@@ -1158,7 +1158,7 @@ export function greet(name = "world") {
 fn destructuring_parameter_rejected() {
     let source = r#"
 /**
- * @bst.sig unpack |point| -> Int
+ * @moth.sig unpack |point| -> Int
  */
 export function unpack({ x }) {
     return x;
@@ -1183,7 +1183,7 @@ export function unpack({ x }) {
 fn collection_type_in_signature_rejected() {
     let source = r#"
 /**
- * @bst.sig process |items {String}| -> String
+ * @moth.sig process |items {String}| -> String
  */
 export function process(items) {
     return items[0];
@@ -1197,7 +1197,7 @@ export function process(items) {
 fn option_type_in_signature_rejected() {
     let source = r#"
 /**
- * @bst.sig maybe |name String?| -> String
+ * @moth.sig maybe |name String?| -> String
  */
 export function maybe(name) {
     return name || "";
@@ -1211,7 +1211,7 @@ export function maybe(name) {
 fn generic_external_function_signature_rejected() {
     let source = r#"
 /**
- * @bst.sig identity type A |value A| -> A
+ * @moth.sig identity type A |value A| -> A
  */
 export function identity(value) {
     return value;
@@ -1226,7 +1226,7 @@ export function identity(value) {
 fn generic_external_opaque_type_rejected() {
     let source = r#"
 /**
- * @bst.opaque Canvas of Int
+ * @moth.opaque Canvas of Int
  */
 "#;
     let parsed = parse(source);
@@ -1239,7 +1239,7 @@ fn generic_external_opaque_type_rejected() {
 fn void_return_rejected() {
     let source = r#"
 /**
- * @bst.sig noop || -> Void
+ * @moth.sig noop || -> Void
  */
 export function noop() {}
 "#;
@@ -1251,7 +1251,7 @@ export function noop() {}
 fn multi_success_return_rejected() {
     let source = r#"
 /**
- * @bst.sig pair || -> Int, String
+ * @moth.sig pair || -> Int, String
  */
 export function pair() {
     return [1, "a"];
@@ -1266,10 +1266,10 @@ export function pair() {
 // ------------------------
 
 #[test]
-fn snake_case_beanstalk_name_maps_to_camel_case_js() {
+fn snake_case_moth_name_maps_to_camel_case_js() {
     let source = r#"
 /**
- * @bst.sig get_canvas_context |id String| -> String
+ * @moth.sig get_canvas_context |id String| -> String
  */
 export function getCanvasContext(id) {
     return id;
@@ -1277,10 +1277,7 @@ export function getCanvasContext(id) {
 "#;
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
-    assert_eq!(
-        parsed.free_functions[0].beanstalk_name,
-        "get_canvas_context"
-    );
+    assert_eq!(parsed.free_functions[0].moth_name, "get_canvas_context");
     assert_eq!(parsed.free_functions[0].js_name, "getCanvasContext");
 }
 
@@ -1296,7 +1293,7 @@ function privateHelper(x) {
 }
 
 /**
- * @bst.sig double |x Int| -> Int
+ * @moth.sig double |x Int| -> Int
  */
 export function double(x) {
     return privateHelper(x);
@@ -1314,26 +1311,26 @@ export function double(x) {
 #[test]
 fn full_module_parse() {
     let source = r#"
-import { bstOk, bstErr } from "@beanstalk/runtime";
+import { mothOk, mothErr } from "@moth/runtime";
 
 /**
- * @bst.opaque Canvas
- * @bst.opaque Canvas2d
+ * @moth.opaque Canvas
+ * @moth.opaque Canvas2d
  */
 
 /**
- * @bst.sig get_canvas |id String| -> Canvas, Error!
+ * @moth.sig get_canvas |id String| -> Canvas, Error!
  */
 export function getCanvas(id) {
     const canvas = document.getElementById(id);
     if (!canvas) {
-        return bstErr(404, "Canvas not found");
+        return mothErr(404, "Canvas not found");
     }
-    return bstOk(canvas);
+    return mothOk(canvas);
 }
 
 /**
- * @bst.sig fill_rect |this ~Canvas2d, x Float, y Float, width Float, height Float|
+ * @moth.sig fill_rect |this ~Canvas2d, x Float, y Float, width Float, height Float|
  */
 export function fillRect(ctx, x, y, width, height) {
     ctx.fillRect(x, y, width, height);
@@ -1364,12 +1361,12 @@ fn builtin_web_canvas_package_parses_expanded_surface() {
             "CanvasTextMetrics",
         ],
     );
-    assert_runtime_imports(&parsed, &[("@beanstalk/runtime", &["bstErr", "bstOk"])]);
+    assert_runtime_imports(&parsed, &[("@moth/runtime", &["mothErr", "mothOk"])]);
 
     let free_function_names: Vec<&str> = parsed
         .free_functions
         .iter()
-        .map(|function| function.beanstalk_name.as_str())
+        .map(|function| function.moth_name.as_str())
         .collect();
     for expected in [
         "get_canvas",

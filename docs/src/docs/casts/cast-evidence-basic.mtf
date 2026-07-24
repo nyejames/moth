@@ -1,0 +1,20 @@
+The compiler already knows the built-in conversions.
+
+A user-defined struct or choice can opt into a supported target by providing
+the required method and declaring explicit conformance.
+
+[codeblock, $code("moth"):
+    Label = |
+        text String,
+    |
+
+    to_string |this Label| -> String:
+        return this.text
+    ;
+
+    Label must CASTABLE_TO_STRING
+]
+
+Now a `Label` can be cast to `String` at a typed destination.
+
+This stays explicit. Matching method names alone do not create cast support.

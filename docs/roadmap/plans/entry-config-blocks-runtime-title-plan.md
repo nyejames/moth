@@ -240,7 +240,7 @@ Context: runtime title mutation is a browser document capability. Unsupported ta
 - Reject every reachable unsupported call with one stable target-contract diagnostic.
 - Do not generate the helper for a rejected target.
 - Emit the JavaScript helper only when the call is reachable on a capable target.
-- Convert input through canonical Beanstalk string-content conversion.
+- Convert input through canonical Moth string-content conversion.
 - Set the live document title.
 - Treat a capable host that lacks its advertised document-title facility as an infrastructure or host-contract failure.
 - Add helper reachability tests.

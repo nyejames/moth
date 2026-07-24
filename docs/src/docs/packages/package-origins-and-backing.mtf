@@ -1,0 +1,58 @@
+Every package has two independent classifications: where it comes from and how the compiler obtains its implementation.
+
+### Package origin
+
+Origin describes ownership and distribution:
+
+- **Core**: compiler-owned packages such as `@core/io` and `@core/math`.
+- **Builder**: packages selected by a project builder, including `@html` and `@web/canvas`.
+- **ProjectLocal**: scoped `+*.moth` support packages, the project-root package facade and annotated project-local JavaScript imports.
+- **Standard** and **Dependency**: reserved for future package-system support.
+
+### Package backing
+
+Backing describes implementation:
+
+- **MothSource**: one or more Moth modules resolved through the source package registry.
+- **ExternalBinding**: typed functions, constants and opaque types implemented outside Moth.
+
+[table:
+    [th:
+        [: **Package**]
+        [: **Origin**]
+        [: **Backing**]
+    ]
+
+    [td: [:`@html`] [: Builder] [: MothSource]]
+    [td: [:`@core/collections`, `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time`] [: Core] [: ExternalBinding]]
+    [td: [:`@web/canvas`] [: Builder] [: ExternalBinding]]
+    [td: [: Scoped `+*.moth` support package] [: ProjectLocal] [: MothSource]]
+    [td: [: Project-root `+*.moth` facade] [: ProjectLocal] [: MothSource]]
+    [td: [: Annotated project-local `.js` import] [: ProjectLocal] [: ExternalBinding]]
+]
+
+Origin and backing don't change import syntax or module visibility. Source-backed packages contain ordinary modules with strict `export:` public surfaces. Binding-backed packages expose typed external symbols registered by the builder.
+
+### Prelude is visibility policy
+
+The prelude is implicit-import policy, not an origin or backing. It exposes the bare `io` namespace as an alias to `@core/io`. Package metadata belongs to `@core/io`, while bare-name visibility belongs to the prelude.
+
+### Builder-selected availability
+
+The builder decides which packages exist. Unsupported packages are rejected with an unsupported-by-builder diagnostic. The HTML builder opts into `@html`, `@web/canvas` and current optional Core packages.
+
+### Binding-backed package constraints
+
+Binding-backed packages expose free functions, constants and opaque types. They don't expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments, default parameters and reactive parameters are source-function features.
+
+The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package needs a Wasm lowering before that backend can use it.
+
+### No package manager yet
+
+There is no remote fetching, lockfile or version resolution yet. Use `+*.moth` support packages for project-local source-backed packages, builder-provided package imports for built-in capabilities and annotated `.js` wrappers for direct browser integration.
+
+### Related concepts
+
+- For project-local packages see @#project-local-packages (Project-local packages).
+- For import path families see @#import-paths (Import paths).
+- For Core package API details see @./core (Core packages).

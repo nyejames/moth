@@ -13,7 +13,7 @@ fn valid_block_css_emits_no_warnings() {
 #[test]
 fn valid_block_css_ignores_comments_inside_statements() {
     let warnings = validate_css_source(
-        ":root { /* Default Background Colours */ --bst-bg-lightmode: #fff; /* Code block colours */ --comment-dark: #838c86; }",
+        ":root { /* Default Background Colours */ --moth-bg-lightmode: #fff; /* Code block colours */ --comment-dark: #838c86; }",
         CssFormatterMode::Block,
     );
 

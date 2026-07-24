@@ -1,4 +1,4 @@
-# Beanstalk Benchmarks
+# Moth Benchmarks
 
 ## Purpose
 
@@ -28,8 +28,8 @@ Each suite uses one warmup iteration and ten measured iterations per case.
 ## Timing And Counter Controls
 
 Normal benchmark commands build the compiler with the concise `timers` feature.
-End-to-end CLI benchmarks run subprocesses with `BST_TIMERS=bench` and
-`BST_COUNTERS=off` so stdout contains stable timing observations without verbose
+End-to-end CLI benchmarks run subprocesses with `MOTH_TIMERS=bench` and
+`MOTH_COUNTERS=off` so stdout contains stable timing observations without verbose
 human prose or counter floods. Focused frontend benchmarks run in-process and
 read the same timing collector directly.
 
@@ -45,18 +45,18 @@ Feature roles:
 Environment controls:
 
 ```text
-BST_TIMERS=summary   # concise human summary
-BST_TIMERS=bench     # stable BST_BENCH timing lines for benchmark tooling
-BST_TIMERS=verbose   # human prose plus stable timing lines
-BST_TIMERS=off       # collect for in-process consumers, suppress stdout
+MOTH_TIMERS=summary   # concise human summary
+MOTH_TIMERS=bench     # stable MOTH_BENCH timing lines for benchmark tooling
+MOTH_TIMERS=verbose   # human prose plus stable timing lines
+MOTH_TIMERS=off       # collect for in-process consumers, suppress stdout
 
-BST_COUNTERS=off     # default
-BST_COUNTERS=summary # stable counter lines plus grouped summary
-BST_COUNTERS=full    # stable counter lines plus full legacy counter dump
+MOTH_COUNTERS=off     # default
+MOTH_COUNTERS=summary # stable counter lines plus grouped summary
+MOTH_COUNTERS=full    # stable counter lines plus full legacy counter dump
 ```
 
 Counter lines are emitted only when the compiler is built with
-`timers,benchmark_counters` and `BST_COUNTERS=summary` or `BST_COUNTERS=full`.
+`timers,benchmark_counters` and `MOTH_COUNTERS=summary` or `MOTH_COUNTERS=full`.
 Do not turn counters on for normal before/after benchmark runs unless the active
 investigation specifically needs counter evidence.
 
@@ -106,27 +106,27 @@ just profile <filter>         # named filter: terse, normal, deep, raw-index
 just profile-case <case-name> [filter]   # profile one specific case
 just profile-symbolicated [filter]       # request Samply presymbolication
 just profile-case-symbolicated <case-name> [filter] # request presymbolication for one case
-just profile-build            # build the profiling binary (target/profiling/bean)
+just profile-build            # build the profiling binary (target/profiling/moth)
 ```
 
 Run `just bench-report` first to identify which case and stage are worth profiling.
 
 ## Measurement Model
 
-CLI wall-clock time is the public rough regression signal. It measures the built `bean` binary as a subprocess, so it includes command startup, project loading, frontend compilation, backend work where relevant, and output handling.
+CLI wall-clock time is the public rough regression signal. It measures the built `moth` binary as a subprocess, so it includes command startup, project loading, frontend compilation, backend work where relevant, and output handling.
 
 Compiler stage timings are attribution and debugging evidence. They help explain whether obvious movement likely came from command/bootstrap setup, Stage 0 project structure, path resolution, reachable-file discovery, file preparation, dependency sorting, AST, HIR, borrow validation, backend lowering, output writing, or another instrumented stage.
 
-Stage observations are emitted as stable `BST_BENCH timing <metric>=<ms>ms`
+Stage observations are emitted as stable `MOTH_BENCH timing <metric>=<ms>ms`
 lines when the compiler is built with `timers` and run with
-`BST_TIMERS=bench` or `BST_TIMERS=verbose`. Human timer prose is developer
+`MOTH_TIMERS=bench` or `MOTH_TIMERS=verbose`. Human timer prose is developer
 output only; benchmark parsing should prefer the stable metric lines.
 
 Stage 0/bootstrap/path-resolution timings are first-class attribution metrics. A CLI benchmark whose wall time is much larger than the sum of relevant top-level command phases should be treated as an instrumentation gap, not as harmless subprocess noise.
 
 Counter observations are local diagnostic evidence, not public benchmark
 results. Stable counter metric names use snake_case or dotted subsystem names
-and are emitted as `BST_BENCH counter <metric>=<value>` lines only when
+and are emitted as `MOTH_BENCH counter <metric>=<value>` lines only when
 counter output is explicitly requested. Counters are stored in local JSONL and
 used by local report tooling; raw counter tables must not be added to tracked
 summaries.
@@ -157,8 +157,8 @@ Both files use group directives:
 
 ```text
 # group: core
-check benchmarks/speed-test.bst
-build benchmarks/speed-test.bst
+check benchmarks/speed-test.moth
+build benchmarks/speed-test.moth
 ```
 
 Groups are public summary labels, not compiler architecture boundaries:
@@ -241,12 +241,12 @@ The Samply pass provides call-stack evidence.
 
 ### Profiling binary
 
-The profiling binary is built to `target/profiling/bean` using
+The profiling binary is built to `target/profiling/moth` using
 `just profile-build`. It uses release settings with full debug info and
 `detailed_timers` for verbose timing evidence. `detailed_timers` no longer
 enables high-volume counters by itself. Profile runs prepare symbol directories
 for the profiling binary where available; on macOS the xtask path also tries to
-materialize `target/profiling/bean.dSYM` with `dsymutil` and reports whether its
+materialize `target/profiling/moth.dSYM` with `dsymutil` and reports whether its
 UUID matches the binary when `dwarfdump` is available. Do not commit the binary
 or `.dSYM` bundle.
 
@@ -258,7 +258,7 @@ Filter modes control how much detail appears in summaries:
 
 | Mode | Purpose | Keeps |
 |---|---|---|
-| `terse` | agent-first default | top 8 Beanstalk-owned functions per case, top 3 cases in root summary |
+| `terse` | agent-first default | top 8 Moth-owned functions per case, top 3 cases in root summary |
 | `normal` | human + agent investigation | top 20 functions per case, top 8 cases in root summary |
 | `deep` | pre-refactor investigation | top 50 functions per case, all profiled cases, caller/callee context |
 | `raw-index` | artifact generation only | raw profile and observation logs, no parsed hotspots |
@@ -320,39 +320,39 @@ allocation, lookup, folding, import, and lowering pressure.
 
 ## Fixture List
 
-- `speed-test.bst`: broad baseline language and compiler exercise covering constant folding, templates, structs, receivers, collections, and control flow.
-- `benchmark-root-single-file.bst`: root-level single-file check case that
+- `speed-test.moth`: broad baseline language and compiler exercise covering constant folding, templates, structs, receivers, collections, and control flow.
+- `benchmark-root-single-file.moth`: root-level single-file check case that
   exercises the non-project single-file path.
-- `template-stress.bst`: deeply nested template composition, slot usage, `$children` wrappers, and formatter directive stress.
-- `type-stress.bst`: type and method-heavy source with structs, choices, aliases, receivers, and constructor patterns.
-- `fold-stress.bst`: constant folding coverage with large arithmetic trees, chained dependencies, and const record creation.
-- `pattern-stress.bst`: pattern and match coverage including exhaustive choice arms, guards, payload capture, and relational patterns.
-- `collection-stress.bst`: collection operations and loop coverage with mutations, range loops, nested iteration, and fallible fallback patterns.
-- `environment-stress.bst`: AST environment building, type alias expansion, nominal structs and choices, receiver catalog construction, generic declarations and instantiations, and body validation/type resolution.
+- `template-stress.moth`: deeply nested template composition, slot usage, `$children` wrappers, and formatter directive stress.
+- `type-stress.moth`: type and method-heavy source with structs, choices, aliases, receivers, and constructor patterns.
+- `fold-stress.moth`: constant folding coverage with large arithmetic trees, chained dependencies, and const record creation.
+- `pattern-stress.moth`: pattern and match coverage including exhaustive choice arms, guards, payload capture, and relational patterns.
+- `collection-stress.moth`: collection operations and loop coverage with mutations, range loops, nested iteration, and fallible fallback patterns.
+- `environment-stress.moth`: AST environment building, type alias expansion, nominal structs and choices, receiver catalog construction, generic declarations and instantiations, and body validation/type resolution.
 - `module-graph/`: small multi-file project with cross-file imports, constants and templates.
 - `import-fanout/`: multi-file project with repeated imports, aliases, wrapper declarations and cross-file constants for string-table interning and module-graph resolution.
 - `module-root-stress/`: directory project with config parsing, multiple
-  reachable module directories, and irrelevant non-Beanstalk trees for Stage 0
+  reachable module directories, and irrelevant non-Moth trees for Stage 0
   module-root/path-resolution attribution.
 - `module-root-role-mix/`: directory project combining many skipped source directories,
   output-producing and API-only module roots and a source-backed package whose cosmetic root name is
-  not `#mod.bst`.
+  not `#mod.moth`.
 - `external-js-imports/`: HTML project with annotated JavaScript imports, runtime helper imports, opaque external types, namespace imports, and external free functions.
-- `borrow-stress.bst`: valid mutable/exclusive access and borrow-validation coverage.
-- `adversarial/one-module-kitchen-sink.bst`: dense single-module churn across imports, constants,
+- `borrow-stress.moth`: valid mutable/exclusive access and borrow-validation coverage.
+- `adversarial/one-module-kitchen-sink.moth`: dense single-module churn across imports, constants,
   aliases, nominal types, choices, traits, generics, templates, collections, maps, receivers, and
   external package calls.
-- `adversarial/deep-scope-churn.bst`: nested functions, control blocks, loop scopes, and local
+- `adversarial/deep-scope-churn.moth`: nested functions, control blocks, loop scopes, and local
   declaration pressure for scope-frame creation and ancestor lookup.
-- `adversarial/template-render-plan-churn.bst`: nested template composition, slots, inserts,
+- `adversarial/template-render-plan-churn.moth`: nested template composition, slots, inserts,
   `$children` wrappers, repeated slot replay, and runtime template rebuilding.
-- `adversarial/constant-dag-churn.bst`: large compile-time constant dependency DAGs, arithmetic
+- `adversarial/constant-dag-churn.moth`: large compile-time constant dependency DAGs, arithmetic
   folding, const records, and folded templates.
-- `adversarial/expression-rpn-churn.bst`: expression parsing and RPN lowering pressure through
+- `adversarial/expression-rpn-churn.moth`: expression parsing and RPN lowering pressure through
   choice matching, mutable stacks, checked operators, and value recovery.
-- `adversarial/generic-trait-churn.bst`: generic structs/functions, trait declarations, explicit
+- `adversarial/generic-trait-churn.moth`: generic structs/functions, trait declarations, explicit
   conformances, bound-provided receiver calls, and concrete instantiations.
-- `adversarial/collection-map-borrow-churn.bst`: valid collection/map mutation, fallible
+- `adversarial/collection-map-borrow-churn.moth`: valid collection/map mutation, fallible
   operations, mutable receiver calls, and borrow-checker side-table pressure.
 - `adversarial/import-external-churn/`: HTML project fixture with import fanout, cross-file
   constants/types/helpers, core package calls, and repeated external JavaScript free-function

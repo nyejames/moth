@@ -8,4 +8,4 @@ rendered_output_contains = ["html_wasm_collection_runtime_coverage len=3 picked=
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

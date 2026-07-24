@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Templates | Beanstalk</title>
-    <meta name="description" content="Template strings, directives, slots, wrappers, control flow and Markdown in Beanstalk.">
+    <title>Templates | Moth</title>
+    <meta name="description" content="Template strings, directives, slots, wrappers, control flow and Markdown in Moth.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -668,7 +668,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Templates</p><h1>Templates</h1><p>Templates are Beanstalk&#39;s superpowered strings. They can stay tiny, or grow into a compile-time HTML and Markdown engine with slots, wrappers and control flow.</p><p>Square brackets look unusual for about five minutes. Then ordinary string formatting starts to feel underdressed.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Templates</p><h1>Templates</h1><p>Templates are Moth&#39;s superpowered strings. They can stay tiny, or grow into a compile-time HTML and Markdown engine with slots, wrappers and control flow.</p><p>Square brackets look unusual for about five minutes. Then ordinary string formatting starts to feel underdressed.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Template basics
@@ -718,27 +718,27 @@ body {
 
 
 
-            <p>Templates are Beanstalk&#39;s powerful string-building form.</p><pre style=""><code class='codeblock'>
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Priya&quot;</span>
+            <p>Templates are Moth&#39;s powerful string-building form.</p><pre style=""><code class='codeblock'>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 
-    greeting <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Hello,</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Square brackets create the template.</p><p>The colon separates its head from its body.</p><p>A nested template inserts a value from the surrounding scope.</p><p>Templates can build plain text, Markdown, HTML, CSS or another string-based format. They may be finished during compilation or built at runtime.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Templates create owned <code>String</code> values.</p><p>They use square brackets. Collections and maps use braces.</p><pre style=""><code class='codeblock'>
-    name <span class='bst-code-operator'>=</span> <span class='bst-code-string'>&quot;Priya&quot;</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 
-    greeting <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Hello,</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Head and body</h3><p>A colon separates the template head from its body.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-string'>&quot;prefix&quot;</span><span class='bst-code-operator'>:</span> body<span class='bst-code-parenthesis'>]</span>
-    </code></pre><p>The head may contain:</p><ul><li>a value or helper template</li><li>directives</li><li>slot contributions</li><li>final <code>if</code> or <code>loop</code> control-flow suffixes</li></ul><p>The body contains authored text and nested templates.</p><p>Authored <code>.bst</code> templates must close with a closing square bracket.</p><p>Truncated heads, bodies, nested children and directive-argument templates are syntax errors.</p><h3>Capture and text</h3><p>A template may read visible values from its surrounding scope.</p><p>Inside a template body:</p><ul><li>backticks are ordinary body text</li><li>backslashes are ordinary body text</li><li>formatter directives decide how authored text is transformed</li></ul><p>Double-quoted string slices still use normal escaping in expression position.</p><h3>Literal delimiters in output</h3><p>To render a literal open or close square bracket inside a template body, insert a string slice:</p><pre style=""><code class='codeblock'>
-    content <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-string'>&quot;[literal]&quot;</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
-    </code></pre><p>The current compiler does not support backtick raw string slices, so string insertion is the supported way to emit literal square brackets.</p><h3>Compile-time and runtime forms</h3><p>A template may:</p><ul><li>fully fold to a compile-time string</li><li>remain as runtime string construction</li></ul><p>The source-level result is still an owned <code>String</code>.</p><p>Templates do not become source-visible function values.</p><p>Runtime Float interpolation and compile-time folding use the same Beanstalk formatter.</p><h3>Page fragments</h3><p>Only direct top-level template expressions in an active HTML module root contribute page fragments.</p><ul><li>top-level runtime templates run through active-root <code>start()</code> in source order</li><li>direct top-level const templates fold into compile-time fragments</li><li>a template assigned to a binding or returned from a function does not become a page fragment by itself</li></ul><p>Page assembly is owned by Project Structure. Const-template rules are owned by <a href="../constants/#const-templates">Const templates</a>.</p>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-string'>&quot;prefix&quot;</span><span class='moth-code-operator'>:</span> body<span class='moth-code-parenthesis'>]</span>
+    </code></pre><p>The head may contain:</p><ul><li>a value or helper template</li><li>directives</li><li>slot contributions</li><li>final <code>if</code> or <code>loop</code> control-flow suffixes</li></ul><p>The body contains authored text and nested templates.</p><p>Authored <code>.moth</code> templates must close with a closing square bracket.</p><p>Truncated heads, bodies, nested children and directive-argument templates are syntax errors.</p><h3>Capture and text</h3><p>A template may read visible values from its surrounding scope.</p><p>Inside a template body:</p><ul><li>backticks are ordinary body text</li><li>backslashes are ordinary body text</li><li>formatter directives decide how authored text is transformed</li></ul><p>Double-quoted string slices still use normal escaping in expression position.</p><h3>Literal delimiters in output</h3><p>To render a literal open or close square bracket inside a template body, insert a string slice:</p><pre style=""><code class='codeblock'>
+    content <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-string'>&quot;[literal]&quot;</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
+    </code></pre><p>The current compiler does not support backtick raw string slices, so string insertion is the supported way to emit literal square brackets.</p><h3>Compile-time and runtime forms</h3><p>A template may:</p><ul><li>fully fold to a compile-time string</li><li>remain as runtime string construction</li></ul><p>The source-level result is still an owned <code>String</code>.</p><p>Templates do not become source-visible function values.</p><p>Runtime Float interpolation and compile-time folding use the same Moth formatter.</p><h3>Page fragments</h3><p>Only direct top-level template expressions in an active HTML module root contribute page fragments.</p><ul><li>top-level runtime templates run through active-root <code>start()</code> in source order</li><li>direct top-level const templates fold into compile-time fragments</li><li>a template assigned to a binding or returned from a function does not become a page fragment by itself</li></ul><p>Page assembly is owned by Project Structure. Const-template rules are owned by <a href="../constants/#const-templates">Const templates</a>.</p>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -791,16 +791,16 @@ body {
 
 
             <p>Directives change how a template is interpreted.</p><p>They begin with <code>$</code>.</p><pre style=""><code class='codeblock'>
-    content <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>md<span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>#</span> <span class='bst-code-struct'>A</span> heading
+    content <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>md<span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>#</span> <span class='moth-code-struct'>A</span> heading
 
-        <span class='bst-code-struct'>This</span> body is <span class='bst-code-struct'>Markdown.</span>
-    <span class='bst-code-parenthesis'>]</span>
-    </code></pre><p>Common directives include:</p><ul><li><code>$md</code> for Beanstalk Markdown</li><li><code>$raw</code> for unformatted text</li><li><code>$note</code> and <code>$todo</code> for ignored template notes</li><li><code>$html</code>, <code>$css</code> and <code>$code</code> in HTML projects</li></ul><p>Builders can add their own directives.</p><p>A formatter applies only to the template that declares it. Nested child templates choose their own formatter.</p>
+        <span class='moth-code-struct'>This</span> body is <span class='moth-code-struct'>Markdown.</span>
+    <span class='moth-code-parenthesis'>]</span>
+    </code></pre><p>Common directives include:</p><ul><li><code>$md</code> for Moth Markdown</li><li><code>$raw</code> for unformatted text</li><li><code>$note</code> and <code>$todo</code> for ignored template notes</li><li><code>$html</code>, <code>$css</code> and <code>$code</code> in HTML projects</li></ul><p>Builders can add their own directives.</p><p>A formatter applies only to the template that declares it. Nested child templates choose their own formatter.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p><code>$</code> introduces a compiler-handled template directive.</p><p>Directive availability comes from one merged registry:</p><ul><li>frontend directives are always available</li><li>a project builder may add project-specific directives</li><li>an unknown directive is a syntax or rule error</li></ul><h3>Frontend directives</h3><p><code>$children(...)</code>:</p><ul><li>applies one wrapper to each direct child</li><li>accepts a template or string-slice wrapper</li><li>the wrapper template must close before the directive closes</li></ul><p><code>$fresh</code>:</p><ul><li>opts one child out of the immediate parent&#39;s <code>$children(...)</code> wrapper</li></ul><p><code>$slot</code>:</p><ul><li>declares a default, named or positional slot</li></ul><p><code>$insert(...)</code>:</p><ul><li>contributes content to a named slot</li></ul><p><code>$note</code> and <code>$todo</code>:</p><ul><li>discard their balanced bodies</li><li>are template-authored comments</li></ul><p><code>$doc</code>:</p><ul><li>marks a documentation-comment template surface</li></ul><p><code>$raw</code>:</p><ul><li>preserves authored body content and whitespace without a formatter</li></ul><p><code>$md</code>:</p><ul><li>applies Beanstalk Markdown formatting</li></ul><h3>HTML builder directives</h3><p>The HTML project builder adds:</p><p><code>$html</code>:</p><ul><li>treats the body as raw HTML content</li></ul><p><code>$css</code>:</p><ul><li>applies the HTML builder&#39;s CSS checking and formatting path</li></ul><p><code>$escape_html</code>:</p><ul><li>escapes HTML-sensitive body content</li></ul><p><code>$code(language)</code>:</p><ul><li>highlights a code body</li><li>suppresses nested child-template interpretation inside the code content</li></ul><h3>Formatter scope</h3><p>Formatting directives do not flow automatically into nested child templates.</p><p>A nested child that needs <code>$md</code>, <code>$raw</code>, <code>$html</code>, <code>$css</code>, <code>$escape_html</code> or <code>$code</code> declares that formatter itself.</p><p>Beandown is the exception:</p><ul><li>a nested template with no explicit directive defaults to <code>$md</code></li><li>any explicit directive overrides that default</li></ul><p>Incompatible formatter declarations in one template head are rejected.</p>
+        <p><code>$</code> introduces a compiler-handled template directive.</p><p>Directive availability comes from one merged registry:</p><ul><li>frontend directives are always available</li><li>a project builder may add project-specific directives</li><li>an unknown directive is a syntax or rule error</li></ul><h3>Frontend directives</h3><p><code>$children(...)</code>:</p><ul><li>applies one wrapper to each direct child</li><li>accepts a template or string-slice wrapper</li><li>the wrapper template must close before the directive closes</li></ul><p><code>$fresh</code>:</p><ul><li>opts one child out of the immediate parent&#39;s <code>$children(...)</code> wrapper</li></ul><p><code>$slot</code>:</p><ul><li>declares a default, named or positional slot</li></ul><p><code>$insert(...)</code>:</p><ul><li>contributes content to a named slot</li></ul><p><code>$note</code> and <code>$todo</code>:</p><ul><li>discard their balanced bodies</li><li>are template-authored comments</li></ul><p><code>$doc</code>:</p><ul><li>marks a documentation-comment template surface</li></ul><p><code>$raw</code>:</p><ul><li>preserves authored body content and whitespace without a formatter</li></ul><p><code>$md</code>:</p><ul><li>applies Moth Markdown formatting</li></ul><h3>HTML builder directives</h3><p>The HTML project builder adds:</p><p><code>$html</code>:</p><ul><li>treats the body as raw HTML content</li></ul><p><code>$css</code>:</p><ul><li>applies the HTML builder&#39;s CSS checking and formatting path</li></ul><p><code>$escape_html</code>:</p><ul><li>escapes HTML-sensitive body content</li></ul><p><code>$code(language)</code>:</p><ul><li>highlights a code body</li><li>suppresses nested child-template interpretation inside the code content</li></ul><h3>Formatter scope</h3><p>Formatting directives do not flow automatically into nested child templates.</p><p>A nested child that needs <code>$md</code>, <code>$raw</code>, <code>$html</code>, <code>$css</code>, <code>$escape_html</code> or <code>$code</code> declares that formatter itself.</p><p>Moth template files are the exception:</p><ul><li>a nested template with no explicit directive defaults to <code>$md</code></li><li>any explicit directive overrides that default</li></ul><p>Incompatible formatter declarations in one template head are rejected.</p>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -853,39 +853,39 @@ body {
 
 
             <p>A slot is a place where another template supplies content.</p><pre style=""><code class='codeblock'>
-    card <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>&lt;</span>h<span class='bst-code-number'>1</span><span class='bst-code-operator'>&gt;</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>slot<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;title&quot;</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>h<span class='bst-code-number'>1</span><span class='bst-code-operator'>&gt;</span>
-        <span class='bst-code-operator'>&lt;</span>section<span class='bst-code-operator'>&gt;</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>slot<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>section<span class='bst-code-operator'>&gt;</span>
-    <span class='bst-code-parenthesis'>]</span>
+    card <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>&lt;</span>h<span class='moth-code-number'>1</span><span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;title&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>h<span class='moth-code-number'>1</span><span class='moth-code-operator'>&gt;</span>
+        <span class='moth-code-operator'>&lt;</span>section<span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>section<span class='moth-code-operator'>&gt;</span>
+    <span class='moth-code-parenthesis'>]</span>
 
-    <span class='bst-code-parenthesis'>[</span>card<span class='bst-code-operator'>:</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>insert<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;title&quot;</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Welcome</span><span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-struct'>This</span> is the card body.
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span>card<span class='moth-code-operator'>:</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>insert<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;title&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Welcome</span><span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-struct'>This</span> is the card body.
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>The named <code>title</code> slot receives <code>Welcome</code>.</p><p>The default slot receives the body text.</p><p>Slots that receive no content become empty strings.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Slots let one template receive content from another.</p><h3>Default and named slots</h3><pre style=""><code class='codeblock'>
-    card <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>&lt;</span>h<span class='bst-code-number'>1</span><span class='bst-code-operator'>&gt;</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>slot<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;title&quot;</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>h<span class='bst-code-number'>1</span><span class='bst-code-operator'>&gt;</span>
-        <span class='bst-code-operator'>&lt;</span>section<span class='bst-code-operator'>&gt;</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>slot<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>section<span class='bst-code-operator'>&gt;</span>
-    <span class='bst-code-parenthesis'>]</span>
+    card <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>&lt;</span>h<span class='moth-code-number'>1</span><span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;title&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>h<span class='moth-code-number'>1</span><span class='moth-code-operator'>&gt;</span>
+        <span class='moth-code-operator'>&lt;</span>section<span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>section<span class='moth-code-operator'>&gt;</span>
+    <span class='moth-code-parenthesis'>]</span>
 
-    <span class='bst-code-parenthesis'>[</span>card<span class='bst-code-operator'>:</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>insert<span class='bst-code-parenthesis'>(</span><span class='bst-code-string'>&quot;title&quot;</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Hello</span><span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-struct'>Body</span> content
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span>card<span class='moth-code-operator'>:</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>insert<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;title&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello</span><span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-struct'>Body</span> content
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>The default and named forms are:</p><pre style=""><code class='codeblock'>
         [$slot]                 -- default slot
         [$slot("name")]         -- named slot
         [$insert("name"): ...]  -- contribution to named slot
     </code></pre><p>The default slot is declared with dollar-slot. A named slot is declared with dollar-slot and a string name. A named insert contributes with dollar-insert and the same name.</p><h3>Positional slots</h3><p>Positive integer slots receive loose head contributions.</p><pre style=""><code class='codeblock'>
-    image <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>&lt;</span>img src<span class='bst-code-operator'>=</span><span class='bst-code-string'>&quot;[$slot(1)]&quot;</span> alt<span class='bst-code-operator'>=</span><span class='bst-code-string'>&quot;[$slot]&quot;</span><span class='bst-code-operator'>&gt;</span>
-    <span class='bst-code-parenthesis'>]</span>
+    image <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>&lt;</span>img src<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[$slot(1)]&quot;</span> alt<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[$slot]&quot;</span><span class='moth-code-operator'>&gt;</span>
+    <span class='moth-code-parenthesis'>]</span>
 
-    <span class='bst-code-parenthesis'>[</span>image, <span class='bst-code-string'>&quot;logo.png&quot;</span><span class='bst-code-operator'>:</span> <span class='bst-code-struct'>Site</span> logo<span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span>image, <span class='moth-code-string'>&quot;logo.png&quot;</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Site</span> logo<span class='moth-code-parenthesis'>]</span>
     </code></pre><p>The first loose contribution fills slot <code>1</code>.</p><p>The remaining loose body content fills the default slot.</p><h3>Routing rules</h3><ul><li>Loose contributions fill positional slots in ascending numeric order.</li><li>Remaining loose contributions go to the default slot when one exists.</li><li>Loose content that cannot be assigned is an error when no default slot exists.</li><li>Missing slots render as empty strings.</li><li>Repeated slots replay the same contribution.</li><li>Named inserts target only their named slot.</li><li>One application may combine named, positional and default contributions.</li></ul><h3>Stored named inserts</h3><p>The language intends to support preparing a named insert in a binding and passing it as a loose contribution. The current compiler does not yet accept this form.</p><h3>Runtime contributions</h3><p>Runtime-capable templates support slot contributions from selected template <code>if</code> branches and template loop bodies.</p><p>AST prepares the slot routing before HIR.</p><p>Runtime lowering appends the routed contributions through normal string accumulators.</p><p>Unresolved slot or insert artifacts after routing are invalid template structure.</p>
     </div>
     </fieldset></section>
@@ -939,36 +939,36 @@ body {
 
 
             <p><code>$children(...)</code> wraps every direct child in the same template.</p><pre style=""><code class='codeblock'>
-    list <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>children<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span><span class='bst-code-operator'>&lt;</span>li<span class='bst-code-operator'>&gt;</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>slot<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>li<span class='bst-code-operator'>&gt;</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>&lt;</span>ul<span class='bst-code-operator'>&gt;</span>
-            <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>slot<span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>ul<span class='bst-code-operator'>&gt;</span>
-    <span class='bst-code-parenthesis'>]</span>
+    list <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>children<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>&lt;</span>li<span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>li<span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>&lt;</span>ul<span class='moth-code-operator'>&gt;</span>
+            <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>ul<span class='moth-code-operator'>&gt;</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>This is useful for lists, table rows and repeated layout elements.</p><p>Use <code>$fresh</code> when one child should skip the immediate wrapper:</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span>list<span class='bst-code-operator'>:</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> wrapped<span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>fresh<span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> not wrapped<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span>list<span class='moth-code-operator'>:</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> wrapped<span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>fresh<span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> not wrapped<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p><code>$children(...)</code> applies a wrapper to each direct child template.</p><pre style=""><code class='codeblock'>
-    list <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>children<span class='bst-code-parenthesis'>(</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span><span class='bst-code-operator'>&lt;</span>li<span class='bst-code-operator'>&gt;</span><span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>slot<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>li<span class='bst-code-operator'>&gt;</span><span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>)</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>&lt;</span>ul<span class='bst-code-operator'>&gt;</span>
-            <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>slot<span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>ul<span class='bst-code-operator'>&gt;</span>
-    <span class='bst-code-parenthesis'>]</span>
+    list <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>children<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>&lt;</span>li<span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>li<span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>&lt;</span>ul<span class='moth-code-operator'>&gt;</span>
+            <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>ul<span class='moth-code-operator'>&gt;</span>
+    <span class='moth-code-parenthesis'>]</span>
 
-    <span class='bst-code-parenthesis'>[</span>list<span class='bst-code-operator'>:</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> one<span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> two<span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span>list<span class='moth-code-operator'>:</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> one<span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> two<span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Each direct child becomes one list item.</p><h3>Direct-child scope</h3><p>The wrapper applies only to direct children.</p><p>A selected child becomes an opaque contribution to its parent.</p><p>The parent&#39;s wrapper does not descend into that child&#39;s nested templates.</p><p>A nested helper may declare its own <code>$children(...)</code> wrapper.</p><p>This keeps row, cell, list and layout helpers from leaking wrappers into deeper content.</p><h3><code>$fresh</code></h3><p><code>$fresh</code> opts one child out of the immediate parent wrapper.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span>list<span class='bst-code-operator'>:</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> one<span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>fresh<span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>:</span> two<span class='bst-code-parenthesis'>]</span><span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span>list<span class='moth-code-operator'>:</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> one<span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>fresh<span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> two<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>The first child receives the list-item wrapper.</p><p>The second child does not.</p><p><code>$fresh</code>:</p><ul><li>affects one child</li><li>affects only the immediate parent wrapper</li><li>does not change sibling behaviour</li><li>does not disable wrappers declared deeper inside the child</li></ul>
     </div>
     </fieldset></section>
@@ -1022,15 +1022,15 @@ body {
 
 
             <p>A template can choose content with <code>if</code>.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>if</span> signed_in<span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Welcome</span> back
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>else</span><span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-struct'>Please</span> sign <span class='bst-code-keyword'>in</span>
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>if</span> signed_in<span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Welcome</span> back
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>else</span><span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-struct'>Please</span> sign <span class='moth-code-keyword'>in</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>A template can repeat content with <code>loop</code>.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>loop</span> names <span class='bst-code-operator'>|</span>name<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>&lt;</span>p<span class='bst-code-operator'>&gt;</span><span class='bst-code-struct'>Hello</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>&lt;</span><span class='bst-code-operator'>/</span>p<span class='bst-code-operator'>&gt;</span>
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>loop</span> names <span class='moth-code-operator'>|</span>name<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>&lt;</span>p<span class='moth-code-operator'>&gt;</span><span class='moth-code-struct'>Hello</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>p<span class='moth-code-operator'>&gt;</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Two structural controls are available inside a template loop:</p><pre style=""><code class='codeblock'>
         [break]
         [continue]
@@ -1039,41 +1039,41 @@ body {
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Templates support <code>if</code> and <code>loop</code> as final head suffixes.</p><p>If the head already contains a value, helper or directive, add a comma before the control-flow suffix.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>if</span> show<span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Visible</span>
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>if</span> show<span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Visible</span>
+    <span class='moth-code-parenthesis'>]</span>
 
-    <span class='bst-code-parenthesis'>[</span>card, <span class='bst-code-keyword'>if</span> show<span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Visible</span> inside card
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span>card, <span class='moth-code-keyword'>if</span> show<span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Visible</span> inside card
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Template <code>if</code></h3><p>Template <code>if</code> supports:</p><ul><li><code>Bool</code> conditions</li><li>option-present capture with <code>is |name|</code></li><li>standalone <code>else if</code> branches</li><li>one optional standalone <code>else</code></li></ul><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>if</span> maybe_name is <span class='bst-code-operator'>|</span>name<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-struct'>Hello</span> <span class='bst-code-parenthesis'>[</span>name<span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>else</span> <span class='bst-code-keyword'>if</span> use_fallback<span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-struct'>Hello</span> fallback
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>else</span><span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-struct'>Hello</span> guest
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>if</span> maybe_name is <span class='moth-code-operator'>|</span>name<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-struct'>Hello</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>else</span> <span class='moth-code-keyword'>if</span> use_fallback<span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-struct'>Hello</span> fallback
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>else</span><span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-struct'>Hello</span> guest
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>The selected branch is evaluated lazily at runtime.</p><p>Full pattern-match arm chains are not template-head syntax.</p><p>Use an ordinary statement or value-producing full match when pattern arms are needed.</p><h3>Template loops</h3><p>Template loops use the ordinary loop-header families:</p><ul><li>conditional loops</li><li>collection loops</li><li>numeric ranges</li></ul><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>loop</span> items <span class='bst-code-operator'>|</span>item, index<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-parenthesis'>[</span>index<span class='bst-code-parenthesis'>]</span><span class='bst-code-operator'>:</span> <span class='bst-code-parenthesis'>[</span>item<span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>loop</span> items <span class='moth-code-operator'>|</span>item, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-parenthesis'>[</span>index<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>item<span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
 
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>loop</span> <span class='bst-code-number'>0</span> <span class='bst-code-keyword'>to</span> <span class='bst-code-number'>10</span> <span class='bst-code-operator'>|</span>number<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-parenthesis'>[</span>number<span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-operator'>|</span>number<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-parenthesis'>[</span>number<span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Collection and range loops may bind the current value and optional zero-based index.</p><p>Iterations concatenate directly. There is no implicit separator.</p><p>Range and collection sources are evaluated once before iteration.</p><p>A conditional loop checks its condition before every iteration.</p><h3>Structural loop control</h3><p>Two standalone structural controls target the nearest active template loop.</p><p>They are signals rather than rendered strings.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>loop</span> items <span class='bst-code-operator'>|</span>item<span class='bst-code-operator'>|</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>if</span> item.skip<span class='bst-code-operator'>:</span>
-            <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>continue</span><span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>loop</span> items <span class='moth-code-operator'>|</span>item<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>if</span> item.skip<span class='moth-code-operator'>:</span>
+            <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>continue</span><span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-parenthesis'>]</span>
 
-        <span class='bst-code-parenthesis'>[</span>item<span class='bst-code-parenthesis'>]</span>
+        <span class='moth-code-parenthesis'>[</span>item<span class='moth-code-parenthesis'>]</span>
 
-        <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>if</span> item.done<span class='bst-code-operator'>:</span>
-            <span class='bst-code-parenthesis'>[</span><span class='bst-code-keyword'>break</span><span class='bst-code-parenthesis'>]</span>
-        <span class='bst-code-parenthesis'>]</span>
-    <span class='bst-code-parenthesis'>]</span>
+        <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>if</span> item.done<span class='moth-code-operator'>:</span>
+            <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>break</span><span class='moth-code-parenthesis'>]</span>
+        <span class='moth-code-parenthesis'>]</span>
+    <span class='moth-code-parenthesis'>]</span>
     </code></pre><p>Output produced before a control signal is preserved.</p><p>An iteration with no output before <code>break</code> or <code>continue</code> does not count as emitted output.</p><h3>Wrappers and no-output</h3><p>A wrapper in the owning loop head wraps the complete aggregate once.</p><p>Place a per-iteration wrapper inside the loop body.</p><p>These forms produce structural no-output:</p><ul><li>a false <code>if</code> with no <code>else</code></li><li>a false conditional loop</li><li>a zero-iteration collection or range loop</li></ul><p>Shared head wrappers and parent <code>$children(...)</code> wrappers are skipped when there is structural no-output.</p><p>A selected empty branch is still selected, so its own head wrapper may render an empty wrapper.</p><h3>Fallible work and slots</h3><p>Postfix <code>!</code> inside selected runtime template content propagates from the enclosing function.</p><p>Catch blocks are not template expressions.</p><p>Runtime slot applications remain valid inside template control flow after normal slot routing.</p><p>Compile-time template control flow and iteration limits are specified by <a href="../constants/#const-templates">Const templates</a>.</p>
     </div>
     </fieldset></section>
@@ -1127,22 +1127,22 @@ body {
 
 
             <p>Use <code>$md</code> when a template body should be formatted as Markdown.</p><pre style=""><code class='codeblock'>
-    content <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>md<span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>#</span> <span class='bst-code-struct'>Welcome</span>
+    content <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>md<span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>#</span> <span class='moth-code-struct'>Welcome</span>
 
-        <span class='bst-code-struct'>This</span> text becomes <span class='bst-code-operator'>*</span><span class='bst-code-operator'>*</span>formatted content<span class='bst-code-operator'>*</span><span class='bst-code-operator'>*</span>.
-    <span class='bst-code-parenthesis'>]</span>
-    </code></pre><p>Small inline code spans use one backtick on each side.</p><p>Use <code>$code(&quot;bst&quot;)</code> or another language name for a full highlighted code block.</p><p>Beanstalk Markdown is deliberately small. It does not support fenced code blocks or pipe tables.</p>
+        <span class='moth-code-struct'>This</span> text becomes <span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span>formatted content<span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span>.
+    <span class='moth-code-parenthesis'>]</span>
+    </code></pre><p>Small inline code spans use one backtick on each side.</p><p>Use <code>$code(&quot;moth&quot;)</code> or another language name for a full highlighted code block.</p><p>Moth Markdown is deliberately small. It does not support fenced code blocks or pipe tables.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p><code>$md</code> applies Beanstalk&#39;s small Markdown flavour.</p><p>It is intentionally not a full CommonMark implementation.</p><pre style=""><code class='codeblock'>
-    content <span class='bst-code-operator'>=</span> <span class='bst-code-parenthesis'>[</span><span class='bst-code-operator'>$</span>md<span class='bst-code-operator'>:</span>
-        <span class='bst-code-operator'>#</span> <span class='bst-code-struct'>Title</span>
+        <p><code>$md</code> applies Moth&#39;s small Markdown flavour.</p><p>It is intentionally not a full CommonMark implementation.</p><pre style=""><code class='codeblock'>
+    content <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>md<span class='moth-code-operator'>:</span>
+        <span class='moth-code-operator'>#</span> <span class='moth-code-struct'>Title</span>
 
-        <span class='bst-code-struct'>Use</span> <span class='bst-code-operator'>*</span><span class='bst-code-operator'>*</span>clear names<span class='bst-code-operator'>*</span><span class='bst-code-operator'>*</span> and <span class='bst-code-operator'>@</span>.<span class='bst-code-operator'>/</span>other<span class='bst-code-operator'>-</span>page <span class='bst-code-parenthesis'>(</span>helpful links<span class='bst-code-parenthesis'>)</span>.
-    <span class='bst-code-parenthesis'>]</span>
-    </code></pre><h3>Supported block forms</h3><ul><li>headings: <code>#</code> through <code>######</code></li><li>paragraphs separated by blank lines</li><li>unordered lists: <code>-</code> items</li><li>ordered lists: <code>1.</code> items</li><li>links: <code>@./path (link text)</code></li><li>emphasis: <code>**bold**</code> and <code>*italic*</code></li></ul><h3>Inline code</h3><p>Inline code uses paired isolated single backticks on one Markdown line.</p><p>It renders as a normal HTML <code>code</code> element.</p><p>Inside an inline code span:</p><ul><li>authored whitespace is preserved</li><li>HTML-sensitive authored characters are escaped</li><li>emphasis is not parsed</li><li>links are not parsed</li></ul><p>Not supported:</p><ul><li>empty code spans</li><li>repeated backtick runs</li><li>unmatched backticks</li><li>multiline code spans</li><li>variable-length delimiters</li><li>fenced code blocks</li><li>Markdown-level backtick escaping</li></ul><p>Use <code>$code(language)</code> for highlighted code blocks.</p><h3>Dynamic content boundaries</h3><p>A dynamic expression anchor may appear inside a parent-authored code span.</p><p><code>$md</code> does not inspect that expression&#39;s rendered output.</p><p>A child template is an opaque formatting boundary.</p><p>A parent Markdown span cannot begin before a child and end after it.</p><h3>Tables</h3><p>Markdown pipe-table syntax is not part of Beanstalk Markdown.</p><p>Inside <code>.bd</code> content, use a structured list.</p><p>When a website page genuinely needs a visual table, build it in the owning <code>.bst</code> page with Beanstalk table helpers.</p><p>Do not rely on pipe-table text rendering as a table.</p><h3>Related content formats</h3><p>Beandown <code>.bd</code> files use an implicit compile-time <code>$md</code> template.</p><p>Plain <code>.md</code> files use the separate raw Markdown content path.</p><p>See <a href="../beandown">Beandown</a> and <a href="../markdown">Plain Markdown</a> for those file contracts.</p>
+        <span class='moth-code-struct'>Use</span> <span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span>clear names<span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span> and <span class='moth-code-operator'>@</span>.<span class='moth-code-operator'>/</span>other<span class='moth-code-operator'>-</span>page <span class='moth-code-parenthesis'>(</span>helpful links<span class='moth-code-parenthesis'>)</span>.
+    <span class='moth-code-parenthesis'>]</span>
+    </code></pre><h3>Supported block forms</h3><ul><li>headings: <code>#</code> through <code>######</code></li><li>paragraphs separated by blank lines</li><li>unordered lists: <code>-</code> items</li><li>ordered lists: <code>1.</code> items</li><li>links: <code>@./path (link text)</code></li><li>emphasis: <code>**bold**</code> and <code>*italic*</code></li></ul><h3>Inline code</h3><p>Inline code uses paired isolated single backticks on one Markdown line.</p><p>It renders as a normal HTML <code>code</code> element.</p><p>Inside an inline code span:</p><ul><li>authored whitespace is preserved</li><li>HTML-sensitive authored characters are escaped</li><li>emphasis is not parsed</li><li>links are not parsed</li></ul><p>Not supported:</p><ul><li>empty code spans</li><li>repeated backtick runs</li><li>unmatched backticks</li><li>multiline code spans</li><li>variable-length delimiters</li><li>fenced code blocks</li><li>Markdown-level backtick escaping</li></ul><p>Use <code>$code(language)</code> for highlighted code blocks.</p><h3>Dynamic content boundaries</h3><p>A dynamic expression anchor may appear inside a parent-authored code span.</p><p><code>$md</code> does not inspect that expression&#39;s rendered output.</p><p>A child template is an opaque formatting boundary.</p><p>A parent Markdown span cannot begin before a child and end after it.</p><h3>Tables</h3><p>Markdown pipe-table syntax is not part of Moth Markdown.</p><p>Inside <code>.mtf</code> content, use a structured list.</p><p>When a website page genuinely needs a visual table, build it in the owning <code>.moth</code> page with Moth table helpers.</p><p>Do not rely on pipe-table text rendering as a table.</p><h3>Related content formats</h3><p>Moth template <code>.mtf</code> files use an implicit compile-time <code>$md</code> template.</p><p>Plain <code>.md</code> files use the separate raw Markdown content path.</p><p>See <a href="../moth-templates">Moth template files</a> and <a href="../markdown">Plain Markdown</a> for those file contracts.</p>
     </div>
     </fieldset></section>
     <section class="container"><nav class="doc-pager" aria-label="Language documentation">
@@ -1170,109 +1170,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1287,63 +1287,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1353,36 +1353,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1395,65 +1395,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1461,10 +1461,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

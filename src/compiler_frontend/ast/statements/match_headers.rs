@@ -387,7 +387,7 @@ fn option_pattern_constructor_like(token_stream: &FileTokens) -> bool {
 /// WHY: captures must be visible in both the guard and the body, but must not leak to other arms.
 ///
 /// Validates:
-/// - No capture name shadows an existing visible local (Beanstalk no-shadowing rule).
+/// - No capture name shadows an existing visible local (Moth no-shadowing rule).
 fn build_arm_scope_with_choice_captures(
     match_context: &ScopeContext,
     parsed_pattern: ParsedChoicePattern,
@@ -453,7 +453,7 @@ fn build_arm_scope_with_choice_captures(
 /// no-shadowing rules.
 ///
 /// Validates:
-/// - No capture name shadows an existing visible local (Beanstalk no-shadowing rule).
+/// - No capture name shadows an existing visible local (Moth no-shadowing rule).
 fn build_arm_scope_with_capture(
     match_context: &ScopeContext,
     capture_name: StringId,

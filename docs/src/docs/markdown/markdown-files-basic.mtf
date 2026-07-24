@@ -1,0 +1,19 @@
+A `.md` file is plain Markdown. The compiler renders it and hands the HTML to the builder.
+
+### The simplest content file
+
+[codeblock, $code("text"):
+    # Welcome
+
+    This is **plain Markdown**.
+]
+
+### Why it is portable
+
+No Moth syntax is interpreted. The file is pure Markdown. You can use it with any Markdown tool.
+
+### Remember
+
+- `.md` uses a separate renderer, not a moth template's `$md`.
+- No Moth captures, directives or templates.
+- The result is a `content #String` constant.

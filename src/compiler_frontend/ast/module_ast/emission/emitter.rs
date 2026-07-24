@@ -1011,7 +1011,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .join_str(IMPLICIT_START_FUNC_NAME, string_table);
 
         // WHAT: entry start() returns Collection(StringSlice, MutableOwned),
-        //       which is the Beanstalk frontend type for Vec<String>.
+        //       which is the Moth frontend type for Vec<String>.
         // WHY: compiler-design-overview.md describes the return type as Vec<String>;
         //      DataType::Collection(StringSlice) is the same contract
         //      expressed in frontend DataType terms. The HIR builder adds the implicit

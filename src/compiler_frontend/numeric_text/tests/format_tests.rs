@@ -1,4 +1,4 @@
-//! Tests for the Beanstalk finite `Float` formatting contract.
+//! Tests for the Moth finite `Float` formatting contract.
 
 use crate::compiler_frontend::numeric_text::format::{FloatFormatError, format_finite_float};
 

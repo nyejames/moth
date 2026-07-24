@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0002"]
+diagnostic_codes = ["MOTH-SYNTAX-0002"]
 message_contains = ['Unexpected token `cast`']

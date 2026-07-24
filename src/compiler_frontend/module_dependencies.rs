@@ -1,4 +1,4 @@
-//! Stage 3 dependency ordering for parsed Beanstalk headers.
+//! Stage 3 dependency ordering for parsed Moth headers.
 //!
 //! WHAT: resolves retained local declaration-ordering hints into a dependency graph over top-level
 //! headers, topologically sorts that graph, then appends `StartFunction` headers in source order.

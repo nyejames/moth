@@ -2,7 +2,7 @@
 //!
 //! WHAT: stores resolved external imports keyed by canonical source path and provider kind
 //!       so repeated imports of the same file within one build reuse the first result.
-//! WHY: avoids re-parsing the same external file multiple times when several Beanstalk
+//! WHY: avoids re-parsing the same external file multiple times when several Moth
 //!      source files import it.
 
 use super::provider::{ExternalImportProviderKind, ResolvedExternalImport};

@@ -1,0 +1,32 @@
+Moth says no to many features that other languages include. Here is why.
+
+### No general macros
+
+Macros create a second language inside your code. Moth uses templates,
+constants and builder directives for compile-time work instead.
+
+### No closures or function values
+
+General closures add complexity to the type system and make code harder to
+follow. Moth uses reactivity for the common UI pattern that closures
+usually solve.
+
+### No trait objects
+
+Trait objects need runtime dispatch and hidden wrappers. Moth uses
+choices for runtime variety and generic bounds for static reuse.
+
+### No operator overloading
+
+Operators in Moth always do the same thing. You can't redefine `+` or
+`==` for your own types.
+
+### No reflection
+
+You can't inspect types at runtime or write code that examines other code's
+structure. This keeps programs predictable and easy to read.
+
+### The pattern
+
+Each excluded feature has a Moth replacement that is more constrained and
+more explicit. The language trades generality for clarity.

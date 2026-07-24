@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 fn write_case_file(name: &str, contents: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "beanstalk_{}_{}_cases.txt",
+        "moth_{}_{}_cases.txt",
         name,
         std::process::id()
     ));
@@ -15,11 +15,11 @@ fn write_case_file(name: &str, contents: &str) -> PathBuf {
 
 #[test]
 fn test_parse_line_simple() {
-    let line = "check speed-test.bst";
+    let line = "check speed-test.moth";
     let case = parse_line(line).unwrap();
     assert_eq!(case.group_name, "ungrouped");
     assert_eq!(case.command, "check");
-    assert_eq!(case.args, vec!["speed-test.bst"]);
+    assert_eq!(case.args, vec!["speed-test.moth"]);
     assert_eq!(case.name, "check_speed-test_bst");
 }
 
@@ -34,18 +34,18 @@ fn test_parse_line_multiple_args() {
 
 #[test]
 fn test_parse_line_multiple_spaces() {
-    let line = "check   speed-test.bst";
+    let line = "check   speed-test.moth";
     let case = parse_line(line).unwrap();
     assert_eq!(case.command, "check");
-    assert_eq!(case.args, vec!["speed-test.bst"]);
+    assert_eq!(case.args, vec!["speed-test.moth"]);
 }
 
 #[test]
 fn test_parse_line_quoted_arg() {
-    let line = r#"check "path with spaces.bst""#;
+    let line = r#"check "path with spaces.moth""#;
     let case = parse_line(line).unwrap();
     assert_eq!(case.command, "check");
-    assert_eq!(case.args, vec!["path with spaces.bst"]);
+    assert_eq!(case.args, vec!["path with spaces.moth"]);
 }
 
 #[test]
@@ -65,30 +65,30 @@ fn test_parse_line_unclosed_quote() {
 #[test]
 fn test_sanitize_case_name() {
     assert_eq!(
-        sanitize_case_name("check", &["speed-test.bst".to_string()]),
+        sanitize_case_name("check", &["speed-test.moth".to_string()]),
         "check_speed-test_bst"
     );
     assert_eq!(
-        sanitize_case_name("check", &["path/to/file.bst".to_string()]),
+        sanitize_case_name("check", &["path/to/file.moth".to_string()]),
         "check_path_to_file_bst"
     );
 }
 
 #[test]
 fn test_tokenize_line() {
-    let tokens = tokenize_line("check file.bst").unwrap();
-    assert_eq!(tokens, vec!["check", "file.bst"]);
+    let tokens = tokenize_line("check file.moth").unwrap();
+    assert_eq!(tokens, vec!["check", "file.moth"]);
 
-    let tokens = tokenize_line("check   file.bst").unwrap();
-    assert_eq!(tokens, vec!["check", "file.bst"]);
+    let tokens = tokenize_line("check   file.moth").unwrap();
+    assert_eq!(tokens, vec!["check", "file.moth"]);
 
-    let tokens = tokenize_line(r#"check "file name.bst""#).unwrap();
-    assert_eq!(tokens, vec!["check", "file name.bst"]);
+    let tokens = tokenize_line(r#"check "file name.moth""#).unwrap();
+    assert_eq!(tokens, vec!["check", "file name.moth"]);
 }
 
 #[test]
 fn test_parse_cases_defaults_to_ungrouped() {
-    let path = write_case_file("default_group", "check benchmarks/speed-test.bst\n");
+    let path = write_case_file("default_group", "check benchmarks/speed-test.moth\n");
     let cases = parse_cases(&path).unwrap();
 
     assert_eq!(cases.len(), 1);
@@ -101,7 +101,7 @@ fn test_parse_cases_defaults_to_ungrouped() {
 fn test_parse_cases_applies_group_directive_to_following_cases() {
     let path = write_case_file(
         "single_group",
-        "# group: core\ncheck benchmarks/speed-test.bst\nbuild benchmarks/speed-test.bst\n",
+        "# group: core\ncheck benchmarks/speed-test.moth\nbuild benchmarks/speed-test.moth\n",
     );
     let cases = parse_cases(&path).unwrap();
 
@@ -117,13 +117,13 @@ fn test_parse_cases_handles_multiple_group_directives() {
         "multiple_groups",
         "\
 # group: core
-check benchmarks/speed-test.bst
+check benchmarks/speed-test.moth
 
 # group: docs
 check docs
 
 # group: stress
-check benchmarks/template-stress.bst
+check benchmarks/template-stress.moth
 ",
     );
     let cases = parse_cases(&path).unwrap();

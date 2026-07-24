@@ -75,8 +75,8 @@ impl TestHarness {
         fs::create_dir_all(entry_root.join("pages")).unwrap();
         fs::create_dir_all(project_root.join("docs")).unwrap();
         fs::write(entry_root.join("assets/images/logo.png"), b"").unwrap();
-        fs::write(entry_root.join("pages/about.bst"), b"").unwrap();
-        fs::write(entry_root.join("index.bst"), b"").unwrap();
+        fs::write(entry_root.join("pages/about.moth"), b"").unwrap();
+        fs::write(entry_root.join("index.moth"), b"").unwrap();
         fs::write(project_root.join("docs/readme.txt"), b"").unwrap();
 
         let resolver = ProjectPathResolver::new(
@@ -104,7 +104,7 @@ impl TestHarness {
     }
 
     fn importer(&self) -> PathBuf {
-        self.project_root.join("src/index.bst")
+        self.project_root.join("src/index.moth")
     }
 }
 
@@ -177,7 +177,7 @@ fn prepared_module_root_table(root_file: &std::path::Path) -> ModuleRootTable {
 #[test]
 fn relative_file_resolves_from_importer_directory() {
     let mut h = TestHarness::new();
-    let path = h.make_path(&[".", "pages", "about.bst"]);
+    let path = h.make_path(&[".", "pages", "about.moth"]);
     let importer = h.importer();
 
     let result = h
@@ -187,7 +187,7 @@ fn relative_file_resolves_from_importer_directory() {
 
     assert_eq!(result.base, CompileTimePathBase::RelativeToFile);
     assert_eq!(result.kind, CompileTimePathKind::File);
-    assert!(result.filesystem_path.ends_with("src/pages/about.bst"));
+    assert!(result.filesystem_path.ends_with("src/pages/about.moth"));
 }
 
 // -----------------------------------------------------------------------
@@ -216,7 +216,7 @@ fn relative_directory_resolves_and_classifies_as_directory() {
 #[test]
 fn entry_root_file_resolves_through_fallback() {
     let mut h = TestHarness::new();
-    let path = h.make_path(&["pages", "about.bst"]);
+    let path = h.make_path(&["pages", "about.moth"]);
     let importer = h.importer();
 
     let result = h
@@ -235,7 +235,7 @@ fn entry_root_file_resolves_through_fallback() {
 #[test]
 fn non_existent_target_is_rejected() {
     let mut h = TestHarness::new();
-    let path = h.make_path(&["pages", "does_not_exist.bst"]);
+    let path = h.make_path(&["pages", "does_not_exist.moth"]);
     let importer = h.importer();
 
     let err = h
@@ -259,7 +259,7 @@ fn non_existent_target_is_rejected() {
 #[test]
 fn path_escaping_project_root_is_rejected() {
     let mut h = TestHarness::new();
-    // From src/index.bst, going ../../.. escapes the project root.
+    // From src/index.moth, going ../../.. escapes the project root.
     let path = h.make_path(&[".", "..", "..", "..", "escape.txt"]);
     let importer = h.importer();
 
@@ -302,7 +302,7 @@ fn entry_root_directory_classifies_correctly() {
 #[test]
 fn relative_path_public_path_keeps_dot_prefix() {
     let mut h = TestHarness::new();
-    let path = h.make_path(&[".", "pages", "about.bst"]);
+    let path = h.make_path(&[".", "pages", "about.moth"]);
     let importer = h.importer();
 
     let result = h
@@ -322,7 +322,7 @@ fn relative_path_public_path_keeps_dot_prefix() {
 fn resolve_compile_time_paths_resolves_multiple_paths() {
     let mut h = TestHarness::new();
     let path_a = h.make_path(&["assets", "images", "logo.png"]);
-    let path_b = h.make_path(&[".", "pages", "about.bst"]);
+    let path_b = h.make_path(&[".", "pages", "about.moth"]);
     let importer = h.importer();
 
     let result = h
@@ -384,8 +384,8 @@ fn source_package_import_resolves_to_package_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("utils.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(package_root.join("utils.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
@@ -407,7 +407,7 @@ fn source_package_import_resolves_to_package_root() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect("source-backed package import should resolve");
@@ -415,7 +415,7 @@ fn source_package_import_resolves_to_package_root() {
     assert_eq!(result.0.base, CompileTimePathBase::SourcePackageRoot);
     assert_eq!(
         result.1,
-        fs::canonicalize(package_root.join("utils.bst")).unwrap(),
+        fs::canonicalize(package_root.join("utils.moth")).unwrap(),
         "should resolve to source-backed package root file"
     );
 }
@@ -426,12 +426,12 @@ fn source_package_folder_import_uses_generic_hash_root_public_surface() {
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
     let package_root = project_root.join("lib/helper");
-    let root_file = package_root.join("#mod.bst");
+    let root_file = package_root.join("#mod.moth");
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
     fs::write(&root_file, b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
@@ -464,7 +464,7 @@ fn source_package_folder_import_uses_generic_hash_root_public_surface() {
     let resolved = resolver
         .resolve_import_to_source_file_with_public_surface_fallback(
             &path,
-            &entry_root.join("index.bst"),
+            &entry_root.join("index.moth"),
             &mut string_table,
         )
         .expect("source-backed package folder import should use its generic root");
@@ -481,11 +481,11 @@ fn source_package_prefix_takes_priority_over_entry_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("utils.bst"), b"").unwrap();
+    fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
     fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/utils.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("helper/utils.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
@@ -507,7 +507,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect("source-backed package import should resolve");
@@ -515,17 +515,17 @@ fn source_package_prefix_takes_priority_over_entry_root() {
     assert_eq!(result.0.base, CompileTimePathBase::SourcePackageRoot);
     assert_eq!(
         result.1,
-        fs::canonicalize(package_root.join("utils.bst")).unwrap()
+        fs::canonicalize(package_root.join("utils.moth")).unwrap()
     );
 }
 
 #[test]
-fn extensionless_import_resolves_supported_beandown_candidate() {
+fn extensionless_import_resolves_supported_moth_template_candidate() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
-    fs::write(h.project_root.join("src/docs/intro.bd"), "hello").unwrap();
+    fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
     let importer = h.importer();
@@ -533,17 +533,17 @@ fn extensionless_import_resolves_supported_beandown_candidate() {
     let result = h
         .resolver
         .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect("supported .bd import should resolve");
+        .expect("supported .mtf import should resolve");
 
-    assert_eq!(result.kind, SourceFileKind::Beandown);
-    assert!(result.path.ends_with("src/docs/intro.bd"));
+    assert_eq!(result.kind, SourceFileKind::MothTemplate);
+    assert!(result.path.ends_with("src/docs/intro.mtf"));
 }
 
 #[test]
-fn recognized_unsupported_beandown_candidate_reports_source_kind_diagnostic() {
+fn recognized_unsupported_moth_template_candidate_reports_source_kind_diagnostic() {
     let mut h = TestHarness::new();
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
-    fs::write(h.project_root.join("src/docs/intro.bd"), "hello").unwrap();
+    fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
     let importer = h.importer();
@@ -551,7 +551,7 @@ fn recognized_unsupported_beandown_candidate_reports_source_kind_diagnostic() {
     let error = h
         .resolver
         .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err("unsupported .bd import should fail");
+        .expect_err("unsupported .mtf import should fail");
     let diagnostic = typed_import_diagnostic(&error);
 
     assert_eq!(
@@ -567,20 +567,20 @@ fn recognized_unsupported_beandown_candidate_reports_source_kind_diagnostic() {
 }
 
 #[test]
-fn direct_beandown_extension_import_is_rejected_as_source_extension() {
+fn direct_moth_template_extension_import_is_rejected_as_source_extension() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
-    fs::write(h.project_root.join("src/docs/intro.bd"), "hello").unwrap();
+    fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
-    let path = h.make_path(&["docs", "intro.bd"]);
+    let path = h.make_path(&["docs", "intro.mtf"]);
     let importer = h.importer();
 
     let error = h
         .resolver
         .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err("direct .bd import should fail");
+        .expect_err("direct .mtf import should fail");
     let diagnostic = typed_import_diagnostic(&error);
 
     assert_eq!(
@@ -596,13 +596,13 @@ fn direct_beandown_extension_import_is_rejected_as_source_extension() {
 }
 
 #[test]
-fn beandown_and_beanstalk_same_stem_are_ambiguous() {
+fn moth_template_and_moth_same_stem_are_ambiguous() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
-    fs::write(h.project_root.join("src/docs/intro.bst"), "").unwrap();
-    fs::write(h.project_root.join("src/docs/intro.bd"), "hello").unwrap();
+    fs::write(h.project_root.join("src/docs/intro.moth"), "").unwrap();
+    fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
     let importer = h.importer();
@@ -610,7 +610,7 @@ fn beandown_and_beanstalk_same_stem_are_ambiguous() {
     let error = h
         .resolver
         .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err("same-stem .bst and .bd should be ambiguous");
+        .expect_err("same-stem .moth and .mtf should be ambiguous");
     let diagnostic = typed_import_diagnostic(&error);
 
     assert_eq!(
@@ -622,12 +622,12 @@ fn beandown_and_beanstalk_same_stem_are_ambiguous() {
 }
 
 #[test]
-fn beandown_and_folder_same_stem_are_ambiguous() {
+fn moth_template_and_folder_same_stem_are_ambiguous() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs/intro")).unwrap();
-    fs::write(h.project_root.join("src/docs/intro.bd"), "hello").unwrap();
+    fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
     let importer = h.importer();
@@ -635,7 +635,7 @@ fn beandown_and_folder_same_stem_are_ambiguous() {
     let error = h
         .resolver
         .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err(".bd and folder with same stem should be ambiguous");
+        .expect_err(".mtf and folder with same stem should be ambiguous");
     let diagnostic = typed_import_diagnostic(&error);
 
     assert_eq!(
@@ -647,18 +647,18 @@ fn beandown_and_folder_same_stem_are_ambiguous() {
 }
 
 #[test]
-fn public_surface_fallback_preserves_beandown_folder_ambiguity() {
+fn public_surface_fallback_preserves_moth_template_folder_ambiguity() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
 
     fs::create_dir_all(entry_root.join("docs/intro")).unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
-    fs::write(entry_root.join("docs/intro.bd"), b"hello").unwrap();
-    fs::write(entry_root.join("docs/intro/#content.bst"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
+    fs::write(entry_root.join("docs/intro.mtf"), b"hello").unwrap();
+    fs::write(entry_root.join("docs/intro/#content.moth"), b"").unwrap();
 
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
         project_root.clone(),
@@ -673,14 +673,14 @@ fn public_surface_fallback_preserves_beandown_folder_ambiguity() {
     path.push_str("docs", &mut string_table);
     path.push_str("intro", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let error = resolver
         .resolve_import_to_source_file_with_public_surface_fallback(
             &path,
             &importer,
             &mut string_table,
         )
-        .expect_err("public-surface fallback must not hide .bd/folder ambiguity");
+        .expect_err("public-surface fallback must not hide .mtf/folder ambiguity");
     let diagnostic = typed_import_diagnostic(&error);
 
     assert_eq!(
@@ -701,9 +701,9 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("#mod.bst"), b"").unwrap();
-    fs::write(package_root.join("helpers.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(package_root.join("#mod.moth"), b"").unwrap();
+    fs::write(package_root.join("helpers.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
     source_packages.register_filesystem_root("html", package_root.clone(), PackageOrigin::Builder);
@@ -722,14 +722,14 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
         Some(&canonical_root)
     );
 
-    let canonical_file = fs::canonicalize(package_root.join("helpers.bst"))
+    let canonical_file = fs::canonicalize(package_root.join("helpers.moth"))
         .expect("should canonicalize source-backed package file");
     let mut string_table = StringTable::new();
     let logical_path = resolver
         .logical_path_for_canonical_file(&canonical_file, &mut string_table)
         .expect("canonical source-backed package file should resolve");
 
-    assert_eq!(logical_path, PathBuf::from("html").join("helpers.bst"));
+    assert_eq!(logical_path, PathBuf::from("html").join("helpers.moth"));
 }
 
 // -----------------------------------------------------------------------
@@ -745,10 +745,10 @@ fn package_scan_root_name_is_not_import_prefix() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("utils.bst"), b"").unwrap();
+    fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::create_dir_all(entry_root.join("lib")).unwrap();
-    fs::write(entry_root.join("lib/thing.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("lib/thing.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
@@ -770,7 +770,7 @@ fn package_scan_root_name_is_not_import_prefix() {
     path.push_str("lib", &mut string_table);
     path.push_str("thing", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect("entry-root fallback import should resolve");
@@ -791,8 +791,8 @@ fn package_direct_child_is_import_prefix() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("utils.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(package_root.join("utils.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
@@ -814,7 +814,7 @@ fn package_direct_child_is_import_prefix() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect("source-backed package import should resolve");
@@ -834,8 +834,8 @@ fn entry_root_import_fallback_success() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(entry_root.join("pages")).unwrap();
-    fs::write(entry_root.join("pages/about.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("pages/about.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
@@ -851,7 +851,7 @@ fn entry_root_import_fallback_success() {
     path.push_str("pages", &mut string_table);
     path.push_str("about", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect("entry-root fallback import should resolve");
@@ -872,11 +872,11 @@ fn source_package_prefix_wins_consistently() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("utils.bst"), b"").unwrap();
+    fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
     fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/utils.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("helper/utils.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
@@ -898,7 +898,7 @@ fn source_package_prefix_wins_consistently() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect("source-backed package import should resolve");
@@ -910,7 +910,7 @@ fn source_package_prefix_wins_consistently() {
     );
     assert_eq!(
         result.1,
-        fs::canonicalize(package_root.join("utils.bst")).unwrap()
+        fs::canonicalize(package_root.join("utils.moth")).unwrap()
     );
 }
 
@@ -925,7 +925,7 @@ fn import_dotdot_rejected() {
     let entry_root = project_root.join("src");
 
     fs::create_dir_all(&entry_root).unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
@@ -942,7 +942,7 @@ fn import_dotdot_rejected() {
     path.push_str("shared", &mut string_table);
     path.push_str("math", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let err = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect_err("'..' in imports should be rejected");
@@ -962,7 +962,7 @@ fn missing_import_target_is_typed_diagnostic() {
     let entry_root = project_root.join("src");
 
     fs::create_dir_all(&entry_root).unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
@@ -978,7 +978,7 @@ fn missing_import_target_is_typed_diagnostic() {
     path.push_str("missing", &mut string_table);
     path.push_str("target", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let err = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect_err("missing import should be rejected");
@@ -1003,7 +1003,7 @@ fn import_escape_project_root_rejected() {
     let entry_root = project_root.join("src");
 
     fs::create_dir_all(&entry_root).unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
@@ -1021,7 +1021,7 @@ fn import_escape_project_root_rejected() {
     path.push_str("..", &mut string_table);
     path.push_str("escape", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let err = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect_err("import escaping project root should be rejected");
@@ -1050,7 +1050,7 @@ fn import_escape_package_root_rejected() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
@@ -1073,7 +1073,7 @@ fn import_escape_package_root_rejected() {
     path.push_str("..", &mut string_table);
     path.push_str("escape", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let err = resolver
         .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
         .expect_err("import escaping package root should be rejected");
@@ -1101,8 +1101,8 @@ fn module_root_public_surface_fallback_resolves_plain_folder_import() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/#home.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("helper/#home.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -1110,7 +1110,7 @@ fn module_root_public_surface_fallback_resolves_plain_folder_import() {
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
-        prepared_module_root_table(&entry_root.join("helper/#home.bst")),
+        prepared_module_root_table(&entry_root.join("helper/#home.moth")),
     )
     .expect("resolver creation should succeed");
 
@@ -1118,7 +1118,7 @@ fn module_root_public_surface_fallback_resolves_plain_folder_import() {
     let mut path = InternedPath::new();
     path.push_str("helper", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver.resolve_import_to_source_file_with_public_surface_fallback(
         &path,
         &importer,
@@ -1131,7 +1131,7 @@ fn module_root_public_surface_fallback_resolves_plain_folder_import() {
     );
     assert_eq!(
         result.unwrap().path,
-        fs::canonicalize(entry_root.join("helper/#home.bst")).unwrap()
+        fs::canonicalize(entry_root.join("helper/#home.moth")).unwrap()
     );
 }
 
@@ -1143,8 +1143,8 @@ fn disabled_module_root_discovery_does_not_register_plain_folder_public_surfaces
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/#home.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("helper/#home.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
@@ -1164,7 +1164,7 @@ fn disabled_module_root_discovery_does_not_register_plain_folder_public_surfaces
     let mut path = InternedPath::new();
     path.push_str("helper", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver.resolve_import_to_source_file_with_public_surface_fallback(
         &path,
         &importer,
@@ -1185,8 +1185,8 @@ fn plain_folder_import_to_module_root_uses_any_hash_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/#home.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("helper/#home.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -1194,7 +1194,7 @@ fn plain_folder_import_to_module_root_uses_any_hash_root() {
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
-        prepared_module_root_table(&entry_root.join("helper/#home.bst")),
+        prepared_module_root_table(&entry_root.join("helper/#home.moth")),
     )
     .expect("resolver creation should succeed");
 
@@ -1202,7 +1202,7 @@ fn plain_folder_import_to_module_root_uses_any_hash_root() {
     let mut path = InternedPath::new();
     path.push_str("helper", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver
         .resolve_import_to_source_file_with_public_surface_fallback(
             &path,
@@ -1213,7 +1213,7 @@ fn plain_folder_import_to_module_root_uses_any_hash_root() {
 
     assert_eq!(
         result.path,
-        fs::canonicalize(entry_root.join("helper/#home.bst")).unwrap()
+        fs::canonicalize(entry_root.join("helper/#home.moth")).unwrap()
     );
 }
 
@@ -1225,9 +1225,9 @@ fn concrete_file_import_inside_module_root_is_accepted() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/#home.bst"), b"").unwrap();
-    fs::write(entry_root.join("helper/thing.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("helper/#home.moth"), b"").unwrap();
+    fs::write(entry_root.join("helper/thing.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
@@ -1243,7 +1243,7 @@ fn concrete_file_import_inside_module_root_is_accepted() {
     path.push_str("helper", &mut string_table);
     path.push_str("thing", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver.resolve_import_to_source_file_with_public_surface_fallback(
         &path,
         &importer,
@@ -1262,13 +1262,13 @@ fn nearest_root_parent_walk_chooses_nested_module_root_over_ancestor() {
     let entry_root = temp_dir.path().join("src");
 
     fs::create_dir_all(entry_root.join("outer/inner/deep")).unwrap();
-    fs::write(entry_root.join("outer/#outer.bst"), b"").unwrap();
-    fs::write(entry_root.join("outer/inner/#inner.bst"), b"").unwrap();
-    fs::write(entry_root.join("outer/inner/deep/page.bst"), b"").unwrap();
+    fs::write(entry_root.join("outer/#outer.moth"), b"").unwrap();
+    fs::write(entry_root.join("outer/inner/#inner.moth"), b"").unwrap();
+    fs::write(entry_root.join("outer/inner/deep/page.moth"), b"").unwrap();
 
-    let outer_root_file = fs::canonicalize(entry_root.join("outer/#outer.bst"))
+    let outer_root_file = fs::canonicalize(entry_root.join("outer/#outer.moth"))
         .expect("outer root file should canonicalize");
-    let inner_root_file = fs::canonicalize(entry_root.join("outer/inner/#inner.bst"))
+    let inner_root_file = fs::canonicalize(entry_root.join("outer/inner/#inner.moth"))
         .expect("inner root file should canonicalize");
     let outer_root_dir = outer_root_file
         .parent()
@@ -1284,7 +1284,7 @@ fn nearest_root_parent_walk_chooses_nested_module_root_over_ancestor() {
         ModuleRootRecord::new(inner_root_dir.clone(), inner_root_file),
     ]);
 
-    let deep_file = fs::canonicalize(entry_root.join("outer/inner/deep/page.bst"))
+    let deep_file = fs::canonicalize(entry_root.join("outer/inner/deep/page.moth"))
         .expect("deep file should canonicalize");
 
     let resolved = table
@@ -1305,8 +1305,8 @@ fn import_case_sensitive_symbol_mismatch_rejected() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(entry_root.join("pages")).unwrap();
-    fs::write(entry_root.join("pages/about.bst"), b"").unwrap();
-    fs::write(entry_root.join("index.bst"), b"").unwrap();
+    fs::write(entry_root.join("pages/about.moth"), b"").unwrap();
+    fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = crate::builder_surface::SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
@@ -1322,7 +1322,7 @@ fn import_case_sensitive_symbol_mismatch_rejected() {
     path.push_str("pages", &mut string_table);
     path.push_str("About", &mut string_table);
 
-    let importer = entry_root.join("index.bst");
+    let importer = entry_root.join("index.moth");
     let result = resolver.resolve_import_as_compile_time_path(&path, &importer, &mut string_table);
 
     #[cfg(target_os = "macos")]
@@ -1401,12 +1401,12 @@ fn markdown_import_rejected_when_unsupported() {
 }
 
 #[test]
-fn markdown_and_beanstalk_same_stem_are_ambiguous() {
+fn markdown_and_moth_same_stem_are_ambiguous() {
     let mut registry = SourceFileKindRegistry::new();
     registry.register("md", SourceFileKind::PlainMarkdown);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
-    fs::write(h.project_root.join("src/docs/intro.bst"), "").unwrap();
+    fs::write(h.project_root.join("src/docs/intro.moth"), "").unwrap();
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
@@ -1415,7 +1415,7 @@ fn markdown_and_beanstalk_same_stem_are_ambiguous() {
     let error = h
         .resolver
         .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err("same-stem .bst and .md should be ambiguous");
+        .expect_err("same-stem .moth and .md should be ambiguous");
     let diagnostic = typed_import_diagnostic(&error);
 
     assert_eq!(
@@ -1452,13 +1452,13 @@ fn markdown_and_folder_same_stem_are_ambiguous() {
 }
 
 #[test]
-fn markdown_and_beandown_same_stem_are_ambiguous() {
+fn markdown_and_moth_template_same_stem_are_ambiguous() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("bd", SourceFileKind::Beandown);
+    registry.register("mtf", SourceFileKind::MothTemplate);
     registry.register("md", SourceFileKind::PlainMarkdown);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
-    fs::write(h.project_root.join("src/docs/intro.bd"), "hello").unwrap();
+    fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
@@ -1467,7 +1467,7 @@ fn markdown_and_beandown_same_stem_are_ambiguous() {
     let error = h
         .resolver
         .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err("same-stem .bd and .md should be ambiguous");
+        .expect_err("same-stem .mtf and .md should be ambiguous");
     let diagnostic = typed_import_diagnostic(&error);
 
     assert_eq!(
@@ -1504,7 +1504,7 @@ fn source_package_for_file_chooses_the_deepest_matching_root() {
     ]);
 
     let selected = resolver
-        .source_package_for_file(std::path::Path::new("/packages/outer/inner/file.bst"))
+        .source_package_for_file(std::path::Path::new("/packages/outer/inner/file.moth"))
         .expect("nested source-backed package file should have a boundary");
 
     assert_eq!(selected.0, "inner");
@@ -1519,7 +1519,7 @@ fn source_package_for_file_breaks_equal_root_ties_by_prefix() {
     ]);
 
     let selected = resolver
-        .source_package_for_file(std::path::Path::new("/packages/shared/file.bst"))
+        .source_package_for_file(std::path::Path::new("/packages/shared/file.moth"))
         .expect("shared source-backed package file should have a boundary");
 
     assert_eq!(selected.0, "alpha");
@@ -1535,10 +1535,10 @@ fn source_package_logical_paths_use_the_deepest_matching_root() {
 
     let logical_path = resolver
         .logical_path_for_canonical_file(
-            std::path::Path::new("/packages/outer/inner/file.bst"),
+            std::path::Path::new("/packages/outer/inner/file.moth"),
             &mut string_table,
         )
         .expect("nested source-backed package file should have a logical path");
 
-    assert_eq!(logical_path, PathBuf::from("inner/file.bst"));
+    assert_eq!(logical_path, PathBuf::from("inner/file.moth"));
 }

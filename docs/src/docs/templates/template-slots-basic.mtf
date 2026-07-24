@@ -1,0 +1,19 @@
+A slot is a place where another template supplies content.
+
+[codeblock, $code("moth"):
+    card = [:
+        <h1>[$slot("title")]</h1>
+        <section>[$slot]</section>
+    ]
+
+    [card:
+        [$insert("title"): Welcome]
+        This is the card body.
+    ]
+]
+
+The named `title` slot receives `Welcome`.
+
+The default slot receives the body text.
+
+Slots that receive no content become empty strings.

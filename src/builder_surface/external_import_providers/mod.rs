@@ -3,7 +3,7 @@
 //! WHAT: defines the trait, request/response types, provider registry, and build-owned cache
 //!       that allow builders to register external file parsers (JS, WIT, Rust, host manifests).
 //! WHY: the compiler needs a general, non-JS-specific hook for resolving imports that target
-//!      non-Beanstalk source files into typed external package surfaces.
+//!      non-Moth source files into typed external package surfaces.
 //!
 //! ## Module layout
 //!

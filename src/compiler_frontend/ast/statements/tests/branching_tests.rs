@@ -872,7 +872,7 @@ fn assert_inline_control_flow_reason(source: &str, expected: InvalidControlFlowS
     assert_eq!(
         diagnostic.kind,
         DiagnosticKind::Rule(RuleDiagnosticKind::InvalidControlFlowStatement),
-        "expected BST-RULE-0042 for {source:?}, got {:?}",
+        "expected MOTH-RULE-0042 for {source:?}, got {:?}",
         diagnostic.kind,
     );
     assert!(

@@ -1,0 +1,144 @@
+# From Moth source to a webpage
+
+A compiler turns source text into something a machine can run or display. It does that in stages. Each stage removes one kind of ambiguity and hands a clearer structure to the next.
+
+This series walks one small Moth project from files on disk to a generated HTML page. If you write Rust, you already know functions, enums, structs and ownership as a user. You may not know terms like *intermediate representation*, *link plan* or *borrow validation* yet. That is fine. Each term shows up when the example needs it.
+
+These pages teach. They do not define compiler behaviour. Accepted architecture lives in the design documents. Current support lives in the progress matrix. Sequencing lives in the roadmap. When code and design disagree, design wins for this tour.
+
+## The project you will carry
+
+Keep this tree in mind for the whole series:
+
+[codeblock, $code("text"):
+compiler_walkthrough/
+├── config.moth
+└── src/
+    ├── #page.moth
+    └── greeting.moth
+]
+
+And keep these source shapes stable:
+
+[codeblock, $code("moth"):
+-- greeting.moth
+
+greeting_prefix #= "Hello"
+
+greet |name String| -> String:
+    return [: [greeting_prefix], [name]!]
+;
+]
+
+[codeblock, $code("moth"):
+-- #page.moth
+
+import @greeting { greet }
+
+visitor = "Priya"
+
+[$html:
+    <p>[greet(visitor)]</p>
+]
+]
+
+The final fragment the series aims at:
+
+[codeblock, $code("text"):
+<p>Hello, Priya!</p>
+]
+
+Priya never changes. The file names never change. The fragment never changes. Side examples may wander for a paragraph, then come back to this greeting.
+
+## What each stage hands the next
+
+One checkpoint strip runs through every article:
+
+[codeblock, $code("text"):
+project tree
+-> command and config
+-> canonical source graph
+-> located tokens
+-> prepared shells
+-> bound interfaces and ordered declarations
+-> typed AST and semantic identities
+-> folded constants, generated requests and TIR handoff
+-> structured diagnostics
+-> validated HIR
+-> borrow and optional-transfer side-table facts
+-> lifetime-region and escape-validation facts
+-> immutable module artefacts and fingerprints
+-> entry assembly and reachable function union
+-> project/link lifetime topology validation
+-> deterministic target assignment
+-> JavaScript and Wasm outputs
+-> HTML, runtime assets and output manifest
+]
+
+Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.
+
+**Diagram placeholder:** Pipeline from project tree to HTML output
+
+*Caption: simplified Moth walkthrough, not a universal compiler taxonomy.*
+*Question: which step still looks like source, and which first looks like something a host can run?*
+
+## Four owners you will meet again
+
+**Build system.** Selects the command, discovers source, builds graphs, schedules modules, plans entries and writes files to disk.
+
+**Compiler frontend and analysis.** Prepares syntax, binds interfaces, checks semantics, lowers HIR and validates access.
+
+**Artefact builder.** Assembles selected compiler facts into an output plan for one kind of project, such as an HTML page.
+
+**Target backends.** Lower validated functions and runtime needs into JavaScript, Wasm and glue.
+
+A fact has one owner. Later stages consume that fact. They do not rebuild it from source text.
+
+## How to read the series
+
+Read in order. The path groups ideas by time of appearance, not by internal crate name.
+
+1. @./what-a-compiler-does (01. What a compiler does)
+2. @./moth-design-choices (02. Why Moth makes different choices)
+3. @./starting-a-build (03. Starting a build)
+4. @./project-graphs-and-modules (04. Project graphs and modules)
+5. @./tokenization (05. Tokenization)
+6. @./declarations-imports-and-ordering (06. Declarations, imports and ordering)
+7. @./ast-semantics-and-types (07. AST semantics and types)
+8. @./compile-time-semantics (08. Compile-time semantics)
+9. @./templates-and-tir (09. Templates and TIR)
+10. @./diagnostics (10. Diagnostics)
+11. @./hir (11. HIR)
+12. @./memory-management-and-gc (12. Memory management and GC)
+13. @./borrow-validation-and-drops (13. Borrow validation and drops)
+14. @./module-artefacts-and-reuse (14. Module artefacts and reuse)
+15. @./linking-entries-and-reachability (15. Linking, entries and reachability)
+16. @./target-planning-and-validation (16. Target planning and validation)
+17. @./backend-lowering (17. Backend lowering)
+18. @./html-assembly-and-output (18. HTML assembly and output)
+
+This landing page acts as article 00.
+
+## Status language on every page
+
+Later articles label four kinds of claim:
+
+- **Accepted design:** architecture or language contract the authorities already chose
+- **Current implementation:** behaviour the progress matrix records today
+- **Queued or active implementation:** named roadmap work still landing
+- **Deferred or outside scope:** postponed on purpose, or rejected as a language shape
+
+The series links the progress matrix and roadmap. It does not paste either document into the articles. Accepted architecture stays the main teaching path.
+
+## Where authority lives
+
+- `docs/compiler-design-overview.md` for compiler stages, identities, artefacts and validation
+- `docs/build-system-design.md` for commands, graphs, builders, linking and outputs
+- `docs/src/docs/codebase/language/overview.mtf` for language surface
+- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime regions, ownership and backend lowering
+- `docs/src/docs/progress/#page.moth` for what works today
+- `docs/roadmap/roadmap.md` for order and deferred design
+
+Educational pages explain those authorities. They do not outrank them.
+
+Next: what a compiler does between Priya's name and a paragraph on a page.

@@ -32,7 +32,7 @@ fn success_case(
         contract: contract.map(str::to_owned),
         role,
         backend_id,
-        entry_path: PathBuf::from("input/#page.bst"),
+        entry_path: PathBuf::from("input/#page.moth"),
         flags: Vec::new(),
         expected: ExpectedOutcome::Success(SuccessExpectation {
             warnings: WarningExpectation::Forbid,
@@ -65,12 +65,12 @@ fn failure_case(
         contract: contract.map(str::to_owned),
         role,
         backend_id,
-        entry_path: PathBuf::from("input/#page.bst"),
+        entry_path: PathBuf::from("input/#page.moth"),
         flags: Vec::new(),
         expected: ExpectedOutcome::Failure(FailureExpectation {
             warnings: WarningExpectation::Forbid,
             message_contains: Vec::new(),
-            diagnostic_codes: vec!["BST-RULE-0001".to_owned()],
+            diagnostic_codes: vec!["MOTH-RULE-0001".to_owned()],
             diagnostic_assertions: Vec::new(),
             diagnostic_match,
             diagnostic_match_reason: diagnostic_match_reason.map(str::to_owned),

@@ -1,0 +1,22 @@
+Use `if` when code should run only under one condition.
+
+[codeblock, $code("moth"):
+    if ready:
+        io.line("Ready!")
+    ;
+]
+
+Add `else` for the other path:
+
+[codeblock, $code("moth"):
+    if ready:
+        io.line("Ready!")
+    else
+        io.line("Not ready yet")
+    ;
+]
+
+One semicolon closes the whole structure.
+
+Moth does not have an `else if` chain. Nest another `if` inside `else`, or
+use pattern matching when several cases belong to one value.

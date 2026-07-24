@@ -1,0 +1,105 @@
+import @./markdown-files {
+    content as markdown_files,
+}
+
+import @./markdown-files-basic {
+    content as markdown_files_basic,
+}
+
+import @./markdown-imports {
+    content as markdown_imports,
+}
+
+import @./markdown-imports-basic {
+    content as markdown_imports_basic,
+}
+
+import @./rendering-contract {
+    content as rendering_contract,
+}
+
+import @./rendering-contract-basic {
+    content as rendering_contract_basic,
+}
+
+import @./choosing-a-content-format {
+    content as choosing_a_content_format,
+}
+
+import @./choosing-a-content-format-basic {
+    content as choosing_a_content_format_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Plain Markdown"
+page_description #= "Plain Markdown content imports for HTML projects."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Plain Markdown
+
+    # Plain Markdown
+
+    Plain Markdown is the least magical content format in a Moth project.
+
+    The compiler can import it, render it and hand the result to the HTML builder.
+    It never pretends the file contains Moth code.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):markdown-files]
+        [$insert("title"):Markdown files]
+        [$insert("advanced"):[markdown_files]]
+
+        [markdown_files_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):markdown-imports]
+        [$insert("title"):Markdown imports]
+        [$insert("advanced"):[markdown_imports]]
+
+        [markdown_imports_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):rendering-contract]
+        [$insert("title"):Rendering contract]
+        [$insert("advanced"):[rendering_contract]]
+
+        [rendering_contract_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):choosing-a-content-format]
+        [$insert("title"):Choosing a content format]
+        [$insert("advanced"):[choosing_a_content_format]]
+
+        [choosing_a_content_format_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../moth-templates/]
+        [$insert("previous_title"):Moth template files]
+        [$insert("next_path"):../design-scope/]
+        [$insert("next_title"):Design scope]
+    ]
+]

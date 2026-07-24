@@ -76,9 +76,9 @@ fn main_function_resolves_correctly() {
 }
 
 #[test]
-fn beanstalk_function_names_resolve_through_tables() {
+fn moth_function_names_resolve_through_tables() {
     let summary = parse_fixture();
-    let resolve_type = find_function(&summary, "beanstalk::compiler_frontend::ast::resolve_type");
+    let resolve_type = find_function(&summary, "moth::compiler_frontend::ast::resolve_type");
     assert!(!resolve_type.name.is_empty());
 }
 
@@ -87,14 +87,14 @@ fn profile_shape_dump_reports_top_level_and_first_thread_shape() {
     let json = r#"{
         "meta": {"product": "samply", "version": "0.13.1"},
         "libs": [
-            {"debugName": "bean"},
+            {"debugName": "moth"},
             {"name": "libsystem_kernel.dylib"}
         ],
         "resourceTable": {"lib": [0], "name": [1]},
         "nativeSymbols": {"0": []},
         "threads": [{
             "name": "main",
-            "stringArray": ["0x1000", "beanstalk::compiler_frontend::ast::build"],
+            "stringArray": ["0x1000", "moth::compiler_frontend::ast::build"],
             "funcTable": {"name": [0, 1], "resource": [0, 0]},
             "frameTable": {"func": [0, 1]},
             "stackTable": {"prefix": [null, 0], "frame": [0, 1]},
@@ -115,7 +115,7 @@ fn profile_shape_dump_reports_top_level_and_first_thread_shape() {
         dump.first_20_func_names,
         vec![
             "0x1000".to_string(),
-            "beanstalk::compiler_frontend::ast::build".to_string()
+            "moth::compiler_frontend::ast::build".to_string()
         ]
     );
     assert_eq!(
@@ -125,7 +125,7 @@ fn profile_shape_dump_reports_top_level_and_first_thread_shape() {
     assert_eq!(dump.libs_count, Some(2));
     assert_eq!(
         dump.first_10_libs,
-        vec!["bean".to_string(), "libsystem_kernel.dylib".to_string()]
+        vec!["moth".to_string(), "libsystem_kernel.dylib".to_string()]
     );
     assert!(dump.native_symbols_present);
 }
@@ -181,11 +181,11 @@ fn self_samples_count_only_leaf_functions() {
     assert!((main.self_samples - 0.0).abs() < 1e-9);
 
     // resolve_type is leaf of worker sample (weight 1) -> self = 1
-    let resolve_type = find_function(&summary, "beanstalk::compiler_frontend::ast::resolve_type");
+    let resolve_type = find_function(&summary, "moth::compiler_frontend::ast::resolve_type");
     assert!((resolve_type.self_samples - 1.0).abs() < 1e-9);
 
     // generate is never the leaf -> self = 0
-    let generate = find_function(&summary, "beanstalk::compiler_frontend::hir::generate");
+    let generate = find_function(&summary, "moth::compiler_frontend::hir::generate");
     assert!((generate.self_samples - 0.0).abs() < 1e-9);
 }
 
@@ -195,7 +195,7 @@ fn worker_thread_sample_contributes_to_self() {
     // Worker sample (stack 2, weight 1): main → alloc → resolve_type
     // resolve_type is leaf -> self += 1 for resolve_type
     // alloc is NOT leaf in worker sample
-    let resolve_type = find_function(&summary, "beanstalk::compiler_frontend::ast::resolve_type");
+    let resolve_type = find_function(&summary, "moth::compiler_frontend::ast::resolve_type");
     assert!((resolve_type.self_samples - 1.0).abs() < 1e-9);
 }
 
@@ -220,7 +220,7 @@ fn inclusive_samples_include_all_ancestors() {
     //   main sample 2 (w=1): main → resolve_type → alloc (inclusive)
     //   worker sample (w=1): main → alloc → resolve_type (leaf, inclusive)
     // -> inclusive = 1 + 1 = 2
-    let resolve_type = find_function(&summary, "beanstalk::compiler_frontend::ast::resolve_type");
+    let resolve_type = find_function(&summary, "moth::compiler_frontend::ast::resolve_type");
     assert!((resolve_type.inclusive_samples - 2.0).abs() < 1e-9);
 }
 
@@ -229,7 +229,7 @@ fn inclusive_samples_for_leaf_function() {
     let summary = parse_fixture();
 
     // generate appears only in main sample 3 (weight 2) -> inclusive = 2
-    let generate = find_function(&summary, "beanstalk::compiler_frontend::hir::generate");
+    let generate = find_function(&summary, "moth::compiler_frontend::hir::generate");
     assert!((generate.inclusive_samples - 2.0).abs() < 1e-9);
 }
 
@@ -291,7 +291,7 @@ fn caller_edges_are_recorded() {
     // resolve_type's callers:
     //   - main (from main sample 2, main→resolve_type→alloc, weight=1)
     //   - alloc (from worker sample, main→alloc→resolve_type, weight=1)
-    let resolve_type = find_function(&summary, "beanstalk::compiler_frontend::ast::resolve_type");
+    let resolve_type = find_function(&summary, "moth::compiler_frontend::ast::resolve_type");
     assert_eq!(resolve_type.callers.len(), 2);
 
     let main_caller = resolve_type
@@ -320,7 +320,7 @@ fn callee_edges_are_recorded() {
     let resolve_type_callee = main
         .callees
         .iter()
-        .find(|e| e.function_name == "beanstalk::compiler_frontend::ast::resolve_type")
+        .find(|e| e.function_name == "moth::compiler_frontend::ast::resolve_type")
         .expect("main should have resolve_type as callee");
     // main→resolve_type appears in main sample 2 (weight=1).
     assert!((resolve_type_callee.samples - 1.0).abs() < 1e-9);

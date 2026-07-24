@@ -40,7 +40,7 @@ fn empty_location() -> SourceLocation {
 }
 
 fn runtime_expression(string_table: &mut StringTable) -> Expression {
-    let scope = InternedPath::from_single_str("main.bst", string_table);
+    let scope = InternedPath::from_single_str("main.moth", string_table);
     let name = string_table.intern("runtime_text");
     Expression::new(
         ExpressionKind::FunctionCall {
@@ -172,7 +172,7 @@ fn preparation_keeps_reactive_content_on_runtime_handoff() {
         TemplateType::String,
         |builder, table| {
             let source = ReactiveSource {
-                path: InternedPath::from_single_str("main.bst/#reactive", table),
+                path: InternedPath::from_single_str("main.moth/#reactive", table),
                 kind: ReactiveSourceKind::Declaration,
             };
             let text = table.intern("reactive text");

@@ -228,7 +228,7 @@ fn can_coexist(a: &VisibleNameBinding, b: &VisibleNameBinding) -> bool {
 
 /// Generate a case-convention warning when an alias uses different leading case than the symbol.
 ///
-/// WHY: Beanstalk naming conventions use leading case to distinguish types from values.
+/// WHY: Moth naming conventions use leading case to distinguish types from values.
 /// An alias that changes leading case is allowed but warned because it misleads readers.
 pub(crate) fn check_alias_case_warning(
     alias_location: &Option<SourceLocation>,

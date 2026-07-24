@@ -162,7 +162,7 @@ fn success_message(duration: Duration) -> String {
 ///
 /// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
 ///      observation in the active collection scope and emits the stable
-///      `BST_BENCH timing` line when the output mode permits.
+///      `MOTH_BENCH timing` line when the output mode permits.
 /// WHY:  check-command boundaries use dotted `command.check.*` metric names so the
 ///      concise summary and benchmark attribution share one recording path.
 #[cfg(feature = "timers")]

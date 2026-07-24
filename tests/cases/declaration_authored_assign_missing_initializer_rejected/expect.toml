@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0043"]
+diagnostic_codes = ["MOTH-RULE-0043"]
 message_contains = ["Declaration 'value' is missing an initializer expression after '='."]

@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-TYPE-0003"]
+diagnostic_codes = ["MOTH-TYPE-0003"]
 message_contains = ["Operator `+` cannot concatenate `String` and `Int`. Use a template for mixed textual interpolation."]

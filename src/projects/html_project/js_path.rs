@@ -6,7 +6,7 @@
 //!
 //! JS-only HTML lifecycle contract (in emission order):
 //!   1. Static entry fragments are emitted as raw HTML in source order.
-//!   2. Runtime fragment slots are emitted as `<div id="bst-slot-N">` placeholders.
+//!   2. Runtime fragment slots are emitted as `<div id="moth-slot-N">` placeholders.
 //!   3. The compiled JS bundle is embedded in an inline `<script>` block.
 //!      The bundle content is escaped so it cannot contain a raw `</script>` sequence
 //!      that would prematurely close the script tag.
@@ -218,7 +218,7 @@ pub(crate) fn render_entry_fragments(
 
     // Interleave runtime slots and const fragments.
     for _ in 0..slot_count {
-        let slot_id = format!("bst-slot-{runtime_index}");
+        let slot_id = format!("moth-slot-{runtime_index}");
         html.push_str(&format!("<div id=\"{slot_id}\"></div>\n"));
         slot_ids.push(slot_id);
         runtime_index += 1;
@@ -346,34 +346,34 @@ fn append_runtime_bootstrap(
     // WHY: start() accumulates fragments via PushRuntimeFragment and returns them as a JS array.
     //      Calling start() here both produces the fragments and runs the lifecycle.
     html.push_str(&format!(
-        "{indent}var bst_frags = {start_function_name}();\n"
+        "{indent}var moth_frags = {start_function_name}();\n"
     ));
-    html.push_str(&format!("{indent}var bst_slots = [\n"));
+    html.push_str(&format!("{indent}var moth_slots = [\n"));
     for slot_id in slot_ids {
         html.push_str(&format!("{indent}  \"{slot_id}\",\n"));
     }
     html.push_str(&format!("{indent}];\n"));
     html.push_str(&format!(
-        "{indent}for (var i = 0; i < bst_slots.length; i++) {{\n"
+        "{indent}for (var i = 0; i < moth_slots.length; i++) {{\n"
     ));
     html.push_str(&format!(
-        "{indent}  var el = document.getElementById(bst_slots[i]);\n"
+        "{indent}  var el = document.getElementById(moth_slots[i]);\n"
     ));
     html.push_str(&format!(
-        "{indent}  if (!el) throw new Error(\"Missing runtime mount slot: \" + bst_slots[i]);\n"
+        "{indent}  if (!el) throw new Error(\"Missing runtime mount slot: \" + moth_slots[i]);\n"
     ));
 
     if uses_reactive_runtime_fragments {
         // Reactive pages use the backend mount helper so template fragments can register for
         // rerendering. The helper also handles plain-string fragments, preserving source order.
         html.push_str(&format!(
-            "{indent}  __bs_mount_template_fragment(el, bst_frags[i]);\n"
+            "{indent}  __moth_mount_template_fragment(el, moth_frags[i]);\n"
         ));
     } else {
         // Non-reactive pages keep the plain direct insertion path and avoid referencing the
         // optional mount helper global.
         html.push_str(&format!(
-            "{indent}  el.insertAdjacentHTML(\"beforeend\", bst_frags[i] || \"\");\n"
+            "{indent}  el.insertAdjacentHTML(\"beforeend\", moth_frags[i] || \"\");\n"
         ));
     }
 

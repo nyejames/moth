@@ -1,0 +1,46 @@
+A struct is a nominal runtime type with named fields.
+
+[codeblock, $code("moth"):
+    Vector2 = |
+        x Float,
+        y Float = 0.0,
+    |
+]
+
+### Contract
+
+- The declaration form is `Name = | fields |`.
+- Struct names use `PascalCase`.
+- Every field has a name and explicit type.
+- Field names must be unique.
+- A field may provide `= default`.
+- Every field default must fully evaluate at compile time.
+- A field without a default is required during construction.
+- Matching field shapes do not make two structs interchangeable.
+- A transparent type alias does not create a new struct identity.
+
+[codeblock, $code("moth"):
+    Point = |
+        x Int,
+        y Int,
+    |
+
+    Position = |
+        x Int,
+        y Int,
+    |
+]
+
+`Point` and `Position` remain different types.
+
+### Generic structs
+
+Struct declarations may introduce declaration-site generic parameters.
+
+[codeblock, $code("moth"):
+    Box type A = |
+        value A,
+    |
+]
+
+Generic construction and inference are documented by @../generics (Generics).

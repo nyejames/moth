@@ -68,7 +68,7 @@ impl SourceFileTable {
                     CompilerError::file_error(
                         &logical,
                         format!(
-                            "Source file logical path {logical:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths."
+                            "Source file logical path {logical:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                         ),
                         string_table,
                     )
@@ -90,7 +90,7 @@ impl SourceFileTable {
                     CompilerError::file_error(
                         &path,
                         format!(
-                            "Source file logical path {path:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths."
+                            "Source file logical path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                         ),
                         string_table,
                     )

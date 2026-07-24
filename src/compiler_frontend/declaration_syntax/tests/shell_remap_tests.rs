@@ -16,7 +16,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 
 fn make_location(string_table: &mut StringTable) -> SourceLocation {
-    let path = InternedPath::from_single_str("test.bst", string_table);
+    let path = InternedPath::from_single_str("test.moth", string_table);
     SourceLocation::new(path, CharPosition::default(), CharPosition::default())
 }
 
@@ -28,7 +28,7 @@ fn assert_test_location(location: &SourceLocation, string_table: &StringTable) {
         .map(|id| string_table.resolve(*id))
         .collect::<Vec<_>>();
 
-    assert_eq!(scope_components, vec!["test.bst"]);
+    assert_eq!(scope_components, vec!["test.moth"]);
 }
 
 fn make_symbol_token(name: StringId, string_table: &mut StringTable) -> Token {

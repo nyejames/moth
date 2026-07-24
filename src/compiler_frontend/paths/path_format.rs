@@ -27,7 +27,7 @@ pub enum OutputPathStyle {
 /// WHY: builders must agree on one source of truth for these policies.
 #[derive(Debug, Clone)]
 pub struct PathStringFormatConfig {
-    /// The `origin` config key value (e.g. `"/beanstalk"`).
+    /// The `origin` config key value (e.g. `"/moth"`).
     /// A bare `"/"` means no prefix is added.
     pub origin: String,
     /// Separator style for the formatted output.
@@ -93,7 +93,7 @@ fn render_public_path(
         }
         CompileTimePathBase::SourcePackageRoot | CompileTimePathBase::EntryRoot => {
             // Non-relative paths become absolute site paths: "/assets/logo.png".
-            // An empty public path here is the Beanstalk public-root literal (`@/`),
+            // An empty public path here is the Moth public-root literal (`@/`),
             // which renders as "/" before origin is applied.
             if portable.starts_with('/') {
                 portable
@@ -138,8 +138,8 @@ fn apply_origin(site_path: &str, origin: &str) -> String {
     // Origin is applied exactly once at the public formatting boundary.
     // Callers must not prepend origin to already formatted path strings.
 
-    // origin is like "/beanstalk", site_path is like "/assets/logo.png"
-    // result: "/beanstalk/assets/logo.png"
+    // origin is like "/moth", site_path is like "/assets/logo.png"
+    // result: "/moth/assets/logo.png"
     format!("{origin}{site_path}")
 }
 

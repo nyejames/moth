@@ -1,0 +1,61 @@
+A reactive parameter passes stable source identity across a function boundary without granting mutation permission.
+
+### Syntax
+
+[codeblock, $code("moth"):
+    counter_view |count $Int| -> String:
+        return [: Count: [$(count)]]
+    ;
+]
+
+### Exact contract
+
+- A reactive parameter preserves stable source identity across the function boundary.
+- It is a read and subscription handle.
+- It does not grant mutation permission.
+- A non-reactive value cannot satisfy a reactive parameter.
+- Reactive parameters do not support defaults.
+- Passing a source to an ordinary `T` parameter performs an ordinary snapshot read.
+- A reactive parameter is not a first-class `$T` value type.
+- Reactive syntax is not valid in fields, return slots or aliases unless another accepted surface explicitly defines it.
+
+### Passing a source to a reactive parameter
+
+[codeblock, $code("moth"):
+    counter_view |count $Int| -> String:
+        return [: Count: [$(count)]]
+    ;
+
+    count $Int = 0
+    view = counter_view(count)
+]
+
+### Passing a source to an ordinary parameter
+
+[codeblock, $code("moth"):
+    show |count Int| -> String:
+        return [: Count: [count]]
+    ;
+
+    count $Int = 0
+    view = show(count)
+]
+
+The source is read once and the snapshot value is passed.
+
+### Plain values cannot satisfy reactive parameters
+
+[codeblock, $code("moth"):
+    counter_view |count $Int| -> String:
+        return [: Count: [$(count)]]
+    ;
+
+    plain Int = 0
+    -- Error: plain value cannot satisfy reactive parameter
+    -- view = counter_view(plain)
+]
+
+### Related concepts
+
+- For reactive sources see @#reactive-sources (Reactive sources).
+- For subscriptions see @#subscriptions (Subscriptions).

@@ -1,0 +1,32 @@
+A reactive source is a value that templates can watch for changes.
+
+### A counter source
+
+[codeblock, $code("moth"):
+    count $Int = 0
+]
+
+`$Int` says `count` is reactive storage for an `Int`.
+
+### Inferred type
+
+[codeblock, $code("moth"):
+    enabled $= true
+]
+
+`$=` lets the compiler infer the underlying type from the initializer.
+
+### Snapshot read
+
+[codeblock, $code("moth"):
+    count $Int = 0
+    current = count
+]
+
+Reading `count` normally gives the current value. It is a snapshot, not a live view.
+
+### Remember
+
+- `$Type` and `$=` declare reactive sources.
+- The source still has the underlying type, such as `Int` or `String`.
+- Reactive syntax is not valid in fields, return types or aliases.

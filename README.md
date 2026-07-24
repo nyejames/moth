@@ -1,55 +1,61 @@
 <div align="center">
 
-# Beanstalk
+<div style="max-width: 17%;">
+
+![Moth logo](./docs/assets/moth-logo.webp)
+
+</div>
+
+# Moth
 
 <p><em>
   A language for creating reliable software in elegant codebases
 </em></p>
 
-# 🌱
-
+# ʚĭɞ
+ 
 <p>⚠️ This project is in early Alpha ⚠️</p> 
 
-<p><a href="https://nyejames.github.io/beanstalk/">The documentation site</a> was created using <a href="https://github.com/nyejames/beanstalk/blob/main/docs/src">Beanstalk</a>. </p>
+<p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using <a href="https://github.com/nyejames/moth/blob/main/docs/src">Moth</a>. </p>
 
-<p>Development is moving quickly. <a href="https://github.com/nyejames/beanstalk/blob/main/CONTRIBUTING.md">CONTRIBUTING</a> has more info if you want to get involved.</p>
+<p>Development is moving quickly. <a href="https://github.com/nyejames/moth/blob/main/CONTRIBUTING.md">CONTRIBUTING</a> has more info if you want to get involved.</p>
 </div>
 <br>
 <br>
 
 <div align="center">
 
-## What is Beanstalk?
+## What is Moth?
 
 </div>
 
-Beanstalk is a small, statically typed and opinionated programming language. 
+Moth is a small, statically typed and opinionated programming language. 
 
 The goal is to provide everything you need. Designed from the ground up to work elegantly within one language and build system.
 
 Web development is the current focus with the home-grown HTML project builder.
 
 
-![Beanstalk code example 1](./docs/assets/code-snippet-2.webp)
+![Moth code example 1](./docs/assets/code-snippet-2.webp)
 
 `@html` is the built-in, source-backed Builder package for HTML projects.
 
 The HTML build system will generate an HTML page from this code:
 
-![Beanstalk code example 2](./docs/assets/code-snippet-3.webp)
+![Moth code example 2](./docs/assets/code-snippet-3.webp)
 
 <div align="center">
 
-## Beanstalk  🤝  Markdown
+## Moth  🤝  Markdown
 
 </div>
 
-Templates are first-class language values in Beanstalk.
+Templates are first-class language values in Moth.
 They are the main way you create strings, but are far more powerful than regular string formatters. 
 
-![Beanstalk code snippet](./docs/assets/code-snippet.webp)
+![Moth code snippet](./docs/assets/code-snippet.webp)
 
-Beanstalk's custom flavor of Markdown can live inside normal templates, so content can capture values, compose styles and fold straight into HTML at compile time.
+Moth's custom flavor of Markdown can live inside normal templates, so content can capture values, compose styles and fold straight into HTML at compile time.
 
 This makes content-heavy pages quick to build and easy to format. 
 
@@ -57,7 +63,7 @@ No more TypeScript framework lasagne, build-tool linguini or 17 package dependen
 
 ## Getting Started
 
-`bean` is the project tool for creating, checking, building and running Beanstalk projects.
+`moth` is the project tool for creating, checking, building and running Moth projects.
 It's the CLI bundled with the compiler and build system.
 
 Installation scripts will arrive for Beta, for now it's best to install manually from a tagged release.
@@ -66,14 +72,14 @@ Installation scripts will arrive for Beta, for now it's best to install manually
 ### Create a project
 
 ```bash
-bean new html my-site
+moth new html my-site
 cd my-site
 ```
 
 ### Run the development server
 
 ```bash
-bean dev .
+moth dev .
 ```
 
 The dev server hot-reloads the project when files change automatically.
@@ -81,7 +87,7 @@ The dev server hot-reloads the project when files change automatically.
 ### Release build
 
 ```bash
-bean build . --release
+moth build . --release
 ```
 
 This compiles the project using the command-selected builder and writes output to the configured release directory.
@@ -129,7 +135,7 @@ A small syntax, strict rules, fast tooling and stable diagnostics make generated
 
 Compiler diagnostics should carry stable codes, structured facts and source metadata for editors, development servers and coding agents.
 
-Beanstalk has very little training data, but this may be useful later: 
+Moth has very little training data, but this may be useful later: 
 examples can grow around the language that exists and the agent will have to follow your codebase style more strictly when there's no legacy patterns to hallucinate.
 
 <div align="center">
@@ -140,7 +146,7 @@ examples can grow around the language that exists and the agent will have to fol
 <strong>
 <li>
     <ul>
-        <a href="https://nyejames.github.io/beanstalk/docs/">The language</a>
+        <a href="https://nyejames.github.io/moth/docs/">The language</a>
     </ul>
 </li>
 <br>
@@ -158,7 +164,7 @@ examples can grow around the language that exists and the agent will have to fol
 <br>
 <li>
     <ul>
-        <a href="https://nyejames.github.io/beanstalk/docs/codebase/memory-management/">Memory management</a>
+        <a href="https://nyejames.github.io/moth/docs/codebase/memory-management/">Memory management</a>
     </ul>
 </li>
 <br>
@@ -170,7 +176,7 @@ examples can grow around the language that exists and the agent will have to fol
 
 </div>
 
-<a href="https://github.com/nyejames/beanstalk-plugin">Syntax highlighting for Visual Studio Code</a>
+<a href="https://github.com/nyejames/moth-plugin">Syntax highlighting for Visual Studio Code</a>
 
 (LSP and more tooling to come in the future as the language stabilises)
 
@@ -181,7 +187,7 @@ examples can grow around the language that exists and the agent will have to fol
 
 </div>
 
-Here is the current <a href="https://nyejames.github.io/beanstalk/docs/progress/">progress matrix</a>.
+Here is the current <a href="https://nyejames.github.io/moth/docs/progress/">progress matrix</a>.
 
 The compiler already has broad frontend, backend and build-system tooling in place.
 

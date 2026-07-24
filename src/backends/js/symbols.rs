@@ -160,6 +160,6 @@ fn build_symbol_raw(
     if release_symbol_names {
         format!("b_{kind_tag}{id}")
     } else {
-        format!("bst_{leaf_name_hint}_{kind_tag}{id}")
+        format!("moth_{leaf_name_hint}_{kind_tag}{id}")
     }
 }

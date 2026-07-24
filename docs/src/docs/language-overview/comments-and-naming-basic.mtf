@@ -1,0 +1,30 @@
+In ordinary Moth code, comments begin with two minus signs:
+
+[codeblock, $code("moth"):
+    -- This source-code line is ignored by the compiler.
+    score = 10
+]
+
+Template and moth template bodies are content. Two minus signs inside those bodies
+are text rather than source comments.
+
+Use `regular_snake_case` for values and functions:
+
+[codeblock, $code("moth"):
+    player_score = 10
+
+    double_score |score Int| -> Int:
+        return score * 2
+    ;
+]
+
+Use `PascalCase` for named types:
+
+[codeblock, $code("moth"):
+    PlayerScore = |
+        value Int,
+    |
+]
+
+Clear names beat short names. `player_score` is easier to understand than
+`ps`, especially when the code grows.

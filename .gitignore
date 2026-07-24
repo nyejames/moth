@@ -27,7 +27,6 @@ benchmarks/**/release/
 /dev
 /test.html
 /index.html
-test.bst
 
 # Integration golden snapshots should remain versionable even when they
 # contain index.html artifacts.

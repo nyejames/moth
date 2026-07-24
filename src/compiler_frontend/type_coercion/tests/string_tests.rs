@@ -38,7 +38,7 @@ fn float_one_folds_without_trailing_decimal() {
 }
 
 #[test]
-fn float_small_value_uses_beanstalk_exponent_form() {
+fn float_small_value_uses_moth_exponent_form() {
     let table = StringTable::new();
     let result = fold_expression_kind_to_string(&ExpressionKind::Float(0.0000001), &table);
     assert_eq!(result, Some(FoldedStringPiece::Text("1e-7".to_string())));

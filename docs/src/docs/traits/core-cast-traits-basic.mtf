@@ -1,0 +1,45 @@
+The compiler owns a fixed set of traits that let user types work with `cast`.
+
+### String conversion
+
+[codeblock, $code("moth"):
+    Label = |
+        text String,
+    |
+
+    to_string |this Label| -> String:
+        return this.text
+    ;
+
+    Label must CASTABLE_TO_STRING
+
+    value String = cast Label("docs")
+]
+
+`CASTABLE_TO_STRING` means: this type can become a `String` without failing.
+
+### Fallible conversion
+
+[codeblock, $code("moth"):
+    Label = |
+        text String,
+    |
+
+    try_to_int |this Label| -> Int, Error!:
+        return! Error("not a number")
+    ;
+
+    Label must TRY_CASTABLE_TO_INT
+
+    number Int = cast Label("42") catch |err|:
+        then 0
+    ;
+]
+
+`TRY_CASTABLE_TO_INT` means: this type may become an `Int`, but it can also fail. The method signals failure with `return!` and the caller recovers with `cast ... catch`.
+
+### Remember
+
+- Core cast trait names are owned by the compiler.
+- You cannot redefine, import, export or alias them.
+- You declare conformance the same way as for user traits.

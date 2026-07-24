@@ -1,3 +1,3 @@
 /**
- * @bst.opaque Canvas of Int
+ * @moth.opaque Canvas of Int
  */

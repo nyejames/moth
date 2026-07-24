@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0007"]
+diagnostic_codes = ["MOTH-SYNTAX-0007"]
 message_contains = ["Invalid character: '`'"]

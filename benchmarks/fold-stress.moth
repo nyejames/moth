@@ -1,0 +1,271 @@
+-- fold-stress.moth
+-- Constant folding stress test:
+-- - Large arithmetic expression trees
+-- - Nested constant references
+-- - Chained constant dependencies
+-- - Mixed Int and Float arithmetic
+-- - Compile-time template interpolation with constants
+-- - Const record (struct instance) creation
+
+-- Basic arithmetic folding clusters
+a1 #= 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
+a2 #= 11 + 12 + 13 + 14 + 15 + 16 + 17 + 18 + 19 + 20
+a3 #= 21 + 22 + 23 + 24 + 25 + 26 + 27 + 28 + 29 + 30
+a4 #= 31 + 32 + 33 + 34 + 35 + 36 + 37 + 38 + 39 + 40
+a5 #= 41 + 42 + 43 + 44 + 45 + 46 + 47 + 48 + 49 + 50
+
+-- Multiplication clusters
+m1 #= 2 * 3 * 4 * 5 * 6
+m2 #= 7 * 8 * 9 * 10 * 11
+m3 #= 12 * 13 * 14 * 15 * 16
+m4 #= 17 * 18 * 19 * 20 * 21
+m5 #= 22 * 23 * 24 * 25 * 26
+
+-- Mixed operations
+mix1 #= (1 + 2) * (3 + 4) * (5 + 6)
+mix2 #= (10 - 5) * (20 - 10) * (30 - 15)
+mix3 #= (100 / 4) * (200 / 5) * (300 / 6)
+mix4 #= ((1 + 2 + 3) * (4 + 5 + 6)) - (7 + 8 + 9)
+mix5 #= ((10 * 10) + (20 * 20) + (30 * 30)) / 10
+
+-- Deeply nested expressions
+deep1 #= (((((1 + 2) + 3) + 4) + 5) + 6)
+deep2 #= (((((10 * 2) * 3) * 4) * 5) * 6)
+deep3 #= (((((100 - 10) - 20) - 30) - 40) - 50)
+deep4 #= ((((1 + 2) * (3 + 4)) - (5 + 6)) * (7 + 8))
+deep5 #= (((2 * 3) + (4 * 5)) * ((6 * 7) + (8 * 9)))
+
+-- Large expression trees
+tree1 #= 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10 + 11 + 12 + 13 + 14 + 15 + 16 + 17 + 18 + 19 + 20
+tree2 #= 1 * 2 * 3 * 4 * 5 * 6 * 7 * 8 * 9 * 10 * 11 * 12 * 13 * 14 * 15
+tree3 #= (1 * 2) + (3 * 4) + (5 * 6) + (7 * 8) + (9 * 10) + (11 * 12) + (13 * 14) + (15 * 16)
+tree4 #= (1 + 2) * (3 + 4) * (5 + 6) * (7 + 8) * (9 + 10) * (11 + 12) * (13 + 14)
+tree5 #= ((1 + 2 + 3) * (4 + 5 + 6)) + ((7 + 8 + 9) * (10 + 11 + 12))
+
+-- Chained dependencies
+step1 #= 100
+step2 #= step1 + 200
+step3 #= step2 * 3
+step4 #= step3 - 150
+step5 #= step4 / 5
+step6 #= step5 + step1
+step7 #= step6 * step2
+step8 #= step7 - step3
+step9 #= step8 / step4
+step10 #= step9 + step5
+
+-- Nested constant references
+base_alpha #= 1000
+base_beta #= 2000
+base_gamma #= 3000
+
+derived_a #= base_alpha + base_beta
+derived_b #= base_beta + base_gamma
+derived_c #= base_gamma + base_alpha
+
+compound_a #= derived_a + derived_b
+compound_b #= derived_b + derived_c
+compound_c #= derived_c + derived_a
+
+final_a #= compound_a + compound_b + compound_c
+final_b #= (compound_a * 2) + (compound_b * 3) + (compound_c * 4)
+final_c #= final_a + final_b + base_alpha + base_beta + base_gamma
+
+-- Float arithmetic
+f1 #= 1.0 + 2.0 + 3.0 + 4.0 + 5.0
+f2 #= 10.5 * 20.5 * 30.5
+f3 #= 100.0 / 3.0 + 200.0 / 7.0
+f4 #= (1.5 + 2.5) * (3.5 + 4.5) * (5.5 + 6.5)
+f5 #= ((10.0 * 10.0) + (20.0 * 20.0)) / 2.0
+
+-- Mixed Int/Float arithmetic
+mix_int_float1 #= 10 + 20.5
+mix_int_float2 #= 100 * 2.5
+mix_int_float3 #= (10 + 20) * 3.5
+mix_int_float4 #= ((1 + 2 + 3) * 10.0) + ((4 + 5 + 6) * 20.0)
+mix_int_float5 #= (100 / 3) + (100.0 / 3.0)
+
+-- Integer division
+int_div1 #= 100 // 7
+int_div2 #= 1000 // 13 // 17
+int_div3 #= (12345 // 11) + (67890 // 13)
+int_div4 #= ((1000 // 3) * (2000 // 7)) - (500 // 11)
+int_div5 #= 999999 // 7 // 11 // 13
+
+-- Modulo-like patterns (using available ops)
+mod_pattern1 #= ((100 * 7) + 13) + ((200 * 11) + 17)
+mod_pattern2 #= ((1000 * 3) - 50) + ((2000 * 5) - 100)
+mod_pattern3 #= ((a1 * 7) + (a2 * 11)) - (a3 * 13)
+
+-- Prime-inspired clusters
+prime_sum1 #= 2 + 3 + 5 + 7 + 11 + 13 + 17 + 19 + 23 + 29
+prime_sum2 #= 31 + 37 + 41 + 43 + 47 + 53 + 59 + 61 + 67 + 71
+prime_prod1 #= 2 * 3 * 5 * 7 * 11
+prime_prod2 #= 13 * 17 * 19 * 23 * 29
+
+-- Power-like patterns (using multiplication)
+power2 #= 2 * 2 * 2 * 2 * 2 * 2 * 2 * 2
+power3 #= 3 * 3 * 3 * 3 * 3 * 3
+power5 #= 5 * 5 * 5 * 5 * 5
+power_mixed #= (2 * 2 * 2) + (3 * 3 * 3) + (5 * 5 * 5)
+
+-- Fibonacci-like sequences at compile time
+fib1 #= 1
+fib2 #= 1
+fib3 #= fib1 + fib2
+fib4 #= fib2 + fib3
+fib5 #= fib3 + fib4
+fib6 #= fib4 + fib5
+fib7 #= fib5 + fib6
+fib8 #= fib6 + fib7
+fib9 #= fib7 + fib8
+fib10 #= fib8 + fib9
+
+-- Factorial-like at compile time
+fact5 #= 1 * 2 * 3 * 4 * 5
+fact6 #= fact5 * 6
+fact7 #= fact6 * 7
+fact8 #= fact7 * 8
+fact9 #= fact8 * 9
+fact10 #= fact9 * 10
+
+-- Large aggregate computations
+sum_1_to_100 #= (100 * 101) // 2
+sum_squares #= (100 * 101 * 201) // 6
+sum_cubes #= sum_1_to_100 * sum_1_to_100
+
+-- Digest chains
+digest_layer1_a #= a1 + a2 + a3 + a4 + a5
+digest_layer1_b #= m1 + m2 + m3 + m4 + m5
+digest_layer1_c #= mix1 + mix2 + mix3 + mix4 + mix5
+
+digest_layer2_a #= digest_layer1_a * 3
+digest_layer2_b #= digest_layer1_b * 5
+digest_layer2_c #= digest_layer1_c * 7
+
+digest_layer3 #= digest_layer2_a + digest_layer2_b + digest_layer2_c
+super_digest #= digest_layer3 + final_a + final_b + final_c
+
+-- Template interpolation with constants
+title_text #= "Constant Folding Stress Test"
+version_num #= 1
+build_num #= 42
+
+header #= [: # [title_text] v[version_num] build [build_num]]
+stats_line #= [: Sum 1-100: [sum_1_to_100] / Squares: [sum_squares] / Cubes: [sum_cubes]]
+fib_line #= [: Fib 10: [fib10]]
+fact_line #= [: Fact 10: [fact10]]
+digest_line #= [: Super digest: [super_digest]]
+
+-- Const record creation
+Point = | x Int, y Int |
+origin #= Point(0, 0)
+point_a #= Point(100, 200)
+point_b #= Point(a1, a2)
+
+Config = |
+    max_retries Int,
+    timeout_ms Int,
+    cache_size Int,
+|
+default_config #= Config(3, 5000, 1000)
+custom_config #= Config(fact5, fact6 * 100, fact7 * 10)
+
+Range = | min Int, max Int |
+range_1 #= Range(0, 100)
+range_2 #= Range(a1, m1)
+range_3 #= Range(fib5, fib10)
+
+-- Nested const records
+Box = | width Int, height Int |
+box1 #= Box(100, 200)
+box2 #= Box(a1 * 2, a2 * 3)
+
+-- Multiple interpolations
+values_report #= [:
+    Values Report:
+    - a1: [a1]
+    - a2: [a2]
+    - a3: [a3]
+    - a4: [a4]
+    - a5: [a5]
+    - m1: [m1]
+    - m2: [m2]
+    - m3: [m3]
+    - m4: [m4]
+    - m5: [m5]
+    Total: [digest_layer1_a + digest_layer1_b]
+]
+
+-- Deep template with constant references
+deep_template #= [:
+    <section>
+        <h1>[title_text]</h1>
+        <p>Build: [build_num]</p>
+        <ul>
+            <li>Sum 1-100: [sum_1_to_100]</li>
+            <li>Sum squares: [sum_squares]</li>
+            <li>Sum cubes: [sum_cubes]</li>
+            <li>Fibonacci 10: [fib10]</li>
+            <li>Factorial 10: [fact10]</li>
+        </ul>
+        <p>Super digest: [super_digest]</p>
+        <p>Power 2^8: [power2]</p>
+        <p>Power 3^6: [power3]</p>
+        <p>Power 5^5: [power5]</p>
+    </section>
+]
+
+-- Chain verification at runtime
+verify_fold_constants ||:
+    io.line("Verifying constant fold values")
+    io.line([: a1 = [a1]])
+    io.line([: a2 = [a2]])
+    io.line([: a3 = [a3]])
+    io.line([: a4 = [a4]])
+    io.line([: a5 = [a5]])
+    io.line([: m1 = [m1]])
+    io.line([: m2 = [m2]])
+    io.line([: m3 = [m3]])
+    io.line([: m4 = [m4]])
+    io.line([: m5 = [m5]])
+    io.line([: mix1 = [mix1]])
+    io.line([: mix2 = [mix2]])
+    io.line([: mix3 = [mix3]])
+    io.line([: mix4 = [mix4]])
+    io.line([: mix5 = [mix5]])
+    io.line([: deep1 = [deep1]])
+    io.line([: deep2 = [deep2]])
+    io.line([: deep3 = [deep3]])
+    io.line([: deep4 = [deep4]])
+    io.line([: deep5 = [deep5]])
+    io.line([: step10 = [step10]])
+    io.line([: final_a = [final_a]])
+    io.line([: final_b = [final_b]])
+    io.line([: final_c = [final_c]])
+    io.line([: fib10 = [fib10]])
+    io.line([: fact10 = [fact10]])
+    io.line([: sum_1_to_100 = [sum_1_to_100]])
+    io.line([: sum_squares = [sum_squares]])
+    io.line([: super_digest = [super_digest]])
+    io.line([: power2 = [power2]])
+    io.line([: power3 = [power3]])
+    io.line([: power5 = [power5]])
+    io.line("Constant fold verification complete")
+;
+
+-- Stress test entry
+run_fold_stress ||:
+    io.line("Constant folding stress test starting")
+    verify_fold_constants()
+    io.line([: [header]])
+    io.line([: [stats_line]])
+    io.line([: [fib_line]])
+    io.line([: [fact_line]])
+    io.line([: [digest_line]])
+    io.line([: [values_report]])
+    io.line([: [deep_template]])
+    io.line("Constant folding stress test complete")
+;
+
+run_fold_stress()

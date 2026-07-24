@@ -72,7 +72,7 @@ impl HtmlWasmHelperExports {
 
 /// Builds the full HTML->Wasm export plan from builder-visible HIR semantics.
 ///
-/// WHAT: exports entry start() directly as "bst_start" plus all string interop helpers.
+/// WHAT: exports entry start() directly as "moth_start" plus all string interop helpers.
 /// WHY: entry start() is the sole runtime fragment producer. JS calls it once and decodes
 ///      the returned fragment list. No entry-body call scanning is needed or correct.
 pub(crate) fn build_html_wasm_export_plan(
@@ -81,7 +81,7 @@ pub(crate) fn build_html_wasm_export_plan(
     Ok(HtmlWasmExportPlan {
         function_exports: vec![HtmlWasmFunctionExport {
             function_id: hir_module.start_function,
-            export_name: String::from("bst_start"),
+            export_name: String::from("moth_start"),
             purpose: HtmlWasmExportPurpose::EntryStart,
         }],
         helper_exports: HtmlWasmHelperExports::all_enabled(),

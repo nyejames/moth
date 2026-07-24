@@ -90,7 +90,7 @@ where
         ));
     }
 
-    println!("Running Beanstalk test cases...\n");
+    println!("Running Moth test cases...\n");
     let timer = std::time::Instant::now();
     let mut indexed_results = if let Some(thread_count) = test_thread_count_from_env()? {
         let pool = rayon::ThreadPoolBuilder::new()
@@ -259,17 +259,17 @@ pub(crate) fn select_cases(
 }
 
 fn test_thread_count_from_env() -> Result<Option<usize>, String> {
-    let Some(raw) = std::env::var_os("BST_TEST_THREADS") else {
+    let Some(raw) = std::env::var_os("MOTH_TEST_THREADS") else {
         return Ok(None);
     };
 
     let threads = raw
         .to_string_lossy()
         .parse::<usize>()
-        .map_err(|_| "BST_TEST_THREADS must be a positive integer".to_string())?;
+        .map_err(|_| "MOTH_TEST_THREADS must be a positive integer".to_string())?;
 
     if threads == 0 {
-        return Err("BST_TEST_THREADS must be greater than 0".to_string());
+        return Err("MOTH_TEST_THREADS must be greater than 0".to_string());
     }
 
     Ok(Some(threads))

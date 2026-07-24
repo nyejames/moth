@@ -1,0 +1,135 @@
+A type alias is a compile-time name for an existing type. It introduces no runtime value and no new semantic type identity.
+
+### Definition and syntax
+
+[codeblock, $code("moth"):
+    UserId as Int
+    Names as {String}
+    MaybeName as String?
+    StringBox as Box of String
+]
+
+The syntax is `AliasName as ExistingType`. Alias names follow type-name casing. The target may be any valid type expression that resolves to a concrete semantic type.
+
+### Exact contract
+
+- A type alias is a compile-time name for an existing type.
+- Aliases are transparent: an alias and its target denote the same `TypeId`.
+- Aliases do not create nominal identity.
+- Alias and target values are type-compatible in both directions.
+- Aliases are valid in type positions such as parameters, fields, returns and local annotations.
+- Aliases are not ordinary values. They cannot be assigned, passed, copied or used in expression position.
+- `as` in a type-alias declaration is not a cast.
+
+### Valid targets
+
+An alias target may be:
+
+- a builtin scalar such as `Int`, `Float`, `Bool`, `Char` or `String`
+- a struct or choice declared in the same file
+- an option such as `String?`
+- a growable collection such as `{String}`
+- a fixed collection such as `{4 Int}`
+- a hashmap such as `{String = Int}`
+- a fully concrete generic instance such as `Box of String`
+- an imported type, imported type alias or external package type
+
+Concrete generic aliases are supported. Parameterized aliases and partial generic application are outside the current language scope.
+
+### Transparency
+
+[codeblock, $code("moth"):
+    UserId as Int
+
+    id UserId = 42
+    raw Int = id
+]
+
+Because `UserId` is transparent, assigning a `UserId` value to an `Int` binding is valid. The reverse is also valid: an `Int` value can be used where `UserId` is expected.
+
+### Contrast with a struct
+
+[codeblock, $code("moth"):
+    UserId as Int
+
+    User = |
+        id Int,
+    |
+]
+
+`UserId` is another name for `Int`. `User` is a distinct nominal struct type with its own constructor and fields. Use a struct when the domain concept needs its own identity. Use an alias when only the annotation name matters.
+
+### Empty literals and aliases
+
+An alias can provide the explicit element type needed by an empty collection or map literal.
+
+[codeblock, $code("moth"):
+    Names as {String}
+
+    names Names = {}
+]
+
+### Alias chains
+
+Aliases may chain through other aliases. The chain remains transparent and resolves to the final target type.
+
+[codeblock, $code("moth"):
+    Name as String
+    Names as {Name}
+
+    names Names = {"Priya"}
+]
+
+### Cycles
+
+Alias cycles are invalid. The compiler reports a circular dependency.
+
+### Aliases are not constructors
+
+An alias does not create a new constructor. The alias name is not callable even when the alias targets a constructible nominal type. Construct the target type using its canonical nominal name.
+
+For struct aliases, only the struct's canonical name constructs:
+
+[codeblock, $code("moth"):
+    Person = |
+        name String,
+    |
+
+    MainPerson as Person
+
+    -- Valid: construct with the canonical name
+    person MainPerson = Person("Priya")
+
+    -- Error: MainPerson is a type, not a constructor
+    -- person MainPerson = MainPerson("Priya")
+]
+
+For choice aliases, only the choice's canonical name constructs variants:
+
+[codeblock, $code("moth"):
+    Status ::
+        Ready,
+        Failed | message String |,
+    ;
+
+    State as Status
+
+    -- Valid: construct with the canonical name
+    ready State = Status::Ready
+    failed State = Status::Failed("bad")
+
+    -- Error: State is a type, not a constructor
+    -- ready State = State::Ready
+]
+
+Aliases to scalar or otherwise non-constructible targets are not callable for the same reason: the alias name is a type, not a value.
+
+### Visibility and module public surfaces
+
+Type aliases follow ordinary module visibility rules. A type alias declared in a source file is importable by other files in the same module. Cross-module visibility is controlled by the module root's explicit `export:` surface. The hash-root filename itself has no semantic role. A public re-export may expose an imported alias under a chosen public name. That operation is not the same as an ordinary local file import alias.
+
+### Related concepts
+
+- For concrete generic application see @../generics (Generics).
+- For import aliasing see the next section.
+- For project visibility and module roots see @../project-structure (Project Structure) and @../packages (Packages).

@@ -146,13 +146,13 @@ pub(crate) fn discover_all_modules_in_project(
     }
 
     // Conservative gate: only take the provider-free parallel path when the entire reachable
-    // import graph contains no provider-backed imports and no unsupported non-Beanstalk
+    // import graph contains no provider-backed imports and no unsupported non-Moth
     // extensions. This keeps provider cache/resolution table mutations on the serial path.
-    // WHY: classification itself reads and tokenizes every reachable Beanstalk source file and
+    // WHY: classification itself reads and tokenizes every reachable Moth source file and
     //      retains the complete scan cache. It records `provider_capable_required` and skips the
     //      external edge when a provider-backed or unsupported package import needs the serial
     //      owner, but it never aborts and discards that cache. The serial fallback then reuses the
-    //      retained lexical data for every already-scanned `.bst` so the lexer never runs twice.
+    //      retained lexical data for every already-scanned `.moth` so the lexer never runs twice.
     //      Skip classification for the common single-entry case because that path stays serial
     //      provider-capable anyway.
     let provider_free_inventory = if seeds.len() >= PROVIDER_FREE_PARALLEL_MIN_MODULES {

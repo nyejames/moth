@@ -9,7 +9,7 @@
 *.json text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
-*.bst text eol=lf
+*.moth text eol=lf
 *.html text eol=lf
 *.js text eol=lf
 *.css text eol=lf

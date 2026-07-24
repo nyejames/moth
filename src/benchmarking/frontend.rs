@@ -5,7 +5,7 @@
 //! timings when `timers` is enabled (counters additionally require
 //! `benchmark_counters`).
 //! WHY: avoids subprocess noise while reusing the exact same setup path as
-//! `bean check`.
+//! `moth check`.
 
 use std::path::PathBuf;
 use std::time::Instant;

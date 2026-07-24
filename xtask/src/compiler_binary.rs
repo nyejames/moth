@@ -1,12 +1,12 @@
-//! Compiler binary builder - Builds the release and profiling Beanstalk compiler
+//! Compiler binary builder - Builds the release and profiling Moth compiler
 //!
 //! This module owns building compiler binaries with timing features enabled.
 //! Normal benchmark builds use the concise `timers` feature; profiling builds
 //! use `detailed_timers` for verbose human-readable substage prose. It supports
 //! two build profiles:
 //!
-//! - **Release** (`target/release/bean`): standard benchmark build.
-//! - **Profiling** (`target/profiling/bean`): dedicated profiling build with
+//! - **Release** (`target/release/moth`): standard benchmark build.
+//! - **Profiling** (`target/profiling/moth`): dedicated profiling build with
 //!   full debug info and frame pointers for Samply symbolication/unwinding.
 //!
 //! # What this module owns
@@ -78,7 +78,7 @@ impl CompilerBinary {
 /// Build the compiler with release profile and concise timers
 ///
 /// WHAT: builds with the `timers` feature so the benchmark subprocess emits
-/// stable BST_BENCH timing lines under BST_TIMERS=bench without the verbose
+/// stable MOTH_BENCH timing lines under MOTH_TIMERS=bench without the verbose
 /// human prose and AST substage timings that detailed_timers adds.
 /// WHY:  keeps benchmark output low-noise while still capturing all top-level
 /// pipeline-stage metrics for attribution and regression detection.
@@ -99,17 +99,17 @@ pub fn build_release_compiler_with_timers() -> Result<CompilerBinary, String> {
         return Err("Compiler build failed".to_string());
     }
 
-    let bean_path = release_compiler_path(env::consts::EXE_SUFFIX);
+    let moth_path = release_compiler_path(env::consts::EXE_SUFFIX);
 
-    if !bean_path.exists() {
+    if !moth_path.exists() {
         return Err(format!(
-            "Bean binary not found at '{}' after build",
-            bean_path.display()
+            "moth binary not found at '{}' after build",
+            moth_path.display()
         ));
     }
 
     Ok(CompilerBinary {
-        path: bean_path,
+        path: moth_path,
         symbol_dirs: Vec::new(),
         profiling_symbols: None,
     })
@@ -119,7 +119,7 @@ pub fn build_release_compiler_with_timers() -> Result<CompilerBinary, String> {
 ///
 /// Executes:
 /// ```bash
-/// RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling --features detailed_timers --bin bean
+/// RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling --features detailed_timers --bin moth
 /// ```
 ///
 /// The profiling profile inherits from release but includes full debug info,
@@ -128,7 +128,7 @@ pub fn build_release_compiler_with_timers() -> Result<CompilerBinary, String> {
 ///
 /// # Returns
 ///
-/// A `CompilerBinary` pointing to `target/profiling/bean`, or an error message.
+/// A `CompilerBinary` pointing to `target/profiling/moth`, or an error message.
 ///
 pub fn build_profiling_compiler_with_timers() -> Result<CompilerBinary, String> {
     let status = Command::new("cargo")
@@ -139,7 +139,7 @@ pub fn build_profiling_compiler_with_timers() -> Result<CompilerBinary, String> 
             "--features",
             "detailed_timers",
             "--bin",
-            "bean",
+            "moth",
         ])
         .env("RUSTFLAGS", "-C force-frame-pointers=yes")
         .status()
@@ -149,22 +149,22 @@ pub fn build_profiling_compiler_with_timers() -> Result<CompilerBinary, String> 
         return Err("Profiling compiler build failed".to_string());
     }
 
-    let bean_path = profiling_compiler_path(env::consts::EXE_SUFFIX);
+    let moth_path = profiling_compiler_path(env::consts::EXE_SUFFIX);
 
-    if !bean_path.exists() {
+    if !moth_path.exists() {
         return Err(format!(
-            "Bean binary not found at '{}' after profiling build",
-            bean_path.display()
+            "moth binary not found at '{}' after profiling build",
+            moth_path.display()
         ));
     }
 
-    let profiling_symbols = prepare_profiling_symbol_diagnostics(&bean_path);
-    let symbol_dirs = candidate_symbol_dirs_for_binary(&bean_path);
+    let profiling_symbols = prepare_profiling_symbol_diagnostics(&moth_path);
+    let symbol_dirs = candidate_symbol_dirs_for_binary(&moth_path);
 
     Ok(CompilerBinary {
         symbol_dirs,
         profiling_symbols: Some(profiling_symbols),
-        path: bean_path,
+        path: moth_path,
     })
 }
 
@@ -174,7 +174,7 @@ pub fn build_profiling_compiler_with_timers() -> Result<CompilerBinary, String> 
 /// WHY: Platform-specific executable suffixes (e.g., `.exe` on Windows)
 /// must be appended correctly so `exists()` checks find the real artifact.
 fn release_compiler_path(exe_suffix: &str) -> PathBuf {
-    compiler_path_with_suffix("target/release/bean", exe_suffix)
+    compiler_path_with_suffix("target/release/moth", exe_suffix)
 }
 
 /// Build the profiling compiler path for the current platform suffix.
@@ -184,7 +184,7 @@ fn release_compiler_path(exe_suffix: &str) -> PathBuf {
 /// so it needs its own path resolver.
 ///
 pub fn profiling_compiler_path(exe_suffix: &str) -> PathBuf {
-    compiler_path_with_suffix("target/profiling/bean", exe_suffix)
+    compiler_path_with_suffix("target/profiling/moth", exe_suffix)
 }
 
 /// Resolve a base binary path with the platform executable suffix.
@@ -193,12 +193,12 @@ pub fn profiling_compiler_path(exe_suffix: &str) -> PathBuf {
 /// WHY: Both release and profiling paths share the same suffix logic;
 /// extracting it avoids duplication.
 fn compiler_path_with_suffix(base: &str, exe_suffix: &str) -> PathBuf {
-    let mut bean_path = PathBuf::from(base);
+    let mut moth_path = PathBuf::from(base);
     if !exe_suffix.is_empty() {
-        bean_path.set_extension(exe_suffix.trim_start_matches('.'));
+        moth_path.set_extension(exe_suffix.trim_start_matches('.'));
     }
 
-    bean_path
+    moth_path
 }
 
 /// Prepare symbol lookup directories for the profiling binary.
@@ -207,24 +207,24 @@ fn compiler_path_with_suffix(base: &str, exe_suffix: &str) -> PathBuf {
 /// tool is available, then returns deterministic symbol directories for Samply.
 /// WHY: Samply can record useful stage data without symbols, but raw-address
 /// function names are not actionable for optimization decisions.
-fn prepare_profiling_symbol_diagnostics(bean_path: &Path) -> ProfilingSymbolDiagnostics {
-    generate_macos_dsym_if_available(bean_path);
+fn prepare_profiling_symbol_diagnostics(moth_path: &Path) -> ProfilingSymbolDiagnostics {
+    generate_macos_dsym_if_available(moth_path);
 
     ProfilingSymbolDiagnostics {
         debug_info_setting: "debug = true",
-        dsym_path: dsym_bundle_path(bean_path),
-        dsym_uuid_match: verify_macos_dsym_uuid(bean_path),
+        dsym_path: dsym_bundle_path(moth_path),
+        dsym_uuid_match: verify_macos_dsym_uuid(moth_path),
     }
 }
 
-fn candidate_symbol_dirs_for_binary(bean_path: &Path) -> Vec<PathBuf> {
+fn candidate_symbol_dirs_for_binary(moth_path: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
-    if let Some(parent) = bean_path.parent() {
+    if let Some(parent) = moth_path.parent() {
         push_existing_dir(&mut dirs, parent.to_path_buf());
     }
 
-    let dsym_bundle = dsym_bundle_path(bean_path);
+    let dsym_bundle = dsym_bundle_path(moth_path);
     push_existing_dir(&mut dirs, dsym_bundle.clone());
     push_existing_dir(&mut dirs, dsym_bundle.join("Contents/Resources/DWARF"));
 
@@ -237,24 +237,24 @@ fn push_existing_dir(dirs: &mut Vec<PathBuf>, dir: PathBuf) {
     }
 }
 
-fn dsym_bundle_path(bean_path: &Path) -> PathBuf {
-    let mut bundle_name = bean_path
+fn dsym_bundle_path(moth_path: &Path) -> PathBuf {
+    let mut bundle_name = moth_path
         .file_name()
         .map(|name| name.to_os_string())
-        .unwrap_or_else(|| "bean".into());
+        .unwrap_or_else(|| "moth".into());
     bundle_name.push(".dSYM");
 
-    bean_path.with_file_name(bundle_name)
+    moth_path.with_file_name(bundle_name)
 }
 
 #[cfg(target_os = "macos")]
-fn verify_macos_dsym_uuid(bean_path: &Path) -> DsymUuidMatch {
-    let dsym_bundle = dsym_bundle_path(bean_path);
+fn verify_macos_dsym_uuid(moth_path: &Path) -> DsymUuidMatch {
+    let dsym_bundle = dsym_bundle_path(moth_path);
     if !dsym_bundle.exists() {
         return DsymUuidMatch::Unknown;
     }
 
-    let binary_output = match dwarfdump_uuid(bean_path) {
+    let binary_output = match dwarfdump_uuid(moth_path) {
         Some(output) => output,
         None => return DsymUuidMatch::Unknown,
     };
@@ -280,7 +280,7 @@ fn verify_macos_dsym_uuid(bean_path: &Path) -> DsymUuidMatch {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn verify_macos_dsym_uuid(_bean_path: &Path) -> DsymUuidMatch {
+fn verify_macos_dsym_uuid(_moth_path: &Path) -> DsymUuidMatch {
     DsymUuidMatch::Unknown
 }
 
@@ -323,10 +323,10 @@ fn parse_dwarfdump_uuids(output: &str) -> Vec<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn generate_macos_dsym_if_available(bean_path: &Path) {
-    let dsym_bundle = dsym_bundle_path(bean_path);
+fn generate_macos_dsym_if_available(moth_path: &Path) {
+    let dsym_bundle = dsym_bundle_path(moth_path);
     let output = Command::new("dsymutil")
-        .arg(bean_path)
+        .arg(moth_path)
         .arg("-o")
         .arg(&dsym_bundle)
         .output();
@@ -342,14 +342,14 @@ fn generate_macos_dsym_if_available(bean_path: &Path) {
         let stderr = String::from_utf8_lossy(&output.stderr);
         eprintln!(
             "Warning: dsymutil failed while preparing '{}': {}",
-            bean_path.display(),
+            moth_path.display(),
             stderr.trim()
         );
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn generate_macos_dsym_if_available(_bean_path: &Path) {}
+fn generate_macos_dsym_if_available(_moth_path: &Path) {}
 
 #[cfg(test)]
 mod tests;

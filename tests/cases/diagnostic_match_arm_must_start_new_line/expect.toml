@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0028"]
+diagnostic_codes = ["MOTH-SYNTAX-0028"]
 message_contains = ["Match arms must start at the beginning of a logical line"]

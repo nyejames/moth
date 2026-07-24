@@ -1,6 +1,6 @@
-//! xtask - Benchmark orchestration tool for Beanstalk compiler
+//! xtask - Benchmark orchestration tool for Moth compiler
 //!
-//! This crate provides build automation and benchmark tooling for the Beanstalk
+//! This crate provides build automation and benchmark tooling for the Moth
 //! compiler project. It is a workspace member that runs benchmarks and generates
 //! timing reports.
 //!

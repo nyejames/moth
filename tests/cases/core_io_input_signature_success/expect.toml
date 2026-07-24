@@ -6,8 +6,8 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = [
-  "function __bs_io_input_new(",
-  "function __bs_io_input_update(",
-  "function __bs_io_input_close(",
+  "function __moth_io_input_new(",
+  "function __moth_io_input_update(",
+  "function __moth_io_input_close(",
   "heldKeys: new Set(),",
 ]

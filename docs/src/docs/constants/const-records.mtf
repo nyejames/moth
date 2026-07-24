@@ -1,0 +1,40 @@
+A fully folded struct instance stored in a constant may become a const record.
+
+[codeblock, $code("moth"):
+    Defaults = |
+        title String,
+        year Int,
+    |
+
+    defaults #= Defaults("Moth", 2026)
+
+    page_title #= defaults.title
+]
+
+### Contract
+
+A const record is a data-only compile-time member group.
+
+Every constructor argument must fold.
+
+Const-record field projection may participate in another constant expression.
+
+The complete const record cannot be used as an ordinary runtime value.
+
+It cannot be:
+
+- assigned to a runtime binding
+- passed as a runtime argument
+- returned from a runtime function
+- stored in a collection or map
+- used through a runtime receiver method
+
+Use one folded field when runtime code needs the value.
+
+[codeblock, $code("moth"):
+    io.line(defaults.title)
+]
+
+Const records preserve their struct-backed field names and types.
+
+They do not introduce structural typing or anonymous runtime record identity.

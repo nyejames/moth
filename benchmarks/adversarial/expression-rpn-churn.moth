@@ -1,0 +1,199 @@
+-- expression-rpn-churn.moth
+-- Stresses expression evaluation and choice pattern matching through a
+-- reverse-Polish-notation interpreter that churns many binary operations.
+
+Op ::
+    Push | value Float |,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Neg,
+;
+
+Token = |
+    kind Op,
+|
+
+push |value Float| -> Token:
+    return Token(Op::Push(value))
+;
+
+add_token || -> Token:
+    return Token(Op::Add)
+;
+
+sub_token || -> Token:
+    return Token(Op::Sub)
+;
+
+mul_token || -> Token:
+    return Token(Op::Mul)
+;
+
+div_token || -> Token:
+    return Token(Op::Div)
+;
+
+neg_token || -> Token:
+    return Token(Op::Neg)
+;
+
+-- Evaluates a token stream against a mutable value stack.
+eval_tokens |tokens {Token}| -> Float:
+    stack ~{Float} = {}
+    loop tokens |token|:
+        if token.kind is:
+            Push(value) =>
+                ~stack.push(value) catch:
+                ;
+            Add =>
+                apply_binary(~stack, "add")
+            Sub =>
+                apply_binary(~stack, "sub")
+            Mul =>
+                apply_binary(~stack, "mul")
+            Div =>
+                apply_binary(~stack, "div")
+            Neg =>
+                apply_neg(~stack)
+        ;
+    ;
+
+    if stack.length() is 0:
+        return 0.0
+    ;
+    value = stack.get(0) catch:
+        then 0.0
+    ;
+    return value
+;
+
+apply_binary |stack ~{Float}, op_name String|:
+    if stack.length() >= 2:
+        b = stack.get(1) catch:
+            then 0.0
+        ;
+        a = stack.get(0) catch:
+            then 0.0
+        ;
+        removed_b = ~stack.remove(1) catch:
+            then 0.0
+        ;
+        removed_a = ~stack.remove(0) catch:
+            then 0.0
+        ;
+        result = compute_binary(a, b, op_name)
+        ~stack.push(result) catch:
+        ;
+    ;
+;
+
+compute_binary |a Float, b Float, op_name String| -> Float:
+    if op_name is "add":
+        return a + b
+    ;
+    if op_name is "sub":
+        return a - b
+    ;
+    if op_name is "mul":
+        return a * b
+    ;
+    if op_name is "div":
+        if b is 0.0:
+            return 0.0
+        ;
+        return a / b
+    ;
+    return 0.0
+;
+
+apply_neg |stack ~{Float}|:
+    if stack.length() > 0:
+        a = stack.get(0) catch:
+            then 0.0
+        ;
+        removed = ~stack.remove(0) catch:
+            then 0.0
+        ;
+        ~stack.push(0.0 - a) catch:
+        ;
+    ;
+;
+
+-- Expression: ((3 + 4) * (5 - 2)) / 7
+build_expression_a || -> {Token}:
+    tokens ~{Token} = {}
+    ~tokens.push(push(3.0)) catch:
+    ;
+    ~tokens.push(push(4.0)) catch:
+    ;
+    ~tokens.push(add_token()) catch:
+    ;
+    ~tokens.push(push(5.0)) catch:
+    ;
+    ~tokens.push(push(2.0)) catch:
+    ;
+    ~tokens.push(sub_token()) catch:
+    ;
+    ~tokens.push(mul_token()) catch:
+    ;
+    ~tokens.push(push(7.0)) catch:
+    ;
+    ~tokens.push(div_token()) catch:
+    ;
+    return tokens
+;
+
+-- Expression: -(10 + 6) * 2
+build_expression_b || -> {Token}:
+    tokens ~{Token} = {}
+    ~tokens.push(push(10.0)) catch:
+    ;
+    ~tokens.push(push(6.0)) catch:
+    ;
+    ~tokens.push(add_token()) catch:
+    ;
+    ~tokens.push(neg_token()) catch:
+    ;
+    ~tokens.push(push(2.0)) catch:
+    ;
+    ~tokens.push(mul_token()) catch:
+    ;
+    return tokens
+;
+
+-- Longer churn expression.
+build_long_expression || -> {Token}:
+    tokens ~{Token} = {}
+    loop 1 to 20 |i|:
+        ~tokens.push(push(i / 1.0)) catch:
+        ;
+        if i > 1:
+            ~tokens.push(add_token()) catch:
+            ;
+        ;
+    ;
+    return tokens
+;
+
+-- Entry
+run_rpn_churn ||:
+    io.line("expression rpn churn start")
+
+    expr_a = build_expression_a()
+    result_a = eval_tokens(expr_a)
+    io.line([: a=[result_a] ])
+
+    expr_b = build_expression_b()
+    result_b = eval_tokens(expr_b)
+    io.line([: b=[result_b] ])
+
+    expr_long = build_long_expression()
+    result_long = eval_tokens(expr_long)
+    io.line([: long=[result_long] ])
+
+    io.line("expression rpn churn complete")
+;
+
+run_rpn_churn()

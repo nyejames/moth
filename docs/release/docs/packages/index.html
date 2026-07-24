@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Packages and imports | Beanstalk</title>
+    <title>Packages and imports | Moth</title>
     <meta name="description" content="Import paths, module visibility, project-local packages and package origin and backing.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -591,15 +591,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -608,13 +608,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -625,9 +625,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -637,15 +637,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -719,14 +719,14 @@ body {
 
 
             <p>Imports make names visible. Every source import resolves from the importing file&#39;s owning module root, not the file&#39;s directory.</p><h3>A module-root-relative import</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>card <span class='bst-code-parenthesis'>{</span>render_card<span class='bst-code-parenthesis'>}</span>
-    </code></pre><p><code>@card</code> resolves to <code>card.bst</code> under the importing file&#39;s owning module root, regardless of how deep the importing file is inside the module.</p><h3>A support package import</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>markdown <span class='bst-code-parenthesis'>{</span>render<span class='bst-code-parenthesis'>}</span>
-    </code></pre><p><code>@markdown</code> resolves to a scoped <code>+*.bst</code> support package visible in the importing module&#39;s lexical scope.</p><h3>Remember</h3><ul><li>Imports resolve from the owning module root, not the importing file&#39;s directory.</li><li><code>@./</code> has no supported meaning.</li><li><code>@../</code> is not supported.</li><li>Source imports omit the file extension.</li><li>JavaScript imports keep <code>.js</code>.</li></ul>
+    import <span class='moth-code-operator'>@</span>card <span class='moth-code-parenthesis'>{</span>render_card<span class='moth-code-parenthesis'>}</span>
+    </code></pre><p><code>@card</code> resolves to <code>card.moth</code> under the importing file&#39;s owning module root, regardless of how deep the importing file is inside the module.</p><h3>A support package import</h3><pre style=""><code class='codeblock'>
+    import <span class='moth-code-operator'>@</span>markdown <span class='moth-code-parenthesis'>{</span>render<span class='moth-code-parenthesis'>}</span>
+    </code></pre><p><code>@markdown</code> resolves to a scoped <code>+*.moth</code> support package visible in the importing module&#39;s lexical scope.</p><h3>Remember</h3><ul><li>Imports resolve from the owning module root, not the importing file&#39;s directory.</li><li><code>@./</code> has no supported meaning.</li><li><code>@../</code> is not supported.</li><li>Source imports omit the file extension.</li><li>JavaScript imports keep <code>.js</code>.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Import paths resolve declaration surfaces, not file bytes. Every source import resolves from the importing file&#39;s owning module root, not the file&#39;s physical directory.</p><h3>Path families</h3><ul><li><strong>Module-root-relative</strong>: imports resolve from the importing file&#39;s owning module root. Example: inside <code>src/internal/deep/renderer.bst</code>, <code>import @accounts { Account }</code> resolves to <code>src/accounts.bst</code>, not <code>src/internal/deep/accounts.bst</code>.</li><li><strong>Child module</strong>: reaching a child normal module ends filesystem traversal and exposes only its <code>export:</code> facade. Imports cannot bypass that facade with paths such as <code>@child/internal</code>.</li><li><strong>Support package</strong>: scoped <code>+*.bst</code> support packages are imported by package name. Consumers do not encode ancestor paths.</li><li><strong>Core binding-backed package</strong>: <code>@core/math</code>, <code>@core/text</code> and current peers are registered by the builder.</li><li><strong>Builder source-backed package</strong>: <code>@html</code> is a builder-provided source-backed package.</li><li><strong>Builder binding-backed package</strong>: <code>@web/canvas</code> is a builder-owned runtime package.</li><li><strong>JavaScript file</strong>: project-local annotated JavaScript files require <code>.js</code> and a builder external import provider. The <code>.js</code> extension is kept.</li></ul><h3>Resolution rules</h3><ul><li><code>@./...</code> has no supported meaning.</li><li>Parent components and <code>..</code> are invalid.</li><li>Paths may traverse ordinary unrooted directories owned by the same module.</li><li><code>.bst</code>, <code>.bd</code> and <code>.md</code> source imports are extensionless.</li><li>Direct <code>.js</code> imports keep the <code>.js</code> extension.</li><li>Scoped support packages are injected by package name, not physical ancestor paths.</li><li>Core and builder runtime packages use their registered package path.</li><li>Specific symbol imports use grouped syntax. Direct symbol-path imports such as <code>import @core/math/sin</code> are rejected.</li><li>Direct imports of <code>#*.bst</code>, <code>+*.bst</code> and <code>config.bst</code> are rejected.</li><li>Beandown <code>.bd</code> and plain Markdown <code>.md</code> content files both expose generated <code>content</code> constants. See <a href="../beandown/#content-imports">Beandown content imports</a> and <a href="../markdown/#markdown-imports">Markdown imports</a>.</li><li>The imported public surface of a module root comes from its <code>export:</code> block. See <a href="#module-visibility">Module visibility</a>.</li></ul><h3>Same-module imports</h3><p>Files in the same module can import ordinary sibling source files directly. Same-module imports bypass the public-surface boundary. See <a href="#module-visibility">Module visibility</a>.</p><h3>Cross-module imports</h3><p>Imports that cross into another module boundary can only access what that module&#39;s <code>export:</code> block makes public. Cross-module imports cannot bypass the public API. See <a href="#module-visibility">Module visibility</a>.</p><h3>Content-file imports</h3><p>Beandown and plain Markdown content files are imported with the same extensionless syntax. Their import shape is covered by the Beandown and Plain Markdown pages, not here.</p><h3>Related concepts</h3><ul><li>For grouped and namespace imports see <a href="#grouped-and-namespace-imports">Grouped and namespace imports</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li><li>For project-local source-backed packages see <a href="#project-local-packages">Project-local packages</a>.</li><li>For package origin and backing see <a href="#package-origins-and-backing">Package origins and backing</a>.</li></ul>
+        <p>Import paths resolve declaration surfaces, not file bytes. Every source import resolves from the importing file&#39;s owning module root, not the file&#39;s physical directory.</p><h3>Path families</h3><ul><li><strong>Module-root-relative</strong>: imports resolve from the importing file&#39;s owning module root. Example: inside <code>src/internal/deep/renderer.moth</code>, <code>import @accounts { Account }</code> resolves to <code>src/accounts.moth</code>, not <code>src/internal/deep/accounts.moth</code>.</li><li><strong>Child module</strong>: reaching a child normal module ends filesystem traversal and exposes only its <code>export:</code> facade. Imports cannot bypass that facade with paths such as <code>@child/internal</code>.</li><li><strong>Support package</strong>: scoped <code>+*.moth</code> support packages are imported by package name. Consumers do not encode ancestor paths.</li><li><strong>Core binding-backed package</strong>: <code>@core/math</code>, <code>@core/text</code> and current peers are registered by the builder.</li><li><strong>Builder source-backed package</strong>: <code>@html</code> is a builder-provided source-backed package.</li><li><strong>Builder binding-backed package</strong>: <code>@web/canvas</code> is a builder-owned runtime package.</li><li><strong>JavaScript file</strong>: project-local annotated JavaScript files require <code>.js</code> and a builder external import provider. The <code>.js</code> extension is kept.</li></ul><h3>Resolution rules</h3><ul><li><code>@./...</code> has no supported meaning.</li><li>Parent components and <code>..</code> are invalid.</li><li>Paths may traverse ordinary unrooted directories owned by the same module.</li><li><code>.moth</code>, <code>.mtf</code> and <code>.md</code> source imports are extensionless.</li><li>Direct <code>.js</code> imports keep the <code>.js</code> extension.</li><li>Scoped support packages are injected by package name, not physical ancestor paths.</li><li>Core and builder runtime packages use their registered package path.</li><li>Specific symbol imports use grouped syntax. Direct symbol-path imports such as <code>import @core/math/sin</code> are rejected.</li><li>Direct imports of <code>#*.moth</code>, <code>+*.moth</code> and <code>config.moth</code> are rejected.</li><li>Moth template <code>.mtf</code> and plain Markdown <code>.md</code> content files both expose generated <code>content</code> constants. See <a href="../moth-templates/#content-imports">Moth template content imports</a> and <a href="../markdown/#markdown-imports">Markdown imports</a>.</li><li>The imported public surface of a module root comes from its <code>export:</code> block. See <a href="#module-visibility">Module visibility</a>.</li></ul><h3>Same-module imports</h3><p>Files in the same module can import ordinary sibling source files directly. Same-module imports bypass the public-surface boundary. See <a href="#module-visibility">Module visibility</a>.</p><h3>Cross-module imports</h3><p>Imports that cross into another module boundary can only access what that module&#39;s <code>export:</code> block makes public. Cross-module imports cannot bypass the public API. See <a href="#module-visibility">Module visibility</a>.</p><h3>Content-file imports</h3><p>Moth template and plain Markdown content files are imported with the same extensionless syntax. Their import shape is covered by the Moth template and Plain Markdown pages, not here.</p><h3>Related concepts</h3><ul><li>For grouped and namespace imports see <a href="#grouped-and-namespace-imports">Grouped and namespace imports</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li><li>For project-local source-backed packages see <a href="#project-local-packages">Project-local packages</a>.</li><li>For package origin and backing see <a href="#package-origins-and-backing">Package origins and backing</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -779,38 +779,38 @@ body {
 
 
             <p>Grouped imports bring multiple symbols. Namespace imports bring a whole surface.</p><h3>Two colliding render symbols</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>blog <span class='bst-code-parenthesis'>{</span> render <span class='bst-code-keyword'>as</span> render_blog <span class='bst-code-parenthesis'>}</span>
-    import <span class='bst-code-operator'>@</span>docs <span class='bst-code-parenthesis'>{</span> render <span class='bst-code-keyword'>as</span> render_docs <span class='bst-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>blog <span class='moth-code-parenthesis'>{</span> render <span class='moth-code-keyword'>as</span> render_blog <span class='moth-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>docs <span class='moth-code-parenthesis'>{</span> render <span class='moth-code-keyword'>as</span> render_docs <span class='moth-code-parenthesis'>}</span>
     </code></pre><p>Two modules both export <code>render</code>. Aliases keep them apart.</p><h3>A namespace alias</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>core<span class='bst-code-operator'>/</span>math <span class='bst-code-keyword'>as</span> math
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-keyword'>as</span> math
 
-    result <span class='bst-code-operator'>=</span> math.sin<span class='bst-code-parenthesis'>(</span><span class='bst-code-number'>1.0</span><span class='bst-code-parenthesis'>)</span>
+    result <span class='moth-code-operator'>=</span> math.sin<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1.0</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><p><code>math</code> gives you field access to the whole math package.</p><h3>Remember</h3><ul><li>Use <code>as</code> to rename individual symbols.</li><li>Namespace imports are field-access-only, not first-class values.</li><li>An import alias must not hide an existing name.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>Grouped and namespace imports provide compact syntax for importing multiple symbols or a whole declaration surface.</p><h3>Grouped symbol imports</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>core<span class='bst-code-operator'>/</span>math <span class='bst-code-parenthesis'>{</span>sin, cos, <span class='bst-code-struct'>PI</span><span class='bst-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>sin, cos, <span class='moth-code-struct'>PI</span><span class='moth-code-parenthesis'>}</span>
 
-    import <span class='bst-code-operator'>@</span>components <span class='bst-code-parenthesis'>{</span>
-        render <span class='bst-code-keyword'>as</span> render_component,
-        <span class='bst-code-struct'>Button</span> <span class='bst-code-keyword'>as</span> <span class='bst-code-struct'>UiButton,</span>
-        <span class='bst-code-struct'>Card,</span>
-    <span class='bst-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>
+        render <span class='moth-code-keyword'>as</span> render_component,
+        <span class='moth-code-struct'>Button</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>UiButton,</span>
+        <span class='moth-code-struct'>Card,</span>
+    <span class='moth-code-parenthesis'>}</span>
     </code></pre><p>Each entry in a grouped import brings one symbol into the file. <code>as</code> creates a file-local alias. Grouped imports expand into individual symbol imports.</p><h3>Namespace imports</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>core<span class='bst-code-operator'>/</span>math
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math
 
-    angle <span class='bst-code-operator'>=</span> math.PI
-    result <span class='bst-code-operator'>=</span> math.sin<span class='bst-code-parenthesis'>(</span>angle<span class='bst-code-parenthesis'>)</span>
+    angle <span class='moth-code-operator'>=</span> math.PI
+    result <span class='moth-code-operator'>=</span> math.sin<span class='moth-code-parenthesis'>(</span>angle<span class='moth-code-parenthesis'>)</span>
     </code></pre><p>A namespace import brings the whole surface as a field-access-only record. Use <code>math.sin(1.0)</code> for values and <code>math.PI</code> for constants, but do not pass the namespace record itself as a value.</p><h3>Namespace alias</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>core<span class='bst-code-operator'>/</span>math <span class='bst-code-keyword'>as</span> math
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-keyword'>as</span> math
 
-    import <span class='bst-code-operator'>@</span>vendor<span class='bst-code-operator'>/</span>drawing.js <span class='bst-code-keyword'>as</span> drawing
+    import <span class='moth-code-operator'>@</span>vendor<span class='moth-code-operator'>/</span>drawing.js <span class='moth-code-keyword'>as</span> drawing
     </code></pre><p>A namespace alias gives the namespace a local name. This is the standard form for external package namespaces.</p><h3>Grouped symbol alias</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>core<span class='bst-code-operator'>/</span>math <span class='bst-code-parenthesis'>{</span>
-        sin <span class='bst-code-keyword'>as</span> sine,
-        <span class='bst-code-struct'>PI</span> <span class='bst-code-keyword'>as</span> pi,
-    <span class='bst-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>
+        sin <span class='moth-code-keyword'>as</span> sine,
+        <span class='moth-code-struct'>PI</span> <span class='moth-code-keyword'>as</span> pi,
+    <span class='moth-code-parenthesis'>}</span>
     </code></pre><p>Each entry can have its own alias. There is no trailing group-level alias.</p><h3>Importable symbol categories</h3><ul><li>functions</li><li>structs</li><li>choices</li><li>type aliases</li><li>traits</li><li>compile-time constants</li></ul><p>Runtime top-level bindings are not importable. See <a href="#module-visibility">Module visibility</a>.</p><h3>Namespaced access</h3><p>Source and module namespace imports are shallow. External package namespaces can expose nested package-local symbols. Use field-access syntax on the namespace record, but do not pass the namespace itself as a first-class value. Source-authored receiver methods are called through receiver-call syntax rather than as namespace fields.</p><h3>Imports are compile-time declarations</h3><p>Import records are not first-class runtime values. They exist at compile time to make names visible.</p><h3>Collision and no-shadowing policy</h3><ul><li>Ordinary import aliases are file-local.</li><li>An import alias cannot hide an existing visible name.</li><li>If <code>render</code> is already declared in the file, <code>import @other { render }</code> is an error. Pick a different local name.</li><li>Leading-case mismatches warn. For example, importing a struct with a lowercase alias or a function with an uppercase alias triggers a warning.</li></ul><h3>No trailing alias for a group</h3><p>A grouped import cannot have a trailing group-level alias. Each entry gets its own alias individually.</p><h3>Related concepts</h3><ul><li>For import alias rules see <a href="../aliases/#import-aliases">Import aliases</a>.</li><li>For import path resolution see <a href="#import-paths">Import paths</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li></ul>
     </div>
     </fieldset></section>
@@ -864,39 +864,39 @@ body {
 
 
             <p>Declarations are private to their module. The export block makes them public.</p><h3>An internal helper file</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- lib/components/utils.bst</span>
-    internal_value <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>42</span>
+    <span class='moth-code-comment'>-- lib/components/utils.moth</span>
+    internal_value <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
     </code></pre><h3>The root module uses it directly</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- lib/components/#api.bst</span>
-    import <span class='bst-code-operator'>@</span>utils <span class='bst-code-parenthesis'>{</span>internal_value<span class='bst-code-parenthesis'>}</span>
+    <span class='moth-code-comment'>-- lib/components/#api.moth</span>
+    import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
 
-    export<span class='bst-code-operator'>:</span>
-        import <span class='bst-code-operator'>@</span>utils <span class='bst-code-parenthesis'>{</span>internal_value<span class='bst-code-parenthesis'>}</span>
+    export<span class='moth-code-operator'>:</span>
+        import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
     ;
     </code></pre><p>Same-module imports see everything. No export block needed.</p><h3>Other modules need the export block</h3><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- src/#site.bst</span>
-    import <span class='bst-code-operator'>@</span>components <span class='bst-code-parenthesis'>{</span>internal_value<span class='bst-code-parenthesis'>}</span>
+    <span class='moth-code-comment'>-- src/#site.moth</span>
+    import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
     </code></pre><p>Now the project module can import <code>internal_value</code> through the <code>@components</code> public surface.</p><h3>Remember</h3><ul><li>Same module: all declarations are visible.</li><li>Cross module: only exported declarations are visible.</li><li>Runtime bindings are never importable.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Module visibility controls which declarations cross a module boundary. Normal declarations are private to their module. The <code>export:</code> block marks what other modules can see.</p><h3>Same-module internal visibility</h3><p>Files within the same module can import each other&#39;s declarations directly. A module is defined by its root directory. All <code>.bst</code> files in that directory (and its subdirectories that do not have their own root) belong to the same module.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- lib/components/utils.bst</span>
-    internal_value <span class='bst-code-operator'>#</span><span class='bst-code-operator'>=</span> <span class='bst-code-number'>42</span>
-    internal_fn <span class='bst-code-operator'>|</span><span class='bst-code-operator'>|</span> <span class='bst-code-operator'>-</span><span class='bst-code-operator'>&gt;</span> <span class='bst-code-type'>String</span><span class='bst-code-operator'>:</span>
-        <span class='bst-code-keyword'>return</span> <span class='bst-code-string'>&quot;internal&quot;</span>
+        <p>Module visibility controls which declarations cross a module boundary. Normal declarations are private to their module. The <code>export:</code> block marks what other modules can see.</p><h3>Same-module internal visibility</h3><p>Files within the same module can import each other&#39;s declarations directly. A module is defined by its root directory. All <code>.moth</code> files in that directory (and its subdirectories that do not have their own root) belong to the same module.</p><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- lib/components/utils.moth</span>
+    internal_value <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+    internal_fn <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;internal&quot;</span>
     ;
     </code></pre><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- lib/components/#api.bst (same module)</span>
-    import <span class='bst-code-operator'>@</span>utils <span class='bst-code-parenthesis'>{</span>internal_value, internal_fn<span class='bst-code-parenthesis'>}</span>
+    <span class='moth-code-comment'>-- lib/components/#api.moth (same module)</span>
+    import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value, internal_fn<span class='moth-code-parenthesis'>}</span>
 
-    export<span class='bst-code-operator'>:</span>
-        import <span class='bst-code-operator'>@</span>utils <span class='bst-code-parenthesis'>{</span>internal_value<span class='bst-code-parenthesis'>}</span>
+    export<span class='moth-code-operator'>:</span>
+        import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
     ;
     </code></pre><p>Same-module imports bypass the public-surface boundary. The importing file sees all declarations in the target file.</p><h3>Cross-module public boundary</h3><p>A different module can only access declarations marked public by the module root&#39;s <code>export:</code> block. Cross-module imports cannot bypass the public API.</p><pre style=""><code class='codeblock'>
-    <span class='bst-code-comment'>-- src/#site.bst (project module)</span>
-    import <span class='bst-code-operator'>@</span>components <span class='bst-code-parenthesis'>{</span>internal_value<span class='bst-code-parenthesis'>}</span>
-    </code></pre><p>The project module can import <code>internal_value</code> through the package root&#39;s public surface. It cannot bypass that boundary with <code>import @components/utils {internal_value}</code>. Without the root export block, the public import is rejected with <code>BST-IMPORT-0011</code>.</p><h3>Root-private declarations</h3><p>Declarations in the module root file outside the <code>export:</code> block are private to the root. They are not available to other modules even through the public surface.</p><h3>Direct root import rejection</h3><p>Direct imports of hash-root files are rejected. Import the module through its directory path, not through the root filename.</p><h3>Runtime top-level bindings not importable</h3><p>Runtime top-level bindings are start-body code. They are not importable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are importable.</p><h3>Receiver method visibility</h3><p>Receiver methods are visible through a module&#39;s public surface when the module exports the receiver type&#39;s source surface. A type alias in the export block does not automatically re-export private implementation methods. Export the receiver type&#39;s source surface or a wrapper explicitly.</p><h3>Import cycles</h3><p>Circular imports between files in the same module are accepted when the declarations resolve in dependency order. Circular constant dependencies are rejected with <code>BST-RULE-0033</code>.</p><h3>No public access through filesystem tricks</h3><p>There is no way to bypass the module public-surface boundary by choosing a different import path. All cross-module imports go through the same resolution and visibility check.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For re-export syntax see <a href="#public-reexports">Public re-exports</a>.</li></ul>
+    <span class='moth-code-comment'>-- src/#site.moth (project module)</span>
+    import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
+    </code></pre><p>The project module can import <code>internal_value</code> through the package root&#39;s public surface. It cannot bypass that boundary with <code>import @components/utils {internal_value}</code>. Without the root export block, the public import is rejected with <code>MOTH-IMPORT-0011</code>.</p><h3>Root-private declarations</h3><p>Declarations in the module root file outside the <code>export:</code> block are private to the root. They are not available to other modules even through the public surface.</p><h3>Direct root import rejection</h3><p>Direct imports of hash-root files are rejected. Import the module through its directory path, not through the root filename.</p><h3>Runtime top-level bindings not importable</h3><p>Runtime top-level bindings are start-body code. They are not importable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are importable.</p><h3>Receiver method visibility</h3><p>Receiver methods are visible through a module&#39;s public surface when the module exports the receiver type&#39;s source surface. A type alias in the export block does not automatically re-export private implementation methods. Export the receiver type&#39;s source surface or a wrapper explicitly.</p><h3>Import cycles</h3><p>Circular imports between files in the same module are accepted when the declarations resolve in dependency order. Circular constant dependencies are rejected with <code>MOTH-RULE-0033</code>.</p><h3>No public access through filesystem tricks</h3><p>There is no way to bypass the module public-surface boundary by choosing a different import path. All cross-module imports go through the same resolution and visibility check.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For re-export syntax see <a href="#public-reexports">Public re-exports</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -949,31 +949,31 @@ body {
 
 
             <p>The export block can re-export imported symbols so other modules can use them.</p><h3>A public re-export</h3><pre style=""><code class='codeblock'>
-    export<span class='bst-code-operator'>:</span>
-        import <span class='bst-code-operator'>@</span>components<span class='bst-code-operator'>/</span>card <span class='bst-code-parenthesis'>{</span>
-            <span class='bst-code-struct'>CardData</span> <span class='bst-code-keyword'>as</span> <span class='bst-code-struct'>Card,</span>
+    export<span class='moth-code-operator'>:</span>
+        import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span>
+            <span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Card,</span>
             render_card,
-        <span class='bst-code-parenthesis'>}</span>
+        <span class='moth-code-parenthesis'>}</span>
     ;
     </code></pre><p>Other modules can now import <code>Card</code> and <code>render_card</code> through the module&#39;s public surface. <code>CardData</code> is not also exported unless the block lists it separately.</p><h3>Local alias is not public</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>components<span class='bst-code-operator'>/</span>card <span class='bst-code-parenthesis'>{</span><span class='bst-code-struct'>CardData</span> <span class='bst-code-keyword'>as</span> <span class='bst-code-struct'>LocalCard</span><span class='bst-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>LocalCard</span><span class='moth-code-parenthesis'>}</span>
     </code></pre><p><code>LocalCard</code> is file-local. It is not public. Only imports inside the <code>export:</code> block become public re-exports.</p><h3>Remember</h3><ul><li>Re-exports go inside the <code>export:</code> block.</li><li>The <code>as</code> alias defines the public API name.</li><li>Legacy inline <code>export</code> syntax is rejected.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
         <p>The <code>export:</code> block can re-export grouped imports from other files, creating a public API surface that exposes imported declarations under controlled names.</p><h3>Grouped re-export</h3><pre style=""><code class='codeblock'>
-    export<span class='bst-code-operator'>:</span>
-        import <span class='bst-code-operator'>@</span>components<span class='bst-code-operator'>/</span>card <span class='bst-code-parenthesis'>{</span>
-            <span class='bst-code-struct'>CardData</span> <span class='bst-code-keyword'>as</span> <span class='bst-code-struct'>Card,</span>
+    export<span class='moth-code-operator'>:</span>
+        import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span>
+            <span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Card,</span>
             render_card,
-        <span class='bst-code-parenthesis'>}</span>
+        <span class='moth-code-parenthesis'>}</span>
 
-        import <span class='bst-code-operator'>@</span>core<span class='bst-code-operator'>/</span>math <span class='bst-code-parenthesis'>{</span>
-            <span class='bst-code-struct'>PI,</span>
+        import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>
+            <span class='moth-code-struct'>PI,</span>
             sin,
-        <span class='bst-code-parenthesis'>}</span>
+        <span class='moth-code-parenthesis'>}</span>
     ;
-    </code></pre><p><code>Card</code>, <code>render_card</code>, <code>PI</code> and <code>sin</code> become accessible to cross-module imports. A grouped alias inside <code>export:</code> becomes the public name. The original <code>CardData</code> name is not also exported unless it is listed separately.</p><h3>Renamed public re-export</h3><p>The <code>as</code> alias inside an export-block re-export defines the public API name. The original source name is what the module imports privately. The alias is what other modules see when importing the module&#39;s public surface.</p><h3>Exported imported types, constants and functions</h3><p>Any importable declaration can be re-exported: functions, structs, choices, type aliases, traits and compile-time constants.</p><h3>Re-export does not make local import alias automatically public</h3><p>A private <code>import @path { Symbol as LocalName }</code> outside the export block creates a file-local alias. It does not become public. Only an <code>import</code> inside the <code>export:</code> block creates a public re-export.</p><h3>Public name collisions</h3><p>Public names in the export block must not collide with each other. Duplicate public names are rejected.</p><h3>Invalid unknown or private targets</h3><p>Re-exporting a symbol that does not exist in the target file is rejected. Re-exporting a private declaration that is not visible in the target file is rejected.</p><h3>No legacy inline export syntax</h3><p>Legacy inline <code>export</code> syntax (without the <code>:</code> block delimiter) is rejected with <code>BST-SYNTAX-0001</code>. The strict <code>export:</code> block is the only public API marker. See <a href="../project-structure/#public-api">Public API</a> for the full export-block rules.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li><li>For import alias rules see <a href="../aliases/#import-aliases">Import aliases</a>.</li></ul>
+    </code></pre><p><code>Card</code>, <code>render_card</code>, <code>PI</code> and <code>sin</code> become accessible to cross-module imports. A grouped alias inside <code>export:</code> becomes the public name. The original <code>CardData</code> name is not also exported unless it is listed separately.</p><h3>Renamed public re-export</h3><p>The <code>as</code> alias inside an export-block re-export defines the public API name. The original source name is what the module imports privately. The alias is what other modules see when importing the module&#39;s public surface.</p><h3>Exported imported types, constants and functions</h3><p>Any importable declaration can be re-exported: functions, structs, choices, type aliases, traits and compile-time constants.</p><h3>Re-export does not make local import alias automatically public</h3><p>A private <code>import @path { Symbol as LocalName }</code> outside the export block creates a file-local alias. It does not become public. Only an <code>import</code> inside the <code>export:</code> block creates a public re-export.</p><h3>Public name collisions</h3><p>Public names in the export block must not collide with each other. Duplicate public names are rejected.</p><h3>Invalid unknown or private targets</h3><p>Re-exporting a symbol that does not exist in the target file is rejected. Re-exporting a private declaration that is not visible in the target file is rejected.</p><h3>No legacy inline export syntax</h3><p>Legacy inline <code>export</code> syntax (without the <code>:</code> block delimiter) is rejected with <code>MOTH-SYNTAX-0001</code>. The strict <code>export:</code> block is the only public API marker. See <a href="../project-structure/#public-api">Public API</a> for the full export-block rules.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li><li>For import alias rules see <a href="../aliases/#import-aliases">Import aliases</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -1025,33 +1025,33 @@ body {
 
 
 
-            <p>Scoped support packages are <code>+*.bst</code> roots in the project source tree. The containing directory supplies the package name.</p><h3>A simple support package</h3><pre style=""><code class='codeblock'>
+            <p>Scoped support packages are <code>+*.moth</code> roots in the project source tree. The containing directory supplies the package name.</p><h3>A simple support package</h3><pre style=""><code class='codeblock'>
         src/
-        ├── #site.bst
+        ├── #site.moth
         └── blog/
-            ├── +package.bst
-            └── helpers/dates.bst
-    </code></pre><p><code>+package.bst</code> makes <code>@blog</code> a scoped support package visible to <code>#site</code> and its sibling modules.</p><h3>Importing from a package</h3><pre style=""><code class='codeblock'>
-    import <span class='bst-code-operator'>@</span>blog <span class='bst-code-parenthesis'>{</span>post_title<span class='bst-code-parenthesis'>}</span>
-    </code></pre><p><code>@blog</code> resolves to the <code>blog</code> directory&#39;s support root. The package&#39;s public surface comes from its <code>export:</code> block.</p><h3>Remember</h3><ul><li><code>+package.bst</code> in a directory creates a scoped support package.</li><li>The package is visible to its nearest ancestor normal module and siblings.</li><li>Internal files are hidden unless re-exported.</li><li>Imported package roots do not become HTML routes.</li></ul>
+            ├── +package.moth
+            └── helpers/dates.moth
+    </code></pre><p><code>+package.moth</code> makes <code>@blog</code> a scoped support package visible to <code>#site</code> and its sibling modules.</p><h3>Importing from a package</h3><pre style=""><code class='codeblock'>
+    import <span class='moth-code-operator'>@</span>blog <span class='moth-code-parenthesis'>{</span>post_title<span class='moth-code-parenthesis'>}</span>
+    </code></pre><p><code>@blog</code> resolves to the <code>blog</code> directory&#39;s support root. The package&#39;s public surface comes from its <code>export:</code> block.</p><h3>Remember</h3><ul><li><code>+package.moth</code> in a directory creates a scoped support package.</li><li>The package is visible to its nearest ancestor normal module and siblings.</li><li>Internal files are hidden unless re-exported.</li><li>Imported package roots do not become HTML routes.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Project-local source-backed packages are scoped <code>+*.bst</code> support packages discovered structurally from the project source tree. No config folder scanning or <code>package_folders</code> setting exists.</p><h3>Directory structure</h3><pre style=""><code class='codeblock'>
+        <p>Project-local source-backed packages are scoped <code>+*.moth</code> support packages discovered structurally from the project source tree. No config folder scanning or <code>package_folders</code> setting exists.</p><h3>Directory structure</h3><pre style=""><code class='codeblock'>
         project-root/
-        ├── config.bst
+        ├── config.moth
         ├── src/
-        │   ├── #site.bst
+        │   ├── #site.moth
         │   ├── markdown/
-        │   │   ├── +package.bst
+        │   │   ├── +package.moth
         │   │   ├── parser/
-        │   │   │   └── #parser.bst
+        │   │   │   └── #parser.moth
         │   │   └── rendering/
-        │   │       └── #rendering.bst
+        │   │       └── #rendering.moth
         │   └── pages/
-        │       └── #pages.bst
-        └── +package.bst
-    </code></pre><p>The <code>markdown</code> directory contains a <code>+package.bst</code> root, making <code>@markdown</code> a scoped support package visible to <code>#site</code>, <code>#pages</code> and their descendants.</p><h3>Scoped visibility</h3><p>For a support package <code>S</code> whose nearest ancestor normal module is <code>P</code>:</p><ul><li><code>S</code> is visible to <code>P</code></li><li><code>S</code> is visible to normal sibling modules of <code>S</code> and their descendants</li><li><code>S</code> is not visible above <code>P</code></li><li><code>S</code> is not visible outside <code>P</code>&#39;s subtree</li><li><code>S</code> is not visible inside its own private implementation subtree</li><li>another support package in the same owner scope cannot import <code>S</code></li></ul><h3>Public surface</h3><p>Outside importers can only see declarations and grouped re-exports marked public by the support root&#39;s <code>export:</code> block. Internal implementation files are hidden unless the root re-exports them.</p><h3>Private subtrees</h3><p>The support facade may import ordinary files it owns, any descendant module in its private subtree, support packages from a strictly outer scope and registered packages. It may not import its parent, normal sibling consumers or same-scope support siblings.</p><p>Consumers see only the support facade&#39;s <code>export:</code> surface. They cannot address <code>@markdown/parser</code> or another implementation path.</p><h3>Imported package roots do not produce routes</h3><p>A support package root is imported rather than activated as an HTML route. Its top-level runtime body and page fragments remain inactive in the consuming project. It exports declarations but produces no HTML artifact. See <a href="../project-structure/#html-routing-and-artifacts">HTML routing and artifacts</a>.</p><h3>Origin and backing are separate</h3><p>Scoped <code>+*.bst</code> packages are ProjectLocal packages backed by Beanstalk source. <code>@html</code> is also source-backed but has Builder origin. <code>@core/math</code> and <code>@web/canvas</code> are binding-backed packages with Core and Builder origins respectively. See <a href="#package-origins-and-backing">Package origins and backing</a>.</p><h3>Related concepts</h3><ul><li>For module root rules see <a href="../project-structure/#module-roots">Module roots</a>.</li><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For import path resolution see <a href="#import-paths">Import paths</a>.</li></ul>
+        │       └── #pages.moth
+        └── +package.moth
+    </code></pre><p>The <code>markdown</code> directory contains a <code>+package.moth</code> root, making <code>@markdown</code> a scoped support package visible to <code>#site</code>, <code>#pages</code> and their descendants.</p><h3>Scoped visibility</h3><p>For a support package <code>S</code> whose nearest ancestor normal module is <code>P</code>:</p><ul><li><code>S</code> is visible to <code>P</code></li><li><code>S</code> is visible to normal sibling modules of <code>S</code> and their descendants</li><li><code>S</code> is not visible above <code>P</code></li><li><code>S</code> is not visible outside <code>P</code>&#39;s subtree</li><li><code>S</code> is not visible inside its own private implementation subtree</li><li>another support package in the same owner scope cannot import <code>S</code></li></ul><h3>Public surface</h3><p>Outside importers can only see declarations and grouped re-exports marked public by the support root&#39;s <code>export:</code> block. Internal implementation files are hidden unless the root re-exports them.</p><h3>Private subtrees</h3><p>The support facade may import ordinary files it owns, any descendant module in its private subtree, support packages from a strictly outer scope and registered packages. It may not import its parent, normal sibling consumers or same-scope support siblings.</p><p>Consumers see only the support facade&#39;s <code>export:</code> surface. They cannot address <code>@markdown/parser</code> or another implementation path.</p><h3>Imported package roots do not produce routes</h3><p>A support package root is imported rather than activated as an HTML route. Its top-level runtime body and page fragments remain inactive in the consuming project. It exports declarations but produces no HTML artifact. See <a href="../project-structure/#html-routing-and-artifacts">HTML routing and artifacts</a>.</p><h3>Origin and backing are separate</h3><p>Scoped <code>+*.moth</code> packages are ProjectLocal packages backed by Moth source. <code>@html</code> is also source-backed but has Builder origin. <code>@core/math</code> and <code>@web/canvas</code> are binding-backed packages with Core and Builder origins respectively. See <a href="#package-origins-and-backing">Package origins and backing</a>.</p><h3>Related concepts</h3><ul><li>For module root rules see <a href="../project-structure/#module-roots">Module roots</a>.</li><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For import path resolution see <a href="#import-paths">Import paths</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -1103,11 +1103,11 @@ body {
 
 
 
-            <p>Packages can differ in two ways: who provides them and what backs their implementation.</p><h3>Origin</h3><ul><li>Core packages come from the compiler.</li><li>Builder packages come from the selected project builder.</li><li>ProjectLocal packages come from your project.</li></ul><h3>Backing</h3><ul><li>Source-backed packages contain ordinary Beanstalk modules.</li><li>Binding-backed packages expose typed functions, constants and opaque types implemented outside Beanstalk.</li></ul><p><code>@html</code> is a source-backed Builder package. <code>@core/collections</code> and <code>@core/math</code> are binding-backed Core packages. <code>@web/canvas</code> is a binding-backed Builder package.</p><h3>Remember</h3><ul><li>Origin and backing are separate.</li><li>The prelude is implicit-import policy, not a package kind.</li><li>The builder selects which packages are available.</li><li>No package manager yet. Use <code>lib/</code> for project-local packages.</li></ul>
+            <p>Packages can differ in two ways: who provides them and what backs their implementation.</p><h3>Origin</h3><ul><li>Core packages come from the compiler.</li><li>Builder packages come from the selected project builder.</li><li>ProjectLocal packages come from your project.</li></ul><h3>Backing</h3><ul><li>Source-backed packages contain ordinary Moth modules.</li><li>Binding-backed packages expose typed functions, constants and opaque types implemented outside Moth.</li></ul><p><code>@html</code> is a source-backed Builder package. <code>@core/collections</code> and <code>@core/math</code> are binding-backed Core packages. <code>@web/canvas</code> is a binding-backed Builder package.</p><h3>Remember</h3><ul><li>Origin and backing are separate.</li><li>The prelude is implicit-import policy, not a package kind.</li><li>The builder selects which packages are available.</li><li>No package manager yet. Use <code>lib/</code> for project-local packages.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Every package has two independent classifications: where it comes from and how the compiler obtains its implementation.</p><h3>Package origin</h3><p>Origin describes ownership and distribution:</p><ul><li><strong>Core</strong>: compiler-owned packages such as <code>@core/io</code> and <code>@core/math</code>.</li><li><strong>Builder</strong>: packages selected by a project builder, including <code>@html</code> and <code>@web/canvas</code>.</li><li><strong>ProjectLocal</strong>: scoped <code>+*.bst</code> support packages, the project-root package facade and annotated project-local JavaScript imports.</li><li><strong>Standard</strong> and <strong>Dependency</strong>: reserved for future package-system support.</li></ul><h3>Package backing</h3><p>Backing describes implementation:</p><ul><li><strong>BeanstalkSource</strong>: one or more Beanstalk modules resolved through the source package registry.</li><li><strong>ExternalBinding</strong>: typed functions, constants and opaque types implemented outside Beanstalk.</li></ul><table style="">
+        <p>Every package has two independent classifications: where it comes from and how the compiler obtains its implementation.</p><h3>Package origin</h3><p>Origin describes ownership and distribution:</p><ul><li><strong>Core</strong>: compiler-owned packages such as <code>@core/io</code> and <code>@core/math</code>.</li><li><strong>Builder</strong>: packages selected by a project builder, including <code>@html</code> and <code>@web/canvas</code>.</li><li><strong>ProjectLocal</strong>: scoped <code>+*.moth</code> support packages, the project-root package facade and annotated project-local JavaScript imports.</li><li><strong>Standard</strong> and <strong>Dependency</strong>: reserved for future package-system support.</li></ul><h3>Package backing</h3><p>Backing describes implementation:</p><ul><li><strong>MothSource</strong>: one or more Moth modules resolved through the source package registry.</li><li><strong>ExternalBinding</strong>: typed functions, constants and opaque types implemented outside Moth.</li></ul><table style="">
             
             <tr style="">
                 
@@ -1118,20 +1118,20 @@ body {
 
 
                 <tr style="">
-                <p> <td style=""><p><code>@html</code></p></td>  <td style=""><p> Builder</p></td>  <td style=""><p> BeanstalkSource</p></td></p>
+                <p> <td style=""><p><code>@html</code></p></td>  <td style=""><p> Builder</p></td>  <td style=""><p> MothSource</p></td></p>
             </tr><tr style="">
                 <p> <td style=""><p><code>@core/collections</code>, <code>@core/io</code>, <code>@core/math</code>, <code>@core/text</code>, <code>@core/random</code>, <code>@core/time</code></p></td>  <td style=""><p> Core</p></td>  <td style=""><p> ExternalBinding</p></td></p>
             </tr><tr style="">
                 <p> <td style=""><p><code>@web/canvas</code></p></td>  <td style=""><p> Builder</p></td>  <td style=""><p> ExternalBinding</p></td></p>
             </tr><tr style="">
-                <p> <td style=""><p> Scoped <code>+*.bst</code> support package</p></td>  <td style=""><p> ProjectLocal</p></td>  <td style=""><p> BeanstalkSource</p></td></p>
+                <p> <td style=""><p> Scoped <code>+*.moth</code> support package</p></td>  <td style=""><p> ProjectLocal</p></td>  <td style=""><p> MothSource</p></td></p>
             </tr><tr style="">
-                <p> <td style=""><p> Project-root <code>+*.bst</code> facade</p></td>  <td style=""><p> ProjectLocal</p></td>  <td style=""><p> BeanstalkSource</p></td></p>
+                <p> <td style=""><p> Project-root <code>+*.moth</code> facade</p></td>  <td style=""><p> ProjectLocal</p></td>  <td style=""><p> MothSource</p></td></p>
             </tr><tr style="">
                 <p> <td style=""><p> Annotated project-local <code>.js</code> import</p></td>  <td style=""><p> ProjectLocal</p></td>  <td style=""><p> ExternalBinding</p></td></p>
             </tr>
             
-    </table><p>Origin and backing don&#39;t change import syntax or module visibility. Source-backed packages contain ordinary modules with strict <code>export:</code> public surfaces. Binding-backed packages expose typed external symbols registered by the builder.</p><h3>Prelude is visibility policy</h3><p>The prelude is implicit-import policy, not an origin or backing. It exposes the bare <code>io</code> namespace as an alias to <code>@core/io</code>. Package metadata belongs to <code>@core/io</code>, while bare-name visibility belongs to the prelude.</p><h3>Builder-selected availability</h3><p>The builder decides which packages exist. Unsupported packages are rejected with an unsupported-by-builder diagnostic. The HTML builder opts into <code>@html</code>, <code>@web/canvas</code> and current optional Core packages.</p><h3>Binding-backed package constraints</h3><p>Binding-backed packages expose free functions, constants and opaque types. They don&#39;t expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments, default parameters and reactive parameters are source-function features.</p><p>The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package needs a Wasm lowering before that backend can use it.</p><h3>No package manager yet</h3><p>There is no remote fetching, lockfile or version resolution yet. Use <code>+*.bst</code> support packages for project-local source-backed packages, builder-provided package imports for built-in capabilities and annotated <code>.js</code> wrappers for direct browser integration.</p><h3>Related concepts</h3><ul><li>For project-local packages see <a href="#project-local-packages">Project-local packages</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For Core package API details see <a href="./core">Core packages</a>.</li></ul>
+    </table><p>Origin and backing don&#39;t change import syntax or module visibility. Source-backed packages contain ordinary modules with strict <code>export:</code> public surfaces. Binding-backed packages expose typed external symbols registered by the builder.</p><h3>Prelude is visibility policy</h3><p>The prelude is implicit-import policy, not an origin or backing. It exposes the bare <code>io</code> namespace as an alias to <code>@core/io</code>. Package metadata belongs to <code>@core/io</code>, while bare-name visibility belongs to the prelude.</p><h3>Builder-selected availability</h3><p>The builder decides which packages exist. Unsupported packages are rejected with an unsupported-by-builder diagnostic. The HTML builder opts into <code>@html</code>, <code>@web/canvas</code> and current optional Core packages.</p><h3>Binding-backed package constraints</h3><p>Binding-backed packages expose free functions, constants and opaque types. They don&#39;t expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments, default parameters and reactive parameters are source-function features.</p><p>The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package needs a Wasm lowering before that backend can use it.</p><h3>No package manager yet</h3><p>There is no remote fetching, lockfile or version resolution yet. Use <code>+*.moth</code> support packages for project-local source-backed packages, builder-provided package imports for built-in capabilities and annotated <code>.js</code> wrappers for direct browser integration.</p><h3>Related concepts</h3><ul><li>For project-local packages see <a href="#project-local-packages">Project-local packages</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For Core package API details see <a href="./core">Core packages</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><nav class="doc-pager" aria-label="Language documentation">
@@ -1146,11 +1146,11 @@ body {
 
             <a
                 class="doc-pager__link doc-pager__link--next"
-                href="../beandown/"
+                href="../moth-templates/"
                 rel="next"
             >
                 <span class="doc-pager__direction">Next →</span>
-                <span class="doc-pager__title">Beandown</span>
+                <span class="doc-pager__title">Moth template files</span>
             </a>
 
             
@@ -1159,109 +1159,109 @@ body {
 
     </nav></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -1276,63 +1276,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -1342,36 +1342,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -1384,65 +1384,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -1450,10 +1450,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

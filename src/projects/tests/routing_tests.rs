@@ -64,7 +64,7 @@ fn parser_accepts_valid_overrides() {
     let mut config = Config::new(PathBuf::from("project"));
     config
         .settings
-        .insert(String::from("origin"), String::from("/beanstalk"));
+        .insert(String::from("origin"), String::from("/moth"));
     config.settings.insert(
         String::from("page_url_style"),
         String::from("no_trailing_slash"),
@@ -76,7 +76,7 @@ fn parser_accepts_valid_overrides() {
     let mut string_table = StringTable::new();
     let parsed =
         parse_html_site_config(&config, &mut string_table).expect("valid settings should parse");
-    assert_eq!(parsed.origin, "/beanstalk");
+    assert_eq!(parsed.origin, "/moth");
     assert_eq!(parsed.page_url_style, PageUrlStyle::NoTrailingSlash);
     assert!(!parsed.redirect_index_html);
 }
@@ -89,14 +89,14 @@ fn parser_rejects_invalid_origin() {
     // No leading slash.
     config
         .settings
-        .insert(String::from("origin"), String::from("beanstalk"));
-    assert_origin_value_rejection(&config, &mut string_table, "beanstalk");
+        .insert(String::from("origin"), String::from("moth"));
+    assert_origin_value_rejection(&config, &mut string_table, "moth");
 
     // Trailing slash on a non-root prefix.
     config
         .settings
-        .insert(String::from("origin"), String::from("/beanstalk/"));
-    assert_origin_value_rejection(&config, &mut string_table, "/beanstalk/");
+        .insert(String::from("origin"), String::from("/moth/"));
+    assert_origin_value_rejection(&config, &mut string_table, "/moth/");
 
     // Empty origin is a separate empty-setting reason.
     config
@@ -191,7 +191,7 @@ fn parser_uses_precise_location_from_setting_locations() {
     let mut string_table = StringTable::new();
     let precise_location = SourceLocation::new(
         InternedPath::try_from_filesystem_path(
-            PathBuf::from("project/config.bst").as_path(),
+            PathBuf::from("project/config.moth").as_path(),
             &mut string_table,
         )
         .expect("test path should be UTF-8"),
@@ -227,31 +227,31 @@ fn parser_falls_back_to_file_location_when_key_not_in_setting_locations() {
     let diagnostic = error.diagnostic().expect("config error should be typed");
     assert_eq!(
         diagnostic.primary_location.scope.to_path_buf(&string_table),
-        PathBuf::from("project/config.bst")
+        PathBuf::from("project/config.moth")
     );
 }
 
 #[test]
 fn prefix_origin_works() {
     assert_eq!(prefix_origin("/", "/docs/"), "/docs/");
-    assert_eq!(prefix_origin("/beanstalk", "/docs/"), "/beanstalk/docs/");
-    assert_eq!(prefix_origin("/beanstalk", "/"), "/beanstalk/");
+    assert_eq!(prefix_origin("/moth", "/docs/"), "/moth/docs/");
+    assert_eq!(prefix_origin("/moth", "/"), "/moth/");
 }
 
 #[test]
 fn strip_origin_prefix_works() {
     assert_eq!(
-        strip_origin_prefix("/beanstalk/docs/", "/beanstalk"),
+        strip_origin_prefix("/moth/docs/", "/moth"),
         Some(String::from("/docs/"))
     );
     assert_eq!(
-        strip_origin_prefix("/beanstalk/", "/beanstalk"),
+        strip_origin_prefix("/moth/", "/moth"),
         Some(String::from("/"))
     );
     assert_eq!(
-        strip_origin_prefix("/beanstalk", "/beanstalk"),
+        strip_origin_prefix("/moth", "/moth"),
         Some(String::from("/"))
     );
-    assert_eq!(strip_origin_prefix("/docs/", "/beanstalk"), None);
-    assert_eq!(strip_origin_prefix("/beanstalkish/", "/beanstalk"), None);
+    assert_eq!(strip_origin_prefix("/docs/", "/moth"), None);
+    assert_eq!(strip_origin_prefix("/mothish/", "/moth"), None);
 }

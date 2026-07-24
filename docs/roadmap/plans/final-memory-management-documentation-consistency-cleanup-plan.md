@@ -1,11 +1,11 @@
 # Final Memory-Management Documentation Consistency Cleanup Plan
 
 **Status:** complete  
-**Repository:** `nyejames/beanstalk`  
+**Repository:** `nyejames/moth`  
 **Baseline reviewed:** commit `d45244f58b662e8d58833cd4a77f1c2db0e8e31c`  
 **Change class:** documentation-only  
 **Primary objective:** remove the final cross-document inconsistencies after the memory-management authority migration and follow-up correction  
-**Required final gate:** `bean build docs --release` or `cargo run --quiet -- build docs --release`  
+**Required final gate:** `moth build docs --release` or `cargo run --quiet -- build docs --release`  
 **Out of scope:** Rust code, tests, fixtures, manifests, compiler behaviour, backend behaviour, runtime behaviour and new semantic design  
 
 ## Current state
@@ -22,8 +22,8 @@ RELEVANT_CONTEXT_NOW:
 ACCEPTANCE_CRITERIA:
 - all phase acceptance criteria satisfied
 VALIDATION_STATE:
-- `bean check docs`: passed
-- `bean build docs --release`: passed; 65 files
+- `moth check docs`: passed
+- `moth build docs --release`: passed; 65 files
 DOCS_IMPACT: memory/compiler/build/language/collections/bindings/canonical-module-plan/progress/roadmap updated; `docs/release/**` regenerated
 BLOCKERS_OR_OPEN_DECISIONS: none
 DELEGATION_DECISION: parent-direct - documentation-only parent-owned work
@@ -96,7 +96,7 @@ Use these terms consistently:
 |---|---|
 | **Fresh result root** | The result root allocation is newly created. It may retain legal references to older allocations. |
 | **Alias result** | The result root is an existing argument, projection, external allocation or another result. |
-| **Independent result graph** | The complete result graph has no mutable sharing or retained Beanstalk reference to pre-existing storage. |
+| **Independent result graph** | The complete result graph has no mutable sharing or retained Moth reference to pre-existing storage. |
 
 Rules:
 
@@ -127,15 +127,15 @@ WIT value-only calls:
 - are non-consuming;
 - lower arguments from shared reads;
 - produce independent component values;
-- lift results into independent Beanstalk result graphs;
-- transfer no Beanstalk alias, lifetime owner, ownership state or destruction responsibility.
+- lift results into independent Moth result graphs;
+- transfer no Moth alias, lifetime owner, ownership state or destruction responsibility.
 
 Restricted host bindings:
 
 - pass ordinary values by value as non-retained inputs;
 - permit mutable host access only to opaque foreign handles;
 - are non-consuming for ordinary host-value crossings;
-- do not use the ordinary Beanstalk ownership ABI to transfer Beanstalk storage.
+- do not use the ordinary Moth ownership ABI to transfer Moth storage.
 
 ### 3.5 Final-use child extraction
 
@@ -301,13 +301,13 @@ docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/
 Replace:
 
 ```markdown
-results are lifted into fresh Beanstalk values
+results are lifted into fresh Moth values
 ```
 
 with:
 
 ```markdown
-results are lifted into independent Beanstalk result graphs
+results are lifted into independent Moth result graphs
 ```
 
 ## 2.2 Language overview WIT wording
@@ -321,13 +321,13 @@ docs/language-overview.md
 Replace:
 
 ```markdown
-results lift into fresh Beanstalk values
+results lift into fresh Moth values
 ```
 
 with:
 
 ```markdown
-results lift into independent Beanstalk result graphs
+results lift into independent Moth result graphs
 ```
 
 ## 2.3 Declared-groups hidden result destinations
@@ -428,7 +428,7 @@ Do not apply `copy` directly to literals, constructor calls or computed expressi
 Run:
 
 ```sh
-rg -n   "\bfresh result\b|\bfresh results\b|fresh-result|fresh Beanstalk|returns fresh storage|result is fresh"   README.md docs index.md
+rg -n   "\bfresh result\b|\bfresh results\b|fresh-result|fresh Moth|returns fresh storage|result is fresh"   README.md docs index.md
 ```
 
 For each hit:
@@ -619,7 +619,7 @@ Mention reactive summaries explicitly if not already covered.
 Immediately after the general parameter-transfer rule, add:
 
 ```markdown
-Closed external boundary profiles override this general rule. WIT value-only calls and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Beanstalk storage through the ordinary Beanstalk ownership ABI.
+Closed external boundary profiles override this general rule. WIT value-only calls and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.
 ```
 
 ## Acceptance criteria
@@ -847,7 +847,7 @@ docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-
 Replace the raw URL with:
 
 ```markdown
-- @https://github.com/nyejames/beanstalk/blob/main/docs/roadmap/plans/grouped-memory-design.md (Grouped memory implementation roadmap): implementation sequencing and deferred investigations
+- @https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/grouped-memory-design.md (Grouped memory implementation roadmap): implementation sequencing and deferred investigations
 ```
 
 ## 7.4 Memory landing page
@@ -911,7 +911,7 @@ Expected: no live design or user-facing occurrences.
 ## 8.2 Freshness
 
 ```sh
-rg -n   "\bfresh result\b|\bfresh results\b|fresh-result|fresh Beanstalk|returns fresh storage|result is fresh"   README.md docs index.md
+rg -n   "\bfresh result\b|\bfresh results\b|fresh-result|fresh Moth|returns fresh storage|result is fresh"   README.md docs index.md
 ```
 
 Review every hit.
@@ -979,7 +979,7 @@ Expected: historical references only; no live authority; file remains absent.
 Run:
 
 ```sh
-bean build docs --release
+moth build docs --release
 ```
 
 Fallback:
@@ -1087,7 +1087,7 @@ Maps own their entry structure. Existing keys and values stored in entries follo
 ### WIT result
 
 ```markdown
-Every result is lifted into an independent Beanstalk result graph.
+Every result is lifted into an independent Moth result graph.
 ```
 
 ### Hidden result destination
@@ -1099,7 +1099,7 @@ Functions whose result root is fresh may allocate that root directly into a call
 ### External transfer override
 
 ```markdown
-Closed external boundary profiles override this general rule. WIT value-only calls and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Beanstalk storage through the ordinary Beanstalk ownership ABI.
+Closed external boundary profiles override this general rule. WIT value-only calls and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.
 ```
 
 ### Dormant root work

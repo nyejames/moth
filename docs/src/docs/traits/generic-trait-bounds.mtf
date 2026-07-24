@@ -1,0 +1,74 @@
+Generic bounds use traits to promise that a generic parameter provides certain behaviour inside the generic declaration.
+
+### Syntax
+
+[codeblock, $code("moth"):
+    DISPLAY_TEXT must:
+        display |This| -> String
+    ;
+
+    render type Item is DISPLAY_TEXT |item Item| -> String:
+        return item.display()
+    ;
+]
+
+### Exact contract
+
+- Generic bounds use `is`, not `must`.
+- `and` adds bounds to one parameter.
+- Commas separate generic parameters.
+- Bounds apply to generic functions, structs and choices.
+- Each concrete argument requires visible reusable evidence.
+- Trait names are static contracts, not concrete type arguments.
+- A bound may enable a unique required receiver call inside the generic declaration.
+- Bound calls resolve statically to concrete source methods.
+- Concrete values still use ordinary visible methods.
+- Conformance does not import methods into scope.
+- Backends do not receive trait objects or runtime evidence tables.
+- `where` syntax is rejected.
+- File-local evidence-backed dispatch outside reusable conformance is outside scope.
+
+### Multiple bounds on one parameter
+
+[codeblock, $code("moth"):
+    NAMED must:
+        name |This| -> String
+    ;
+
+    render_named type Item is DISPLAY_TEXT and NAMED |item Item| -> String:
+        return item.display()
+    ;
+]
+
+### Multiple parameters with bounds
+
+[codeblock, $code("moth"):
+    render_pair type A is DISPLAY_TEXT, B is DISPLAY_TEXT |left A, right B| -> String:
+        return left.display() + right.display()
+    ;
+]
+
+### Evidence must be visible
+
+Concrete calls and instantiations require reusable evidence. User-authored reusable evidence originates from the canonical conformance declared with the same-file target type. Callers may reuse that evidence wherever both the type and trait are visible.
+
+Compiler-owned evidence also exists for the builtin cast table.
+
+[codeblock, $code("moth"):
+    Label = |
+        text String,
+    |
+
+    display |this Label| -> String:
+        return this.text
+    ;
+
+    Label must DISPLAY_TEXT
+
+    value = render(Label("ok"))
+]
+
+### Related concepts
+
+- For conformance see @#conformance (Conformance).
+- For generics see @../generics (Generics).

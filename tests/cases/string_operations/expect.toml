@@ -5,4 +5,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["console.log", "__bs_read"]
+must_contain = ["console.log", "__moth_read"]

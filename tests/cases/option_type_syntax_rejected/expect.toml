@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0057"]
-message_contains = ["`Option of T` is not Beanstalk type syntax", "T?"]
+diagnostic_codes = ["MOTH-RULE-0057"]
+message_contains = ["`Option of T` is not Moth type syntax", "T?"]

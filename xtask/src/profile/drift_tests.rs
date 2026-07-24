@@ -20,7 +20,7 @@ fn test_previous_record() -> ProfileHistoryRecord {
             case_name: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
-            args: vec!["foo.bst".to_string()],
+            args: vec!["foo.moth".to_string()],
             observation_wall_ms: 1000.0,
             sample_count: 500,
             sample_weight: 500.0,
@@ -40,7 +40,7 @@ fn test_previous_record() -> ProfileHistoryRecord {
             }],
             hot_functions: vec![
                 HistoryHotFunction {
-                    name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+                    name: "moth::compiler_frontend::ast::resolve_type".to_string(),
                     bucket_label: "AST".to_string(),
                     inclusive_samples: 400.0,
                     self_samples: 200.0,
@@ -48,7 +48,7 @@ fn test_previous_record() -> ProfileHistoryRecord {
                     self_pct: 20.0,
                 },
                 HistoryHotFunction {
-                    name: "beanstalk::compiler_frontend::tokenizer::tokenize".to_string(),
+                    name: "moth::compiler_frontend::tokenizer::tokenize".to_string(),
                     bucket_label: "Tokenization".to_string(),
                     inclusive_samples: 200.0,
                     self_samples: 100.0,
@@ -68,7 +68,7 @@ fn test_current_increased() -> DriftCaseInput {
     DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![
             BenchmarkMetric {
                 name: "ast_ms".to_string(),
@@ -85,13 +85,13 @@ fn test_current_increased() -> DriftCaseInput {
         }],
         hot_functions: vec![
             DriftHotFunction {
-                name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+                name: "moth::compiler_frontend::ast::resolve_type".to_string(),
                 bucket_label: "AST".to_string(),
                 inclusive_samples: 500.0,
                 inclusive_pct: 50.0,
             },
             DriftHotFunction {
-                name: "beanstalk::compiler_frontend::tokenizer::tokenize".to_string(),
+                name: "moth::compiler_frontend::tokenizer::tokenize".to_string(),
                 bucket_label: "Tokenization".to_string(),
                 inclusive_samples: 160.0,
                 inclusive_pct: 16.0,
@@ -105,7 +105,7 @@ fn test_current_decreased() -> DriftCaseInput {
     DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![
             BenchmarkMetric {
                 name: "ast_ms".to_string(),
@@ -122,13 +122,13 @@ fn test_current_decreased() -> DriftCaseInput {
         }],
         hot_functions: vec![
             DriftHotFunction {
-                name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+                name: "moth::compiler_frontend::ast::resolve_type".to_string(),
                 bucket_label: "AST".to_string(),
                 inclusive_samples: 300.0,
                 inclusive_pct: 30.0,
             },
             DriftHotFunction {
-                name: "beanstalk::compiler_frontend::tokenizer::tokenize".to_string(),
+                name: "moth::compiler_frontend::tokenizer::tokenize".to_string(),
                 bucket_label: "Tokenization".to_string(),
                 inclusive_samples: 200.0,
                 inclusive_pct: 20.0,
@@ -142,7 +142,7 @@ fn test_current_noise() -> DriftCaseInput {
     DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
             name: "ast_ms".to_string(),
             value: 505.0,
@@ -152,7 +152,7 @@ fn test_current_noise() -> DriftCaseInput {
             value: 10050.0,
         }],
         hot_functions: vec![DriftHotFunction {
-            name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+            name: "moth::compiler_frontend::ast::resolve_type".to_string(),
             bucket_label: "AST".to_string(),
             inclusive_samples: 210.0,
             inclusive_pct: 42.0,
@@ -176,7 +176,7 @@ fn significant_function_increase_detected() {
     assert_eq!(report.function_increases.len(), 1);
     assert_eq!(
         report.function_increases[0].function_name,
-        "beanstalk::compiler_frontend::ast::resolve_type"
+        "moth::compiler_frontend::ast::resolve_type"
     );
     assert!(report.function_increases[0].delta_pct > 0.0);
     assert!(!report.function_increases[0].share_only);
@@ -194,7 +194,7 @@ fn significant_function_decrease_detected() {
     assert_eq!(report.function_decreases.len(), 1);
     assert_eq!(
         report.function_decreases[0].function_name,
-        "beanstalk::compiler_frontend::ast::resolve_type"
+        "moth::compiler_frontend::ast::resolve_type"
     );
     assert!(report.function_decreases[0].delta_pct < 0.0);
 }
@@ -229,11 +229,11 @@ fn low_sample_count_function_is_ignored() {
     let current = vec![DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![],
         hot_functions: vec![DriftHotFunction {
-            name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+            name: "moth::compiler_frontend::ast::resolve_type".to_string(),
             bucket_label: "AST".to_string(),
             inclusive_samples: 50.0, // Below 300 threshold
             inclusive_pct: 45.0,
@@ -258,11 +258,11 @@ fn share_only_drift_when_wall_moves_opposite() {
     let current = vec![DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![],
         hot_functions: vec![DriftHotFunction {
-            name: "beanstalk::compiler_frontend::ast::resolve_type".to_string(),
+            name: "moth::compiler_frontend::ast::resolve_type".to_string(),
             bucket_label: "AST".to_string(),
             inclusive_samples: 300.0,
             inclusive_pct: 50.0, // Was 40%, now 50% (+10pp)
@@ -375,7 +375,7 @@ fn significant_counter_increase_detected() {
     let current = vec![DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![BenchmarkMetric {
             name: "token_count".to_string(),
@@ -403,7 +403,7 @@ fn tiny_absolute_counter_is_noise_even_if_percentage_large() {
     let current = vec![DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![BenchmarkMetric {
             name: "tiny_counter".to_string(),
@@ -691,7 +691,7 @@ fn no_comparable_case_produces_empty_report() {
     let current = vec![DriftCaseInput {
         case_name: "nonexistent_case".to_string(),
         command: "check".to_string(),
-        args: vec!["missing.bst".to_string()],
+        args: vec!["missing.moth".to_string()],
         stage_timings: vec![],
         counters: vec![],
         hot_functions: vec![],
@@ -716,7 +716,7 @@ fn function_only_in_current_is_ignored() {
     let current = vec![DriftCaseInput {
         case_name: "check_foo_bst".to_string(),
         command: "check".to_string(),
-        args: vec!["foo.bst".to_string()],
+        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![],
         hot_functions: vec![DriftHotFunction {

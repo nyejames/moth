@@ -1,0 +1,25 @@
+Moth has two kinds of features that aren't available today.
+
+### Deferred: coming later
+
+Some features are planned but not built yet. The compiler knows about them and
+gives a helpful error when you try to use them. Examples include declared memory
+groups and recursive choice types.
+
+### Outside scope: not planned
+
+Other features are intentionally excluded. They don't fit Moth's design
+goals. The compiler rejects them, but the error message won't say "coming soon"
+because they aren't coming.
+
+### Why exclude features?
+
+Moth prefers:
+
+- one clear mechanism over many specialised forms
+- static resolution over runtime dynamism
+- explicit behaviour over implicit magic
+- small surface area over broad feature coverage
+
+When a feature would make the language broader, more implicit or harder to
+reason about locally, Moth says no.

@@ -8,10 +8,10 @@ rendered_output_contains = ["string float demand: 3.5"]
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0064"]
+diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
-code = "BST-RULE-0064"
+code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.runtime_casts"
 
 
@@ -19,16 +19,16 @@ reason = "unsupported_backend_feature.runtime_casts"
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_cast_float(",
+    "function __moth_cast_float(",
 ]
 must_not_contain = [
-    "function __bs_normalize_numeric_text(",
+    "function __moth_normalize_numeric_text(",
 ]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
 must_not_contain = [
-    "function __bs_cast_int(",
-    "function __bs_cast_int_in_range(",
+    "function __moth_cast_int(",
+    "function __moth_cast_int_in_range(",
 ]

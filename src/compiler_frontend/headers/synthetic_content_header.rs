@@ -1,8 +1,8 @@
 //! Shared helper for compiler-generated `content #String` headers.
 //!
 //! WHAT: builds ordinary private `content #String` headers for compiler-generated source assets
-//!       such as Beandown `.bd` and plain Markdown `.md`.
-//! WHY: `.bd` and `.md` both expose a single generated content constant but differ in how their
+//!       such as Moth template `.mtf` and plain Markdown `.md`.
+//! WHY: `.mtf` and `.md` both expose a single generated content constant but differ in how their
 //!      initializer tokens are produced. This helper removes that duplication without changing
 //!      either source kind's output shape.
 //! MUST NOT: render Markdown, tokenize source, parse imports, own source-kind decisions, or

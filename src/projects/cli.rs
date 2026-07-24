@@ -1,4 +1,4 @@
-//! Command-line entrypoints for the Beanstalk toolchain.
+//! Command-line entrypoints for the Moth toolchain.
 //!
 //! This module parses CLI commands and dispatches them into build, dev-server, scaffolding, and
 //! compiler test workflows.
@@ -61,7 +61,7 @@ pub fn start_cli() {
 
     if cli_args[0].starts_with("--") || cli_args[0].starts_with('-') {
         if is_standalone_version_request(cli_args) {
-            println!("bean {}", env!("CARGO_PKG_VERSION"));
+            println!("moth {}", env!("CARGO_PKG_VERSION"));
             return;
         }
 
@@ -564,7 +564,7 @@ fn help_build_flag_entries() -> &'static [&'static str] {
 }
 
 fn print_help() {
-    say!(Green Bold "Beanstalk", Reset " is version ", Blue Bold env!("CARGO_PKG_VERSION"));
+    say!(Green Bold "Moth", Reset " is version ", Blue Bold env!("CARGO_PKG_VERSION"));
 
     say!(Green Bold "\nCommands:");
     say!("  build [path]      - Builds a project");
@@ -596,7 +596,7 @@ fn print_help() {
 
 fn print_build_message(build_result: BuildResult, duration: std::time::Duration) {
     say!(
-        "\n🌱 Built ",
+        "\nBuilt ",
         Blue build_result.project.output_files.len(),
         Reset " files successfully in: ",
         Green Bold #duration,

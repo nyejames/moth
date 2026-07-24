@@ -6,10 +6,10 @@
 
 use crate::projects::routing::prefix_origin;
 
-pub const DEV_CLIENT_MARKER: &str = "<!-- beanstalk-dev-client -->";
+pub const DEV_CLIENT_MARKER: &str = "<!-- moth-dev-client -->";
 
 pub fn dev_client_snippet(origin: &str) -> String {
-    let sse_path = prefix_origin(origin, "/__beanstalk/events");
+    let sse_path = prefix_origin(origin, "/__moth/events");
     format!(
         "\n{DEV_CLIENT_MARKER}\n<script>\n  (() => {{\n    const source = new EventSource('{sse_path}');\n    source.addEventListener('reload', () => window.location.reload());\n  }})();\n</script>\n"
     )

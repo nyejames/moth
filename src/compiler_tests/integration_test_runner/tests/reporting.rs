@@ -32,7 +32,7 @@ fn case(
         contract: contract.map(str::to_owned),
         role,
         backend_id,
-        entry_path: PathBuf::from("input/#page.bst"),
+        entry_path: PathBuf::from("input/#page.moth"),
         flags: Vec::new(),
         expected,
     }
@@ -61,7 +61,7 @@ fn listing_groups_selected_backends_and_retains_case_metadata() {
             ExpectedOutcome::Failure(FailureExpectation {
                 warnings: WarningExpectation::Forbid,
                 message_contains: Vec::new(),
-                diagnostic_codes: vec!["BST-RULE-0001".to_owned()],
+                diagnostic_codes: vec!["MOTH-RULE-0001".to_owned()],
                 diagnostic_assertions: Vec::new(),
                 diagnostic_match: DiagnosticMatchMode::Contains,
                 diagnostic_match_reason: Some("independent recovery".to_owned()),
@@ -76,7 +76,7 @@ fn listing_groups_selected_backends_and_retains_case_metadata() {
             ExpectedOutcome::Failure(FailureExpectation {
                 warnings: WarningExpectation::Forbid,
                 message_contains: Vec::new(),
-                diagnostic_codes: vec!["BST-RULE-0001".to_owned()],
+                diagnostic_codes: vec!["MOTH-RULE-0001".to_owned()],
                 diagnostic_assertions: Vec::new(),
                 diagnostic_match: DiagnosticMatchMode::Contains,
                 diagnostic_match_reason: Some("independent recovery".to_owned()),
@@ -117,12 +117,12 @@ fn inventory_json_groups_backend_metadata_under_one_canonical_case() {
         ExpectedOutcome::Failure(FailureExpectation {
             warnings: WarningExpectation::Forbid,
             message_contains: Vec::new(),
-            diagnostic_codes: vec!["BST-RULE-0001".to_owned()],
+            diagnostic_codes: vec!["MOTH-RULE-0001".to_owned()],
             diagnostic_assertions: vec![DiagnosticAssertion {
-                code: "BST-RULE-0001".to_owned(),
+                code: "MOTH-RULE-0001".to_owned(),
                 occurrence: 1,
                 reason: Some("invalid_expression.expected_operator".to_owned()),
-                path: Some("input/main.bst".to_owned()),
+                path: Some("input/main.moth".to_owned()),
                 line: Some(1),
                 column: None,
                 count: Some(1),
@@ -358,7 +358,7 @@ fn inventory_counts_authored_expected_warning_as_a_contract() {
             Some(CaseRole::Smoke),
             ExpectedOutcome::Success(SuccessExpectation {
                 warnings: WarningExpectation::Exact(ExactWarningExpectation {
-                    expected_codes: vec!["BST-RULE-0022".to_owned()],
+                    expected_codes: vec!["MOTH-RULE-0022".to_owned()],
                 }),
                 success_contract: None,
                 artifact_assertions: Vec::new(),
@@ -374,7 +374,7 @@ fn inventory_counts_authored_expected_warning_as_a_contract() {
     assert_eq!(json["summary"]["expected_warning_backend_blocks"], 1);
     assert_eq!(
         json["cases"][0]["backends"][0]["warning_codes"],
-        serde_json::json!(["BST-RULE-0022"])
+        serde_json::json!(["MOTH-RULE-0022"])
     );
     assert!(
         !json["cases"][0]["backends"][0]
@@ -401,9 +401,9 @@ fn inventory_serializes_exact_warning_codes_without_a_transitional_count() {
             ExpectedOutcome::Success(SuccessExpectation {
                 warnings: WarningExpectation::Exact(ExactWarningExpectation {
                     expected_codes: vec![
-                        "BST-RULE-0022".to_owned(),
-                        "BST-RULE-0022".to_owned(),
-                        "BST-RULE-0022".to_owned(),
+                        "MOTH-RULE-0022".to_owned(),
+                        "MOTH-RULE-0022".to_owned(),
+                        "MOTH-RULE-0022".to_owned(),
                     ],
                 }),
                 success_contract: None,
@@ -419,7 +419,7 @@ fn inventory_serializes_exact_warning_codes_without_a_transitional_count() {
 
     assert_eq!(
         json["cases"][0]["backends"][0]["warning_codes"],
-        serde_json::json!(["BST-RULE-0022", "BST-RULE-0022", "BST-RULE-0022"])
+        serde_json::json!(["MOTH-RULE-0022", "MOTH-RULE-0022", "MOTH-RULE-0022"])
     );
     assert!(
         !json["cases"][0]["backends"][0]
@@ -493,7 +493,7 @@ fn report_serializes_contains_policy_finding_once_with_typed_reason_fact() {
         ExpectedOutcome::Failure(FailureExpectation {
             warnings: WarningExpectation::Forbid,
             message_contains: Vec::new(),
-            diagnostic_codes: vec!["BST-RULE-0001".to_owned()],
+            diagnostic_codes: vec!["MOTH-RULE-0001".to_owned()],
             diagnostic_assertions: Vec::new(),
             diagnostic_match: DiagnosticMatchMode::Contains,
             diagnostic_match_reason: Some("  ".to_owned()),

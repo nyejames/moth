@@ -57,7 +57,7 @@ fn docs_style_table_and_data_declarations(
     string_table: &mut StringTable,
     shared_store: &Rc<RefCell<TemplateIrStore>>,
 ) -> Vec<Declaration> {
-    let wrapper_scope = InternedPath::from_single_str("main.bst/#const_template0", string_table);
+    let wrapper_scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
 
     let mut header_row_tokens = template_tokens_from_source(
         "[$children([:\n            <th style=\"border: 1px solid; padding: 0.5em; text-align: left;\">[$slot]</th>\n        ]):[$slot]]",

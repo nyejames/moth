@@ -1,4 +1,4 @@
-//! Target path resolution for `bean new html`.
+//! Target path resolution for `moth new html`.
 //!
 //! WHAT: Resolves user-provided paths into canonical project directories with
 //! interactive prompts for ambiguous or destructive placements.
@@ -31,7 +31,7 @@ pub fn resolve_project_target(
     let default_name = resolved_dir
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("Beanstalk Project")
+        .unwrap_or("Moth Project")
         .to_owned();
 
     let name_input = prompt.ask(&format!(

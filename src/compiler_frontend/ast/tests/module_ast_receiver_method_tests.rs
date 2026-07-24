@@ -68,8 +68,8 @@ fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
     let method_name = string_table.intern("reset");
     let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int);
     let key = (receiver.to_owned(), method_name);
-    let local_source = interned_path(&["src", "#page.bst"], &mut string_table);
-    let package_source = interned_path(&["lib", "shared.bst"], &mut string_table);
+    let local_source = interned_path(&["src", "#page.moth"], &mut string_table);
+    let package_source = interned_path(&["lib", "shared.moth"], &mut string_table);
 
     let local_entry = empty_receiver_entry(
         interned_path(&["src", "reset"], &mut string_table),
@@ -102,8 +102,8 @@ fn visible_method_lookup_prefers_same_file_before_catalog_fallback() {
     let mut string_table = StringTable::new();
     let method_name = string_table.intern("render");
 
-    let local_source = interned_path(&["src", "#page.bst"], &mut string_table);
-    let exported_source = interned_path(&["lib", "shared.bst"], &mut string_table);
+    let local_source = interned_path(&["src", "#page.moth"], &mut string_table);
+    let exported_source = interned_path(&["lib", "shared.moth"], &mut string_table);
 
     let local_entry = empty_receiver_entry(
         interned_path(&["src", "render_local"], &mut string_table),
@@ -135,16 +135,16 @@ fn visible_method_lookup_prefers_same_file_before_catalog_fallback() {
 fn visible_method_lookup_uses_stable_catalog_fallback_order() {
     let mut string_table = StringTable::new();
     let method_name = string_table.intern("render");
-    let context_source = interned_path(&["src", "#page.bst"], &mut string_table);
+    let context_source = interned_path(&["src", "#page.moth"], &mut string_table);
 
     let first_entry = empty_receiver_entry(
         interned_path(&["lib", "a_render"], &mut string_table),
-        interned_path(&["lib", "a.bst"], &mut string_table),
+        interned_path(&["lib", "a.moth"], &mut string_table),
         ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::String),
     );
     let second_entry = empty_receiver_entry(
         interned_path(&["lib", "z_render"], &mut string_table),
-        interned_path(&["lib", "z.bst"], &mut string_table),
+        interned_path(&["lib", "z.moth"], &mut string_table),
         ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::String),
     );
 

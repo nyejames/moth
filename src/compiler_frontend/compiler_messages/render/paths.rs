@@ -39,7 +39,7 @@ pub(crate) fn resolve_source_file_path(
 ) -> PathBuf {
     let mut source_file = normalize_path(&scope.to_path_buf(string_table));
 
-    // Header diagnostics use a synthetic "file.bst/header_name.header" scope so the terminal and
+    // Header diagnostics use a synthetic "file.moth/header_name.header" scope so the terminal and
     // dev-server error pages both need to strip that suffix back to the original source file.
     if source_file
         .file_name()

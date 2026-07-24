@@ -240,7 +240,7 @@ fn rapid_loopback_ping_requests_do_not_stall_request_handling() {
     for _ in 0..5 {
         let mut client = TcpStream::connect(address).expect("client should connect");
         client
-            .write_all(b"GET /__beanstalk/ping HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .write_all(b"GET /__moth/ping HTTP/1.1\r\nHost: localhost\r\n\r\n")
             .expect("client should send ping request");
         let mut response = String::new();
         client

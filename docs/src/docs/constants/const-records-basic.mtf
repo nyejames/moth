@@ -1,0 +1,20 @@
+A constant can hold a fully known struct value.
+
+[codeblock, $code("moth"):
+    Defaults = |
+        title String,
+        year Int,
+    |
+
+    defaults #= Defaults("Moth", 2026)
+]
+
+Read its fields during compilation or use one field in runtime code:
+
+[codeblock, $code("moth"):
+    page_title #= defaults.title
+    io.line(defaults.title)
+]
+
+The complete const record is not an ordinary runtime object. Use its fields
+instead.

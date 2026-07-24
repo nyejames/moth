@@ -1,0 +1,22 @@
+import @./style-guide {content as style_content}
+import @./testing {content as testing_content}
+import @./validation {content as validation_content}
+import @styles/docs {navbar, section, theme_head}
+
+page_title #= "Codebase development standards"
+page_description #= "Rust code style, testing strategy and validation gates for Moth compiler work."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Codebase) / Codebase development standards
+
+    # Codebase development standards
+
+    Good compiler work should be easy to read, easy to test and hard to misinterpret. These references cover implementation style, test design and the validation gates that show a change is ready.
+]
+
+#[section, style_content]
+#[section, testing_content]
+#[section, validation_content]

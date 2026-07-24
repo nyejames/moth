@@ -1,4 +1,4 @@
-//! Type compatibility checks for the Beanstalk compiler frontend.
+//! Type compatibility checks for the Moth compiler frontend.
 //!
 //! WHAT: determines whether a value of a given type is accepted in a position
 //! expecting a target type.

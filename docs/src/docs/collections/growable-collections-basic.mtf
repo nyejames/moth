@@ -1,0 +1,21 @@
+A growable collection can gain and lose items.
+
+[codeblock, $code("moth"):
+    names ~{String} = {}
+
+    ~names.push("Priya") catch:
+        assert(false, "push failed")
+    ;
+]
+
+The binding is mutable because the collection changes.
+
+An immutable collection can still be read:
+
+[codeblock, $code("moth"):
+    names = {"Priya", "Grace"}
+
+    first = names.get(0) catch:
+        then "guest"
+    ;
+]

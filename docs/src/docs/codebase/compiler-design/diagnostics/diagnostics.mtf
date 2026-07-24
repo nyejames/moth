@@ -1,0 +1,132 @@
+# Compiler errors as structured data
+
+Suppose the page mistypes the import:
+
+[codeblock, $code("moth"):
+import @greeting { great }
+]
+
+The failure is not "something went wrong." It is a precise event: an unknown imported symbol at a known location, in a known stage, with a stable code a tool can recognise.
+
+Moth treats diagnostics as **durable structured data**. Rendering into English is a later, separate act.
+
+## The stage with the best context
+
+Each stage owns the failures it is uniquely equipped to see.
+
+[table:
+    [th:
+        [: Stage family]
+        [: Example failure]
+    ]
+
+    [td:
+        [: Tokenizer]
+        [: bad escape, broken delimiter]
+    ]
+
+    [td:
+        [: Headers and binding]
+        [: malformed shell, missing provider symbol]
+    ]
+
+    [td:
+        [: AST]
+        [: unknown name, type mismatch, bad template slot]
+    ]
+
+    [td:
+        [: Borrow validation]
+        [: conflicting exclusive access]
+    ]
+
+    [td:
+        [: Target validation]
+        [: unsupported capability on a reachable function]
+    ]
+]
+
+A single global "parser error" funnel would throw away context. The type checker already knows the expected type. The borrow checker already knows the place. Let the owner who holds the fact construct the payload.
+
+**Diagram placeholder:** User failure and compiler failure take separate paths
+
+*Caption: accepted ownership map.*
+*Question: who can continue after each kind of failure?*
+
+## Diagnostic data lanes
+
+Two lanes matter.
+
+**`CompilerDiagnostic`** carries user-facing failures: source, syntax, import, config, type, rule, borrow and target-contract problems. These are the messages authors should fix.
+
+**`CompilerError`** carries internal and infrastructure failures: impossible compiler states, transformation bugs, filesystem failures, tooling or backend infrastructure collapse. These mean "do not trust later results," not "rename your variable."
+
+Payloads include stable **codes**, **descriptors**, structured **reasons**, **locations** and **secondary labels**. They deliberately avoid baking final prose into every checker branch.
+
+Deferred-feature diagnostics stay distinct from outside-design-scope diagnostics. "Not implemented yet" and "not part of the language" are different sentences.
+
+## Semantic identities in messages
+
+Type diagnostics carry **semantic type identities** plus context. Rendering resolves user-facing names later through a render context and the relevant local type environment.
+
+Why wait?
+
+Because the same identity might print differently in different tools, and because pretty names are not the semantic authority. Source spelling, canonical paths and human wording remain distinct layers. A stable code must not be repurposed for a different semantic family when someone rewrites a sentence.
+
+## Carrying and rendering
+
+Stages accumulate diagnostics locally. Builds merge them in **canonical order**: file order and module order, never worker-completion order.
+
+Rendering happens at CLI or tooling boundaries. The same structured event can feed a terminal, a future editor integration or a test harness.
+
+Module outcomes split cleanly:
+
+- **Success** carries an artefact and may retain structured warnings
+- **Diagnosed** carries user diagnostics and **no partial public interface**
+- **CompilerError** aborts the owning project or package compilation because later results cannot be trusted
+
+Consumers blocked by a diagnosed required interface are not semantically compiled as if the provider half-worked. A failed root does not feed its dependents. Independent graph branches may continue under build-system orchestration for `check` or tooling. A backend never receives a partial linkable project.
+
+**Diagram placeholder:** One diagnosed module exposes no partial interface and a dependent waits
+
+*Caption: graph failure simplification.*
+*Question: what does the build publish when a provider fails?*
+
+**Diagram placeholder:** One structured event feeds CLI and tooling views
+
+*Caption: exact data-lane principle, simplified renderer shape.*
+*Question: why defer wording?*
+
+## Parallel failures
+
+Workers may finish in any order. Merge order ignores that race. Canonical module order and original source order decide how humans and tools see the list.
+
+Per-stage articles still own their contracts. This page owns the transport and lane model, not a catalogue of every code.
+
+## What can fail here
+
+- user syntax, type, import, borrow or target failure
+- internal invariant, filesystem or backend failure
+
+Exact wording in examples should track current constructors when you verify against the tree. Do not fossilise a poetic error string that the code never emits.
+
+## Why Moth does it this way
+
+**Alternative:** construct final prose inside each parser or checker branch.
+
+**Choice:** structured diagnostic payloads with deferred rendering.
+
+**Benefit:** CLI, dev server and tooling render the same semantic event. Codes stay stable while wording improves.
+
+**Cost:** descriptors and render contexts become maintained data, not afterthoughts.
+
+## Roadmap and current status
+
+- **Accepted design:** separate diagnostic and error lanes plus deterministic rendering order.
+- **Current implementation:** progress matrix and current diagnostics owners.
+- **Queued work:** `compiler-diagnostics-improvement-plan.md`.
+- **Deferred or outside scope:** this page does not catalogue every diagnostic code.
+
+## Exit state
+
+You leave knowing how failures travel, and what a trusted successful semantic result implies. Next: how successful meaning becomes explicit runtime control flow in HIR.

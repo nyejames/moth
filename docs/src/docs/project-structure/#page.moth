@@ -1,0 +1,143 @@
+import @./project-layout {
+    content as project_layout,
+}
+
+import @./project-layout-basic {
+    content as project_layout_basic,
+}
+
+import @./project-config {
+    content as project_config,
+}
+
+import @./project-config-basic {
+    content as project_config_basic,
+}
+
+import @./module-roots {
+    content as module_roots,
+}
+
+import @./module-roots-basic {
+    content as module_roots_basic,
+}
+
+import @./public-api {
+    content as public_api,
+}
+
+import @./public-api-basic {
+    content as public_api_basic,
+}
+
+import @./entry-runtime-and-fragments {
+    content as entry_runtime_and_fragments,
+}
+
+import @./entry-runtime-and-fragments-basic {
+    content as entry_runtime_and_fragments_basic,
+}
+
+import @./html-routing-and-artifacts {
+    content as html_routing_and_artifacts,
+}
+
+import @./html-routing-and-artifacts-basic {
+    content as html_routing_and_artifacts_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Project structure"
+page_description #= "How Moth projects are structured, how modules are discovered, and how the HTML builder emits pages."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Project structure
+
+    # Project structure
+
+    A Moth project is a set of modules, one strict project config and a builder
+    that decides what those modules produce.
+
+    The root filename begins with `#`, but the name after it is deliberately
+    unimportant. The source tells the compiler what is public. The builder decides
+    whether the module becomes an artifact.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):project-layout]
+        [$insert("title"):Project layout]
+        [$insert("advanced"):[project_layout]]
+
+        [project_layout_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):project-config]
+        [$insert("title"):Project config]
+        [$insert("advanced"):[project_config]]
+
+        [project_config_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):module-roots]
+        [$insert("title"):Module roots]
+        [$insert("advanced"):[module_roots]]
+
+        [module_roots_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):public-api]
+        [$insert("title"):Public API]
+        [$insert("advanced"):[public_api]]
+
+        [public_api_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):entry-runtime-and-fragments]
+        [$insert("title"):Active-root runtime and fragments]
+        [$insert("advanced"):[entry_runtime_and_fragments]]
+
+        [entry_runtime_and_fragments_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):html-routing-and-artifacts]
+        [$insert("title"):HTML routing and artifacts]
+        [$insert("advanced"):[html_routing_and_artifacts]]
+
+        [html_routing_and_artifacts_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../memory/]
+        [$insert("previous_title"):Memory and lifetimes]
+        [$insert("next_path"):../packages/]
+        [$insert("next_title"):Packages and imports]
+    ]
+]

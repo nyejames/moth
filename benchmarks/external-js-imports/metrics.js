@@ -1,37 +1,37 @@
-import { bstOk, bstErr } from "@beanstalk/runtime";
+import { mothOk, mothErr } from "@moth/runtime";
 
 /**
- * @bst.opaque MetricHandle
+ * @moth.opaque MetricHandle
  */
 
 /**
- * @bst.sig create_metric |name String, value Int| -> MetricHandle
+ * @moth.sig create_metric |name String, value Int| -> MetricHandle
  */
 export function createMetric(name, value) {
     return { name, value };
 }
 
 /**
- * @bst.sig metric_label |metric MetricHandle| -> String
+ * @moth.sig metric_label |metric MetricHandle| -> String
  */
 export function metricLabel(metric) {
     return `${metric.name}:${metric.value}`;
 }
 
 /**
- * @bst.sig set_metric_value |metric ~MetricHandle, value Int|
+ * @moth.sig set_metric_value |metric ~MetricHandle, value Int|
  */
 export function setMetricValue(metric, value) {
     metric.value = value;
 }
 
 /**
- * @bst.sig load_metric_label |id String| -> String, Error!
+ * @moth.sig load_metric_label |id String| -> String, Error!
  */
 export function loadMetricLabel(id) {
     if (id === "") {
-        return bstErr(404, "Missing metric id");
+        return mothErr(404, "Missing metric id");
     }
 
-    return bstOk(`metric:${id}`);
+    return mothOk(`metric:${id}`);
 }

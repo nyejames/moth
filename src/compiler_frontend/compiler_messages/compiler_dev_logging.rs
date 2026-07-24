@@ -68,7 +68,7 @@ macro_rules! timer_log {
 }
 
 /// Benchmark-aware timer macro: prints the existing human message, then emits a stable
-/// machine-readable `BST_BENCH timing` line for benchmark observation parsing.
+/// machine-readable `MOTH_BENCH timing` line for benchmark observation parsing.
 ///
 /// WHAT: wraps one stage/timer so it produces both developer-readable colored output and
 /// a grep-friendly metric that survives prose refactors.
@@ -106,7 +106,7 @@ pub fn log_aggregated_duration(label: &str, duration: Duration) {
 
 /// Emit one stable, machine-readable benchmark observation line.
 ///
-/// WHAT: prints a plain `BST_BENCH timing <metric>=<millis>ms` line that the benchmark
+/// WHAT: prints a plain `MOTH_BENCH timing <metric>=<millis>ms` line that the benchmark
 /// observation parser can grep without depending on human prose.
 /// WHY: separating the stable metric line from colored human output lets compiler
 /// logging change its prose without silently breaking performance attribution.
@@ -125,8 +125,8 @@ pub fn log_benchmark_timing(metric_name: &str, duration: Duration) {
 
 /// Emit one stable, machine-readable benchmark counter observation.
 ///
-/// WHAT: records `BST_BENCH counter <metric>=<value>` into the central collection
-///       scope and prints the stable line when `BST_COUNTERS` requests stdout.
+/// WHAT: records `MOTH_BENCH counter <metric>=<value>` into the central collection
+///       scope and prints the stable line when `MOTH_COUNTERS` requests stdout.
 /// WHY: counters need a stable machine path for local benchmark history while
 ///      human counter prose remains optional display text. Gated by
 ///      `benchmark_counters` (independent of `detailed_timers`) so counter
@@ -134,7 +134,7 @@ pub fn log_benchmark_timing(metric_name: &str, duration: Duration) {
 ///
 /// Counter storage reuses the `timers` collector, so observations are only
 /// recorded when `timers` is also active. The stdout line is delegated to
-/// `timing::emit_bench_counter_line`, which honors the `BST_COUNTERS` mode
+/// `timing::emit_bench_counter_line`, which honors the `MOTH_COUNTERS` mode
 /// and the in-process output-suppression flag.
 #[cfg(feature = "benchmark_counters")]
 pub fn log_benchmark_counter(metric_name: &str, value: f64) {

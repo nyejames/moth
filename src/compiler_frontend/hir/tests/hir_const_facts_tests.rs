@@ -47,7 +47,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
             source: ConstBindingSource::ExplicitHash,
             value_kind: ConstFactValueKind::Literal,
             resolved_expression: Expression::string_slice(
-                string_table.intern("Beanstalk"),
+                string_table.intern("Moth"),
                 test_location(2),
                 ValueMode::ImmutableOwned,
             ),

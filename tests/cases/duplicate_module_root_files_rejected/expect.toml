@@ -3,11 +3,11 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-CONFIG-0001"]
-message_contains = ["multiple hash-root files", "#home.bst", "#page.bst"]
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["multiple hash-root files", "#home.moth", "#page.moth"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-CONFIG-0001"]
-message_contains = ["multiple hash-root files", "#home.bst", "#page.bst"]
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["multiple hash-root files", "#home.moth", "#page.moth"]

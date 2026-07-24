@@ -5,4 +5,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_test_pkg_a_open", "__bs_test_pkg_b_open"]
+must_contain = ["__moth_test_pkg_a_open", "__moth_test_pkg_b_open"]

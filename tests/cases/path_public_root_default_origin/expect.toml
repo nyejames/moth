@@ -8,4 +8,4 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = ["href=\"/\""]
-must_not_contain = ["/beanstalk/"]
+must_not_contain = ["/moth/"]

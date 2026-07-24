@@ -10,14 +10,14 @@ path = "index.html"
 kind = "html"
 must_contain = [
     "Math.random()",
-    "function __bs_random_int(",
-    "__bs_random_int(1, 3)",
+    "function __moth_random_int(",
+    "__moth_random_int(1, 3)",
 ]
 must_not_contain = [
-    "function __bs_random_float(",
+    "function __moth_random_float(",
 ]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

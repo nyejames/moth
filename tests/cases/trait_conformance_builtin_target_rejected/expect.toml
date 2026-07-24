@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0073"]
+diagnostic_codes = ["MOTH-RULE-0073"]
 message_contains = ["Builtin type 'Int' cannot declare user-authored trait conformance"]

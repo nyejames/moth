@@ -45,7 +45,7 @@ pub(super) fn validate_and_apply_config_ast(
     let mut errors = Vec::new();
     let mut seen_config_keys = HashSet::new();
 
-    // Only top-level compile-time constant declarations authored in `config.bst` are config keys.
+    // Only top-level compile-time constant declarations authored in `config.moth` are config keys.
     // Imported package constants and types are support surface, not entries. The authored scope
     // is the exact interned identity the parser used for tokenization, so membership is checked by
     // direct interned equality rather than by converting paths back to `PathBuf`.
@@ -88,7 +88,7 @@ pub(super) fn validate_and_apply_config_ast(
         }
     }
 
-    // 2. Reject authored start-body statements in `config.bst`.
+    // 2. Reject authored start-body statements in `config.moth`.
     // Only top-level compile-time constants are config entries. Plain bindings and runtime
     // statements are not.
     for node in &parsed_config.ast.nodes {

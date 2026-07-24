@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Ownership and drops | Beanstalk</title>
-    <meta name="description" content="How Beanstalk infers ownership and lowers conditional destruction.">
+    <title>Ownership and drops | Moth</title>
+    <meta name="description" content="How Moth infers ownership and lowers conditional destruction.">
     <style>
 /*!
-  BS CSS CORE (absolute basics CSS reset)
+  MOTH CSS CORE (absolute basics CSS reset)
   This is inspired by Pico.css, but is an even more minimal reset.
 
   Actual style systems are intended to be built on top of this easily.
@@ -17,24 +17,24 @@
 :root {
   color-scheme: light dark;
 
-  --bst-font-size: 100%;
+  --moth-font-size: 100%;
 
-  --bst-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --bst-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--bst-font-family-emoji);
-  --bst-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--bst-font-family-emoji);
-  --bst-font-family: var(--bst-font-family-sans-serif);
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
 
-  --bst-line-height: 1.5;
-  --bst-font-weight: 400;
-  --bst-font-size: 100%;
-  --bst-text-underline-offset: 0.1rem;
-  --bst-border-radius: 0.25rem;
-  --bst-border-width: 0.0625rem;
-  --bst-outline-width: 0.125rem;
-  --bst-transition: 0.2s ease-in-out;
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
 
-  --bst-spacing: 1rem;
-  --bst-spacing-small: 0.5rem;
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
 
   /* Code block colours */
   --comment: #8e8e8e;
@@ -53,11 +53,11 @@
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-weight: var(--bst-font-weight);
-  font-size: var(--bst-font-size);
-  line-height: var(--bst-line-height);
-  font-family: var(--bst-font-family);
-  text-underline-offset: var(--bst-text-underline-offset);
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
   -moz-tab-size: 4;
@@ -68,27 +68,27 @@
 
 @media (min-width: 576px) {
   :root {
-    --bst-font-size: 106.25%;
+    --moth-font-size: 106.25%;
   }
 }
 @media (min-width: 768px) {
   :root {
-    --bst-font-size: 112.5%;
+    --moth-font-size: 112.5%;
   }
 }
 @media (min-width: 1024px) {
   :root {
-    --bst-font-size: 118.75%;
+    --moth-font-size: 118.75%;
   }
 }
 @media (min-width: 1280px) {
   :root {
-    --bst-font-size: 125%;
+    --moth-font-size: 125%;
   }
 }
 @media (min-width: 1536px) {
   :root {
-    --bst-font-size: 131.25%;
+    --moth-font-size: 131.25%;
   }
 }
 
@@ -100,35 +100,35 @@ body {
 /* Code Style */
 .codeblock {
   color: hsla(0, 0%, 100%, 0.982);
-  font-family: var(--bst-font-family-monospace);
+  font-family: var(--moth-font-family-monospace);
   display: block;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
   tab-size: 4;
 }
-.bst-code-comment {
+.moth-code-comment {
   color: var(--comment);
 }
-.bst-code-keyword {
+.moth-code-keyword {
   color: var(--keyword);
 }
-.bst-code-string {
+.moth-code-string {
   color: var(--string);
 }
-.bst-code-number {
+.moth-code-number {
   color: var(--number);
 }
-.bst-code-operator {
+.moth-code-operator {
   color: var(--operator);
 }
-.bst-code-struct {
+.moth-code-struct {
   color: var(--struct);
 }
-.bst-code-type {
+.moth-code-type {
   color: var(--type);
 }
-.bst-code-parenthesis {
+.moth-code-parenthesis {
   color: var(--parenthesis);
 }
 
@@ -153,7 +153,7 @@ body {
     </style>
     <style>@font-face {
         font-family: "Computer Modern Sans";
-        src: url("/beanstalk/fonts/cmunss.woff2") format("woff2");
+        src: url("/moth/fonts/cmunss.woff2") format("woff2");
         font-style: normal;
         letter-spacing: 10em;
         font-weight: 400;
@@ -161,7 +161,7 @@ body {
     }body {
         font-family:
             "Computer Modern Sans",
-            var(--bst-font-family-sans-serif);
+            var(--moth-font-family-sans-serif);
 
         min-height: 100vh;
 
@@ -229,13 +229,13 @@ body {
         width: 100%;
         margin-right: auto;
         margin-left: auto;
-        padding-right: var(--bst-spacing-small);
-        padding-left: var(--bst-spacing-small);
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
     }
 
     .container code:not(.codeblock) {
         color: #c444aff9;
-        font-family: var(--bst-font-family-monospace);
+        font-family: var(--moth-font-family-monospace);
     }
 
     .container pre {
@@ -267,9 +267,9 @@ body {
     @media (min-width: 576px) {
         .container {
             max-width: 510px;
-            padding-right: var(--bst-spacing);
-            padding-left: var(--bst-spacing);
-            padding-bottom: var(--bst-spacing);
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
     }
 
@@ -306,7 +306,7 @@ body {
         }
     }
 
-    .bst-nav-1 {
+    .moth-nav-1 {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -318,15 +318,15 @@ body {
 
   </head>
   <body style="">
-    <nav class="bst-nav-1" aria-label="Primary">
+    <nav class="moth-nav-1" aria-label="Primary">
         <a
-            href="/beanstalk/"
+            href="/moth/"
             style="
                 display: flex;
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -335,13 +335,13 @@ body {
             <span
                 aria-hidden="true"
                 style="
-                    font-family: var(--bst-font-family-emoji);
+                    font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
                 "
-            >🌱</span>
+            >ʚĭɞ</span>
 
-            <span>Beanstalk</span>
+            <span>Moth</span>
         </a>
 
         <div
@@ -352,9 +352,9 @@ body {
             "
         >
             <a
-                href="/beanstalk/docs/"
+                href="/moth/docs/"
                 style="
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     text-decoration: none;
                     font-weight: 500;
                     padding: 0.35rem 0;
@@ -364,15 +364,15 @@ body {
             </a>
 
             <a
-                href="https://github.com/nyejames/beanstalk"
+                href="https://github.com/nyejames/moth"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Beanstalk GitHub repository"
+                aria-label="Moth GitHub repository"
                 style="
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    color: light-dark(var(--bst-text-lightmode), var(--bst-text-darkmode));
+                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                     padding: 0.35rem 0;
                 "
             >
@@ -396,121 +396,121 @@ body {
         </div>
     </nav>
     <section class="container"><p><a href="../">Memory management</a> / Ownership and drops</p><h1>Ownership and drops</h1><p>Ownership is an optimisation state layered over GC-safe semantics. The compiler transfers destruction responsibility only where static analysis proves it&#39;s safe.</p></section>
-    <section class="container"><h2>Design contract</h2><p>Beanstalk ownership is an optimisation state layered over GC-safe source semantics. It isn&#39;t a separate source type system.</p><p>Borrow and lifetime analysis prove optional transfer eligibility and topology legality. Ownership lowering only realises already-validated facts.</p><p>The compiler may transfer destruction responsibility only where static analysis proves that doing so can&#39;t invalidate a later source use. If that proof is unavailable, the operation remains a borrow and the value may remain GC-managed.</p><h2>Ownership is an optimisation state</h2><ul><li>Ownership metadata is separate from semantic <code>TypeId</code>.</li><li>Shared/mutable parameter syntax doesn&#39;t create owned/borrowed source types.</li><li>Backend ownership eligibility isn&#39;t required for correctness.</li><li>GC is a permitted runtime representation for a statically legal lifetime topology.</li><li>Ownership-aware and GC paths must preserve identical observable behaviour.</li></ul><h2>Ownership bit</h2><p>The ownership bit records destruction responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.</p><pre style=""><code class='codeblock'>
+    <section class="container"><h2>Design contract</h2><p>Moth ownership is an optimisation state layered over GC-safe source semantics. It isn&#39;t a separate source type system.</p><p>Borrow and lifetime analysis prove optional transfer eligibility and topology legality. Ownership lowering only realises already-validated facts.</p><p>The compiler may transfer destruction responsibility only where static analysis proves that doing so can&#39;t invalidate a later source use. If that proof is unavailable, the operation remains a borrow and the value may remain GC-managed.</p><h2>Ownership is an optimisation state</h2><ul><li>Ownership metadata is separate from semantic <code>TypeId</code>.</li><li>Shared/mutable parameter syntax doesn&#39;t create owned/borrowed source types.</li><li>Backend ownership eligibility isn&#39;t required for correctness.</li><li>GC is a permitted runtime representation for a statically legal lifetime topology.</li><li>Ownership-aware and GC paths must preserve identical observable behaviour.</li></ul><h2>Ownership bit</h2><p>The ownership bit records destruction responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.</p><pre style=""><code class='codeblock'>
         borrowed
             The runtime path must not destroy the value.
 
         owned
             The runtime path carries release or safe-transfer responsibility.
-    </code></pre><h2>Ownership responsibility versus lifetime ownership</h2><p>Contrast these distinct concepts:</p><ul><li><strong>Lifetime owner:</strong> the one semantic region responsible for allocation lifetime</li><li><strong>destruction-responsibility path:</strong> the runtime path that may release or transfer when deterministic release is used</li><li><strong>shared aliases:</strong> observers that do not become additional lifetime owners</li><li><strong>region-owned allocation family:</strong> storage whose release is owned by a group or region rather than an individual callee</li></ul><p>The bit does not imply individual releasability when the value belongs to a region-owned allocation family.</p><h2>Inferred transfer</h2><p>Assignments and calls can be optional transfer points. Analysis proves eligibility. Lowering realises validated transfer facts. There is no move keyword.</p><ul><li>No later use on every relevant path → transfer may occur.</li><li>Later use → operation remains a borrow.</li><li>Path-dependent or imprecise outcome → operation remains a borrow.</li><li>Failure to prove transfer must not reject the program.</li></ul><p>When transfer is realised:</p><ul><li>aliases can&#39;t remain usable after a possible transfer</li><li>a callee that receives ownership assumes eventual release responsibility</li><li>responsibility may be discharged by release or a further proven transfer</li></ul><p>Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site. Parameter mutability controls access; ownership metadata controls destruction responsibility. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.</p><p>Closed external boundary profiles override this general rule. WIT value-only calls are non-consuming. Restricted host-value crossings are non-consuming, and mutable opaque-handle access does not transfer Beanstalk storage through the ordinary Beanstalk ownership ABI.</p><h2>Single ownership transfer</h2><ul><li>Ownership transfers at most once along a control-flow path.</li><li>A borrowed value is never released by the borrower.</li><li>An owned value must reach a valid release or transfer point.</li><li>Joins conservatively account for paths that may own.</li></ul><h2>Group-owned values</h2><ul><li>The group owns release responsibility for its allocation family.</li><li>Ordinary calls normally borrow group-owned storage.</li><li>An individual callee cannot release one group child merely because an owned bit exists.</li><li>Hidden destination allocation may produce a fresh result root directly in a group when every retained edge is legal for that destination.</li><li>Group-owned values may use grouped release rather than individual drop when the region ends.</li></ul><h2>Unified ownership ABI</h2><p>Ownership-aware lowering uses one calling convention rather than separate source-visible borrowed and owned function variants.</p><p>Heap-managed or handle-based values that participate in ownership lowering carry ownership metadata with the runtime value. Scalar values may continue to use target-native representations.</p><p>ABI behaviour:</p><ul><li>Borrowed metadata → callee must not destroy the value.</li><li>Owned metadata → callee receives release responsibility.</li><li>Callee must release or safely transfer that responsibility before it ends.</li><li>Caller must not use a value again after a path that may have transferred ownership.</li><li>Source function signatures don&#39;t distinguish borrowed and owned variants.</li><li>Backend specialisation may remove redundant checks without changing the semantic ABI.</li></ul><p>The unified ABI keeps dispatch static without generating separate borrowed and owned function families. It also limits ownership-driven monomorphisation and binary-size growth, especially for Wasm, while still allowing static specialisation to remove redundant ownership checks.</p><h2>Conditions for release</h2><p>Deterministic release is legal only when:</p><ul><li>topology is already valid</li><li>no observable alias remains</li><li>responsibility is owned</li><li>the allocation is individually releasable or its owning region is ending</li></ul><h2>Conditional destruction</h2><p><code>drop_if_owned</code> is inserted at possible destruction points. It checks ownership metadata and releases only when responsibility is owned.</p><ul><li>It is a conditional responsibility check only.</li><li>It is not an alias count.</li><li>It is not a topology validator.</li><li>It is a no-op for borrowed state.</li><li>Under pure GC it can lower to no-op or be erased where allowed.</li><li>Region-owned values may use grouped release rather than individual drop.</li><li>It doesn&#39;t belong in source syntax.</li><li>Different backends may represent it differently while preserving behaviour.</li></ul><h2>Control-flow exits</h2><p>Possible destruction points include:</p><ul><li>normal region or scope exits</li><li>function returns</li><li>error returns</li><li>loop <code>break</code> and other reachable loop-exit paths</li><li>branch edges that leave an owning region</li><li>region/group exits</li><li>return values that transfer responsibility out</li></ul><p>A non-exiting loop needs no exit destruction point. A loop that can exit must account for ownership on each reachable break, return, error-return or region-exit path.</p><p>A control-flow join determines whether a later exit may own. The join itself is not a destruction point and is not automatically a release site.</p><p>Deterministic release is enabled where analysis supports it. Where it does not, GC-backed or otherwise conservative representation remains legal for already-valid topology.</p><h2>Aggregates and stored values</h2><p>Aggregates may contain shared and independently owned children.</p><ul><li>Insertion follows ordinary borrow/copy/transfer rules.</li><li>Explicit copy is required for independent duplication.</li><li>Removal may transfer responsibility out under normal lifetime rules.</li><li>Aggregate destruction recursively follows validated child responsibility and topology.</li><li>Borrowed children are never destroyed through the aggregate.</li></ul><h2>Static specialisation</h2><p>Accepted effect categories:</p><pre style=""><code class='codeblock'>
+    </code></pre><h2>Ownership responsibility versus lifetime ownership</h2><p>Contrast these distinct concepts:</p><ul><li><strong>Lifetime owner:</strong> the one semantic region responsible for allocation lifetime</li><li><strong>destruction-responsibility path:</strong> the runtime path that may release or transfer when deterministic release is used</li><li><strong>shared aliases:</strong> observers that do not become additional lifetime owners</li><li><strong>region-owned allocation family:</strong> storage whose release is owned by a group or region rather than an individual callee</li></ul><p>The bit does not imply individual releasability when the value belongs to a region-owned allocation family.</p><h2>Inferred transfer</h2><p>Assignments and calls can be optional transfer points. Analysis proves eligibility. Lowering realises validated transfer facts. There is no move keyword.</p><ul><li>No later use on every relevant path → transfer may occur.</li><li>Later use → operation remains a borrow.</li><li>Path-dependent or imprecise outcome → operation remains a borrow.</li><li>Failure to prove transfer must not reject the program.</li></ul><p>When transfer is realised:</p><ul><li>aliases can&#39;t remain usable after a possible transfer</li><li>a callee that receives ownership assumes eventual release responsibility</li><li>responsibility may be discharged by release or a further proven transfer</li></ul><p>Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site. Parameter mutability controls access; ownership metadata controls destruction responsibility. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.</p><p>Closed external boundary profiles override this general rule. WIT value-only calls are non-consuming. Restricted host-value crossings are non-consuming, and mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.</p><h2>Single ownership transfer</h2><ul><li>Ownership transfers at most once along a control-flow path.</li><li>A borrowed value is never released by the borrower.</li><li>An owned value must reach a valid release or transfer point.</li><li>Joins conservatively account for paths that may own.</li></ul><h2>Group-owned values</h2><ul><li>The group owns release responsibility for its allocation family.</li><li>Ordinary calls normally borrow group-owned storage.</li><li>An individual callee cannot release one group child merely because an owned bit exists.</li><li>Hidden destination allocation may produce a fresh result root directly in a group when every retained edge is legal for that destination.</li><li>Group-owned values may use grouped release rather than individual drop when the region ends.</li></ul><h2>Unified ownership ABI</h2><p>Ownership-aware lowering uses one calling convention rather than separate source-visible borrowed and owned function variants.</p><p>Heap-managed or handle-based values that participate in ownership lowering carry ownership metadata with the runtime value. Scalar values may continue to use target-native representations.</p><p>ABI behaviour:</p><ul><li>Borrowed metadata → callee must not destroy the value.</li><li>Owned metadata → callee receives release responsibility.</li><li>Callee must release or safely transfer that responsibility before it ends.</li><li>Caller must not use a value again after a path that may have transferred ownership.</li><li>Source function signatures don&#39;t distinguish borrowed and owned variants.</li><li>Backend specialisation may remove redundant checks without changing the semantic ABI.</li></ul><p>The unified ABI keeps dispatch static without generating separate borrowed and owned function families. It also limits ownership-driven monomorphisation and binary-size growth, especially for Wasm, while still allowing static specialisation to remove redundant ownership checks.</p><h2>Conditions for release</h2><p>Deterministic release is legal only when:</p><ul><li>topology is already valid</li><li>no observable alias remains</li><li>responsibility is owned</li><li>the allocation is individually releasable or its owning region is ending</li></ul><h2>Conditional destruction</h2><p><code>drop_if_owned</code> is inserted at possible destruction points. It checks ownership metadata and releases only when responsibility is owned.</p><ul><li>It is a conditional responsibility check only.</li><li>It is not an alias count.</li><li>It is not a topology validator.</li><li>It is a no-op for borrowed state.</li><li>Under pure GC it can lower to no-op or be erased where allowed.</li><li>Region-owned values may use grouped release rather than individual drop.</li><li>It doesn&#39;t belong in source syntax.</li><li>Different backends may represent it differently while preserving behaviour.</li></ul><h2>Control-flow exits</h2><p>Possible destruction points include:</p><ul><li>normal region or scope exits</li><li>function returns</li><li>error returns</li><li>loop <code>break</code> and other reachable loop-exit paths</li><li>branch edges that leave an owning region</li><li>region/group exits</li><li>return values that transfer responsibility out</li></ul><p>A non-exiting loop needs no exit destruction point. A loop that can exit must account for ownership on each reachable break, return, error-return or region-exit path.</p><p>A control-flow join determines whether a later exit may own. The join itself is not a destruction point and is not automatically a release site.</p><p>Deterministic release is enabled where analysis supports it. Where it does not, GC-backed or otherwise conservative representation remains legal for already-valid topology.</p><h2>Aggregates and stored values</h2><p>Aggregates may contain shared and independently owned children.</p><ul><li>Insertion follows ordinary borrow/copy/transfer rules.</li><li>Explicit copy is required for independent duplication.</li><li>Removal may transfer responsibility out under normal lifetime rules.</li><li>Aggregate destruction recursively follows validated child responsibility and topology.</li><li>Borrowed children are never destroyed through the aggregate.</li></ul><h2>Static specialisation</h2><p>Accepted effect categories:</p><pre style=""><code class='codeblock'>
         MayConsume
         NeverConsumes
         AlwaysConsumes
-    </code></pre><p>These are analysis/lowering facts only, not required exact Rust enum names and not source-visible signature categories.</p><ul><li><code>MayConsume</code> retains conditional ownership handling.</li><li><code>NeverConsumes</code> can omit drop responsibility.</li><li><code>AlwaysConsumes</code> may remove ownership-condition branches only after call-path proof.</li><li>Specialisation must not create source-visible overloads or mandatory-consuming APIs.</li><li>Exact monomorphisation extent remains a backend and benchmarking decision.</li><li>The unified semantic contract remains fixed even if implementation encoding evolves.</li></ul><h2>Physical representations</h2><p>Internal reference counting is permitted as a backend representation for a statically legal topology. Source-visible RC, retain/release, weak ownership or dynamic shared-ownership semantics remain outside the language design.</p><p>Compatible extension points within the accepted memory model:</p><ul><li>stronger future-use precision</li><li>region-based allocation</li><li>place- and projection-based alias precision</li><li>drop elision through region knowledge</li><li>static ownership specialisation</li><li>retain elimination</li><li>escape analysis</li><li>GC elision for proven regions</li><li>internal RC for already-legal topology</li></ul><p>These must preserve source-language semantics, the unified ownership contract and GC as a legal representation for valid topology.</p><h2>Common mistakes</h2><ul><li>Treating ownership as a source type.</li><li>Treating <code>~</code> as ownership transfer.</li><li>Using runtime ownership metadata to decide source legality.</li><li>Treating the ownership bit as uniqueness or observer count.</li><li>Treating individual owned bits as permission to free group-owned children.</li><li>Generating separate visible borrowed/owned functions.</li><li>Assuming every scalar is a tagged pointer.</li><li>Destroying borrowed values.</li><li>Using advisory sites as exact lifetimes or complete topology proof.</li><li>Requiring ownership proof for correctness.</li><li>Allowing ownership optimisation to change alias behaviour.</li><li>Introducing a source-visible mandatory-consuming API.</li></ul><h2>Related reading</h2><ul><li><a href="../">Memory management</a>: concise memory-model contract</li><li><a href="../access-and-aliasing">Access and aliasing</a>: source semantics</li><li><a href="../borrow-validation">Borrow validation</a>: optional transfer facts</li><li><a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: lifetime owners and topology</li><li><a href="../declared-memory-groups">Declared memory groups</a>: group ownership of release families and reassignment</li><li><a href="../runtime-and-backend-lowering">Runtime and backend memory lowering</a>: ABI realisation and representations</li><li><a href="https://github.com/nyejames/beanstalk/blob/main/docs/compiler-design-overview.md">Compiler borrow validation</a>: transfer and drop facts</li><li><a href="https://github.com/nyejames/beanstalk/blob/main/docs/compiler-design-overview.md">Compiler Wasm lowering</a>: ownership-aware backend seam</li></ul></section>
+    </code></pre><p>These are analysis/lowering facts only, not required exact Rust enum names and not source-visible signature categories.</p><ul><li><code>MayConsume</code> retains conditional ownership handling.</li><li><code>NeverConsumes</code> can omit drop responsibility.</li><li><code>AlwaysConsumes</code> may remove ownership-condition branches only after call-path proof.</li><li>Specialisation must not create source-visible overloads or mandatory-consuming APIs.</li><li>Exact monomorphisation extent remains a backend and benchmarking decision.</li><li>The unified semantic contract remains fixed even if implementation encoding evolves.</li></ul><h2>Physical representations</h2><p>Internal reference counting is permitted as a backend representation for a statically legal topology. Source-visible RC, retain/release, weak ownership or dynamic shared-ownership semantics remain outside the language design.</p><p>Compatible extension points within the accepted memory model:</p><ul><li>stronger future-use precision</li><li>region-based allocation</li><li>place- and projection-based alias precision</li><li>drop elision through region knowledge</li><li>static ownership specialisation</li><li>retain elimination</li><li>escape analysis</li><li>GC elision for proven regions</li><li>internal RC for already-legal topology</li></ul><p>These must preserve source-language semantics, the unified ownership contract and GC as a legal representation for valid topology.</p><h2>Common mistakes</h2><ul><li>Treating ownership as a source type.</li><li>Treating <code>~</code> as ownership transfer.</li><li>Using runtime ownership metadata to decide source legality.</li><li>Treating the ownership bit as uniqueness or observer count.</li><li>Treating individual owned bits as permission to free group-owned children.</li><li>Generating separate visible borrowed/owned functions.</li><li>Assuming every scalar is a tagged pointer.</li><li>Destroying borrowed values.</li><li>Using advisory sites as exact lifetimes or complete topology proof.</li><li>Requiring ownership proof for correctness.</li><li>Allowing ownership optimisation to change alias behaviour.</li><li>Introducing a source-visible mandatory-consuming API.</li></ul><h2>Related reading</h2><ul><li><a href="../">Memory management</a>: concise memory-model contract</li><li><a href="../access-and-aliasing">Access and aliasing</a>: source semantics</li><li><a href="../borrow-validation">Borrow validation</a>: optional transfer facts</li><li><a href="../lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: lifetime owners and topology</li><li><a href="../declared-memory-groups">Declared memory groups</a>: group ownership of release families and reassignment</li><li><a href="../runtime-and-backend-lowering">Runtime and backend memory lowering</a>: ABI realisation and representations</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md">Compiler borrow validation</a>: transfer and drop facts</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md">Compiler Wasm lowering</a>: ownership-aware backend seam</li></ul></section>
     <script>
-    function __bs_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__bs_ref === true;
+    function __moth_is_ref(value) {
+    return value !== null && typeof value === "object" && value.__moth_ref === true;
     }
 
-    function __bs_binding(value) {
-    return { __bs_ref: true, __bs_kind: "binding", __bs_mode: "slot", __bs_slot: { value }, __bs_target: null };
+    function __moth_binding(value) {
+    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
     }
 
-    function __bs_param_binding(value) {
-    if (!__bs_is_ref(value)) {
-    return __bs_binding(value);
+    function __moth_param_binding(value) {
+    if (!__moth_is_ref(value)) {
+    return __moth_binding(value);
     }
-    if (value.__bs_kind === "binding") {
+    if (value.__moth_kind === "binding") {
     return value;
     }
-    const binding = __bs_binding(undefined);
-    binding.__bs_mode = "alias";
-    binding.__bs_target = value;
+    const binding = __moth_binding(undefined);
+    binding.__moth_mode = "alias";
+    binding.__moth_target = value;
     return binding;
     }
 
-    function __bs_resolve(ref) {
-    while (ref.__bs_kind === "binding" && ref.__bs_mode === "alias") {
-    ref = ref.__bs_target;
+    function __moth_resolve(ref) {
+    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+    ref = ref.__moth_target;
     }
     return ref;
     }
 
-    function __bs_read(ref) {
-    const resolved = __bs_resolve(ref);
-    return resolved.__bs_kind === "binding" ? resolved.__bs_slot.value : resolved.__bs_get();
+    function __moth_read(ref) {
+    const resolved = __moth_resolve(ref);
+    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
     }
 
-    function __bs_write(ref, value) {
-    const resolved = __bs_resolve(ref);
-    if (resolved.__bs_kind === "binding") {
-    resolved.__bs_slot.value = value;
+    function __moth_write(ref, value) {
+    const resolved = __moth_resolve(ref);
+    if (resolved.__moth_kind === "binding") {
+    resolved.__moth_slot.value = value;
     } else {
-    resolved.__bs_set(value);
+    resolved.__moth_set(value);
     }
     return value;
     }
 
-    function __bs_assign_borrow(binding, ref) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, __bs_read(ref));
+    function __moth_assign_borrow(binding, ref) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, __moth_read(ref));
     }
-    binding.__bs_mode = "alias";
-    binding.__bs_target = ref;
+    binding.__moth_mode = "alias";
+    binding.__moth_target = ref;
     return binding;
     }
 
-    function __bs_assign_value(binding, value) {
-    if (binding.__bs_mode === "alias") {
-    return __bs_write(binding, value);
+    function __moth_assign_value(binding, value) {
+    if (binding.__moth_mode === "alias") {
+    return __moth_write(binding, value);
     }
-    binding.__bs_mode = "slot";
-    binding.__bs_target = null;
-    binding.__bs_slot.value = value;
+    binding.__moth_mode = "slot";
+    binding.__moth_target = null;
+    binding.__moth_slot.value = value;
     return binding;
     }
 
-    function __bs_field(baseRef, field) {
+    function __moth_field(baseRef, field) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[field];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[field];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[field] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[field] = value;
     }
     };
     }
 
-    function __bs_index(baseRef, index) {
+    function __moth_index(baseRef, index) {
     return {
-    __bs_ref: true,
-    __bs_kind: "computed",
-    __bs_get() {
-    return __bs_read(baseRef)[index];
+    __moth_ref: true,
+    __moth_kind: "computed",
+    __moth_get() {
+    return __moth_read(baseRef)[index];
     },
-    __bs_set(value) {
-    __bs_read(baseRef)[index] = value;
+    __moth_set(value) {
+    __moth_read(baseRef)[index] = value;
     }
     };
     }
 
-    function __bs_clone_value(value) {
+    function __moth_clone_value(value) {
     if (Array.isArray(value)) {
-    return value.map(__bs_clone_value);
+    return value.map(__moth_clone_value);
     }
     if (value !== null && typeof value === "object") {
     const result = {};
     for (const key of Object.keys(value)) {
-    result[key] = __bs_clone_value(value[key]);
+    result[key] = __moth_clone_value(value[key]);
     }
     return result;
     }
     return value;
     }
 
-    function __bs_error_normalize_file(file) {
+    function __moth_error_normalize_file(file) {
     if (typeof file !== "string") {
     return "";
     }
@@ -525,63 +525,63 @@ body {
     return file;
     }
 
-    function __bs_make_error(message, code, location, trace) {
+    function __moth_make_error(message, code, location, trace) {
     return {
     b_fld0: message,
     b_fld1: code,
-    __bst_location: location ?? null,
-    __bst_trace: trace ?? null
+    __moth_location: location ?? null,
+    __moth_trace: trace ?? null
     };
     }
 
-    function __bs_error_result(message, code) {
-    return { tag: "err", value: __bs_make_error(message, code, null, null) };
+    function __moth_error_result(message, code) {
+    return { tag: "err", value: __moth_make_error(message, code, null, null) };
     }
 
-    function __bs_error_message(error) {
+    function __moth_error_message(error) {
     const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
-    function __bs_error_code(error) {
+    function __moth_error_code(error) {
     const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
-    function __bs_error_with_location(error, location) {
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), location, error.__bst_trace);
+    function __moth_error_with_location(error, location) {
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
     }
 
-    function __bs_error_push_trace(error, frame) {
-    const nextTrace = error.__bst_trace ? error.__bst_trace.concat([frame]) : [frame];
-    return __bs_make_error(__bs_error_message(error), __bs_error_code(error), error.__bst_location, nextTrace);
+    function __moth_error_push_trace(error, frame) {
+    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
     }
 
-    function __bs_error_bubble(error, file, line, column, functionName) {
+    function __moth_error_bubble(error, file, line, column, functionName) {
     const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
     const location = {
-    file: __bs_error_normalize_file(file),
+    file: __moth_error_normalize_file(file),
     line,
     column,
     function: safeFunction === "<unknown>" ? null : safeFunction
     };
     const frame = { function: safeFunction, location };
-    const nextLocation = error.__bst_location ?? location;
-    const located = __bs_error_with_location(error, nextLocation);
-    return __bs_error_push_trace(located, frame);
+    const nextLocation = error.__moth_location ?? location;
+    const located = __moth_error_with_location(error, nextLocation);
+    return __moth_error_push_trace(located, frame);
     }
 
-    function __bs_result_propagate(result) {
+    function __moth_result_propagate(result) {
     if (result && result.tag === "ok") {
     return result.value;
     }
     if (result && result.tag === "err") {
-    throw { __bs_result_propagate: true, value: result.value };
+    throw { __moth_result_propagate: true, value: result.value };
     }
     throw new Error("Expected internal Result carrier during propagation");
     }
 
-    function __bs_result_fallback(result, fallback) {
+    function __moth_result_fallback(result, fallback) {
     if (result && result.tag === "ok") {
     return result.value;
     }
@@ -591,36 +591,36 @@ body {
     throw new Error("Expected internal Result carrier during fallback handling");
     }
 
-    function __bs_fixed_collection(items, fixedCapacity) {
+    function __moth_fixed_collection(items, fixedCapacity) {
     return {
-    __bst_kind: "fixed_collection",
+    __moth_kind: "fixed_collection",
     items: items,
     fixedCapacity: fixedCapacity,
     };
     }
 
-    function __bs_collection_items(collection) {
+    function __moth_collection_items(collection) {
     if (Array.isArray(collection)) {
     return collection;
     }
     return collection.items;
     }
 
-    function __bs_collection_fixed_capacity(collection) {
+    function __moth_collection_fixed_capacity(collection) {
     if (Array.isArray(collection)) {
     return null;
     }
     return collection.fixedCapacity;
     }
 
-    function __bs_collection_is_valid(collection) {
+    function __moth_collection_is_valid(collection) {
     if (Array.isArray(collection)) {
     return true;
     }
     if (collection === null || typeof collection !== "object") {
     return false;
     }
-    if (collection.__bst_kind !== "fixed_collection") {
+    if (collection.__moth_kind !== "fixed_collection") {
     return false;
     }
     if (!Array.isArray(collection.items)) {
@@ -633,65 +633,65 @@ body {
     );
     }
 
-    function __bs_collection_index_is_valid(collection, index) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
     return Number.isInteger(index) && index >= 0 && index < items.length;
     }
 
-    function __bs_collection_get(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     return { tag: "ok", value: items[index] };
     }
 
-    function __bs_collection_set(collection, index, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     items[index] = value;
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_push(collection, value) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_push(collection, value) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    const items = __bs_collection_items(collection);
-    const fixedCapacity = __bs_collection_fixed_capacity(collection);
+    const items = __moth_collection_items(collection);
+    const fixedCapacity = __moth_collection_fixed_capacity(collection);
     if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __bs_error_result("Fixed collection capacity exceeded", 102);
+    return __moth_error_result("Fixed collection capacity exceeded", 102);
     }
     items.push(value);
     return { tag: "ok", value: null };
     }
 
-    function __bs_collection_remove(collection, index) {
-    if (!__bs_collection_is_valid(collection)) {
-    return __bs_error_result("Collection operation expects an ordered collection", 100);
+    function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+    return __moth_error_result("Collection operation expects an ordered collection", 100);
     }
-    if (!__bs_collection_index_is_valid(collection, index)) {
-    return __bs_error_result("Collection index out of bounds", 101);
+    if (!__moth_collection_index_is_valid(collection, index)) {
+    return __moth_error_result("Collection index out of bounds", 101);
     }
-    const items = __bs_collection_items(collection);
+    const items = __moth_collection_items(collection);
     const removed = items.splice(index, 1)[0];
     return { tag: "ok", value: removed };
     }
 
-    function __bs_collection_length(collection) {
-    const items = __bs_collection_items(collection);
+    function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
     return items.length;
     }
 
-    function __bs_value_to_string(value) {
+    function __moth_value_to_string(value) {
     if (value === undefined || value === null) {
     return "";
     }
@@ -699,10 +699,10 @@ body {
     }
 
     function b_fn6() {
-    let b_l24 = __bs_binding(undefined);
+    let b_l24 = __moth_binding(undefined);
 
-    __bs_assign_value(b_l24, []);
-    return __bs_read(b_l24);
+    __moth_assign_value(b_l24, []);
+    return __moth_read(b_l24);
     }
 
     </script>

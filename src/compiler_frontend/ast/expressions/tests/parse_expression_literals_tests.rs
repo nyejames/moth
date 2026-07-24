@@ -53,7 +53,7 @@ fn parse_literal_expression_rejects_positive_i32_overflow() {
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidNumberLiteral)
     );
-    assert_eq!(diagnostic.kind.code(), "BST-SYNTAX-0008");
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0008");
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::InvalidNumberLiteral {
@@ -107,7 +107,7 @@ fn parse_whole_number_token(
     next_number_negative: bool,
 ) -> Result<LiteralParseOutcome, ExpressionParseError> {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("test.bst", &mut string_table);
+    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope.clone(),

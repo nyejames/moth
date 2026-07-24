@@ -62,7 +62,7 @@ fn choice_variant_construction_emits_integer_literal() {
     assert!(
         output
             .source
-            .contains("__bs_assign_value(bst_status_l0, 2)"),
+            .contains("__moth_assign_value(moth_status_l0, 2)"),
         "choice variant must lower to a plain integer literal inside an assignment"
     );
 }

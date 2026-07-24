@@ -7,7 +7,7 @@ rendered_output_exact = "reactive_mount_multiple_sources_success 5-8\nreactive_m
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_mount_template_fragment(",
-    "__bs_reactive_registered_fragments.push(mounted)",
-    "__bs_reactive_source_to_fragments.set(sourceId, list)",
+    "function __moth_mount_template_fragment(",
+    "__moth_reactive_registered_fragments.push(mounted)",
+    "__moth_reactive_source_to_fragments.set(sourceId, list)",
 ]

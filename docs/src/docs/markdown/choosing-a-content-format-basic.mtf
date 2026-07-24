@@ -1,0 +1,18 @@
+Three formats, one choice.
+
+### `.md` for plain Markdown
+
+Use when the content is ordinary Markdown with no Moth syntax needed.
+
+### `.mtf` for Moth-aware Markdown
+
+Use when the content needs compile-time constants, nested templates or builder helpers.
+
+### `.moth` for full Moth
+
+Use when runtime values, control flow, imports or page fragments are needed.
+
+### Remember
+
+- `.md` is portable. `.mtf` is Moth-aware. `.moth` is full power.
+- Start with `.md` or `.mtf` for content. Reach for `.moth` when content becomes logic.

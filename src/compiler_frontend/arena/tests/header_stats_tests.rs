@@ -50,8 +50,8 @@ DISPLAYABLE must:
 #[test]
 fn multi_file_declarations_are_aggregated() {
     let mut string_table = StringTable::new();
-    let entry_path = PathBuf::from("src/#page.bst");
-    let helper_path = PathBuf::from("src/helper.bst");
+    let entry_path = PathBuf::from("src/#page.moth");
+    let helper_path = PathBuf::from("src/helper.moth");
 
     let entry_output =
         prepare_single_file("[runtime1]\n", &entry_path, &entry_path, &mut string_table);

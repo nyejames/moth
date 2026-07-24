@@ -18,9 +18,9 @@ pub(super) fn normalize_import_dependency_path(
     if import_path
         .as_components()
         .iter()
-        .any(|component| string_table.resolve(*component).ends_with(".bst"))
+        .any(|component| string_table.resolve(*component).ends_with(".moth"))
     {
-        return Err(Box::new(CompilerDiagnostic::explicit_bst_extension(
+        return Err(Box::new(CompilerDiagnostic::explicit_moth_extension(
             import_path.to_owned(),
             path_location.clone(),
         )));

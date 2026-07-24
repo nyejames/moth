@@ -25,11 +25,11 @@ fn args(values: &[&str]) -> Vec<String> {
 
 #[test]
 fn dev_command_uses_default_options() {
-    let command = get_command(&args(&["dev", "main.bst"])).expect("command should parse");
+    let command = get_command(&args(&["dev", "main.moth"])).expect("command should parse");
     assert_eq!(
         command,
         Command::Dev {
-            path: String::from("main.bst"),
+            path: String::from("main.moth"),
             options: DevServerOptions::default(),
             flags: Vec::new(),
         }
@@ -51,11 +51,11 @@ fn build_command_uses_current_directory_when_path_is_missing() {
 #[test]
 fn build_command_supports_mixed_path_and_flag_ordering() {
     let command =
-        get_command(&args(&["build", "--release", "main.bst"])).expect("command should parse");
+        get_command(&args(&["build", "--release", "main.moth"])).expect("command should parse");
     assert_eq!(
         command,
         Command::Build {
-            path: String::from("main.bst"),
+            path: String::from("main.moth"),
             flags: vec![Flag::Release],
         }
     );
@@ -98,7 +98,7 @@ fn new_html_command_parses_project_path() {
 fn dev_command_parses_custom_host_port_and_poll_interval() {
     let command = get_command(&args(&[
         "dev",
-        "main.bst",
+        "main.moth",
         "--host",
         "0.0.0.0",
         "--port",
@@ -111,7 +111,7 @@ fn dev_command_parses_custom_host_port_and_poll_interval() {
     assert_eq!(
         command,
         Command::Dev {
-            path: String::from("main.bst"),
+            path: String::from("main.moth"),
             options: DevServerOptions {
                 host: String::from("0.0.0.0"),
                 port: 7777,
@@ -124,7 +124,7 @@ fn dev_command_parses_custom_host_port_and_poll_interval() {
 
 #[test]
 fn dev_command_rejects_invalid_port_values() {
-    let error = get_command(&args(&["dev", "main.bst", "--port", "invalid"]))
+    let error = get_command(&args(&["dev", "main.moth", "--port", "invalid"]))
         .expect_err("invalid port should fail");
     assert!(error.contains("Invalid --port value"));
 }
@@ -132,24 +132,24 @@ fn dev_command_rejects_invalid_port_values() {
 #[test]
 fn dev_command_rejects_unknown_flags() {
     let error =
-        get_command(&args(&["dev", "main.bst", "--wat"])).expect_err("unknown flag should fail");
+        get_command(&args(&["dev", "main.moth", "--wat"])).expect_err("unknown flag should fail");
     assert!(error.contains("Unknown dev flag"));
 }
 
 #[test]
 fn dev_command_rejects_missing_flag_values() {
     let host_error =
-        get_command(&args(&["dev", "main.bst", "--host"])).expect_err("missing host value");
+        get_command(&args(&["dev", "main.moth", "--host"])).expect_err("missing host value");
     assert!(host_error.contains("Missing value for --host"));
 
     let port_error =
-        get_command(&args(&["dev", "main.bst", "--port"])).expect_err("missing port value");
+        get_command(&args(&["dev", "main.moth", "--port"])).expect_err("missing port value");
     assert!(port_error.contains("Missing value for --port"));
 }
 
 #[test]
 fn dev_command_rejects_zero_poll_interval() {
-    let error = get_command(&args(&["dev", "main.bst", "--poll-interval-ms", "0"]))
+    let error = get_command(&args(&["dev", "main.moth", "--poll-interval-ms", "0"]))
         .expect_err("zero interval should fail");
     assert!(error.contains("greater than zero"));
 }
@@ -160,7 +160,7 @@ fn dev_command_supports_path_and_flag_ordering() {
         "dev",
         "--host",
         "localhost",
-        "main.bst",
+        "main.moth",
         "--poll-interval-ms",
         "900",
     ]))
@@ -169,7 +169,7 @@ fn dev_command_supports_path_and_flag_ordering() {
     assert_eq!(
         command,
         Command::Dev {
-            path: String::from("main.bst"),
+            path: String::from("main.moth"),
             options: DevServerOptions {
                 host: String::from("localhost"),
                 port: 6342,
@@ -400,12 +400,12 @@ fn check_command_uses_default_options() {
 
 #[test]
 fn check_command_parses_path_and_terse_flag() {
-    let command = get_command(&args(&["check", "main.bst", "--terse"]))
+    let command = get_command(&args(&["check", "main.moth", "--terse"]))
         .expect("check command should parse path and terse flag");
     assert_eq!(
         command,
         Command::Check {
-            path: String::from("main.bst"),
+            path: String::from("main.moth"),
             terse: true,
         }
     );
@@ -413,12 +413,12 @@ fn check_command_parses_path_and_terse_flag() {
 
 #[test]
 fn check_command_supports_mixed_argument_ordering() {
-    let command = get_command(&args(&["check", "--terse", "main.bst"]))
+    let command = get_command(&args(&["check", "--terse", "main.moth"]))
         .expect("check command should parse mixed argument ordering");
     assert_eq!(
         command,
         Command::Check {
-            path: String::from("main.bst"),
+            path: String::from("main.moth"),
             terse: true,
         }
     );
@@ -426,7 +426,7 @@ fn check_command_supports_mixed_argument_ordering() {
 
 #[test]
 fn check_command_rejects_multiple_paths() {
-    let error = get_command(&args(&["check", "a.bst", "b.bst"]))
+    let error = get_command(&args(&["check", "a.moth", "b.moth"]))
         .expect_err("multiple check paths should fail");
     assert!(error.contains("at most one path"));
 }
@@ -500,7 +500,7 @@ fn build_command_rejects_removed_warning_flags() {
 #[test]
 fn dev_command_rejects_removed_warning_flags() {
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
-        let error = get_command(&args(&["dev", "main.bst", removed]))
+        let error = get_command(&args(&["dev", "main.moth", removed]))
             .expect_err("removed flag should be rejected by dev");
         assert!(
             error.contains("Unknown dev flag"),
@@ -622,7 +622,7 @@ fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult 
             cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
         },
-        config: Config::new(PathBuf::from("main.bst")),
+        config: Config::new(PathBuf::from("main.moth")),
         warnings,
         string_table: StringTable::new(),
     }

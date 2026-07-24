@@ -1,4 +1,4 @@
-//! HTML JavaScript `@bst.*` annotation parser.
+//! HTML JavaScript `@moth.*` annotation parser.
 //!
 //! WHAT: turns a single JS source file into a `ParsedJsModule` containing opaque types,
 //!       free functions, receiver-shaped signatures, registered runtime imports, and diagnostics.
@@ -9,9 +9,9 @@
 //! ## Module layout
 //!
 //! - `parsed_js_module`: parser-owned data model (spans, diagnostics, signatures).
-//! - `comment_extractor`: finds `/** ... */` blocks and extracts `@bst.opaque` / `@bst.sig`.
+//! - `comment_extractor`: finds `/** ... */` blocks and extracts `@moth.opaque` / `@moth.sig`.
 //! - `export_scanner`: finds supported JS exports and rejects unsupported forms.
-//! - `signature_parser`: parses the Beanstalk parameter/return syntax inside `@bst.sig`.
+//! - `signature_parser`: parses the Moth parameter/return syntax inside `@moth.sig`.
 //! - `mod.rs` (this file): orchestrates extraction → scanning → binding → signature parsing.
 
 mod comment_extractor;
@@ -35,7 +35,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Parses a single JS source file into a `ParsedJsModule` using an explicit registry.
 ///
-/// WHAT: extracts `@bst.*` annotations, scans for JS exports, matches each `@bst.sig`
+/// WHAT: extracts `@moth.*` annotations, scans for JS exports, matches each `@moth.sig`
 ///       to the immediately following supported export, parses signatures, and validates
 ///       arity and duplicate names against the provided runtime module registry.
 ///
@@ -52,7 +52,7 @@ struct ParseOrchestrator<'a> {
     annotations: Vec<ExtractedAnnotation>,
     exports: Vec<JsExport>,
     diagnostics: Vec<JsParserDiagnostic>,
-    seen_beanstalk_names: Vec<String>,
+    seen_moth_names: Vec<String>,
     seen_js_names: Vec<String>,
 }
 
@@ -64,7 +64,7 @@ impl<'a> ParseOrchestrator<'a> {
             annotations: Vec::new(),
             exports: Vec::new(),
             diagnostics: Vec::new(),
-            seen_beanstalk_names: Vec::new(),
+            seen_moth_names: Vec::new(),
             seen_js_names: Vec::new(),
         }
     }
@@ -100,17 +100,17 @@ impl<'a> ParseOrchestrator<'a> {
         // Collect opaque types (file-level annotations, no export binding needed).
         for annotation in &self.annotations {
             if let AnnotationKind::Opaque { type_name } = &annotation.kind {
-                if self.seen_beanstalk_names.contains(type_name) {
+                if self.seen_moth_names.contains(type_name) {
                     self.diagnostics.push(JsParserDiagnostic {
                         message: format!(
-                            "Duplicate Beanstalk-facing name `{}` in JS module.",
+                            "Duplicate Moth-facing name `{}` in JS module.",
                             type_name
                         ),
                         span: annotation.span.clone(),
-                        kind: JsDiagnosticKind::DuplicateBeanstalkName,
+                        kind: JsDiagnosticKind::DuplicateMothName,
                     });
                 } else {
-                    self.seen_beanstalk_names.push(type_name.clone());
+                    self.seen_moth_names.push(type_name.clone());
                 }
 
                 parsed.opaque_types.push(ParsedOpaqueType {
@@ -120,7 +120,7 @@ impl<'a> ParseOrchestrator<'a> {
             }
         }
 
-        // Bind `@bst.sig` annotations to the next supported JS export.
+        // Bind `@moth.sig` annotations to the next supported JS export.
         let mut annotation_index = 0;
         let mut export_index = 0;
 
@@ -128,12 +128,12 @@ impl<'a> ParseOrchestrator<'a> {
             let annotation = &self.annotations[annotation_index];
             annotation_index += 1;
 
-            let (beanstalk_name, signature_text, annotation_span) = match &annotation.kind {
+            let (moth_name, signature_text, annotation_span) = match &annotation.kind {
                 AnnotationKind::Sig {
-                    beanstalk_name,
+                    moth_name,
                     signature_text,
                 } => (
-                    beanstalk_name.clone(),
+                    moth_name.clone(),
                     signature_text.clone(),
                     annotation.span.clone(),
                 ),
@@ -162,18 +162,18 @@ impl<'a> ParseOrchestrator<'a> {
                     self.seen_js_names.push(export.js_name.clone());
                 }
 
-                // Check for duplicate Beanstalk-facing name
-                if self.seen_beanstalk_names.contains(&beanstalk_name) {
+                // Check for duplicate Moth-facing name
+                if self.seen_moth_names.contains(&moth_name) {
                     self.diagnostics.push(JsParserDiagnostic {
                         message: format!(
-                            "Duplicate Beanstalk-facing name `{}` in JS module.",
-                            beanstalk_name
+                            "Duplicate Moth-facing name `{}` in JS module.",
+                            moth_name
                         ),
                         span: annotation_span.clone(),
-                        kind: JsDiagnosticKind::DuplicateBeanstalkName,
+                        kind: JsDiagnosticKind::DuplicateMothName,
                     });
                 } else {
-                    self.seen_beanstalk_names.push(beanstalk_name.clone());
+                    self.seen_moth_names.push(moth_name.clone());
                 }
 
                 // Parse the signature body
@@ -185,13 +185,13 @@ impl<'a> ParseOrchestrator<'a> {
                 });
                 self.diagnostics.extend(sig_result.diagnostics);
 
-                // Validate arity: Beanstalk ABI parameters vs JS parameters
+                // Validate arity: Moth ABI parameters vs JS parameters
                 let abi_count = sig_result.signature.abi_parameter_count();
                 if abi_count != export.parameter_count {
                     self.diagnostics.push(JsParserDiagnostic {
                         message: format!(
-                            "Annotated JS export `{}` has {} Beanstalk ABI parameter(s) but {} JS parameter(s). \
-                             Receiver `this` counts as the first JS parameter. Beanstalk JS module exports must use one plain JS parameter per Beanstalk ABI parameter.",
+                            "Annotated JS export `{}` has {} Moth ABI parameter(s) but {} JS parameter(s). \
+                             Receiver `this` counts as the first JS parameter. Moth JS module exports must use one plain JS parameter per Moth ABI parameter.",
                             export.js_name,
                             abi_count,
                             export.parameter_count
@@ -202,7 +202,7 @@ impl<'a> ParseOrchestrator<'a> {
                 }
 
                 let parsed_function = ParsedJsFunction {
-                    beanstalk_name: beanstalk_name.clone(),
+                    moth_name: moth_name.clone(),
                     js_name: export.js_name.clone(),
                     signature: sig_result.signature,
                     annotation_span: annotation_span.clone(),
@@ -217,8 +217,8 @@ impl<'a> ParseOrchestrator<'a> {
             } else {
                 self.diagnostics.push(JsParserDiagnostic {
                     message: format!(
-                        "`@bst.sig` for `{}` is not followed by a supported JS export declaration.",
-                        beanstalk_name
+                        "`@moth.sig` for `{}` is not followed by a supported JS export declaration.",
+                        moth_name
                     ),
                     span: annotation_span,
                     kind: JsDiagnosticKind::MissingExportAfterSig,
@@ -240,8 +240,8 @@ impl<'a> ParseOrchestrator<'a> {
             if !is_annotated {
                 self.diagnostics.push(JsParserDiagnostic {
                     message: format!(
-                        "JavaScript export `{}` is not annotated with `@bst.sig`. \
-                         Every export in a Beanstalk JS module must be explicitly annotated. Keep private helpers unexported.",
+                        "JavaScript export `{}` is not annotated with `@moth.sig`. \
+                         Every export in a Moth JS module must be explicitly annotated. Keep private helpers unexported.",
                         export.js_name
                     ),
                     span: export.span.clone(),
@@ -295,7 +295,7 @@ impl<'a> ParseOrchestrator<'a> {
         for parameter in &function.signature.parameters {
             self.validate_type_name(
                 &parameter.type_name,
-                &function.beanstalk_name,
+                &function.moth_name,
                 &function.annotation_span,
                 opaque_names,
             );
@@ -304,7 +304,7 @@ impl<'a> ParseOrchestrator<'a> {
         for return_type in &function.signature.returns {
             self.validate_type_name(
                 &return_type.type_name,
-                &function.beanstalk_name,
+                &function.moth_name,
                 &function.annotation_span,
                 opaque_names,
             );
@@ -328,7 +328,7 @@ impl<'a> ParseOrchestrator<'a> {
 
         self.diagnostics.push(JsParserDiagnostic {
             message: format!(
-                "Unknown external type `{}` in `@bst.sig` for `{}`. Declare it with `@bst.opaque {}` before using it in Beanstalk JS module signatures.",
+                "Unknown external type `{}` in `@moth.sig` for `{}`. Declare it with `@moth.opaque {}` before using it in Moth JS module signatures.",
                 type_name, function_name, type_name
             ),
             span: span.clone(),

@@ -4,7 +4,6 @@
 //! Header parsing also owns top-level symbol collection (`module_symbols`), so dependency sorting
 //! and AST construction receive a pre-built symbol package without a separate manifest stage.
 
-pub(crate) mod beandown_prepare;
 mod const_fragments;
 mod constant_dependencies;
 mod dependency_canonicalization;
@@ -16,6 +15,7 @@ mod header_dispatch;
 pub(crate) mod import_environment;
 mod imports;
 pub(crate) mod module_symbols;
+pub(crate) mod moth_template_prepare;
 mod ordering_hints;
 pub(crate) mod parse_file_headers;
 pub(crate) mod plain_markdown_prepare;

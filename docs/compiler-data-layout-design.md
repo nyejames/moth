@@ -1,4 +1,4 @@
-# Beanstalk Compiler Data Layout Design
+# Moth Compiler Data Layout Design
 
 > **Repository path:** `docs/compiler-data-layout-design.md`
 >
@@ -12,7 +12,7 @@
 ## Authority and ownership
 
 This document is the canonical authority for the physical representation, ownership, lifetime and
-extension rules of Beanstalk compiler source metadata, retained tokens and diagnostics.
+extension rules of Moth compiler source metadata, retained tokens and diagnostics.
 
 It owns:
 
@@ -34,8 +34,8 @@ It does not override:
 - `docs/compiler-design-overview.md` for compiler stage and semantic ownership
 - `docs/build-system-design.md` for Stage 0, graph scheduling, project tooling and host orchestration
 - `docs/language-overview.md` for source-language behaviour
-- the memory-management authorities for Beanstalk program semantics
-- `docs/src/docs/progress/#page.bst` for current implementation status
+- the memory-management authorities for Moth program semantics
+- `docs/src/docs/progress/#page.moth` for current implementation status
 - `docs/roadmap/roadmap.md` and the owning implementation plan for sequencing
 
 Where an implementation slice changes a boundary shared with one of those authorities, both
@@ -280,7 +280,7 @@ are fixed:
 - `text` is the exact UTF-8 source snapshot compiled.
 - `line_starts` contains byte offsets into `text`; the first entry is always `0`.
 - `extended_spans` owns exact ranges that do not fit inline in `LocalSpan`.
-- `kind` identifies Beanstalk, Beandown, Markdown, config or another registered source kind.
+- `kind` identifies Moth, Moth template, Markdown, config or another registered source kind.
 - `provenance` distinguishes authored physical source from synthetic or adapted source and points to
   its owning source where needed.
 
@@ -764,7 +764,7 @@ pub struct DiagnosticCode(NonZeroU16);
 
 `DiagnosticCode` is an explicit internal numeric identity. It is assigned in the diagnostic schema
 and never derived from enum declaration order. Its descriptor supplies the external stable code such
-as `BST-RULE-0044`, category, title and default severity.
+as `MOTH-RULE-0044`, category, title and default severity.
 
 `code_and_flags` uses this fixed layout:
 
@@ -1040,7 +1040,7 @@ Conceptually:
 diagnostic_schema! {
     TypeMismatch {
         code: 17,
-        stable: "BST-TYPE-0001",
+        stable: "MOTH-TYPE-0001",
         category: Type,
         default_severity: Error,
         facts: {
@@ -1181,7 +1181,7 @@ not require a globally contended string interner.
 
 ## Failure architecture
 
-Beanstalk compiler failures have exactly three lanes. They are not converted into one another merely
+Moth compiler failures have exactly three lanes. They are not converted into one another merely
 for rendering convenience.
 
 ### Lane 1: user-caused diagnostics
@@ -1252,7 +1252,7 @@ pub fn raise_compiler_bug(
 The panic payload is a structured `CompilerBugReport` containing:
 
 - compiler stage
-- optional Beanstalk source span
+- optional Moth source span
 - Rust caller file, line and column from `#[track_caller]`
 - compiler version and commit identity where available
 - a precise invariant message
@@ -1609,11 +1609,11 @@ Implementation of this design requires synchronized changes to:
 - `docs/compiler-design-overview.md` — source context, token ownership, diagnostics and failure lanes
 - `docs/build-system-design.md` — deterministic source registration, compilation contexts and tooling
   worker boundaries
-- `docs/src/docs/codebase/style-guide/style-guide.bd` — hard layout and failure-lane rules; remove
+- `docs/src/docs/codebase/style-guide/style-guide.mtf` — hard layout and failure-lane rules; remove
   boxing as the normal `result_large_err` answer
-- `docs/src/docs/codebase/style-guide/testing.bd` — layout/property/failure-lane ownership
-- `docs/src/docs/codebase/style-guide/validation.bd` — updated manual architecture audit
-- `docs/src/docs/progress/#page.bst` — current implementation status during and after migration
+- `docs/src/docs/codebase/style-guide/testing.mtf` — layout/property/failure-lane ownership
+- `docs/src/docs/codebase/style-guide/validation.mtf` — updated manual architecture audit
+- `docs/src/docs/progress/#page.moth` — current implementation status during and after migration
 - `docs/roadmap/roadmap.md` — sequencing and measured deferrals
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md` — dependency and post-layout resume
   capsule

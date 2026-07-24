@@ -40,7 +40,7 @@ pub(crate) enum WasmFunctionEmissionPolicy {
 
     /// Lower functions syntactically reachable from the requested export roots.
     ///
-    /// WHY: HTML-Wasm page modules are entered through `bst_start`; unused source-backed package
+    /// WHY: HTML-Wasm page modules are entered through `moth_start`; unused source-backed package
     /// wrappers must not request host imports or unsupported backend lowering.
     ReachableFromExports,
 }
@@ -61,19 +61,19 @@ pub(crate) struct WasmExportPolicy {
 pub(crate) struct WasmHelperExportPolicy {
     /// Export memory as `memory`.
     pub export_memory: bool,
-    /// Export runtime string-pointer helper as `bst_str_ptr`.
+    /// Export runtime string-pointer helper as `moth_str_ptr`.
     pub export_str_ptr: bool,
-    /// Export runtime string-length helper as `bst_str_len`.
+    /// Export runtime string-length helper as `moth_str_len`.
     pub export_str_len: bool,
-    /// Export runtime Vec handle constructor as `bst_vec_new`.
+    /// Export runtime Vec handle constructor as `moth_vec_new`.
     pub export_vec_new: bool,
-    /// Export runtime Vec append helper as `bst_vec_push`.
+    /// Export runtime Vec append helper as `moth_vec_push`.
     pub export_vec_push: bool,
-    /// Export runtime Vec length helper as `bst_vec_len`.
+    /// Export runtime Vec length helper as `moth_vec_len`.
     pub export_vec_len: bool,
-    /// Export runtime Vec element reader as `bst_vec_get`.
+    /// Export runtime Vec element reader as `moth_vec_get`.
     pub export_vec_get: bool,
-    /// Export runtime release helper as `bst_release`.
+    /// Export runtime release helper as `moth_release`.
     pub export_release: bool,
 }
 

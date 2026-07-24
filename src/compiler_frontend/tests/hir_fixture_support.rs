@@ -29,7 +29,7 @@ pub(crate) fn build_ast(nodes: Vec<AstNode>, entry_path: InternedPath) -> Ast {
 }
 
 pub(crate) fn entry_and_start(string_table: &mut StringTable) -> (InternedPath, InternedPath) {
-    let entry_path = InternedPath::from_single_str("main.bst", string_table);
+    let entry_path = InternedPath::from_single_str("main.moth", string_table);
     let start_name = entry_path.join_str(IMPLICIT_START_FUNC_NAME, string_table);
     (entry_path, start_name)
 }

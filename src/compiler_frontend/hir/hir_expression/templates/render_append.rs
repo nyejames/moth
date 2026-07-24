@@ -1425,7 +1425,7 @@ impl<'a> HirBuilder<'a> {
             ));
         }
 
-        // `Float` template chunks must use the Beanstalk-owned formatter instead of target-native
+        // `Float` template chunks must use the Moth-owned formatter instead of target-native
         // stringification so casts and templates share one formatting contract.
         if expression.ty == self.type_environment.builtins().float {
             return self.emit_formatted_float_value(expression, location);

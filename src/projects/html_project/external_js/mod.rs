@@ -1,8 +1,8 @@
 //! HTML JavaScript external binding module support.
 //!
-//! WHAT: parses single-file JavaScript binding modules annotated with Beanstalk `@bst.*`
+//! WHAT: parses single-file JavaScript binding modules annotated with Moth `@moth.*`
 //!       metadata into a structured, parser-owned data model, and tracks builder-owned
-//!       core JS runtime modules such as `@beanstalk/runtime`.
+//!       core JS runtime modules such as `@moth/runtime`.
 //! WHY: project-local `.js` imports and built-in JS-backed packages such as `@web/canvas`
 //!      need a typed surface before they can be fed into the compiler frontend.
 //!
@@ -13,7 +13,7 @@
 //!
 //! ## Module layout
 //!
-//! - `parser/`: the `@bst.*` annotation scanner, export scanner, and signature parser.
+//! - `parser/`: the `@moth.*` annotation scanner, export scanner, and signature parser.
 //! - `runtime_module_registry`: builder-owned registry of allowed JS runtime module imports
 //!   and their authored source.
 

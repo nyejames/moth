@@ -1,15 +1,15 @@
-//! Lightweight parser for `@bst.sig` signature bodies.
+//! Lightweight parser for `@moth.sig` signature bodies.
 //!
-//! WHAT: parses Beanstalk parameter-list syntax such as `|this ~Canvas2d, x Float| -> Error!`
+//! WHAT: parses Moth parameter-list syntax such as `|this ~Canvas2d, x Float| -> Error!`
 //!       into structured `ParsedParameter` and `ParsedReturnType` values.
-//! WHY: the scanner should not embed full Beanstalk parser dependency, but it must
+//! WHY: the scanner should not embed full Moth parser dependency, but it must
 //!      understand enough of the signature shape to validate arity and detect
 //!      receiver-shaped signatures that external package registration rejects.
 //!
 //! Limitations (intentional):
 //! - Does not resolve type names against a registry; type names are returned as strings.
 //! - Rejects `Void`, multi-success returns, collections, options, callbacks, and generics.
-//! - Does not validate that receiver types were declared with `@bst.opaque`.
+//! - Does not validate that receiver types were declared with `@moth.opaque`.
 
 use super::parsed_js_module::{
     JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedParameter, ParsedReturnType,
@@ -33,7 +33,7 @@ pub struct SignatureParseResult {
     pub diagnostics: Vec<JsParserDiagnostic>,
 }
 
-/// Parses a `@bst.sig` body after the Beanstalk-facing name has been extracted.
+/// Parses a `@moth.sig` body after the Moth-facing name has been extracted.
 ///
 /// WHAT: expects text starting with a parameter list `|...|` and optionally
 ///       followed by `->` and return types.
@@ -124,7 +124,7 @@ impl SignatureScanner {
         }
 
         self.emit_diagnostic(
-            "External package functions cannot be generic. Expose concrete external functions or wrap them with source Beanstalk generic functions.",
+            "External package functions cannot be generic. Expose concrete external functions or wrap them with source Moth generic functions.",
             JsDiagnosticKind::GenericExternalFunction,
         );
 
@@ -200,7 +200,7 @@ impl SignatureScanner {
         // at the next boundary instead of consuming the rest of the signature.
         if self.peek_str("...") {
             self.emit_diagnostic(
-                "Rest parameters are not supported in Beanstalk JS module signatures.",
+                "Rest parameters are not supported in Moth JS module signatures.",
                 JsDiagnosticKind::UnsupportedParameterPattern,
             );
             self.skip_to_parameter_boundary();
@@ -211,7 +211,7 @@ impl SignatureScanner {
         // only accepts flat ABI slots.
         if self.peek_char('{') || self.peek_char('[') {
             self.emit_diagnostic(
-                "Destructuring parameters are not supported in Beanstalk JS module signatures.",
+                "Destructuring parameters are not supported in Moth JS module signatures.",
                 JsDiagnosticKind::UnsupportedParameterPattern,
             );
             self.skip_to_parameter_boundary();
@@ -223,7 +223,7 @@ impl SignatureScanner {
         // Optional parameters are rejected in the external signature subset.
         if self.consume_char('?') {
             self.emit_diagnostic(
-                "Optional parameters are not supported in Beanstalk JS module signatures.",
+                "Optional parameters are not supported in Moth JS module signatures.",
                 JsDiagnosticKind::UnsupportedParameterPattern,
             );
             self.skip_to_parameter_boundary();
@@ -250,13 +250,13 @@ impl SignatureScanner {
         if is_receiver {
             if parameter_index != 0 {
                 self.emit_diagnostic(
-                    "Receiver parameter `this` must be the first parameter in a Beanstalk JS module signature.",
+                    "Receiver parameter `this` must be the first parameter in a Moth JS module signature.",
                     JsDiagnosticKind::InvalidReceiverParameter,
                 );
             }
             if *has_seen_receiver {
                 self.emit_diagnostic(
-                    "Receiver parameter `this` may appear at most once in a Beanstalk JS module signature.",
+                    "Receiver parameter `this` may appear at most once in a Moth JS module signature.",
                     JsDiagnosticKind::InvalidReceiverParameter,
                 );
             }
@@ -288,7 +288,7 @@ impl SignatureScanner {
                 type_name.push('}');
             }
             self.emit_diagnostic(
-                "Collection types are not supported in Beanstalk JS module signatures yet.",
+                "Collection types are not supported in Moth JS module signatures yet.",
                 JsDiagnosticKind::UnsupportedTypeSyntax,
             );
             return type_name;
@@ -306,7 +306,7 @@ impl SignatureScanner {
         if self.consume_char('?') {
             type_name.push('?');
             self.emit_diagnostic(
-                "Option types are not supported in Beanstalk JS module signatures yet.",
+                "Option types are not supported in Moth JS module signatures yet.",
                 JsDiagnosticKind::UnsupportedTypeSyntax,
             );
         }
@@ -380,7 +380,7 @@ impl SignatureScanner {
         // More than one success return is not supported in this parser subset.
         if returns.len() > 1 {
             self.emit_diagnostic(
-                "Multi-success returns are not supported in Beanstalk JS module signatures yet.",
+                "Multi-success returns are not supported in Moth JS module signatures yet.",
                 JsDiagnosticKind::MultiSuccessReturn,
             );
         }

@@ -1328,7 +1328,7 @@ fn lowering_errors_preserve_string_table_context() {
         .scope
         .to_portable_string(&messages.string_table);
     assert!(
-        resolved_scope.ends_with("main.bst"),
+        resolved_scope.ends_with("main.moth"),
         "HIR lowering errors should preserve the source path in the returned StringTable, got '{resolved_scope}'",
     );
 }

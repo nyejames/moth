@@ -1,0 +1,50 @@
+`assert` is an always-checked statement intrinsic for invariants.
+
+[codeblock, $code("moth"):
+    assert(index < items.length())
+    assert(index < items.length(), "index must be in bounds")
+    assert(false, "unimplemented backend path")
+]
+
+### Accepted forms
+
+[codeblock, $code("moth"):
+    assert(condition)
+    assert(condition, "literal message")
+]
+
+- The condition must resolve to `Bool`.
+- The condition is required.
+- The message is optional.
+- When present the message must be one quoted string literal.
+- Exactly one condition and at most one message are accepted.
+- Named arguments are invalid.
+- Mutable access markers are invalid.
+- Parentheses are required.
+- Trailing comma without a message is invalid.
+
+### Failure behaviour
+
+- Assertions are checked in development and release builds.
+- Failure is unrecoverable in Moth source.
+- Failure does not produce `Error!`.
+- Postfix `!` is invalid.
+- `catch` is invalid.
+- Expected runtime failures should use a typed error path instead.
+
+### Statement-only contract
+
+`assert`:
+
+- cannot be assigned
+- cannot be passed as an argument
+- cannot be imported or aliased
+- cannot appear in template interpolation
+- does not produce a value
+
+`assert(false)` and `assert(false, "message")` are statically terminal.
+
+They may end a function path that otherwise requires a value.
+
+A dynamic `assert(condition)` is not statically terminal because the condition
+may succeed.

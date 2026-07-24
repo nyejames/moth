@@ -93,7 +93,7 @@ pub(crate) fn invalid_match_pattern_message(
 
     match reason {
         InvalidMatchPatternReason::WildcardNotSupported => {
-            "Wildcard pattern '_' is not supported in Beanstalk. Use 'else =>' for a catch-all arm.".to_string()
+            "Wildcard pattern '_' is not supported in Moth. Use 'else =>' for a catch-all arm.".to_string()
         }
         InvalidMatchPatternReason::AsNotValid => {
             "`as` is not valid in match patterns. It is only supported in choice payload captures.".to_string()
@@ -148,7 +148,7 @@ pub(crate) fn invalid_match_pattern_message(
         }
         InvalidMatchPatternReason::UnknownVariant => format!("Unknown variant {variant_text}."),
         InvalidMatchPatternReason::CaptureBindingShadowsVariable => {
-            "Capture binding shadows an existing variable. Beanstalk does not allow shadowing.".to_string()
+            "Capture binding shadows an existing variable. Moth does not allow shadowing.".to_string()
         }
         InvalidMatchPatternReason::NonePatternRequiresOptionalScrutinee => {
             "`none =>` is only valid when matching an optional value.".to_string()

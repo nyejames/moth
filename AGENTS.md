@@ -1,35 +1,35 @@
-# Beanstalk agent rules
+# Moth agent rules
 
 Resolve every relative path in this file from the current worktree root. Do not read project references from another worktree unless the user explicitly asks you to.
 
 ## Reading list
 
-Before any Beanstalk task, read:
+Before any Moth task, read:
 - this file
 - `docs/compiler-design-overview.md`
-- `docs/src/docs/codebase/style-guide/style-guide.bd`
-- `docs/src/docs/codebase/memory-management/overview.bd`
+- `docs/src/docs/codebase/style-guide/style-guide.mtf`
+- `docs/src/docs/codebase/memory-management/overview.mtf`
 
 Before making or reviewing a non-trivial change, read:
-- `docs/src/docs/codebase/style-guide/validation.bd`
+- `docs/src/docs/codebase/style-guide/validation.mtf`
 
-Read `docs/src/docs/codebase/style-guide/testing.bd` when the task changes or reviews behavior, diagnostics, compiler stages, backend artifacts, tests, fixtures, or test infrastructure.
+Read `docs/src/docs/codebase/style-guide/testing.mtf` when the task changes or reviews behavior, diagnostics, compiler stages, backend artifacts, tests, fixtures, or test infrastructure.
 
 Read `docs/build-system-design.md` for build-system or project orchestration: Stage 0, config, imports, modules, packages, builders, tooling, link planning, backend project assembly, outputs, incremental builds and the dev server.
 
 For memory, ownership, borrow checking, allocation, GC, drops, or runtime-handle work:
-1. Read `docs/src/docs/codebase/memory-management/overview.bd`
+1. Read `docs/src/docs/codebase/memory-management/overview.mtf`
 2. Use its task-reading guide
 3. Read the selected memory leaf documents
 
 For language syntax, semantics and user-visible behavior, read:
-1. `docs/src/docs/codebase/language/overview.bd`
-2. The canonical unsuffixed Beandown files it selects
+1. `docs/src/docs/codebase/language/overview.mtf`
+2. The canonical unsuffixed Moth template files it selects
 3. `docs/language-overview.md` for concepts that have not migrated yet
-4. Paired `-basic.bd` files and `#page.bst` only when teaching, presentation or website structure is in scope
+4. Paired `-basic.mtf` files and `#page.moth` only when teaching, presentation or website structure is in scope
 
 Use:
-- `docs/src/docs/progress/#page.bst` for current implementation status and coverage
+- `docs/src/docs/progress/#page.moth` for current implementation status and coverage
 - `docs/roadmap/roadmap.md` for sequencing, active plans, and genuinely deferred design
 - `index.md` only as a file and module locator
 
@@ -53,7 +53,7 @@ The progress matrix answers what works today. It does not override accepted arch
 - Prefer readability, modularity, correctness, and structured diagnostics over cleverness. Avoid complexity.
 - Maintain strict boundaries between build-system, frontend, AST, HIR, analysis, project-builder, and backend responsibilities.
 - Avoid user-input panics. User failures use structured diagnostics; panic paths are only for proven internal compiler invariants.
-- Beanstalk is pre-release. Do not preserve old APIs through compatibility wrappers, forwarding shims, parallel structs, or legacy entry points.
+- Moth is pre-release. Do not preserve old APIs through compatibility wrappers, forwarding shims, parallel structs, or legacy entry points.
 - Prefer one current implementation path. Extend, consolidate, replace, or delete existing paths instead of adding parallel systems. 
 - When an API shape changes, thread the new shape through the compiler and remove the old one. 
 - Be strict about making root-cause fixes over patches. Never leave code that will need refactoring or cleaning up later.
@@ -77,9 +77,9 @@ test gaps after each completed phase.
 3. Search for overlapping helpers, validators, lowering paths, diagnostics, tests, and legacy implementations.
 4. Decide whether the task extends, consolidates, replaces, or removes an existing path.
 5. Implement the smallest coherent slice without leaving transitional duplication.
-6. Add or update tests according to `style-guide/testing.bd` when behavior or internal invariants changed.
+6. Add or update tests according to `style-guide/testing.mtf` when behavior or internal invariants changed.
 7. Review the progress matrix when support, rejection, backend coverage, or test coverage changed.
-8. Apply the correct final gate from `style-guide/validation.bd`.
+8. Apply the correct final gate from `style-guide/validation.mtf`.
 9. Perform the final audit below.
 
 If a user request changes accepted behavior, treat the request as authoritative for that task and update the relevant design/status documentation when documentation changes are in scope. Call out any implementation conflict explicitly.
@@ -107,7 +107,7 @@ Actively look for duplicated:
 
 ## Testing
 
-Follow `docs/src/docs/codebase/style-guide/testing.bd`.
+Follow `docs/src/docs/codebase/style-guide/testing.mtf`.
 
 Key routing:
 - prefer integration cases under `tests/cases/` for user-visible language behavior
@@ -119,9 +119,9 @@ Key routing:
 
 ## Validation
 
-Always follow `docs/src/docs/codebase/style-guide/validation.bd`.
+Always follow `docs/src/docs/codebase/style-guide/validation.mtf`.
 
-If using the beanstalk compiler `check` command, prefer `--terse` for compact Beanstalk error messages.
+If using the Moth compiler `check` command, prefer `--terse` for compact Moth error messages.
 
 ## Documentation policy
 

@@ -1,4 +1,4 @@
-//! Integration test runner for end-to-end Beanstalk compiler coverage.
+//! Integration test runner for end-to-end Moth compiler coverage.
 //!
 //! Supports:
 //! - canonical self-contained case folders under `tests/cases/<case>/`

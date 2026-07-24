@@ -9,13 +9,13 @@ rendered_output_contains = ["trap helpers emitted"]
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_int_check(",
-    "function __bs_numeric_trap(",
-    "__bs_numeric_trap(__bs_int_add",
-    "__bs_numeric_trap(__bs_float_mul",
+    "function __moth_int_check(",
+    "function __moth_numeric_trap(",
+    "__moth_numeric_trap(__moth_int_add",
+    "__moth_numeric_trap(__moth_float_mul",
 ]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

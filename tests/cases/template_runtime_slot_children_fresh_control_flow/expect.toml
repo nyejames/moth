@@ -11,4 +11,4 @@ rendered_output_not_contains = ["<li class=\"wrapped\">fresh runtime</li>"]
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

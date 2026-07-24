@@ -18,7 +18,7 @@ fn write_fixture(name: &str, expectation_source: &str) -> (PathBuf, PathBuf) {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(case_root.join(EXPECT_FILE_NAME), expectation_source)
         .expect("should write expect file");
     (root, case_root)
@@ -48,7 +48,7 @@ fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
 fn failure_diagnostic_match_defaults_to_exact_and_is_retained() {
     let (root, case_root) = write_fixture(
         "default_diagnostic_match",
-        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\n",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
     );
 
     let cases = load_canonical_case_specs(&case_root, None)
@@ -84,7 +84,7 @@ fn diagnostic_codes_reject_a_blank_identity_entry() {
 fn diagnostic_codes_keep_exact_multisets_and_duplicates() {
     let (root, case_root) = write_fixture(
         "diagnostic_codes_duplicates",
-        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0044\", \"BST-RULE-0044\"]\n",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0044\", \"MOTH-RULE-0044\"]\n",
     );
 
     let cases = load_canonical_case_specs(&case_root, None)
@@ -94,7 +94,7 @@ fn diagnostic_codes_keep_exact_multisets_and_duplicates() {
     };
     assert_eq!(
         expectation.diagnostic_codes,
-        vec!["BST-RULE-0044".to_owned(), "BST-RULE-0044".to_owned()]
+        vec!["MOTH-RULE-0044".to_owned(), "MOTH-RULE-0044".to_owned()]
     );
 
     fs::remove_dir_all(&root).expect("should clean up");
@@ -108,19 +108,19 @@ fn structured_diagnostic_assertions_parse_and_normalize_locations() {
             "[backends.html]\n",
             "mode = \"failure\"\n",
             "warnings = \"forbid\"\n",
-            "diagnostic_codes = [\"BST-RULE-0044\"]\n",
+            "diagnostic_codes = [\"MOTH-RULE-0044\"]\n",
             "\n",
             "[[backends.html.diagnostic_assertions]]\n",
-            "code = \"BST-RULE-0044\"\n",
+            "code = \"MOTH-RULE-0044\"\n",
             "reason = \"invalid_assignment_target.immutable_binding\"\n",
-            "path = \"input\\\\main.bst\"\n",
+            "path = \"input\\\\main.moth\"\n",
             "line = 3\n",
             "column = 2\n",
             "count = 1\n",
             "\n",
             "[[backends.html.diagnostic_assertions.secondary_labels]]\n",
             "occurrence = 1\n",
-            "path = \"input\\\\helper.bst\"\n",
+            "path = \"input\\\\helper.moth\"\n",
             "line = 4\n",
             "column = 5\n",
         ),
@@ -137,14 +137,14 @@ fn structured_diagnostic_assertions_parse_and_normalize_locations() {
         assertion.reason.as_deref(),
         Some("invalid_assignment_target.immutable_binding")
     );
-    assert_eq!(assertion.path.as_deref(), Some("input/main.bst"));
+    assert_eq!(assertion.path.as_deref(), Some("input/main.moth"));
     assert_eq!(assertion.line, Some(3));
     assert_eq!(assertion.column, Some(2));
     assert_eq!(assertion.count, Some(1));
     assert_eq!(assertion.secondary_labels[0].occurrence, 1);
     assert_eq!(
         assertion.secondary_labels[0].path.as_deref(),
-        Some("input/helper.bst")
+        Some("input/helper.moth")
     );
 
     fs::remove_dir_all(&root).expect("should clean up");
@@ -158,10 +158,10 @@ fn unique_structured_diagnostic_code_defaults_occurrence_to_one() {
             "[backends.html]\n",
             "mode = \"failure\"\n",
             "warnings = \"forbid\"\n",
-            "diagnostic_codes = [\"BST-RULE-0044\"]\n",
+            "diagnostic_codes = [\"MOTH-RULE-0044\"]\n",
             "\n",
             "[[backends.html.diagnostic_assertions]]\n",
-            "code = \"BST-RULE-0044\"\n",
+            "code = \"MOTH-RULE-0044\"\n",
             "line = 1\n",
         ),
     );
@@ -181,17 +181,17 @@ fn repeated_structured_diagnostic_code_requires_explicit_valid_unique_occurrence
     let cases = [
         (
             "ambiguous",
-            "[[backends.html.diagnostic_assertions]]\ncode = \"BST-RULE-0044\"\nline = 1\n",
+            "[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\nline = 1\n",
             "must author 'occurrence'",
         ),
         (
             "zero",
-            "[[backends.html.diagnostic_assertions]]\ncode = \"BST-RULE-0044\"\noccurrence = 0\nline = 1\n",
+            "[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\noccurrence = 0\nline = 1\n",
             "one-based",
         ),
         (
             "beyond_multiplicity",
-            "[[backends.html.diagnostic_assertions]]\ncode = \"BST-RULE-0044\"\noccurrence = 3\nline = 1\n",
+            "[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\noccurrence = 3\nline = 1\n",
             "contains it 2 time(s)",
         ),
     ];
@@ -200,7 +200,7 @@ fn repeated_structured_diagnostic_code_requires_explicit_valid_unique_occurrence
         let (root, case_root) = write_fixture(
             &format!("structured_occurrence_{name}"),
             &format!(
-                "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0044\", \"BST-RULE-0044\"]\n\n{assertion}"
+                "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0044\", \"MOTH-RULE-0044\"]\n\n{assertion}"
             ),
         );
 
@@ -218,17 +218,17 @@ fn structured_diagnostic_assertions_reject_absent_duplicate_and_empty_selectors(
     let cases = [
         (
             "absent",
-            "diagnostic_codes = [\"BST-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"BST-SYNTAX-0003\"\nline = 1\n",
+            "diagnostic_codes = [\"MOTH-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-SYNTAX-0003\"\nline = 1\n",
             "absent from 'diagnostic_codes'",
         ),
         (
             "duplicate",
-            "diagnostic_codes = [\"BST-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"BST-RULE-0044\"\nline = 1\n\n[[backends.html.diagnostic_assertions]]\ncode = \"BST-RULE-0044\"\ncolumn = 2\n",
-            "duplicates diagnostic code 'BST-RULE-0044' occurrence 1",
+            "diagnostic_codes = [\"MOTH-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\nline = 1\n\n[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\ncolumn = 2\n",
+            "duplicates diagnostic code 'MOTH-RULE-0044' occurrence 1",
         ),
         (
             "empty",
-            "diagnostic_codes = [\"BST-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"BST-RULE-0044\"\n",
+            "diagnostic_codes = [\"MOTH-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\n",
             "at least one structured diagnostic fact",
         ),
     ];
@@ -259,12 +259,12 @@ fn structured_diagnostic_assertions_validate_reason_location_and_count_shape() {
         ("path", "path = \"   \"\n", "non-empty 'path'"),
         (
             "absolute_path",
-            "path = \"/tmp/main.bst\"\n",
+            "path = \"/tmp/main.moth\"\n",
             "must be a relative path",
         ),
         (
             "parent_path",
-            "path = \"../main.bst\"\n",
+            "path = \"../main.moth\"\n",
             "authored parent component",
         ),
         ("line", "line = 0\n", "positive 'line'"),
@@ -276,7 +276,7 @@ fn structured_diagnostic_assertions_validate_reason_location_and_count_shape() {
         let (root, case_root) = write_fixture(
             &format!("structured_shape_{name}"),
             &format!(
-                "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"BST-RULE-0044\"\n{fields}"
+                "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\n{fields}"
             ),
         );
 
@@ -294,7 +294,7 @@ fn structured_secondary_labels_require_occurrence_and_location_fact() {
     let cases = [
         (
             "missing_occurrence",
-            "path = \"helper.bst\"\nline = 2\n",
+            "path = \"helper.moth\"\nline = 2\n",
             "requires a one-based 'occurrence'",
         ),
         (
@@ -308,7 +308,7 @@ fn structured_secondary_labels_require_occurrence_and_location_fact() {
         let (root, case_root) = write_fixture(
             &format!("structured_secondary_{name}"),
             &format!(
-                "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"BST-RULE-0044\"\nline = 1\n\n[[backends.html.diagnostic_assertions.secondary_labels]]\n{secondary_fields}"
+                "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\nline = 1\n\n[[backends.html.diagnostic_assertions.secondary_labels]]\n{secondary_fields}"
             ),
         );
 
@@ -329,11 +329,11 @@ fn structured_diagnostic_assertions_are_failure_only() {
             "[backends.html]\n",
             "mode = \"success\"\n",
             "warnings = \"forbid\"\n",
-            "diagnostic_codes = [\"BST-RULE-0044\"]\n",
+            "diagnostic_codes = [\"MOTH-RULE-0044\"]\n",
             "rendered_output_contains = [\"ok\"]\n",
             "\n",
             "[[backends.html.diagnostic_assertions]]\n",
-            "code = \"BST-RULE-0044\"\n",
+            "code = \"MOTH-RULE-0044\"\n",
             "line = 1\n",
         ),
     );
@@ -353,7 +353,7 @@ fn structured_diagnostic_assertions_are_failure_only() {
 fn exact_warning_codes_are_retained_as_a_typed_multiset_contract() {
     let (root, case_root) = write_fixture(
         "exact_warning_codes",
-        "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"BST-RULE-0022\", \"BST-RULE-0010\"]\n",
+        "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0010\"]\n",
     );
 
     let cases = load_canonical_case_specs(&case_root, None)
@@ -364,7 +364,7 @@ fn exact_warning_codes_are_retained_as_a_typed_multiset_contract() {
     assert_eq!(
         expectation.warnings,
         WarningExpectation::Exact(ExactWarningExpectation {
-            expected_codes: vec!["BST-RULE-0022".to_owned(), "BST-RULE-0010".to_owned(),],
+            expected_codes: vec!["MOTH-RULE-0022".to_owned(), "MOTH-RULE-0010".to_owned(),],
         })
     );
 
@@ -412,11 +412,11 @@ fn removed_warning_count_spelling_is_rejected() {
     let cases = [
         (
             "backend",
-            "[backends.html]\nmode = \"failure\"\nwarnings = \"exact\"\nwarning_count = 1\nwarning_codes = [\"BST-RULE-0022\", \"BST-RULE-0010\"]\ndiagnostic_codes = [\"BST-RULE-0001\"]\n",
+            "[backends.html]\nmode = \"failure\"\nwarnings = \"exact\"\nwarning_count = 1\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0010\"]\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
         ),
         (
             "top_level",
-            "warning_count = 1\n[backends.html]\nmode = \"failure\"\nwarnings = \"exact\"\nwarning_codes = [\"BST-RULE-0022\", \"BST-RULE-0010\"]\ndiagnostic_codes = [\"BST-RULE-0001\"]\n",
+            "warning_count = 1\n[backends.html]\nmode = \"failure\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0010\"]\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
         ),
     ];
 
@@ -482,7 +482,7 @@ fn ignore_and_forbid_reject_warning_identity_fields() {
 fn justified_contains_diagnostic_match_is_retained() {
     let (root, case_root) = write_fixture(
         "contains_diagnostic_match",
-        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\ndiagnostic_match = \"contains\"\ndiagnostic_match_reason = \"independent recovery\"\n",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\ndiagnostic_match = \"contains\"\ndiagnostic_match_reason = \"independent recovery\"\n",
     );
 
     let cases = load_canonical_case_specs(&case_root, None)
@@ -508,7 +508,7 @@ fn contains_diagnostic_match_retains_missing_and_blank_reasons_for_policy() {
         let (root, case_root) = write_fixture(
             &format!("contains_without_reason_{name}"),
             &format!(
-                "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\ndiagnostic_match = \"contains\"\n{reason_line}"
+                "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\ndiagnostic_match = \"contains\"\n{reason_line}"
             ),
         );
 
@@ -531,7 +531,7 @@ fn contains_diagnostic_match_retains_missing_and_blank_reasons_for_policy() {
 fn exact_diagnostic_match_rejects_authored_reason() {
     let (root, case_root) = write_fixture(
         "exact_diagnostic_match_reason",
-        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\ndiagnostic_match = \"exact\"\ndiagnostic_match_reason = \"not allowed\"\n",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\ndiagnostic_match = \"exact\"\ndiagnostic_match_reason = \"not allowed\"\n",
     );
 
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
@@ -587,7 +587,7 @@ fn rejects_unknown_success_contract_value_with_backend_context() {
 fn rejects_acceptance_only_on_failure_backend() {
     let (root, case_root) = write_fixture(
         "acceptance_only_failure_mode",
-        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\n",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
     );
 
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
@@ -661,7 +661,7 @@ fn rejects_removed_success_contract_spelling() {
 fn rejects_acceptance_only_with_authored_expected_warning() {
     let (root, case_root) = write_fixture(
         "acceptance_only_expected_warning",
-        "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"BST-RULE-0022\"]\nsuccess_contract = \"acceptance_only\"\n",
+        "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\"]\nsuccess_contract = \"acceptance_only\"\n",
     );
 
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
@@ -681,10 +681,10 @@ fn rejects_error_type_expectation_key() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("#page.bst"), "x = 1\n").expect("should write fixture source");
+    fs::write(input_root.join("#page.moth"), "x = 1\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
-        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\nerror_type = \"rule\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\n",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\nerror_type = \"rule\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
     )
     .expect("should write expect file");
 
@@ -702,7 +702,7 @@ fn rejects_legacy_top_level_expectation_contract() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "mode = \"success\"\nwarnings = \"forbid\"\n",
@@ -726,10 +726,10 @@ fn rejects_backend_panic_expectation_key() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
-        "[backends.html]\nmode = \"failure\"\npanic = true\nwarnings = \"forbid\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\nmessage_contains = [\"x\"]\n",
+        "[backends.html]\nmode = \"failure\"\npanic = true\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\nmessage_contains = [\"x\"]\n",
     )
     .expect("should write expect file");
 
@@ -747,7 +747,7 @@ fn rejects_top_level_panic_expectation_key() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "panic = true\n\n[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n",
@@ -768,7 +768,7 @@ fn rejects_unknown_backend_matrix_key() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "entry = \".\"\n\n[backends.wasm]\nmode = \"success\"\nwarnings = \"forbid\"\n",
@@ -794,7 +794,7 @@ fn accepts_normalized_golden_mode() {
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
     fs::create_dir_all(&input_root).expect("should create input directory");
     fs::create_dir_all(&golden_root).expect("should create golden directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write source");
     fs::write(golden_root.join("index.html"), "<h1>ok</h1>\n").expect("should write golden");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
@@ -815,7 +815,7 @@ fn rejects_unknown_golden_mode() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\ngolden_mode = \"fuzzy\"\n",
@@ -839,7 +839,7 @@ fn accepts_success_fixture_with_rendered_output_only() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nrendered_output_contains = [\"ok\"]\n",
@@ -950,7 +950,7 @@ fn rejects_each_new_rendered_form_in_acceptance_only_and_failure_modes() {
     for (index, field) in fields.iter().enumerate() {
         for (mode, suffix) in [
             ("acceptance_only", "success_contract = \"acceptance_only\""),
-            ("failure", "diagnostic_codes = [\"BST-RULE-0001\"]"),
+            ("failure", "diagnostic_codes = [\"MOTH-RULE-0001\"]"),
         ] {
             let (root, case_root) = write_fixture(
                 &format!("rendered_output_rejected_{index}_{mode}"),
@@ -1025,10 +1025,10 @@ fn rejects_rendered_output_in_failure_mode() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
-        "[backends.html]\nmode = \"failure\"\nwarnings = \"ignore\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\nmessage_contains = [\"x\"]\nrendered_output_contains = [\"y\"]\n",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"ignore\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\nmessage_contains = [\"x\"]\nrendered_output_contains = [\"y\"]\n",
     )
     .expect("should write expect file");
 
@@ -1049,7 +1049,7 @@ fn rejects_normalized_contains_on_wasm_artifact() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n\n[[backends.html.artifact_assertions]]\npath = \"page.wasm\"\nkind = \"wasm\"\nnormalized_contains = [\"something\"]\n",
@@ -1070,7 +1070,7 @@ fn accepts_artifacts_must_not_exist_in_success_mode() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nartifacts_must_not_exist = [\"api\\\\index.html\"]\n",
@@ -1099,10 +1099,10 @@ fn rejects_artifacts_must_not_exist_in_failure_mode() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
-        "[backends.html]\nmode = \"failure\"\nwarnings = \"ignore\"\ndiagnostic_codes = [\"BST-RULE-0001\"]\nartifacts_must_not_exist = [\"api/index.html\"]\n",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"ignore\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\nartifacts_must_not_exist = [\"api/index.html\"]\n",
     )
     .expect("should write expect file");
 
@@ -1123,7 +1123,7 @@ fn rejects_empty_artifacts_must_not_exist_entry() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("#page.bst"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("#page.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nartifacts_must_not_exist = [\"\"]\n",

@@ -912,7 +912,7 @@ fn infer_legacy_group_name(name: &str, command: &str, args: &[String]) -> String
         text.push_str(arg);
     }
 
-    if text.contains("speed-test.bst") {
+    if text.contains("speed-test.moth") {
         "core".to_string()
     } else if args.iter().any(|arg| arg == "docs") {
         "docs".to_string()

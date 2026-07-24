@@ -45,7 +45,7 @@ pub(crate) fn code_formatter_factory(
 pub(crate) enum CodeLanguage {
     Generic,
     Text,
-    Beanstalk,
+    Moth,
     JavaScript,
     TypeScript,
     Python,
@@ -57,7 +57,7 @@ impl CodeLanguage {
     pub(crate) fn from_alias(alias: &str) -> Option<Self> {
         match alias {
             "txt" | "text" => Some(Self::Text),
-            "bst" | "beanstalk" => Some(Self::Beanstalk),
+            "moth" => Some(Self::Moth),
             "js" | "javascript" => Some(Self::JavaScript),
             "ts" | "typescript" => Some(Self::TypeScript),
             "py" | "python" => Some(Self::Python),
@@ -68,14 +68,14 @@ impl CodeLanguage {
     }
 
     pub(crate) fn supported_aliases() -> &'static str {
-        "\"txt\"/\"text\", \"bst\"/\"beanstalk\", \"js\"/\"javascript\", \"ts\"/\"typescript\", \"py\"/\"python\", \"rs\"/\"rust\", \"bash\"/\"sh\"/\"shell\""
+        "\"txt\"/\"text\", \"moth\", \"js\"/\"javascript\", \"ts\"/\"typescript\", \"py\"/\"python\", \"rs\"/\"rust\", \"bash\"/\"sh\"/\"shell\""
     }
 
     fn comment_prefix(self) -> Option<&'static str> {
         match self {
             Self::Text => None,
             Self::Generic => Some("//"),
-            Self::Beanstalk => Some("--"),
+            Self::Moth => Some("--"),
             Self::JavaScript | Self::TypeScript | Self::Rust => Some("//"),
             Self::Python => Some("#"),
             Self::Shell => Some("#"),
@@ -180,7 +180,7 @@ pub(crate) fn highlight_code_html(source: &str, language: CodeLanguage) -> Strin
         if matches_comment_prefix(&chars, index, language.comment_prefix()) {
             flush_word(&mut highlighted, &mut word, language);
             let prefix = language.comment_prefix().unwrap_or_default();
-            highlighted.push_str("<span class='bst-code-comment'>");
+            highlighted.push_str("<span class='moth-code-comment'>");
 
             for comment_char in prefix.chars() {
                 push_escaped_char(&mut highlighted, comment_char);
@@ -211,7 +211,7 @@ pub(crate) fn highlight_code_html(source: &str, language: CodeLanguage) -> Strin
 
         if current.is_bracket() {
             flush_word(&mut highlighted, &mut word, language);
-            highlighted.push_str("<span class='bst-code-parenthesis'>");
+            highlighted.push_str("<span class='moth-code-parenthesis'>");
             push_escaped_char(&mut highlighted, current);
             highlighted.push_str("</span>");
             index += 1;
@@ -220,7 +220,7 @@ pub(crate) fn highlight_code_html(source: &str, language: CodeLanguage) -> Strin
 
         if is_operator_char(current) {
             flush_word(&mut highlighted, &mut word, language);
-            highlighted.push_str("<span class='bst-code-operator'>");
+            highlighted.push_str("<span class='moth-code-operator'>");
             push_escaped_char(&mut highlighted, current);
             highlighted.push_str("</span>");
             index += 1;
@@ -331,7 +331,7 @@ fn starts_number_literal(chars: &[char], index: usize) -> bool {
 
 fn highlight_string(chars: &[char], mut index: usize, output: &mut String) -> usize {
     let quote = chars[index];
-    output.push_str("<span class='bst-code-string'>");
+    output.push_str("<span class='moth-code-string'>");
     push_escaped_char(output, quote);
     index += 1;
 
@@ -356,7 +356,7 @@ fn highlight_string(chars: &[char], mut index: usize, output: &mut String) -> us
 }
 
 fn highlight_number_literal(chars: &[char], mut index: usize, output: &mut String) -> usize {
-    output.push_str("<span class='bst-code-number'>");
+    output.push_str("<span class='moth-code-number'>");
 
     // Keep this deliberately narrow for now. The generic highlighter is only
     // meant to recognise obvious numeric runs, not fully parse every literal form.
@@ -382,17 +382,17 @@ fn flush_word(output: &mut String, word: &mut String, language: CodeLanguage) {
     // such as whitespace or punctuation. That keeps keyword matching simple and
     // lets generic mode leave unknown identifiers untouched.
     if is_keyword(word, language) {
-        output.push_str("<span class='bst-code-keyword'>");
+        output.push_str("<span class='moth-code-keyword'>");
         output.push_str(&escaped);
         output.push_str("</span>");
     } else if is_type_keyword(word, language) {
-        output.push_str("<span class='bst-code-type'>");
+        output.push_str("<span class='moth-code-type'>");
         output.push_str(&escaped);
         output.push_str("</span>");
     } else if language != CodeLanguage::Generic
         && word.chars().next().is_some_and(|ch| ch.is_uppercase())
     {
-        output.push_str("<span class='bst-code-struct'>");
+        output.push_str("<span class='moth-code-struct'>");
         output.push_str(&escaped);
         output.push_str("</span>");
     } else {
@@ -405,7 +405,7 @@ fn flush_word(output: &mut String, word: &mut String, language: CodeLanguage) {
 fn is_keyword(word: &str, language: CodeLanguage) -> bool {
     match language {
         CodeLanguage::Text => false,
-        CodeLanguage::Beanstalk => matches!(
+        CodeLanguage::Moth => matches!(
             word,
             "if" | "else"
                 | "return"
@@ -519,7 +519,7 @@ fn is_keyword(word: &str, language: CodeLanguage) -> bool {
 fn is_type_keyword(word: &str, language: CodeLanguage) -> bool {
     match language {
         CodeLanguage::Generic | CodeLanguage::Text => false,
-        CodeLanguage::Beanstalk => {
+        CodeLanguage::Moth => {
             matches!(
                 word,
                 "Int" | "Float" | "Bool" | "String" | "None" | "True" | "False"

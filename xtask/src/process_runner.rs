@@ -1,10 +1,10 @@
-//! Process runner - Executes the Beanstalk compiler binary as a subprocess
+//! Process runner - Executes the Moth compiler binary as a subprocess
 //!
-//! This module owns subprocess execution of the built `bean` binary.
+//! This module owns subprocess execution of the built `moth` binary.
 //! It measures wall-clock time and captures stdout/stderr.
 //!
 //! # What this module owns
-//! - Spawning `std::process::Command` for the bean binary
+//! - Spawning `std::process::Command` for the moth binary
 //! - Measuring subprocess wall-clock duration
 //! - Capturing stdout and stderr output
 //!
@@ -32,41 +32,41 @@ pub struct ProcessRun {
     pub stdout: String,
 }
 
-/// Run a bean compiler command as a timed subprocess
+/// Run a moth compiler command as a timed subprocess
 ///
-/// Spawns the bean binary, measures wall-clock time, and captures output.
+/// Spawns the moth binary, measures wall-clock time, and captures output.
 ///
 /// # Arguments
 ///
-/// * `bean_path` - Path to the bean binary (e.g., target/release/bean)
+/// * `moth_path` - Path to the moth binary (e.g., target/release/moth)
 /// * `command` - The subcommand to execute (e.g., "check", "build")
 /// * `args` - Arguments to pass to the subcommand
 ///
 /// # Returns
 ///
 /// A `ProcessRun` with timing and output data, or an error message.
-pub fn run_bean_command(
-    bean_path: &Path,
+pub fn run_moth_command(
+    moth_path: &Path,
     command: &str,
     args: &[String],
 ) -> Result<ProcessRun, String> {
     let start = Instant::now();
 
-    let output = Command::new(bean_path)
+    let output = Command::new(moth_path)
         .arg(command)
         .args(args)
         // Stable machine-readable timing lines for benchmark parsing.
         // The subprocess is built with the concise `timers` feature, so
-        // BST_TIMERS=bench emits BST_BENCH timing lines without verbose
-        // human prose. BST_COUNTERS=off suppresses counter output so
+        // MOTH_TIMERS=bench emits MOTH_BENCH timing lines without verbose
+        // human prose. MOTH_COUNTERS=off suppresses counter output so
         // normal benchmark runs stay low-noise.
-        .env("BST_TIMERS", "bench")
-        .env("BST_COUNTERS", "off")
+        .env("MOTH_TIMERS", "bench")
+        .env("MOTH_COUNTERS", "off")
         .output()
         .map_err(|e| {
             format!(
-                "Failed to execute bean binary at '{}': {}",
-                bean_path.display(),
+                "Failed to execute moth binary at '{}': {}",
+                moth_path.display(),
                 e
             )
         })?;

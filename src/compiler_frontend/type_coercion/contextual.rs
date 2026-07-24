@@ -1,6 +1,6 @@
 //! Contextual coercion for explicit type boundaries.
 //!
-//! WHAT: applies the small set of implicit conversions that Beanstalk allows
+//! WHAT: applies the small set of implicit conversions that Moth allows
 //! only when a surrounding declaration, argument, field, collection, or return
 //! slot supplies the target type.
 //! WHY: the expression parser resolves `1 + 1` as `Int` regardless of the

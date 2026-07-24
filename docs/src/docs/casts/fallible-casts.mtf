@@ -1,0 +1,40 @@
+A fallible cast can propagate through builtin `Error!` or recover locally.
+
+### Propagation
+
+[codeblock, $code("moth"):
+    parse_count |text String| -> Int, Error!:
+        return cast! text
+    ;
+]
+
+`cast!` requires fallible cast evidence and a compatible builtin `Error!`
+return path.
+
+### Local recovery
+
+[codeblock, $code("moth"):
+    count Int = cast text catch:
+        then 0
+    ;
+
+    other_count Int = cast text catch |err|:
+        io.line(err.message)
+        then 0
+    ;
+]
+
+A recovery handler must produce the success value required by the receiving
+site or leave explicitly with `return` or `return!`.
+
+### Rules
+
+- `cast! expression catch:` is invalid.
+- Propagation and local recovery are mutually exclusive.
+- `cast!` and `cast ... catch:` handle only cast failures.
+- If the operand itself produces `Error!`, handle or propagate that operand before applying the cast.
+- Optional receiving contexts recover inner `T`, then wrap the successful or recovered value into `T?`.
+- `then none` is invalid in a cast recovery handler targeting `T?`.
+
+Plain `cast` is not a promise that every source-target pair is infallible. It
+requires infallible evidence for the selected pair.

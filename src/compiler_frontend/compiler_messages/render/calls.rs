@@ -490,7 +490,7 @@ pub(crate) fn invalid_receiver_call_message(
                         format!("Mutable receiver method {method} requires explicit mutable access. Prefix the receiver with `~`.")
                     } else {
                         // The concrete example uses raw authored names inside one code span so
-                        // the rendered form matches Beanstalk source (`~p.move(...)`) instead of
+                        // the rendered form matches Moth source (`~p.move(...)`) instead of
                         // nesting backticks around each token.
                         let raw_binding =
                             raw_name(receiver_binding_name, string_table, "");
@@ -609,7 +609,7 @@ fn render_immutable_receiver(
 /// WHAT: receiver-access diagnostics render authored source names (method, binding) as code
 ///       spans rather than the single-quoted labels used by type-named diagnostics.
 /// WHY: the active diagnostics plan specifies source-visible code spans for receiver-access
-///      guidance so the rendered example matches authored Beanstalk syntax.
+///      guidance so the rendered example matches authored Moth syntax.
 fn backtick_name(name: Option<StringId>, string_table: &StringTable, fallback: &str) -> String {
     name.map(|n| format!("`{}`", string_table.resolve(n)))
         .unwrap_or_else(|| fallback.to_string())

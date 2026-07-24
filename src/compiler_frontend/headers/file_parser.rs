@@ -1,6 +1,6 @@
 //! Per-file header splitting.
 //!
-//! WHAT: orchestrates one tokenized Beanstalk file into top-level declaration headers, import
+//! WHAT: orchestrates one tokenized Moth file into top-level declaration headers, import
 //! records, const-fragment metadata, and the implicit entry `start` body.
 //! WHY: file-level control flow is different from declaration parsing, import recording, and hash
 //! item handling; this module keeps the high-level loop visible while delegated modules own details.

@@ -68,7 +68,7 @@ fn header(
         local_ordering_hints: std::collections::HashSet::new(),
         name_location: SourceLocation::default(),
         tokens: FileTokens::new(src_path, Vec::new()),
-        source_file: InternedPath::from_single_str("root.bst", string_table),
+        source_file: InternedPath::from_single_str("root.moth", string_table),
         capacity_references: Vec::new(),
     }
 }
@@ -178,7 +178,7 @@ fn receiver_entry(
     ReceiverMethodEntry {
         function_path,
         receiver,
-        source_file: InternedPath::from_single_str("root.bst", string_table),
+        source_file: InternedPath::from_single_str("root.moth", string_table),
         receiver_mutable: false,
         signature,
     }

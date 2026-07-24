@@ -102,7 +102,7 @@ fn trap_mode_format_float_lowers_to_trapped_helper() {
 
     assert!(
         output.contains(
-            "__bs_assign_value(bst_result_l0, __bs_numeric_trap(__bs_format_float(1.5)));"
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_format_float(1.5)));"
         ),
         "trap-mode FormatFloat must assign the scalar trap result"
     );
@@ -122,12 +122,12 @@ fn return_error_mode_format_float_lowers_to_carrier() {
     );
 
     assert!(
-        output.contains("__bs_assign_value(bst_result_l0, __bs_format_float(1.5));"),
+        output.contains("__moth_assign_value(moth_result_l0, __moth_format_float(1.5));"),
         "ReturnError FormatFloat must assign the helper carrier directly"
     );
     assert!(
-        !output.contains("__bs_numeric_trap(__bs_format_float"),
-        "ReturnError FormatFloat must not wrap the helper in __bs_numeric_trap"
+        !output.contains("__moth_numeric_trap(__moth_format_float"),
+        "ReturnError FormatFloat must not wrap the helper in __moth_numeric_trap"
     );
 }
 
@@ -146,7 +146,7 @@ fn trap_mode_validate_float_lowers_to_trapped_helper() {
 
     assert!(
         output.contains(
-            "__bs_assign_value(bst_result_l0, __bs_numeric_trap(__bs_float_validate(1.5)));"
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_float_validate(1.5)));"
         ),
         "trap-mode ValidateFloat must assign the scalar trap result"
     );
@@ -166,12 +166,12 @@ fn return_error_mode_validate_float_lowers_to_carrier() {
     );
 
     assert!(
-        output.contains("__bs_assign_value(bst_result_l0, __bs_float_validate(1.5));"),
+        output.contains("__moth_assign_value(moth_result_l0, __moth_float_validate(1.5));"),
         "ReturnError ValidateFloat must assign the helper carrier directly"
     );
     assert!(
-        !output.contains("__bs_numeric_trap(__bs_float_validate"),
-        "ReturnError ValidateFloat must not wrap the helper in __bs_numeric_trap"
+        !output.contains("__moth_numeric_trap(__moth_float_validate"),
+        "ReturnError ValidateFloat must not wrap the helper in __moth_numeric_trap"
     );
 }
 
@@ -189,16 +189,16 @@ fn format_float_helper_emitted_when_format_float_reachable() {
     );
 
     assert!(
-        source.contains("function __bs_format_float("),
-        "modules with FormatFloat must emit __bs_format_float"
+        source.contains("function __moth_format_float("),
+        "modules with FormatFloat must emit __moth_format_float"
     );
     assert!(
-        !source.contains("function __bs_float_validate("),
+        !source.contains("function __moth_float_validate("),
         "FormatFloat should not emit the separate boundary-validation helper"
     );
     assert!(
-        source.contains("function __bs_numeric_trap("),
-        "modules with FormatFloat must emit __bs_numeric_trap"
+        source.contains("function __moth_numeric_trap("),
+        "modules with FormatFloat must emit __moth_numeric_trap"
     );
 }
 
@@ -216,16 +216,16 @@ fn validate_float_helper_emitted_when_validate_float_reachable() {
     );
 
     assert!(
-        source.contains("function __bs_float_validate("),
-        "modules with ValidateFloat must emit __bs_float_validate"
+        source.contains("function __moth_float_validate("),
+        "modules with ValidateFloat must emit __moth_float_validate"
     );
     assert!(
-        !source.contains("function __bs_format_float("),
+        !source.contains("function __moth_format_float("),
         "ValidateFloat should not emit the separate formatting helper"
     );
     assert!(
-        source.contains("function __bs_numeric_trap("),
-        "modules with ValidateFloat must emit __bs_numeric_trap"
+        source.contains("function __moth_numeric_trap("),
+        "modules with ValidateFloat must emit __moth_numeric_trap"
     );
 }
 
@@ -235,12 +235,12 @@ fn float_helpers_not_emitted_without_float_statement() {
     let source = lower_minimal_module("main");
 
     assert!(
-        !source.contains("function __bs_format_float("),
-        "modules without Float statements must not emit __bs_format_float"
+        !source.contains("function __moth_format_float("),
+        "modules without Float statements must not emit __moth_format_float"
     );
     assert!(
-        !source.contains("function __bs_float_validate("),
-        "modules without Float statements must not emit __bs_float_validate"
+        !source.contains("function __moth_float_validate("),
+        "modules without Float statements must not emit __moth_float_validate"
     );
 }
 
@@ -325,7 +325,7 @@ fn trap_mode_int_add_lowers_to_trapped_helper() {
     );
 
     assert!(
-        output.contains("__bs_assign_value(bst_result_l0, __bs_numeric_trap(__bs_int_add(1, 2)));"),
+        output.contains("__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_add(1, 2)));"),
         "trap-mode IntAdd must assign the scalar trap result"
     );
 }
@@ -347,12 +347,12 @@ fn return_error_mode_int_add_lowers_to_carrier() {
     );
 
     assert!(
-        output.contains("__bs_assign_value(bst_result_l0, __bs_int_add(1, 2));"),
+        output.contains("__moth_assign_value(moth_result_l0, __moth_int_add(1, 2));"),
         "ReturnError IntAdd must assign the helper carrier directly"
     );
     assert!(
-        !output.contains("__bs_numeric_trap(__bs_int_add"),
-        "ReturnError IntAdd must not wrap the helper in __bs_numeric_trap"
+        !output.contains("__moth_numeric_trap(__moth_int_add"),
+        "ReturnError IntAdd must not wrap the helper in __moth_numeric_trap"
     );
 }
 
@@ -372,7 +372,7 @@ fn int_neg_lowers_to_unary_helper() {
     );
 
     assert!(
-        output.contains("__bs_assign_value(bst_result_l0, __bs_numeric_trap(__bs_int_neg(1)));"),
+        output.contains("__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_neg(1)));"),
         "trap-mode IntNeg must lower to the unary helper"
     );
 }
@@ -395,7 +395,7 @@ fn float_div_lowers_to_helper() {
 
     assert!(
         output
-            .contains("__bs_assign_value(bst_result_l0, __bs_numeric_trap(__bs_float_div(1, 2)));"),
+            .contains("__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_float_div(1, 2)));"),
         "trap-mode FloatDiv must lower to the checked float helper"
     );
 }
@@ -406,12 +406,12 @@ fn numeric_helpers_not_emitted_without_numeric_op() {
     let source = lower_minimal_module("main");
 
     assert!(
-        !source.contains("function __bs_int_add("),
-        "modules without NumericOp must not emit __bs_int_add"
+        !source.contains("function __moth_int_add("),
+        "modules without NumericOp must not emit __moth_int_add"
     );
     assert!(
-        !source.contains("function __bs_numeric_trap("),
-        "modules without NumericOp must not emit __bs_numeric_trap"
+        !source.contains("function __moth_numeric_trap("),
+        "modules without NumericOp must not emit __moth_numeric_trap"
     );
     assert!(
         !source.contains("const __BS_INT_MIN ="),
@@ -436,27 +436,27 @@ fn numeric_helpers_emitted_when_numeric_op_reachable() {
     );
 
     assert!(
-        source.contains("function __bs_int_add("),
-        "numeric modules must emit __bs_int_add"
+        source.contains("function __moth_int_add("),
+        "numeric modules must emit __moth_int_add"
     );
     assert!(
-        source.contains("function __bs_int_check("),
-        "numeric modules must emit __bs_int_check"
+        source.contains("function __moth_int_check("),
+        "numeric modules must emit __moth_int_check"
     );
     assert!(
-        source.contains("function __bs_numeric_trap("),
-        "numeric modules must emit __bs_numeric_trap"
+        source.contains("function __moth_numeric_trap("),
+        "numeric modules must emit __moth_numeric_trap"
     );
     assert!(
         source.contains("const __BS_INT_MIN ="),
         "numeric modules must emit numeric range constants"
     );
     assert!(
-        !source.contains("function __bs_format_float("),
+        !source.contains("function __moth_format_float("),
         "NumericOp should not emit the Float formatting helper"
     );
     assert!(
-        !source.contains("function __bs_float_validate("),
+        !source.contains("function __moth_float_validate("),
         "NumericOp should not emit the Float boundary-validation helper"
     );
 }
@@ -480,20 +480,20 @@ fn numeric_trap_returns_ok_and_throws_err() {
         types.int,
     );
 
-    let trap = helper_source(&source, "__bs_numeric_trap");
+    let trap = helper_source(&source, "__moth_numeric_trap");
 
     assert!(
         trap.contains("carrier.tag === \"ok\"") && trap.contains("return carrier.value;"),
-        "__bs_numeric_trap must return ok values"
+        "__moth_numeric_trap must return ok values"
     );
     assert!(
         trap.contains("carrier.tag === \"err\"")
-            && trap.contains("throw new Error(__bs_error_message(carrier.value));"),
-        "__bs_numeric_trap must throw JS errors using the canonical Beanstalk error message"
+            && trap.contains("throw new Error(__moth_error_message(carrier.value));"),
+        "__moth_numeric_trap must throw JS errors using the canonical Moth error message"
     );
 }
 
-/// Verifies that integer helper successes normalize JS `-0` to the single Beanstalk Int zero.
+/// Verifies that integer helper successes normalize JS `-0` to the single Moth Int zero.
 #[test]
 fn int_ok_helper_normalizes_negative_zero() {
     let region = RegionId(0);
@@ -508,7 +508,7 @@ fn int_ok_helper_normalizes_negative_zero() {
         types.int,
     );
 
-    let helper = helper_source(&source, "__bs_int_ok");
+    let helper = helper_source(&source, "__moth_int_ok");
 
     assert!(
         helper.contains("Object.is(value, -0) ? 0 : value"),
@@ -516,7 +516,7 @@ fn int_ok_helper_normalizes_negative_zero() {
     );
 }
 
-/// Verifies that the shared `__bs_int_check` helper enforces the i32 range and reports
+/// Verifies that the shared `__moth_int_check` helper enforces the i32 range and reports
 /// `IntOverflow` on failure.
 #[test]
 fn int_check_helper_contains_overflow_error() {
@@ -533,21 +533,21 @@ fn int_check_helper_contains_overflow_error() {
         types.int,
     );
 
-    let check = helper_source(&source, "__bs_int_check");
+    let check = helper_source(&source, "__moth_int_check");
     let overflow = BuiltinErrorCode::IntOverflow;
     let expected = format!(
-        r#"__bs_error_result("{}", {})"#,
+        r#"__moth_error_result("{}", {})"#,
         overflow.default_message(),
         overflow.as_i32()
     );
 
     assert!(
         check.contains(&expected),
-        "__bs_int_check must use IntOverflow error result"
+        "__moth_int_check must use IntOverflow error result"
     );
 }
 
-/// Verifies that integer helpers delegate final i32 validation to `__bs_int_check`.
+/// Verifies that integer helpers delegate final i32 validation to `__moth_int_check`.
 #[test]
 fn int_helpers_delegate_to_int_check() {
     let region = RegionId(0);
@@ -563,15 +563,15 @@ fn int_helpers_delegate_to_int_check() {
         types.int,
     );
 
-    let add = helper_source(&source, "__bs_int_add");
+    let add = helper_source(&source, "__moth_int_add");
 
     assert!(
-        add.contains("return __bs_int_check(result);"),
-        "__bs_int_add must delegate i32 validation to __bs_int_check"
+        add.contains("return __moth_int_check(result);"),
+        "__moth_int_add must delegate i32 validation to __moth_int_check"
     );
     assert!(
         !add.contains("Number.isInteger(result)"),
-        "__bs_int_add must not duplicate the i32 range check"
+        "__moth_int_add must not duplicate the i32 range check"
     );
 }
 
@@ -591,21 +591,21 @@ fn int_div_helper_contains_divide_by_zero_error() {
         types.int,
     );
 
-    let div = helper_source(&source, "__bs_int_div");
+    let div = helper_source(&source, "__moth_int_div");
     let divide_by_zero = BuiltinErrorCode::DivideByZero;
     let expected = format!(
-        r#"__bs_error_result("{}", {})"#,
+        r#"__moth_error_result("{}", {})"#,
         divide_by_zero.default_message(),
         divide_by_zero.as_i32()
     );
 
     assert!(
         div.contains(&expected),
-        "__bs_int_div must use DivideByZero error result"
+        "__moth_int_div must use DivideByZero error result"
     );
 }
 
-/// Verifies that `InvalidExponent` code and message appear in `__bs_int_pow`.
+/// Verifies that `InvalidExponent` code and message appear in `__moth_int_pow`.
 #[test]
 fn int_pow_helper_contains_invalid_exponent_error() {
     let region = RegionId(0);
@@ -621,17 +621,17 @@ fn int_pow_helper_contains_invalid_exponent_error() {
         types.int,
     );
 
-    let pow = helper_source(&source, "__bs_int_pow");
+    let pow = helper_source(&source, "__moth_int_pow");
     let invalid_exponent = BuiltinErrorCode::InvalidExponent;
     let expected = format!(
-        r#"__bs_error_result("{}", {})"#,
+        r#"__moth_error_result("{}", {})"#,
         invalid_exponent.default_message(),
         invalid_exponent.as_i32()
     );
 
     assert!(
         pow.contains(&expected),
-        "__bs_int_pow must use InvalidExponent error result"
+        "__moth_int_pow must use InvalidExponent error result"
     );
 }
 
@@ -651,17 +651,17 @@ fn float_helpers_contain_non_finite_error() {
         types.float,
     );
 
-    let add = helper_source(&source, "__bs_float_add");
+    let add = helper_source(&source, "__moth_float_add");
     let non_finite = BuiltinErrorCode::FloatNonFinite;
     let expected = format!(
-        r#"__bs_error_result("{}", {})"#,
+        r#"__moth_error_result("{}", {})"#,
         non_finite.default_message(),
         non_finite.as_i32()
     );
 
     assert!(
         add.contains(&expected),
-        "__bs_float_add must use FloatNonFinite error result"
+        "__moth_float_add must use FloatNonFinite error result"
     );
 }
 

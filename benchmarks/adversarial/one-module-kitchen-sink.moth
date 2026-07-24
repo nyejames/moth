@@ -1,0 +1,190 @@
+-- one-module-kitchen-sink.moth
+-- Adversarial single-module fixture that exercises many frontend surfaces at once:
+-- constants, aliases, structs, choices, traits, generics, templates, collections,
+-- maps, receivers, control flow, and external package calls.
+
+import @core/math { PI, sin, cos }
+import @core/text { length, contains, starts_with }
+import @core/random { random_int }
+
+-- Aliases
+Id as Int
+Name as String
+Count as Int
+
+-- Structs
+Point = | x Float, y Float |
+Rect = | origin Point, size Size |
+Size = | width Float, height Float |
+Color = | r Int, g Int, b Int |
+
+-- Choices
+Shape ::
+    Circle | center Point, radius Float |,
+    Rectangle | bounds Rect |,
+    Polygon | points {Point} |,
+;
+
+Status ::
+    Pending,
+    Running,
+    Done | label String |,
+    Failed | code Int |,
+;
+
+-- Trait
+DESCRIBED must:
+    describe |This| -> String
+;
+
+-- Receiver methods (one trait method name per file, so Point owns describe)
+describe |this Point| -> String:
+    return [: ([this.x], [this.y])]
+;
+
+measure |this Point| -> Float:
+    return (this.x * this.x) + (this.y * this.y)
+;
+
+Point must DESCRIBED
+
+-- Generic helpers
+identity type T |value T| -> T:
+    return value
+;
+
+make_pair type A, B |left A, right B| -> Pair of A, B:
+    return Pair(left, right)
+;
+
+render type Item is DESCRIBED |item Item| -> String:
+    return item.describe()
+;
+
+Pair type A, B = |
+    first A,
+    second B,
+|
+
+-- Constants and constant DAG
+base_a #= 10
+base_b #= 20
+base_c #= 30
+layer_1_a #= base_a + base_b
+layer_1_b #= base_b + base_c
+layer_2 #= layer_1_a * layer_1_b
+angle #= PI / 4.0
+
+-- Template helpers
+slot_shell #= [:
+    <section>
+        <h1>[$slot("title")]</h1>
+        <div>[$slot]</div>
+    </section>
+]
+
+title_insert #= [$insert("title"): Kitchen Sink]
+
+status_badge |status Status| -> String:
+    if status is:
+        Pending => return [: <span>pending</span>]
+        Running => return [: <span>running</span>]
+        Done(label) => return [: <span>[label]</span>]
+        Failed(code) => return [: <span>error [code]</span>]
+    ;
+    return "unknown"
+;
+
+-- Collection and map helpers
+build_points || -> {Point}:
+    points ~{Point} = {}
+    loop 0 to 8 |i|:
+        x = i / 1.0
+        y = x * x
+        ~points.push(Point(x, y)) catch:
+        ;
+    ;
+    return points
+;
+
+score_total |scores ~{String = Int}| -> Int:
+    map_size = scores.length
+    removed = ~scores.remove("key-0") catch:
+        then 0
+    ;
+    value = scores.get("key-1") catch:
+        then 0
+    ;
+    return map_size * 10 + value + removed
+;
+
+-- Borrow-aware helpers
+increment |this ~Counter|:
+    this.value = this.value + 1
+;
+
+Counter = |
+    value Int,
+|
+
+-- Main runtime entry
+run_kitchen_sink ||:
+    io.line("kitchen sink start")
+
+    -- Structs and generics
+    origin = Point(0.0, 0.0)
+    size = Size(10.0, 20.0)
+    rect = Rect(origin, size)
+    point_pair = make_pair(origin, size)
+    identity_pair = identity(point_pair)
+
+    io.line([: origin=[origin.describe()] size=[size.width]x[size.height] ])
+    io.line([: pair=[identity_pair.first.describe()] ])
+
+    -- Choices
+    status = Status::Done("ready")
+    io.line([: badge=[status_badge(status)] ])
+
+    -- External calls
+    angle_step = PI / 8.0
+    sample = sin(angle_step)
+    wave = sin(angle_step) + cos(angle_step)
+    text = "hello world"
+    has_world = contains(text, "world")
+    text_length = length(text)
+    rand_value = random_int(0, 1000)
+
+    io.line([: sin=[sample] wave=[wave] has=[has_world] len=[text_length] rand=[rand_value] ])
+
+    -- Collections and maps
+    points = build_points()
+    first_point = points.get(0) catch:
+        then Point(0.0, 0.0)
+    ;
+    measure_sum = first_point.measure()
+    scores ~{String = Int} = {"key-0" = 0, "key-1" = 10, "key-2" = 20, "key-3" = 30}
+    total = score_total(~scores)
+
+    io.line([: measures=[measure_sum] scores=[total] ])
+
+    -- Mutable borrow
+    counter ~= Counter(0)
+    ~counter.increment()
+    ~counter.increment()
+    io.line([: counter=[counter.value] ])
+
+    -- Template assembly
+    io.line([slot_shell, title_insert: content here])
+
+    -- Render plan churn via repeated composition
+    output ~= [: <div>]
+    loop 0 to 5 |i|:
+        output = [: [output]<p>line [i]</p>]
+    ;
+    output = [: [output]</div>]
+    io.line([: [output] ])
+
+    io.line("kitchen sink complete")
+;
+
+run_kitchen_sink()

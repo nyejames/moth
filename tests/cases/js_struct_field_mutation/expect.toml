@@ -7,4 +7,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_field", "__bs_write", "__bs_read"]
+must_contain = ["__moth_field", "__moth_write", "__moth_read"]

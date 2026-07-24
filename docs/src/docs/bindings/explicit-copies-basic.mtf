@@ -1,0 +1,28 @@
+Use `copy` when two stored values need to change independently.
+
+[codeblock, $code("moth"):
+    names ~= {"Priya", "Grace"}
+    copied_names ~= copy names
+
+    ~names.push("Linus") catch:
+    ;
+]
+
+Changing `names` does not add `"Linus"` to `copied_names`.
+
+This is different from a normal assignment:
+
+[codeblock, $code("moth"):
+    shared_names = names
+]
+
+A normal assignment creates another shared view. `copy` creates an independent
+value.
+
+`copy` works on a stored name or field:
+
+[codeblock, $code("moth"):
+    copied_title = copy page.title
+]
+
+Do not apply `copy` directly to literals, constructor calls or computed expressions; `copy` accepts places only. Those expressions create new result roots, but existing values stored inside them still follow ordinary shared-reference rules.

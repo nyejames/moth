@@ -122,7 +122,7 @@ fn get_root_and_has_prefix_locate_registered_root() {
 }
 
 #[test]
-fn source_registry_always_constructs_beanstalk_source_metadata() {
+fn source_registry_always_constructs_moth_source_metadata() {
     let mut registry = SourcePackageRegistry::new();
     registry.register_filesystem_root(
         "html",
@@ -139,11 +139,11 @@ fn source_registry_always_constructs_beanstalk_source_metadata() {
         assert_eq!(
             root.metadata,
             PackageMetadata::source(root.metadata.origin),
-            "source registry must only carry BeanstalkSource backing"
+            "source registry must only carry MothSource backing"
         );
         assert_eq!(
             root.metadata.backing,
-            PackageBacking::BeanstalkSource,
+            PackageBacking::MothSource,
             "source registry must not construct ExternalBinding backing"
         );
     }
@@ -153,11 +153,11 @@ fn source_registry_always_constructs_beanstalk_source_metadata() {
 fn reserved_origins_are_representable_in_source_metadata() {
     let standard = PackageMetadata::source(PackageOrigin::Standard);
     assert_eq!(standard.origin, PackageOrigin::Standard);
-    assert_eq!(standard.backing, PackageBacking::BeanstalkSource);
+    assert_eq!(standard.backing, PackageBacking::MothSource);
 
     let dependency = PackageMetadata::source(PackageOrigin::Dependency);
     assert_eq!(dependency.origin, PackageOrigin::Dependency);
-    assert_eq!(dependency.backing, PackageBacking::BeanstalkSource);
+    assert_eq!(dependency.backing, PackageBacking::MothSource);
 }
 
 #[test]

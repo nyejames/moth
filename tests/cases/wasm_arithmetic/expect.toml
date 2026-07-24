@@ -5,7 +5,7 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_binding"]
+must_contain = ["__moth_binding"]
 
 [backends.html_wasm]
 mode = "success"

@@ -1,0 +1,18 @@
+Templates are Moth's powerful string-building form.
+
+[codeblock, $code("moth"):
+    name = "Priya"
+
+    greeting = [:
+        Hello, [name]
+    ]
+]
+
+Square brackets create the template.
+
+The colon separates its head from its body.
+
+A nested template inserts a value from the surrounding scope.
+
+Templates can build plain text, Markdown, HTML, CSS or another string-based
+format. They may be finished during compilation or built at runtime.

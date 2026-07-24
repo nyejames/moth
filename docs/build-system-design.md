@@ -1,6 +1,6 @@
-# Beanstalk Build System Design
+# Moth Build System Design
 
-Beanstalk's build system selects a command and capability surface, bootstraps project config, discovers source, constructs project and package graphs, schedules compiler work, plans linked artefacts and owns output writing.
+Moth's build system selects a command and capability surface, bootstraps project config, discovers source, constructs project and package graphs, schedules compiler work, plans linked artefacts and owns output writing.
 
 This document is the single source of truth for accepted build-system, project graph, builder, tooling, link and output architecture. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
 
@@ -10,16 +10,16 @@ Companion authorities:
 
 - `docs/compiler-design-overview.md` for core compiler architecture
 - `docs/language-overview.md` and `docs/src/docs/codebase/language/**` for source syntax and language semantics
-- `docs/src/docs/codebase/design-scope/overview.bd` for design bias and scope boundaries
-- `docs/src/docs/codebase/memory-management/overview.bd` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
-- `docs/src/docs/codebase/style-guide/style-guide.bd` for implementation standards
-- `docs/src/docs/progress/#page.bst` for current support and backend coverage
+- `docs/src/docs/codebase/design-scope/overview.mtf` for design bias and scope boundaries
+- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
+- `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards
+- `docs/src/docs/progress/#page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
 
 ## Architectural invariants
 
 - One command selects one artefact builder and any active tooling overlays before config schema validation begins.
-- `config.bst` is one self-contained compile-time source file with no source imports or package resolution.
+- `config.moth` is one self-contained compile-time source file with no source imports or package resolution.
 - Stage 0 owns one canonical graph, file ownership, legal project/module graph topology and deterministic scheduling for each project or package boundary.
 - A physical module is semantically compiled once inside that boundary.
 - Tokenization and declaration-shell parsing happen once. Stage 0 reuses prepared syntax for graph construction, later interface binding and module compilation.
@@ -34,7 +34,7 @@ Companion authorities:
 
 ## Selected command and capability surface
 
-Bootstrap starts with the command rather than with `config.bst`.
+Bootstrap starts with the command rather than with `config.moth`.
 
 The command selects:
 
@@ -44,7 +44,7 @@ The command selects:
 - explicit build inputs
 - target intent and command-specific options
 
-The current CLI selects the HTML builder implicitly. Final builder-selection syntax and a possible Beanstalk-native build script system remain deferred.
+The current CLI selects the HTML builder implicitly. Final builder-selection syntax and a possible Moth-native build script system remain deferred.
 
 The selected builder exposes a bootstrap capability surface before config compilation:
 
@@ -66,9 +66,9 @@ One artefact builder runs per `build` or `dev` invocation. Tooling overlays exte
 
 ## Project bootstrap
 
-### Self-contained `config.bst`
+### Self-contained `config.moth`
 
-`config.bst` is build-system-owned compile-time Beanstalk source. It is not a module and produces no HIR, `start`, runtime artefact or package interface.
+`config.moth` is build-system-owned compile-time Moth source. It is not a module and produces no HIR, `start`, runtime artefact or package interface.
 
 Config bootstrap operates on exactly one authored source identity. It does not construct:
 
@@ -118,11 +118,11 @@ Project config creates no source-visible declarations. Its folded outputs enter 
 
 Short shape:
 
-```beanstalk
+```moth
 default_channel #= "alpha"
 
 project #= |
-    name = "beanstalk_docs",
+    name = "moth_docs",
     version #Import of String = "0.1.0",
     entry_root = "src",
     metadata = |
@@ -136,7 +136,7 @@ html #= |
 |
 ```
 
-`config.bst` does not select the builder. The command has already done so.
+`config.moth` does not select the builder. The command has already done so.
 
 ### Project record
 
@@ -203,7 +203,7 @@ The interface contains:
 - no HIR
 - no runtime body
 
-It is classified as project-local and Beanstalk-source-backed for provenance and capability purposes, but it is not discovered as a normal source package.
+It is classified as project-local and Moth-source-backed for provenance and capability purposes, but it is not discovered as a normal source package.
 
 `@project` exposes direct project fields as namespace members. It does not expose another value named `project`.
 
@@ -328,7 +328,7 @@ Complex release optimisation remains outside the fast frontend path unless corre
 
 ### Entry-local `config:` blocks
 
-An entry `config:` block is root-local builder metadata. It is not an embedded `config.bst` source file.
+An entry `config:` block is root-local builder metadata. It is not an embedded `config.moth` source file.
 
 Placement rules:
 
@@ -339,7 +339,7 @@ Placement rules:
 - invalid in the project package facade
 - invalid inside `export:`
 - invalid inside executable bodies
-- invalid in `config.bst`
+- invalid in `config.moth`
 
 The block contains section records only.
 
@@ -398,7 +398,7 @@ select command, artefact builder, build profile and tooling overlays
 -> lower backend artefacts
 ```
 
-Config compilation tokenizes and parses one self-contained `config.bst`, orders config declarations, resolves direct project `#Import` sources while AST folds config, and validates the completed project record and active project sections. Inactive config sections are folded during config compilation even though their schemas are not active. Project config creates no source import graph.
+Config compilation tokenizes and parses one self-contained `config.moth`, orders config declarations, resolves direct project `#Import` sources while AST folds config, and validates the completed project record and active project sections. Inactive config sections are folded during config compilation even though their schemas are not active. Project config creates no source import graph.
 
 ## Source indexing and source sets
 
@@ -429,7 +429,7 @@ The source index owns:
 - path collision facts
 - deterministic discovery order
 
-`package_folders` and default `/lib` scanning do not exist. Project-local source packages are structural `+*.bst` packages or the optional project-root facade.
+`package_folders` and default `/lib` scanning do not exist. Project-local source packages are structural `+*.moth` packages or the optional project-root facade.
 
 ### Owned source set
 
@@ -450,8 +450,8 @@ The semantic source set determines the module's semantic source fingerprint. Che
 A module's `SemanticSourceSet` contains:
 
 - its root file
-- every owned `.bst` file reachable through source imports
-- every reachable builder-supported source asset such as `.bd` or `.md`
+- every owned `.moth` file reachable through source imports
+- every reachable builder-supported source asset such as `.mtf` or `.md`
 - any other source-kind input explicitly defined as semantic by the selected builder
 
 Only the semantic source set contributes declarations, HIR, the public interface and module link facts.
@@ -460,7 +460,7 @@ Provider-backed explicit-extension files are owned through their provider contra
 
 ### Check source set
 
-`check` also examines owned `.bst` files that are not in the canonical semantic source set.
+`check` also examines owned `.moth` files that are not in the canonical semantic source set.
 
 Each orphan becomes a check-only source unit under its nearest module namespace. It may be parsed, bound and semantically diagnosed with the same provider interfaces and visibility rules, but it does not silently add declarations to the canonical module artefact or public interface.
 
@@ -505,9 +505,9 @@ Stage 0 produces structure, resolved build-input contracts and compiler inputs. 
 
 Terminology is strict:
 
-- A module is one directory-scoped compilation and visibility unit rooted by `#*.bst` or `+*.bst`.
+- A module is one directory-scoped compilation and visibility unit rooted by `#*.moth` or `+*.moth`.
 - A package is a named reusable `@...` import root and future dependency or distribution unit.
-- A binding is a typed bridge to an implementation outside Beanstalk source.
+- A binding is a typed bridge to an implementation outside Moth source.
 - A prelude is implicit import policy rather than a package kind.
 - Library is informal wording only.
 
@@ -515,11 +515,11 @@ Terminology is strict:
 
 A directory contains at most one module root.
 
-- `#*.bst` defines a normal module.
-- `+*.bst` inside a project source tree defines an API-only scoped support module.
-- One optional project-root `+*.bst` beside `config.bst` defines the external project package facade.
+- `#*.moth` defines a normal module.
+- `+*.moth` inside a project source tree defines an API-only scoped support module.
+- One optional project-root `+*.moth` beside `config.moth` defines the external project package facade.
 - The suffix after `#` or `+` is cosmetic.
-- `config.bst` is not a module root.
+- `config.moth` is not a module root.
 
 A normal module may own dormant top-level runtime work and page fragments.
 
@@ -543,20 +543,20 @@ Example:
 
 ```text
 src/
-├── #site.bst
-├── accounts.bst
+├── #site.moth
+├── accounts.moth
 └── internal/
     └── deep/
-        └── renderer.bst
+        └── renderer.moth
 ```
 
-Inside `renderer.bst`:
+Inside `renderer.moth`:
 
-```beanstalk
+```moth
 import @accounts { Account }
 ```
 
-This resolves to `src/accounts.bst`. It does not search beside `renderer.bst`.
+This resolves to `src/accounts.moth`. It does not search beside `renderer.moth`.
 
 Rules:
 
@@ -594,23 +594,23 @@ Valid normal-module topology is acyclic by construction. Stage 0 retains a defen
 
 ### Scoped support packages
 
-A `+*.bst` support root exposes a package named by its containing directory.
+A `+*.moth` support root exposes a package named by its containing directory.
 
 Example:
 
 ```text
 site/
-├── #site.bst
+├── #site.moth
 ├── markdown/
-│   ├── +package.bst
+│   ├── +package.moth
 │   ├── parser/
-│   │   └── #parser.bst
+│   │   └── #parser.moth
 │   └── rendering/
-│       └── #rendering.bst
+│       └── #rendering.moth
 └── pages/
-    ├── #pages.bst
+    ├── #pages.moth
     └── article/
-        └── #article.bst
+        └── #article.moth
 ```
 
 `@markdown` is visible to `site`, `pages` and `article`. Its private descendants may be imported by the `markdown` facade, but consumers cannot address them through `@markdown/parser` or another implementation path.
@@ -641,7 +641,7 @@ Direct normal-sibling imports remain disallowed. A future design may revisit the
 
 ### Project package facade
 
-The project-root `+*.bst` facade is a canonical API-only module compiled through the ordinary compiler pipeline with project-facade visibility supplied by Stage 0.
+The project-root `+*.moth` facade is a canonical API-only module compiled through the ordinary compiler pipeline with project-facade visibility supplied by Stage 0.
 
 It may define and export its own legal API-only declarations.
 
@@ -669,7 +669,7 @@ The compiler produces an immutable facade module artefact and public interface.
 
 Assembly never recompiles or mutates the facade.
 
-A project may be both an application and a package. Without the facade it has no externally consumable Beanstalk package surface.
+A project may be both an application and a package. Without the facade it has no externally consumable Moth package surface.
 
 The facade package identity comes from `project.name`.
 
@@ -690,7 +690,7 @@ Reject overlapping visible identities between:
 - dependency aliases
 - case-only variants
 
-Recognised extensionless source kinds share one namespace. `docs.bst`, `docs.bd`, `docs.md` and `docs/` cannot coexist where each would mean `@docs`.
+Recognised extensionless source kinds share one namespace. `docs.moth`, `docs.mtf`, `docs.md` and `docs/` cannot coexist where each would mean `@docs`.
 
 Explicit-extension provider files may coexist with a same-stem directory only when syntax remains unambiguous.
 
@@ -710,20 +710,20 @@ enum PackageOrigin {
 }
 
 enum PackageBacking {
-    BeanstalkSource,
+    MothSource,
     ExternalBinding,
 }
 ```
 
 Accepted mappings include:
 
-- `@html`: Builder origin and BeanstalkSource backing
+- `@html`: Builder origin and MothSource backing
 - Core packages such as `@core/io`: Core origin and ExternalBinding backing
 - `@web/canvas`: Builder origin and ExternalBinding backing
-- scoped `+*.bst`: ProjectLocal origin and BeanstalkSource backing
-- project-root facade: ProjectLocal origin and BeanstalkSource backing
+- scoped `+*.moth`: ProjectLocal origin and MothSource backing
+- project-root facade: ProjectLocal origin and MothSource backing
 - annotated project-local `.js`: ProjectLocal origin and ExternalBinding backing
-- dependency source package: Dependency origin and BeanstalkSource backing
+- dependency source package: Dependency origin and MothSource backing
 
 `Standard` remains valid even when no current package uses it.
 
@@ -1078,7 +1078,7 @@ Partition rules:
 - JavaScript requirements propagate backwards to transitive callers.
 - Neutral console IO does not force JavaScript ownership.
 - Remaining supported functions default to Wasm.
-- No Wasm-owned Beanstalk function may call a JavaScript-owned Beanstalk function after propagation.
+- No Wasm-owned Moth function may call a JavaScript-owned Moth function after propagation.
 - JavaScript-owned functions may call Wasm-owned functions through generated wrappers.
 - Every decision records an explicit reason.
 - Partitioning is independent of development or release mode.
@@ -1120,11 +1120,11 @@ External boundary profile and capability metadata belong on the builder surface 
 
 ### Runtime and memory
 
-Each page owns one runtime instance and one memory shared by its linked Beanstalk Wasm variants.
+Each page owns one runtime instance and one memory shared by its linked Moth Wasm variants.
 
-Linked Beanstalk Wasm variants import the page runtime rather than owning separate memories.
+Linked Moth Wasm variants import the page runtime rather than owning separate memories.
 
-This one-page runtime/memory contract applies to linked Beanstalk Wasm variants. It does not require imported WIT components to share page memory. Imported components own private runtime memory and cross the boundary only through closed value conversion profiles.
+This one-page runtime/memory contract applies to linked Moth Wasm variants. It does not require imported WIT components to share page memory. Imported components own private runtime memory and cross the boundary only through closed value conversion profiles.
 
 Project-level runtime bytes may be emitted once and instantiated separately for each page.
 
@@ -1135,7 +1135,7 @@ Wasm LIR is structured and backend-owned. It is not a second frontend semantic a
 The final design removes:
 
 - dispatcher-loop control flow as the durable backend shape
-- `bst_start`
+- `moth_start`
 - per-module memories
 - helper-export booleans
 - the `i64` Int bridge architecture

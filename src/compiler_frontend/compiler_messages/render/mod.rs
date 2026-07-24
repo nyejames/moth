@@ -130,7 +130,7 @@ pub(crate) fn invalid_map_type_message(
             "Map type can only contain one top-level '=' separator.".to_owned()
         }
         InvalidMapTypeReason::FixedCapacityNotAllowed => {
-            "Fixed or capacity map syntax is outside Beanstalk's builtin hashmap design.".to_owned()
+            "Fixed or capacity map syntax is outside Moth's builtin hashmap design.".to_owned()
         }
     }
 }
@@ -335,7 +335,7 @@ fn generic_parameter_operator_message(
     };
 
     Some(format!(
-        "Operator `{operator_spelling}` is not available for {subject}. Beanstalk operators are compiler-owned and generic bounds do not provide operator support. Use a concrete type or a receiver method provided by an explicit bound."
+        "Operator `{operator_spelling}` is not available for {subject}. Moth operators are compiler-owned and generic bounds do not provide operator support. Use a concrete type or a receiver method provided by an explicit bound."
     ))
 }
 
@@ -638,7 +638,7 @@ pub(crate) fn special_file_name_from_path(
     for component in path.as_components() {
         let segment = string_table.resolve(*component);
         if import_component_is_config_file(segment) {
-            return "config.bst".to_owned();
+            return "config.moth".to_owned();
         }
     }
     "special file".to_owned()

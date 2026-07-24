@@ -30,7 +30,7 @@ pub(crate) struct EmittedFallibleCarrier {
     pub(crate) ok_type: TypeId,
     pub(crate) err_type: TypeId,
     /// True when the success payload is a `Float` entering from an external/backend boundary
-    /// and must be validated before ordinary Beanstalk code observes it.
+    /// and must be validated before ordinary Moth code observes it.
     pub(crate) validate_float_success: bool,
 }
 

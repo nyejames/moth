@@ -363,7 +363,7 @@ fn generate_text_diff(expected: &str, actual: &str, max_pairs: usize) -> String 
 
 /// Normalizes compiler-generated counter suffixes in JS/HTML text for comparison.
 ///
-/// WHAT: replaces unstable numeric counters in `bst_`-prefixed identifiers with the placeholder
+/// WHAT: replaces unstable numeric counters in `moth_`-prefixed identifiers with the placeholder
 ///       `N` while preserving line endings and the embedded core-CSS contract.
 /// WHY: generated names can vary between compilations even when emitted structure is equivalent.
 pub(super) fn normalize_text_for_comparison(text: &str) -> String {
@@ -377,7 +377,7 @@ pub(super) fn normalize_text_for_comparison(text: &str) -> String {
         match (token_start, in_identifier) {
             (None, true) => token_start = Some(index),
             (Some(start), false) => {
-                result.push_str(&normalize_bst_identifier(&text[start..index]));
+                result.push_str(&normalize_moth_identifier(&text[start..index]));
                 result.push(character);
                 token_start = None;
             }
@@ -386,7 +386,7 @@ pub(super) fn normalize_text_for_comparison(text: &str) -> String {
         }
     }
     if let Some(start) = token_start {
-        result.push_str(&normalize_bst_identifier(&text[start..]));
+        result.push_str(&normalize_moth_identifier(&text[start..]));
     }
     result
 }
@@ -431,8 +431,8 @@ fn strip_embedded_css(text: &str) -> String {
     result
 }
 
-fn normalize_bst_identifier(token: &str) -> String {
-    if !token.starts_with("bst_") {
+fn normalize_moth_identifier(token: &str) -> String {
+    if !token.starts_with("moth_") {
         return token.to_owned();
     }
 

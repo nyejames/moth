@@ -1,0 +1,33 @@
+Read an item with `get`:
+
+[codeblock, $code("moth"):
+    first = items.get(0) catch:
+        then 0
+    ;
+]
+
+Change a stored item with `set`:
+
+[codeblock, $code("moth"):
+    ~items.set(0, 99) catch:
+    ;
+]
+
+Add and remove items with `push` and `remove`:
+
+[codeblock, $code("moth"):
+    ~items.push(40) catch:
+    ;
+
+    removed = ~items.remove(1) catch:
+        then 0
+    ;
+]
+
+Get the current number of items with `length()`:
+
+[codeblock, $code("moth"):
+    count = items.length()
+]
+
+Operations that can fail must use `!` or `catch`.

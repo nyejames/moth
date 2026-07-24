@@ -1,6 +1,6 @@
 //! Shared HTML page-routing policy parsing and defaults.
 //!
-//! WHAT: parses routing-related `config.bst` settings into typed values.
+//! WHAT: parses routing-related `config.moth` settings into typed values.
 //! WHY: keeping one parser avoids drift between builder validation and dev-server runtime behavior.
 
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
@@ -38,7 +38,7 @@ impl Default for HtmlSiteConfig {
 
 /// Parse and validate HTML site config keys from the project config map.
 ///
-/// WHAT: resolves defaults plus optional overrides from `config.bst`.
+/// WHAT: resolves defaults plus optional overrides from `config.moth`.
 /// WHY: site configuration must be explicit and strict so all runtime/build tooling stays aligned.
 pub fn parse_html_site_config(
     config: &Config,
@@ -214,17 +214,17 @@ pub fn strip_origin_prefix(public_path: &str, origin: &str) -> Option<String> {
         return Some(public_path.to_owned());
     }
 
-    // Origin is like "/beanstalk"
-    // Public path must start with "/beanstalk"
+    // Origin is like "/moth"
+    // Public path must start with "/moth"
     if !public_path.starts_with(origin) {
         return None;
     }
 
     let stripped = &public_path[origin.len()..];
 
-    // If public_path was "/beanstalk", stripped is ""
-    // If public_path was "/beanstalk/", stripped is "/"
-    // If public_path was "/beanstalk/about", stripped is "/about"
+    // If public_path was "/moth", stripped is ""
+    // If public_path was "/moth/", stripped is "/"
+    // If public_path was "/moth/about", stripped is "/about"
     if stripped.is_empty() {
         return Some(String::from("/"));
     }
@@ -232,7 +232,7 @@ pub fn strip_origin_prefix(public_path: &str, origin: &str) -> Option<String> {
     if stripped.starts_with('/') {
         Some(stripped.to_owned())
     } else {
-        // This handles cases like "/beanstalkish" when origin is "/beanstalk"
+        // This handles cases like "/mothish" when origin is "/moth"
         None
     }
 }

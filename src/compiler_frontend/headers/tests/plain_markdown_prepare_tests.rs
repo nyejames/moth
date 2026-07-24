@@ -2,7 +2,7 @@
 //!
 //! WHAT: verifies that `.md` files enter the frontend as one normal private `content #String`
 //! constant whose initializer is a single literal token holding the rendered HTML.
-//! WHY: Markdown must not be tokenized or parsed as Beanstalk, so the preparation output shape
+//! WHY: Markdown must not be tokenized or parsed as Moth, so the preparation output shape
 //!      is the primary regression surface.
 
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
@@ -112,7 +112,7 @@ fn initializer_is_single_string_literal_with_rendered_html() {
 
 #[test]
 fn markdown_looking_syntax_creates_no_initializer_references() {
-    let source = "This costs $100 -- not a comment.\n\nLiteral template-looking text: [not_a_template]\n\nRaw Beanstalk-ish block: [: <p>not parsed</p>]";
+    let source = "This costs $100 -- not a comment.\n\nLiteral template-looking text: [not_a_template]\n\nRaw Moth-ish block: [: <p>not parsed</p>]";
     let (output, _string_table) = prepare(source);
 
     let header = &output.headers[0];

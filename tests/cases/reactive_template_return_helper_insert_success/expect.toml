@@ -7,5 +7,5 @@ rendered_output_contains = ["reactive_template_return_helper_insert_success retu
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_mount_template_fragment(",
+    "function __moth_mount_template_fragment(",
 ]

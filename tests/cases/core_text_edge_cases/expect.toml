@@ -9,16 +9,16 @@ rendered_output_contains = ["len_empty=0 len_emoji=2 empty_yes=true empty_no=fal
 path = "index.html"
 kind = "html"
 must_contain = [
-    "function __bs_text_length(",
-    "function __bs_text_is_empty(",
-    "function __bs_text_contains(",
-    "function __bs_text_starts_with(",
-    "function __bs_text_ends_with(",
-    "__bs_text_length(\"\")",
-    "__bs_text_length(\"😊\")",
+    "function __moth_text_length(",
+    "function __moth_text_is_empty(",
+    "function __moth_text_contains(",
+    "function __moth_text_starts_with(",
+    "function __moth_text_ends_with(",
+    "__moth_text_length(\"\")",
+    "__moth_text_length(\"😊\")",
 ]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0058"]

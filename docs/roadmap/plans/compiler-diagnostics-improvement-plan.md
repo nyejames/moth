@@ -1,8 +1,8 @@
-# Beanstalk Compiler Diagnostics Improvement Plan
+# Moth Compiler Diagnostics Improvement Plan
 
 ## Purpose
 
-Improve Beanstalk diagnostics without teaching invalid syntax, legacy behaviour or patterns that fight the language design.
+Improve Moth diagnostics without teaching invalid syntax, legacy behaviour or patterns that fight the language design.
 
 Every retained item in this plan has been checked against the current language and compiler contracts. Several findings from the original audit have been corrected, consolidated or removed because their proposed fixes were stale, ambiguous or semantically wrong.
 
@@ -48,7 +48,7 @@ ACCEPTANCE_CRITERIA:
 - temporary, immutable direct-binding and immutable field-root assignment targets use distinct reasons and clean wording without `place`/`rvalue`/`variable` terminology
 - field-write diagnostics name the field and root binding; a generic fallback exists when the root cannot be named
 - `~` is never suggested on assignment targets; reassignment guidance uses ordinary `=`
-- stable `BST-RULE-0044` is preserved; no new diagnostic code
+- stable `MOTH-RULE-0044` is preserved; no new diagnostic code
 VALIDATION_STATE:
 - Phases 1–2.6b and 3.1a–3.1b: every checkpoint passed its focused checks and `just validate`; completed phase notes retain design and correction details
 - Phase 3.2a Ollama patch: passed `cargo fmt`, 3,609 Rust tests, 1,777 integration cases and library Clippy
@@ -78,19 +78,19 @@ NEXT_RESUME_ACTION: launch Phase 4.1c (multiple-success return-shape reason + Sc
 - Reassignment and field assignment use ordinary `=`. `~` is not written on assignment targets.
 - Fresh values passed to mutable parameters remain valid without source `~`.
 - External package namespace access and grouped imports are both valid for direct package exports. Diagnostics must not claim otherwise.
-- Error handling uses Beanstalk's `Error!`, postfix `!` and `catch` terminology. User-facing diagnostics must not describe the source feature as a first-class `Result`.
-- Multi-return calls cannot be received by a single declaration or assignment target. Beanstalk has no implicit dropped return slot and no documented discard syntax.
+- Error handling uses Moth's `Error!`, postfix `!` and `catch` terminology. User-facing diagnostics must not describe the source feature as a first-class `Result`.
+- Multi-return calls cannot be received by a single declaration or assignment target. Moth has no implicit dropped return slot and no documented discard syntax.
 
 ## Required implementation rules
 
-- Emit user mistakes as typed `CompilerDiagnostic` values. Do not route malformed source through `CompilerError` or `BST-INFRA-0001`.
+- Emit user mistakes as typed `CompilerDiagnostic` values. Do not route malformed source through `CompilerError` or `MOTH-INFRA-0001`.
 - Keep diagnostic payloads factual. Carry names, `TypeId`s, operators, counts, locations and reason enums rather than pre-rendered prose.
 - Render type names through `DiagnosticRenderContext`.
 - Reuse an existing stable code when the diagnostic category and contract remain the same. Add a new code only for a genuinely new diagnostic family.
 - Preserve the source location that identifies the actual mistake. Add a secondary label for the related declaration, delimiter, conflicting directive or active access when available.
 - Do not generate exact replacement source unless the compiler has enough structured facts to make it valid. Prefer a generic correction over a fabricated snippet.
 - Keep suggestions source-visible. Do not mention internal AST, HIR, parameter receiver placeholders, borrow lattice states or compiler-introduced locals.
-- Suggestions must favour normal Beanstalk patterns:
+- Suggestions must favour normal Moth patterns:
   - explicit mutable declarations followed by ordinary assignment
   - explicit `~place` at mutable call boundaries
   - templates for mixed textual interpolation
@@ -146,7 +146,7 @@ The Phase 2.2 hard-removal audit also made const-record diagnostics use the sour
 **Status:** Complete in `979703ea7`
 
 Quoted strings now decode exactly `\\`, `\"`, `\n`, `\r` and `\t`. Typed
-`BST-SYNTAX-0034` reasons distinguish unsupported escapes, physical LF/CRLF continuation and a
+`MOTH-SYNTAX-0034` reasons distinguish unsupported escapes, physical LF/CRLF continuation and a
 trailing backslash. Spans cover two authored characters for complete unsupported escapes and only
 the backslash for continuation or trailing cases. Control characters render source-visibly.
 
@@ -163,7 +163,7 @@ and raw-token preservation.
 `SymbolicSpacingConstruct` now distinguishes binary operators, ordinary assignment, compound
 assignment and the adjacent `~=` mutable-declaration marker. It carries the exact operator plus
 `MissingWhitespace::{Before, After, Both}`, including complete `//=` recognition. Outer spacing
-uses `BST-SYNTAX-0031`, while the declaration parser still owns whitespace inside `~ =` through
+uses `MOTH-SYNTAX-0031`, while the declaration parser still owns whitespace inside `~ =` through
 `InvalidMutableBindingSpacing`. Valid `name ~= value` and ordinary operator tokenization are
 unchanged. Table-driven tokenizer coverage protects every compound assignment and each missing-side
 classification, with integration owners for source-visible assignment and mutable-marker wording.
@@ -197,10 +197,10 @@ valid `@` imports, division, integer division and comments.
 - `2485d961d`: function signatures and trait requirements share the missing-return boundary check
   but retain source-accurate function-body versus bodyless-requirement guidance.
 - `bcbdd73aa`: authored `=` with no declaration value uses `MissingInitializerExpression`. The
-  no-`=` family is `MissingDeclarationInitializer`, keeps `BST-RULE-0031` and has no compatibility
+  no-`=` family is `MissingDeclarationInitializer`, keeps `MOTH-RULE-0031` and has no compatibility
   aliases.
 - `a21396762`: parameter and struct-field `=` boundaries use `MissingDefaultValue` and
-  `BST-RULE-0028`. Reactive, trait and choice prohibitions still win, while complete and
+  `MOTH-RULE-0028`. Reactive, trait and choice prohibitions still win, while complete and
   operator-continued multiline defaults remain valid.
 
 Focused boundary tables and integration owners protect exact messages, stable codes and source
@@ -213,7 +213,7 @@ existing `BinaryRight` reason already owns a missing right operand.
 **Additional confirmed gap:** duplicate struct field names currently survive the shared record-body
 parser and fail as a HIR invariant. Choice payload fields already run a later duplicate scan, so
 adding another struct-only validator would preserve duplicate ownership.
-**Additional confirmed gap:** duplicate function parameter names also reach `BST-INFRA-0001` from
+**Additional confirmed gap:** duplicate function parameter names also reach `MOTH-INFRA-0001` from
 function-scope local registration. Both failures must move to the shared signature-member parser.
 **Additional confirmed gap:** duplicate trait-requirement parameter names currently compile
 successfully. The same shared signature-member owner must reject them before trait registration.
@@ -228,7 +228,7 @@ misleading.
 
 The shared directive-argument parser now classifies a closing parenthesis, leading-newline-only
 argument and template boundary before an expression as `EmptyArguments`. The `$children` owner
-reclassifies that fact to `InvalidChildrenArgument` with `BST-SYNTAX-0021`. True file EOF remains
+reclassifies that fact to `InvalidChildrenArgument` with `MOTH-SYNTAX-0021`. True file EOF remains
 the header balancer's unclosed-template diagnostic and begun argument expressions keep their own
 delimiter failures. Focused parser coverage protects generic versus `$children` wording, with one
 integration owner for the template-boundary case. Phase 6.2 owns adding opening context to the
@@ -248,7 +248,7 @@ Duplicate parameter and record-field names are source declarations, not HIR inva
   - previous member location
 - Make the shared renderer scope-neutral and accurate for top-level declarations, visible local
   bindings, parameters, fields and variants. Prefer: `Cannot declare 'name' because that name is
-  already visible in this scope. Beanstalk does not allow duplicate names or shadowing.`
+  already visible in this scope. Moth does not allow duplicate names or shadowing.`
 - Remove the later choice-payload-only duplicate scan once the shared owner covers it.
 - Do not create a function-scope `CompilerError`.
 - Do not let duplicate struct fields reach the HIR duplicate-field invariant.
@@ -265,7 +265,7 @@ The incomplete-value cases in 2.4 must return typed diagnostics before expressio
 
 #### Acceptance
 
-The retained malformed-source fixtures produce no `BST-INFRA-0001`.
+The retained malformed-source fixtures produce no `MOTH-INFRA-0001`.
 
 ### 2.6 Delete config-key migration diagnostics
 
@@ -312,7 +312,7 @@ the invalid source fact is the authored key name. Header parsing already owns th
   continue to point at the authored initializer value.
 - Do not add a location to the shared AST `Declaration` type or create a global header-to-AST side
   table for this Stage 0-only need.
-- Strengthen generic unknown-key coverage to assert the key span and keep `BST-CONFIG-0001`.
+- Strengthen generic unknown-key coverage to assert the key span and keep `MOTH-CONFIG-0001`.
 - Preserve the exact authored-key payload and ordinary unknown-key message established in Phase
   2.6.
 
@@ -430,20 +430,20 @@ Use one matrix covering user functions, source receiver methods, collection buil
 ### 3.2 Correct immutable assignment and field-write guidance
 
 **Original finding:** DIAG-007
-**Rejected original proposal:** `~p.x = 10` is not Beanstalk assignment syntax.
+**Rejected original proposal:** `~p.x = 10` is not Moth assignment syntax.
 
 **Phase 3.2a status:** Complete in this checkpoint. Reason taxonomy, message wording and field-write distinction are done. The secondary declaration label (scope-frame binding location) is Phase 3.2b.
 
 For:
 
-```beanstalk
+```moth
 p = Point(x = 1, y = 2)
 p.x = 10
 ```
 
 the root binding is immutable. The correct pattern is:
 
-```beanstalk
+```moth
 p ~= Point(x = 1, y = 2)
 p.x = 10
 ```
@@ -487,7 +487,7 @@ p.x = 10
 
 For:
 
-```beanstalk
+```moth
 x = 1
 ~x = 2
 ```
@@ -498,7 +498,7 @@ render:
 
 A complete correction is:
 
-```beanstalk
+```moth
 x ~= 1
 x = 2
 ```
@@ -615,18 +615,18 @@ source rule. These are ordinary invalid assignment targets, not compatibility di
 `FirstError!` through `SecondError!` probe reaches this path. The source contract calls this the
 function's error return or error slot, never a Result error.
 
-**Additional confirmed descriptor gap:** the stable `BST-RULE-0051` title still renders
+**Additional confirmed descriptor gap:** the stable `MOTH-RULE-0051` title still renders
 `Invalid result handling` even when its message correctly names an unhandled `Error!` call. Keep
 the code but change the user-facing descriptor title to `Invalid fallible handling` when the
 operand matrix lands.
 
-**Additional confirmed operand-family gap:** `BST-TYPE-0004` still renders the descriptor title
+**Additional confirmed operand-family gap:** `MOTH-TYPE-0004` still renders the descriptor title
 `Invalid result operand`, and its internal kind, payload and reason family repeat the same stale
 term even though the only production path is an unhandled fallible operand. The
 `OptionalValueNotInspected` reason has no compiler production site and exists only in renderer/model
 tests. Rename the diagnostic family outright to fallible-operand terminology, render a title such
 as `Unhandled fallible operand` and delete the dead optional reason rather than preserving an
-unused parallel path. Keep `BST-TYPE-0004`.
+unused parallel path. Keep `MOTH-TYPE-0004`.
 
 **Additional confirmed propagation-shape gap:** postfix `?` requires exactly one optional success
 return slot. The current validator collapses top-level code, zero-return functions, non-optional
@@ -675,9 +675,9 @@ matrix.
 
 Rename `TypeMismatchContext::ResultError` to `ErrorReturn` and render `error return`. Apply the
 same source-visible context to incompatible postfix `!` call propagation and `cast!` propagation.
-Keep the expected and found error types as semantic `TypeId`s and preserve `BST-TYPE-0001`.
+Keep the expected and found error types as semantic `TypeId`s and preserve `MOTH-TYPE-0001`.
 
-Render the `BST-RULE-0051` descriptor title as `Invalid fallible handling`. Internal reason-family
+Render the `MOTH-RULE-0051` descriptor title as `Invalid fallible handling`. Internal reason-family
 identifiers must also change coherently in this slice: rename `InvalidResultHandlingReason`, its
 payload, constructor and kind to fallible-handling terminology without aliases or compatibility
 wrappers. AST expression and HIR type names outside the diagnostic family are not part of this
@@ -709,23 +709,23 @@ mechanical rename. No renderer title or message may call the source feature resu
 
   > This function does not declare an `Error!` return slot. Add one or recover locally with `catch`.
 
-Keep the stable `BST-RULE-0051` family unless a branch belongs to an existing more precise code.
+Keep the stable `MOTH-RULE-0051` family unless a branch belongs to an existing more precise code.
 
 #### Reclassify invalid public carrier type spellings
 
 **Additional confirmed design mismatch:** the canonical generic type-application contract states
-that `Option of T` and `Result of T, E` are not Beanstalk language syntax. The compiler instead
-routes both through `DeferredFeatureReason` and `BST-DEFERRED-0001`, which falsely reserves a future
+that `Option of T` and `Result of T, E` are not Moth language syntax. The compiler instead
+routes both through `DeferredFeatureReason` and `MOTH-DEFERRED-0001`, which falsely reserves a future
 public carrier syntax. First-class public result values are outside language design scope, while
 optional types use the current `T?` suffix.
 
 - Delete `DeferredFeatureReason::{PublicOptionTypeSyntax, PublicResultTypeSyntax}` and the helper
   that classifies these authored forms as deferred.
 - Route the two generic-position spellings through factual structured
-  `InvalidGenericInstantiationReason` variants and existing `BST-RULE-0057` ownership.
+  `InvalidGenericInstantiationReason` variants and existing `MOTH-RULE-0057` ownership.
 - Render:
-  - `` `Option of T` is not Beanstalk type syntax. Use the `T?` optional suffix. ``
-  - `` `Result of T, E` is not Beanstalk type syntax. Fallible functions declare a final `E!`
+  - `` `Option of T` is not Moth type syntax. Use the `T?` optional suffix. ``
+  - `` `Result of T, E` is not Moth type syntax. Fallible functions declare a final `E!`
     error return slot. ``
 - Rename the `_deferred` unit tests and integration fixtures around current rejection.
 - Delete the old reason names and deferred prose without aliases, reserved-future comments or a
@@ -877,7 +877,7 @@ current headers.
 
 `Box of String` is type annotation syntax. Construction still uses the nominal constructor name:
 
-```beanstalk
+```moth
 x Box of String = Box(value = "hello")
 ```
 
@@ -1109,7 +1109,7 @@ Examples:
 
 - Primary label: incoming item
 - Secondary label: earlier conflicting item
-- Keep `BST-SYNTAX-0022`
+- Keep `MOTH-SYNTAX-0022`
 
 #### Tests
 
@@ -1170,7 +1170,7 @@ The annotation scanner currently sees only supported exports, so an annotation b
 - missing-export declaration followed by a valid annotated export
 - private helper between annotation and export prevents distant binding
 - genuinely orphaned annotation
-- provider-level rendering preserves `BST-IMPORT-0022` and the JavaScript source span
+- provider-level rendering preserves `MOTH-IMPORT-0022` and the JavaScript source span
 
 ### 6.4 Keep standalone template-helper diagnostics source-visible
 
@@ -1191,7 +1191,7 @@ Render:
 **Original finding:** DIAG-023
 
 **Additional confirmed gap:** ordinary body-local typed and mutable redeclarations still use the
-parallel `ShadowedName` family and `BST-RULE-0038`. That path duplicates `DuplicateDeclaration`,
+parallel `ShadowedName` family and `MOTH-RULE-0038`. That path duplicates `DuplicateDeclaration`,
 labels the first initializer rather than the authored binding and leaves the scope-neutral message
 from Phase 2.5 unused for normal local bindings.
 
@@ -1214,7 +1214,7 @@ A second reactive declaration is not invalid because `$` is unexpected. It is in
 - Reuse the scope-neutral duplicate-name message established in Phase 2.5. Do not reintroduce a
   reactive-specific renderer branch.
 - Use the authored binding location preserved by Phase 3.2 and label both declarations.
-- Update the existing `BST-RULE-0038` fixtures to `BST-RULE-0002`. Do not reserve or retain the
+- Update the existing `MOTH-RULE-0038` fixtures to `MOTH-RULE-0002`. Do not reserve or retain the
   superseded code through an alias.
 - Do not invent a separate reactive uniqueness rule.
 
@@ -1223,7 +1223,7 @@ A second reactive declaration is not invalid because `$` is unexpected. It is in
 **Additional confirmed gap:** option-present captures, choice payload captures and general match
 captures currently use `InvalidMatchPatternReason::CaptureBindingShadowsVariable`. That parallel
 reason carries neither the authored capture name nor the previous declaration location, uses
-source-inaccurate `variable` terminology and reports `BST-RULE-0049` for the ordinary language-wide
+source-inaccurate `variable` terminology and reports `MOTH-RULE-0049` for the ordinary language-wide
 no-shadowing rule.
 
 - Delete `CaptureBindingShadowsVariable` and its renderer branch.
@@ -1233,7 +1233,7 @@ no-shadowing rule.
   secondary label. Omit the secondary label when a visible symbol has no authored binding location.
 - Preserve distinct `DuplicateCaptureBinding` handling for two captures inside the same pattern.
 - Keep the current capture location primary and preserve option, choice and general-capture parsing.
-- Update the existing capture-shadowing integration owners to `BST-RULE-0002` rather than adding
+- Update the existing capture-shadowing integration owners to `MOTH-RULE-0002` rather than adding
   cosmetic duplicate fixtures.
 
 ### 7.2 Exact operator diagnostics consolidated into Phase 1.2
@@ -1262,19 +1262,19 @@ through the ordinary current grammar without a compatibility message.
 
 ### 7.4 Reject unsupported Wasm variant payloads before lowering
 
-**Additional audit finding:** `cast_optional_success_wraps_inner_value` currently expects `BST-INFRA-0001` because a reachable optional payload reaches Wasm LIR lowering, where `HirExpressionKind::VariantConstruct` with fields is rejected as a transformation error. This is valid Beanstalk source using a target feature that HTML-Wasm does not yet lower. The existing pre-lowering `UnsupportedBackendFeature` lane owns this failure.
+**Additional audit finding:** `cast_optional_success_wraps_inner_value` currently expects `MOTH-INFRA-0001` because a reachable optional payload reaches Wasm LIR lowering, where `HirExpressionKind::VariantConstruct` with fields is rejected as a transformation error. This is valid Moth source using a target feature that HTML-Wasm does not yet lower. The existing pre-lowering `UnsupportedBackendFeature` lane owns this failure.
 
 #### Implementation
 
 - Extend Wasm backend feature validation to detect reachable variant constructions with payload fields before LIR lowering.
-- Emit the existing `BST-RULE-0064` `UnsupportedBackendFeature` diagnostic at the source expression. Name the unsupported feature as variant payload values without exposing HIR or LIR.
+- Emit the existing `MOTH-RULE-0064` `UnsupportedBackendFeature` diagnostic at the source expression. Name the unsupported feature as variant payload values without exposing HIR or LIR.
 - Preserve reachability policy. An unsupported variant payload in an unreachable helper must not block the selected target.
 - Keep empty/unit variant construction on the supported path.
 - Do not convert the Wasm lowering invariant itself into a user diagnostic. Backend feature validation must prevent valid reachable source from reaching that invariant.
 
 #### Tests
 
-- Update `cast_optional_success_wraps_inner_value` to expect `BST-RULE-0064` for HTML-Wasm while preserving HTML success.
+- Update `cast_optional_success_wraps_inner_value` to expect `MOTH-RULE-0064` for HTML-Wasm while preserving HTML success.
 - Add a focused backend-feature validation test for reachable and unreachable payload construction if the integration case cannot protect both reachability branches.
 
 ## Phase 8: Doc comments and code comments review
@@ -1383,7 +1383,7 @@ Use focused subsystem tests for:
 ### Regression requirements
 
 - No negative fixture should pass only because a later unrelated diagnostic fires.
-- Positive counterparts must protect the intended valid Beanstalk pattern.
+- Positive counterparts must protect the intended valid Moth pattern.
 - Do not use benchmark fixtures as diagnostic coverage.
 - Remove fixtures tied only to deleted legacy paths.
 
@@ -1423,7 +1423,7 @@ Also perform the manual diagnostic audit required by the compiler style guide:
 - No deleted syntax has a dedicated compatibility surface.
 - Every incompatible directive diagnostic names both items and explains the conflict.
 - Mutable diagnostics distinguish missing `~`, immutable places, fresh values and invalid assignment markers.
-- Fallible and optional diagnostics name the authored operator and correct Beanstalk carrier.
+- Fallible and optional diagnostics name the authored operator and correct Moth carrier.
 - Terse diagnostics never have an empty message field.
-- Malformed user source in this plan never produces `BST-INFRA-0001`.
+- Malformed user source in this plan never produces `MOTH-INFRA-0001`.
 - `just validate` passes.

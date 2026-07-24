@@ -87,7 +87,7 @@ fn cleanup_manifest_diff_removes_stale_managed_files() {
 }
 
 #[test]
-fn cleanup_manifest_diff_removes_stale_tracked_byte_assets_from_v2_manifest() {
+fn cleanup_manifest_diff_removes_stale_tracked_byte_assets_from_manifest() {
     let root = temp_dir("cleanup_stale_bytes");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
@@ -115,7 +115,7 @@ fn cleanup_manifest_diff_removes_stale_tracked_byte_assets_from_v2_manifest() {
 
     assert_eq!(
         read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::ValidV2 {
+        ManifestLoadResult::Valid {
             paths: vec![
                 PathBuf::from("assets/logo.png"),
                 PathBuf::from("index.html")
@@ -183,7 +183,7 @@ fn cleanup_missing_manifest_preserves_stale_html_route_alias() {
 
     assert!(
         output_root.join("docs/basics.html").exists(),
-        "missing manifests must preserve stale aliases until a valid v2 manifest is available"
+        "missing manifests must preserve stale aliases until a valid manifest is available"
     );
     assert!(output_root.join("docs/basics/index.html").exists());
 
@@ -191,7 +191,7 @@ fn cleanup_missing_manifest_preserves_stale_html_route_alias() {
 }
 
 #[test]
-fn cleanup_first_build_writes_v2_manifest_without_removing() {
+fn cleanup_first_build_writes_manifest_without_removing() {
     let root = temp_dir("cleanup_first_build");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
@@ -221,7 +221,7 @@ fn cleanup_first_build_writes_v2_manifest_without_removing() {
 
     assert_eq!(
         read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::ValidV2 {
+        ManifestLoadResult::Valid {
             paths: vec![PathBuf::from("index.html")],
             builder_kind: BuilderKind::Html,
         }
@@ -298,7 +298,7 @@ fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
         WriteMode::AlwaysWrite,
         &StringTable::new(),
     )
-    .expect("should write v2 manifest");
+    .expect("should write v3 manifest");
 
     let project = html_project(
         vec![OutputFile::new(
@@ -406,7 +406,7 @@ fn cleanup_unreadable_manifest_enters_limited_safe_mode_and_preserves_existing_f
 
     assert!(
         output_root.join("docs/basics.html").exists(),
-        "unreadable manifests must preserve stale aliases until a valid v2 manifest is available"
+        "unreadable manifests must preserve stale aliases until a valid manifest is available"
     );
     assert!(
         output_root.join("custom/landing.html").exists(),
@@ -447,7 +447,7 @@ fn cleanup_disabled_skips_manifest_cleanup() {
 }
 
 #[test]
-fn unsupported_manifest_preserves_existing_files_until_next_v2_cleanup() {
+fn unsupported_manifest_preserves_existing_files_until_next_cleanup() {
     let root = temp_dir("cleanup_legacy_manifest");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
@@ -507,7 +507,7 @@ fn unsupported_manifest_preserves_existing_files_until_next_v2_cleanup() {
 }
 
 #[test]
-fn read_build_manifest_rejects_builder_mismatch_in_v2_manifest() {
+fn read_build_manifest_rejects_builder_mismatch_in_v3_manifest() {
     let root = temp_dir("cleanup_builder_mismatch");
     fs::create_dir_all(&root).expect("should create temp root");
 
@@ -534,11 +534,11 @@ fn read_build_manifest_rejects_builder_mismatch_in_v2_manifest() {
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
-/// Write a v2 manifest directly so extension-mismatch cases can vary metadata without reusing the
+/// Write a v3 manifest directly so extension-mismatch cases can vary metadata without reusing the
 /// active policy's writer.
-fn write_v2_manifest_text(root: &Path, builder: &str, extensions_csv: &str, paths: &[&str]) {
+fn write_v3_manifest_text(root: &Path, builder: &str, extensions_csv: &str, paths: &[&str]) {
     let mut lines = vec![
-        String::from("# beanstalk-manifest v2"),
+        String::from("# moth-manifest v3"),
         format!("# builder: {builder}"),
         format!("# managed_extensions: {extensions_csv}"),
     ];
@@ -546,7 +546,7 @@ fn write_v2_manifest_text(root: &Path, builder: &str, extensions_csv: &str, path
         lines.push((*path).to_string());
     }
     fs::write(root.join(BUILD_MANIFEST_FILENAME), lines.join("\n"))
-        .expect("should write v2 manifest");
+        .expect("should write v3 manifest");
 }
 
 fn html_active_extensions() -> BTreeSet<String> {
@@ -561,11 +561,11 @@ fn read_build_manifest_accepts_equivalent_managed_extensions_in_different_order(
     let root = temp_dir("cleanup_ext_order");
     fs::create_dir_all(&root).expect("should create temp root");
 
-    write_v2_manifest_text(&root, "html", ".wasm,.html,.js", &["index.html"]);
+    write_v3_manifest_text(&root, "html", ".wasm,.html,.js", &["index.html"]);
 
     assert_eq!(
         read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::ValidV2 {
+        ManifestLoadResult::Valid {
             paths: vec![PathBuf::from("index.html")],
             builder_kind: BuilderKind::Html,
         }
@@ -580,11 +580,11 @@ fn read_build_manifest_normalizes_managed_extension_case_and_leading_dot() {
     fs::create_dir_all(&root).expect("should create temp root");
 
     // Uppercase and dotless forms must normalize to the active lowercased dotted set.
-    write_v2_manifest_text(&root, "html", "HTML,js,.WASM", &["index.html"]);
+    write_v3_manifest_text(&root, "html", "HTML,js,.WASM", &["index.html"]);
 
     assert_eq!(
         read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::ValidV2 {
+        ManifestLoadResult::Valid {
             paths: vec![PathBuf::from("index.html")],
             builder_kind: BuilderKind::Html,
         }
@@ -603,7 +603,7 @@ fn read_build_manifest_rejects_missing_managed_extension() {
         .map(|ext| (*ext).to_string())
         .collect();
 
-    write_v2_manifest_text(&root, "html", ".html,.js", &["index.html"]);
+    write_v3_manifest_text(&root, "html", ".html,.js", &["index.html"]);
 
     assert_eq!(
         read_build_manifest(&root, &html_cleanup_policy()),
@@ -628,7 +628,7 @@ fn read_build_manifest_rejects_extra_managed_extension() {
         .map(|ext| (*ext).to_string())
         .collect();
 
-    write_v2_manifest_text(&root, "html", ".html,.js,.wasm,.css", &["index.html"]);
+    write_v3_manifest_text(&root, "html", ".html,.js,.wasm,.css", &["index.html"]);
 
     assert_eq!(
         read_build_manifest(&root, &html_cleanup_policy()),
@@ -644,13 +644,13 @@ fn read_build_manifest_rejects_extra_managed_extension() {
 }
 
 #[test]
-fn read_build_manifest_rejects_malformed_v2_metadata() {
+fn read_build_manifest_rejects_malformed_v3_metadata() {
     let root = temp_dir("cleanup_ext_malformed_metadata");
     fs::create_dir_all(&root).expect("should create temp root");
 
-    // A v2 header with an unknown builder name is invalid metadata, distinct from an extension
+    // A v3 header with an unknown builder name is invalid metadata, distinct from an extension
     // mismatch or builder mismatch between known builders.
-    write_v2_manifest_text(&root, "unknown", ".html,.js,.wasm", &["index.html"]);
+    write_v3_manifest_text(&root, "unknown", ".html,.js,.wasm", &["index.html"]);
 
     assert_eq!(
         read_build_manifest(&root, &html_cleanup_policy()),
@@ -683,7 +683,7 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
 
     // The manifest claims a different managed-extension set, so cleanup must enter limited safe
     // mode rather than delete files under a mismatched ownership contract.
-    write_v2_manifest_text(
+    write_v3_manifest_text(
         &output_root,
         "html",
         ".html,.js",
@@ -738,7 +738,7 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
     // The finalize path rewrites the manifest using the active policy, so the next read is valid.
     assert_eq!(
         read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::ValidV2 {
+        ManifestLoadResult::Valid {
             paths: vec![PathBuf::from("index.html")],
             builder_kind: BuilderKind::Html,
         }
@@ -748,7 +748,7 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
 }
 
 #[test]
-fn write_build_manifest_produces_sorted_v2_output() {
+fn write_build_manifest_produces_sorted_output() {
     let root = temp_dir("manifest_sorted");
     fs::create_dir_all(&root).expect("should create temp root");
 
@@ -775,7 +775,7 @@ fn write_build_manifest_produces_sorted_v2_output() {
     assert_eq!(
         lines,
         vec![
-            "# beanstalk-manifest v2",
+            "# moth-manifest v3",
             "# builder: html",
             "# managed_extensions: .html,.js,.wasm",
             "about/index.html",

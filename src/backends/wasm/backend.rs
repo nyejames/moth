@@ -212,21 +212,21 @@ fn validate_helper_export_policy(
 
     if helpers.export_str_ptr != helpers.export_str_len {
         return Err(CompilerError::compiler_error(
-            "Wasm helper exports must request both bst_str_ptr and bst_str_len together",
+            "Wasm helper exports must request both moth_str_ptr and moth_str_len together",
         )
         .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
     }
 
     if helpers.export_vec_new != helpers.export_vec_push {
         return Err(CompilerError::compiler_error(
-            "Wasm helper exports must request both bst_vec_new and bst_vec_push together",
+            "Wasm helper exports must request both moth_vec_new and moth_vec_push together",
         )
         .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
     }
 
     if helpers.export_vec_len != helpers.export_vec_get {
         return Err(CompilerError::compiler_error(
-            "Wasm helper exports must request both bst_vec_len and bst_vec_get together",
+            "Wasm helper exports must request both moth_vec_len and moth_vec_get together",
         )
         .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
     }
@@ -255,13 +255,13 @@ fn validate_helper_export_policy(
         };
 
     add_reserved_export(helpers.export_memory, "memory")?;
-    add_reserved_export(helpers.export_str_ptr, "bst_str_ptr")?;
-    add_reserved_export(helpers.export_str_len, "bst_str_len")?;
-    add_reserved_export(helpers.export_vec_new, "bst_vec_new")?;
-    add_reserved_export(helpers.export_vec_push, "bst_vec_push")?;
-    add_reserved_export(helpers.export_vec_len, "bst_vec_len")?;
-    add_reserved_export(helpers.export_vec_get, "bst_vec_get")?;
-    add_reserved_export(helpers.export_release, "bst_release")?;
+    add_reserved_export(helpers.export_str_ptr, "moth_str_ptr")?;
+    add_reserved_export(helpers.export_str_len, "moth_str_len")?;
+    add_reserved_export(helpers.export_vec_new, "moth_vec_new")?;
+    add_reserved_export(helpers.export_vec_push, "moth_vec_push")?;
+    add_reserved_export(helpers.export_vec_len, "moth_vec_len")?;
+    add_reserved_export(helpers.export_vec_get, "moth_vec_get")?;
+    add_reserved_export(helpers.export_release, "moth_release")?;
 
     Ok(())
 }

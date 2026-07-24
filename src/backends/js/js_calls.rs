@@ -92,7 +92,7 @@ impl<'hir> JsEmitter<'hir> {
                 .collect::<Result<Vec<_>, _>>()?
         } else {
             args.iter()
-                .map(|arg| self.lower_expression_for_use(arg, JsValueUse::BeanstalkCallArgument))
+                .map(|arg| self.lower_expression_for_use(arg, JsValueUse::MothCallArgument))
                 .collect::<Result<Vec<_>, _>>()?
         };
 
@@ -108,9 +108,9 @@ impl<'hir> JsEmitter<'hir> {
         if let Some(result_local) = result {
             let result_name = self.local_name(*result_local)?;
             if self.call_returns_alias_reference(target) {
-                self.emit_line(&format!("__bs_assign_borrow({result_name}, {call});"));
+                self.emit_line(&format!("__moth_assign_borrow({result_name}, {call});"));
             } else {
-                self.emit_line(&format!("__bs_assign_value({result_name}, {call});"));
+                self.emit_line(&format!("__moth_assign_value({result_name}, {call});"));
             }
         } else {
             self.emit_line(&format!("{call};"));

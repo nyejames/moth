@@ -1,0 +1,16 @@
+Add `#` when a value must be known during compilation.
+
+[codeblock, $code("moth"):
+    site_name #= "Moth"
+    version #Int = 1
+]
+
+Constants cannot change.
+
+They can be used by other compile-time values:
+
+[codeblock, $code("moth"):
+    full_name #= [: [site_name] v[version]]
+]
+
+Use a normal binding when the value belongs to runtime code.

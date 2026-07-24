@@ -5,8 +5,8 @@
       "isMainThread": true,
       "stringArray": [
         "main",
-        "beanstalk::compiler_frontend::ast::resolve_type",
-        "beanstalk::compiler_frontend::hir::generate",
+        "moth::compiler_frontend::ast::resolve_type",
+        "moth::compiler_frontend::hir::generate",
         "std::alloc::alloc",
         "rayon::ThreadPool::spawn"
       ],
@@ -31,7 +31,7 @@
       "isMainThread": false,
       "stringArray": [
         "main",
-        "beanstalk::compiler_frontend::ast::resolve_type",
+        "moth::compiler_frontend::ast::resolve_type",
         "std::alloc::alloc"
       ],
       "funcTable": {

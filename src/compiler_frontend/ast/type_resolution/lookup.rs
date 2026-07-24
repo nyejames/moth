@@ -437,7 +437,7 @@ pub(super) fn resolve_generic_base_type(
 /// Detect deferred public `Option` / `Result` syntax in generic position.
 ///
 /// WHAT: returns the matching invalid-generic-instantiation reason when the name is `Option` or `Result`.
-/// WHY: `Option of T` and `Result of T, E` are not Beanstalk type syntax. Optional types use the
+/// WHY: `Option of T` and `Result of T, E` are not Moth type syntax. Optional types use the
 ///      `T?` suffix and fallible functions declare a final `E!` error return slot.
 fn invalid_carrier_type_syntax(
     type_name: StringId,

@@ -1,0 +1,72 @@
+Slots let one template receive content from another.
+
+### Default and named slots
+
+[codeblock, $code("moth"):
+    card = [:
+        <h1>[$slot("title")]</h1>
+        <section>[$slot]</section>
+    ]
+
+    [card:
+        [$insert("title"): Hello]
+        Body content
+    ]
+]
+
+The default and named forms are:
+
+[codeblock, $code("text"):
+    [$slot]                 -- default slot
+    [$slot("name")]         -- named slot
+    [$insert("name"): ...]  -- contribution to named slot
+]
+
+The default slot is declared with dollar-slot. A named slot is declared with
+dollar-slot and a string name. A named insert contributes with dollar-insert
+and the same name.
+
+### Positional slots
+
+Positive integer slots receive loose head contributions.
+
+[codeblock, $code("moth"):
+    image = [:
+        <img src="[$slot(1)]" alt="[$slot]">
+    ]
+
+    [image, "logo.png": Site logo]
+]
+
+The first loose contribution fills slot `1`.
+
+The remaining loose body content fills the default slot.
+
+### Routing rules
+
+- Loose contributions fill positional slots in ascending numeric order.
+- Remaining loose contributions go to the default slot when one exists.
+- Loose content that cannot be assigned is an error when no default slot exists.
+- Missing slots render as empty strings.
+- Repeated slots replay the same contribution.
+- Named inserts target only their named slot.
+- One application may combine named, positional and default contributions.
+
+### Stored named inserts
+
+The language intends to support preparing a named insert in a binding and
+passing it as a loose contribution. The current compiler does not yet accept
+this form.
+
+### Runtime contributions
+
+Runtime-capable templates support slot contributions from selected template
+`if` branches and template loop bodies.
+
+AST prepares the slot routing before HIR.
+
+Runtime lowering appends the routed contributions through normal string
+accumulators.
+
+Unresolved slot or insert artifacts after routing are invalid template
+structure.

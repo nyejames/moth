@@ -1,0 +1,65 @@
+Module visibility controls which declarations cross a module boundary. Normal declarations are private to their module. The `export:` block marks what other modules can see.
+
+### Same-module internal visibility
+
+Files within the same module can import each other's declarations directly. A module is defined by its root directory. All `.moth` files in that directory (and its subdirectories that do not have their own root) belong to the same module.
+
+[codeblock, $code("moth"):
+    -- lib/components/utils.moth
+    internal_value #= 42
+    internal_fn || -> String:
+        return "internal"
+    ;
+]
+
+[codeblock, $code("moth"):
+    -- lib/components/#api.moth (same module)
+    import @utils {internal_value, internal_fn}
+
+    export:
+        import @utils {internal_value}
+    ;
+]
+
+Same-module imports bypass the public-surface boundary. The importing file sees all declarations in the target file.
+
+### Cross-module public boundary
+
+A different module can only access declarations marked public by the module root's `export:` block. Cross-module imports cannot bypass the public API.
+
+[codeblock, $code("moth"):
+    -- src/#site.moth (project module)
+    import @components {internal_value}
+]
+
+The project module can import `internal_value` through the package root's public surface. It cannot bypass that boundary with `import @components/utils {internal_value}`. Without the root export block, the public import is rejected with `MOTH-IMPORT-0011`.
+
+### Root-private declarations
+
+Declarations in the module root file outside the `export:` block are private to the root. They are not available to other modules even through the public surface.
+
+### Direct root import rejection
+
+Direct imports of hash-root files are rejected. Import the module through its directory path, not through the root filename.
+
+### Runtime top-level bindings not importable
+
+Runtime top-level bindings are start-body code. They are not importable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are importable.
+
+### Receiver method visibility
+
+Receiver methods are visible through a module's public surface when the module exports the receiver type's source surface. A type alias in the export block does not automatically re-export private implementation methods. Export the receiver type's source surface or a wrapper explicitly.
+
+### Import cycles
+
+Circular imports between files in the same module are accepted when the declarations resolve in dependency order. Circular constant dependencies are rejected with `MOTH-RULE-0033`.
+
+### No public access through filesystem tricks
+
+There is no way to bypass the module public-surface boundary by choosing a different import path. All cross-module imports go through the same resolution and visibility check.
+
+### Related concepts
+
+- For the export block see @../project-structure/#public-api (Public API).
+- For import path families see @#import-paths (Import paths).
+- For re-export syntax see @#public-reexports (Public re-exports).

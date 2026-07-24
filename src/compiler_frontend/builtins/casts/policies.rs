@@ -129,7 +129,7 @@ fn float_to_string(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Bu
         ));
     };
 
-    // Beanstalk `Float` is finite `f64`, so a non-finite value reaching the cast
+    // Moth `Float` is finite `f64`, so a non-finite value reaching the cast
     // policy is a defensive invariant failure rather than ordinary user input.
     let text = format_finite_float(*value).map_err(|error| {
         BuiltinCastError::new(
@@ -231,7 +231,7 @@ fn float_to_int(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Built
         ));
     }
 
-    // Truncate toward zero, then require the result to fit Beanstalk's signed i32 Int.
+    // Truncate toward zero, then require the result to fit Moth's signed i32 Int.
     let truncated = value.trunc();
     if truncated < (i32::MIN as f64) || truncated > (i32::MAX as f64) {
         return Err(BuiltinCastError::new(

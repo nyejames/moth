@@ -5,7 +5,7 @@
 //! stay plain JS helpers so the backend surface matches the language semantics.
 //!
 //! Map representation:
-//! - Maps are branded `{ __bst_kind: "ordered_map", map: new Map() }` wrappers.
+//! - Maps are branded `{ __moth_kind: "ordered_map", map: new Map() }` wrappers.
 //!
 //! Semantic policy:
 //! - `get`, `set`, and `remove` return `{ tag: "ok", value: ... }` or `{ tag: "err", value: ... }`.
@@ -29,7 +29,7 @@ impl<'hir> JsEmitter<'hir> {
         let key_not_found_message = key_not_found.default_message();
 
         // Branded wrapper so runtime helpers can distinguish maps from arbitrary objects.
-        self.emit_line("function __bs_map_new(entries) {");
+        self.emit_line("function __moth_map_new(entries) {");
         self.with_indent(|emitter| {
             emitter.emit_line("const map = new Map();");
             emitter.emit_line("if (Array.isArray(entries)) {");
@@ -45,35 +45,35 @@ impl<'hir> JsEmitter<'hir> {
                 em.emit_line("}");
             });
             emitter.emit_line("}");
-            emitter.emit_line("return { __bst_kind: \"ordered_map\", map: map };");
+            emitter.emit_line("return { __moth_kind: \"ordered_map\", map: map };");
         });
         self.emit_line("}");
         self.emit_line("");
 
         // Validation gate shared by all fallible map operations.
-        self.emit_line("function __bs_map_is_valid(value) {");
+        self.emit_line("function __moth_map_is_valid(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line(
-                "return value !== null && typeof value === \"object\" && value.__bst_kind === \"ordered_map\" && value.map instanceof Map;",
+                "return value !== null && typeof value === \"object\" && value.__moth_kind === \"ordered_map\" && value.map instanceof Map;",
             );
         });
         self.emit_line("}");
         self.emit_line("");
 
         // Fallible accessor: invalid receiver -> MapExpectedOrderedMap, missing key -> MapKeyNotFound.
-        self.emit_line("function __bs_map_get(map, key) {");
+        self.emit_line("function __moth_map_get(map, key) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__bs_map_is_valid(map)) {");
+            emitter.emit_line("if (!__moth_map_is_valid(map)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{invalid_map_message}\", {invalid_map_code});",
+                    "return __moth_error_result(\"{invalid_map_message}\", {invalid_map_code});",
                 ));
             });
             emitter.emit_line("}");
             emitter.emit_line("if (!map.map.has(key)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{key_not_found_message}\", {key_not_found_code});",
+                    "return __moth_error_result(\"{key_not_found_message}\", {key_not_found_code});",
                 ));
             });
             emitter.emit_line("}");
@@ -83,7 +83,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Infallible helpers do not validate the receiver or return error carriers.
-        self.emit_line("function __bs_map_contains(map, key) {");
+        self.emit_line("function __moth_map_contains(map, key) {");
         self.with_indent(|emitter| {
             emitter.emit_line("return map.map.has(key);");
         });
@@ -91,12 +91,12 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Fallible mutation: only validates the receiver; the key is always inserted.
-        self.emit_line("function __bs_map_set(map, key, value) {");
+        self.emit_line("function __moth_map_set(map, key, value) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__bs_map_is_valid(map)) {");
+            emitter.emit_line("if (!__moth_map_is_valid(map)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{invalid_map_message}\", {invalid_map_code});",
+                    "return __moth_error_result(\"{invalid_map_message}\", {invalid_map_code});",
                 ));
             });
             emitter.emit_line("}");
@@ -107,19 +107,19 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Fallible mutation: missing key -> MapKeyNotFound.
-        self.emit_line("function __bs_map_remove(map, key) {");
+        self.emit_line("function __moth_map_remove(map, key) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__bs_map_is_valid(map)) {");
+            emitter.emit_line("if (!__moth_map_is_valid(map)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{invalid_map_message}\", {invalid_map_code});",
+                    "return __moth_error_result(\"{invalid_map_message}\", {invalid_map_code});",
                 ));
             });
             emitter.emit_line("}");
             emitter.emit_line("if (!map.map.has(key)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
-                    "return __bs_error_result(\"{key_not_found_message}\", {key_not_found_code});",
+                    "return __moth_error_result(\"{key_not_found_message}\", {key_not_found_code});",
                 ));
             });
             emitter.emit_line("}");
@@ -131,7 +131,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Infallible mutation: clears every entry without returning an error carrier.
-        self.emit_line("function __bs_map_clear(map) {");
+        self.emit_line("function __moth_map_clear(map) {");
         self.with_indent(|emitter| {
             emitter.emit_line("map.map.clear();");
         });
@@ -139,7 +139,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Infallible query: returns the entry count.
-        self.emit_line("function __bs_map_length(map) {");
+        self.emit_line("function __moth_map_length(map) {");
         self.with_indent(|emitter| {
             emitter.emit_line("return map.map.size;");
         });

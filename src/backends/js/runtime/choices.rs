@@ -10,7 +10,7 @@ use crate::backends::js::JsEmitter;
 impl<'hir> JsEmitter<'hir> {
     /// Emits the choice structural equality helper.
     ///
-    /// WHAT: `__bs_choice_eq` compares two choice carriers by tag and then by every
+    /// WHAT: `__moth_choice_eq` compares two choice carriers by tag and then by every
     /// payload field. Nested choices are compared recursively; all other supported types
     /// use `===`.
     ///
@@ -18,7 +18,7 @@ impl<'hir> JsEmitter<'hir> {
     /// structural equality, so the helper can safely assume primitives are `===`-comparable
     /// and only needs recursion for nested choice carriers.
     pub(crate) fn emit_runtime_choice_helpers(&mut self) {
-        self.emit_line("function __bs_choice_eq(a, b) {");
+        self.emit_line("function __moth_choice_eq(a, b) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (a === b) return true;");
             emitter.emit_line("if (!a || !b) return false;");
@@ -31,7 +31,7 @@ impl<'hir> JsEmitter<'hir> {
                 inner.emit_line("var av = a[k], bv = b[k];");
                 inner.emit_line("if (av && typeof av === \"object\" && \"tag\" in av) {");
                 inner.with_indent(|deepest| {
-                    deepest.emit_line("if (!__bs_choice_eq(av, bv)) return false;");
+                    deepest.emit_line("if (!__moth_choice_eq(av, bv)) return false;");
                 });
                 inner.emit_line("} else if (av !== bv) {");
                 inner.with_indent(|deepest| {

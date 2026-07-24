@@ -98,7 +98,7 @@ pub(crate) fn type_mismatch_context_name(
 ///
 /// WHAT: gives syntax diagnostics one spelling source across terminal, terse, dev-server, and
 /// contextless compiler-error fallback while the last bridge call sites are retired.
-/// WHY: parser diagnostics carry `TokenKind` facts, but user output should show Beanstalk syntax
+/// WHY: parser diagnostics carry `TokenKind` facts, but user output should show Moth syntax
 /// such as `(` or `name`, not implementation names such as `OpenParenthesis`.
 pub(crate) fn token_kind_name(token_kind: &TokenKind, string_table: &StringTable) -> String {
     match token_kind {
@@ -257,6 +257,6 @@ pub(crate) fn duplicate_declaration_message(name: StringId, string_table: &Strin
     let name_str = string_table.resolve(name);
 
     format!(
-        "Cannot declare '{name_str}' because that name is already visible in this scope. Beanstalk does not allow duplicate names or shadowing."
+        "Cannot declare '{name_str}' because that name is already visible in this scope. Moth does not allow duplicate names or shadowing."
     )
 }

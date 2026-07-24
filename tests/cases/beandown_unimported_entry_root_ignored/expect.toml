@@ -1,8 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["beandown_unimported_entry_root_ignored page content"]
-rendered_output_not_contains = ["beandown_unimported_entry_root_ignored hidden content"]
-

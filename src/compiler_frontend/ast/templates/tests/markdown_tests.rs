@@ -112,7 +112,7 @@ fn parses_links_for_all_supported_target_prefixes() {
         ("@./local/path (Local)", "./local/path"),
         ("@../parent/path (Parent)", "../parent/path"),
         ("@#overview (Overview)", "#overview"),
-        ("@?q=beanstalk (Search)", "?q=beanstalk"),
+        ("@?q=moth (Search)", "?q=moth"),
     ];
 
     for (input, target) in cases {

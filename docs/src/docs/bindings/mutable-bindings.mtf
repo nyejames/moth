@@ -1,0 +1,44 @@
+`~` on a declaration marks the binding as mutation-capable.
+
+[codeblock, $code("moth"):
+    count ~= 0
+    names ~{String} = {}
+]
+
+### Declaration and reassignment
+
+[codeblock, $code("moth"):
+    count ~= 0
+    count = 1
+]
+
+- `name ~= value` declares a mutable binding with an inferred type.
+- `name ~Type = value` declares a mutable binding with an explicit type.
+- Reassignment still uses ordinary `=`.
+- `~=` is an adjacent mutable-declaration marker. Write whitespace before `~` and after `=`, but never between them.
+- Mutability belongs to the binding, not the semantic type.
+
+### Exclusive access
+
+Declaration mutability and call-site exclusive access are separate operations.
+
+[codeblock, $code("moth"):
+    add_name |names ~{String}, name String|:
+        ~names.push(name) catch:
+        ;
+    ;
+
+    names ~{String} = {}
+    add_name(~names, "Priya")
+]
+
+A mutable parameter accepts:
+
+- `~place` for an existing mutable place
+- a plain fresh rvalue such as a literal, template, constructor call or computed value
+
+`~` is place-only syntax. It is invalid on immutable bindings and is not
+written on fresh rvalues.
+
+`~` requests exclusive access for that operation. It is not explicit move
+syntax and is not part of type identity.

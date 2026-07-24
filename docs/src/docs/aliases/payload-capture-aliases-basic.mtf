@@ -1,0 +1,38 @@
+When you match a choice with a payload, the field name becomes the local variable inside that arm. Sometimes that name collides with another variable or just feels wrong in context.
+
+### Rename one payload field
+
+[codeblock, $code("moth"):
+    Response ::
+        Err | message String |,
+        Success | value String |,
+    ;
+
+    response = Response::Err("oops")
+
+    if response is:
+        Err(message as error_message) => io.line(error_message)
+        Success(value as body) => io.line(body)
+    ;
+]
+
+`message as error_message` means: take the payload field called `message` and bind it to `error_message` in this arm only.
+
+### Why rename?
+
+[codeblock, $code("moth"):
+    message = "outer message"
+
+    if response is:
+        Err(message as failure_message) => io.line(failure_message)
+        else => io.line(message)
+    ;
+]
+
+Without the alias, the capture would collide with the visible outer `message` and be rejected. The alias keeps both names distinct.
+
+### Remember
+
+- The name before `as` must match the field name.
+- The new name is visible only inside that arm.
+- It does not rename the field on the choice.

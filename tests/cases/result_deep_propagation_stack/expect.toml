@@ -6,4 +6,4 @@ rendered_output_contains = ["deep_fallback"]
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__bs_result_propagate", "try {"]
+must_contain = ["__moth_result_propagate", "try {"]

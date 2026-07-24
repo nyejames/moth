@@ -1,0 +1,104 @@
+import @./conditional-loops {
+    content as conditional_loops,
+}
+
+import @./conditional-loops-basic {
+    content as conditional_loops_basic,
+}
+
+import @./collection-loops {
+    content as collection_loops,
+}
+
+import @./collection-loops-basic {
+    content as collection_loops_basic,
+}
+
+import @./range-loops {
+    content as range_loops,
+}
+
+import @./range-loops-basic {
+    content as range_loops_basic,
+}
+
+import @./loop-control {
+    content as loop_control,
+}
+
+import @./loop-control-basic {
+    content as loop_control_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Loops"
+page_description #= "Conditional, collection and range loops with break and continue in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Loops
+
+    # Loops
+
+    Loops repeat work without hiding what kind of repetition is happening. Moth uses one `loop` keyword for conditions, collections and numeric ranges. The header tells you which form you are looking at.
+
+    Each section starts with a practical explanation. Switch only that section to Advanced when you need the exact rules and edge cases.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):conditional-loops]
+        [$insert("title"):Conditional loops]
+        [$insert("advanced"):[conditional_loops]]
+
+        [conditional_loops_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):collection-loops]
+        [$insert("title"):Collection loops]
+        [$insert("advanced"):[collection_loops]]
+
+        [collection_loops_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):range-loops]
+        [$insert("title"):Range loops]
+        [$insert("advanced"):[range_loops]]
+
+        [range_loops_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):loop-control]
+        [$insert("title"):Loop control]
+        [$insert("advanced"):[loop_control]]
+
+        [loop_control_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../branching/]
+        [$insert("previous_title"):Branching]
+        [$insert("next_path"):../structs/]
+        [$insert("next_title"):Structs]
+    ]
+]

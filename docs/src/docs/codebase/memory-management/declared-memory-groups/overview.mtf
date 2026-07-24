@@ -1,0 +1,22 @@
+# Declared memory groups
+
+Accepted deferred `group` / `into` semantics and hard destination lifetimes.
+
+**Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
+
+## Contract
+
+- Input: accepted `group` blocks and declaration receiving-boundary placement
+- Output: declared lifetime-owner, placement, destination-scope and group-exit semantics
+- Decides: group identity, legal placement syntax, destination binding visibility, nested-group retained-edge rules and group escape rules
+- Must not decide: current implementation support, borrow-checker algorithm, physical arena representation, backend allocation or implementation order
+- Invariant: a declared group is a hard semantic lifetime boundary and cannot be silently widened
+
+## Read next
+
+- `docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.mtf`
+- `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/src/docs/codebase/memory-management/access-and-aliasing/overview.mtf`
+- `docs/roadmap/plans/grouped-memory-design.md`
+- `docs/language-overview.md`
+- `docs/src/docs/progress/#page.moth`

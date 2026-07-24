@@ -3,7 +3,7 @@
 //! WHAT: defines slot keys, directive kinds, template node classifications, the
 //!       durable `Template` handle, and shared formatter/style vocabulary consumed
 //!       throughout AST template processing.
-//! WHY: templates are a first-class Beanstalk construct; this module owns the
+//! WHY: templates are a first-class Moth construct; this module owns the
 //!      durable `Template` value and the shared vocabulary used by parsing,
 //!      folding, slot routing, and runtime-handoff preparation.
 

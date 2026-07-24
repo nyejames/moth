@@ -1,6 +1,6 @@
 //! HIR module container.
 //!
-//! WHAT: the executable/semantic IR payload produced for one Beanstalk module.
+//! WHAT: the executable/semantic IR payload produced for one Moth module.
 //! WHY: backends consume `HirModule` as the stable frontend output after AST lowering and borrow
 //! validation.
 //!

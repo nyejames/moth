@@ -1,0 +1,23 @@
+-- Test basic Moth language features
+
+-- Variable declarations with different types
+int_var ~= 42
+float_var ~= 3.14159
+string_slice_var ~= "Hello Moth"
+bool_var ~= true
+immutable_int = 100
+
+-- Simple arithmetic expressions
+sum ~= 10 + 5
+difference ~= 20 - 8
+product ~= 6 * 7
+quotient ~= 15 / 3
+
+-- Boolean expressions
+is_true ~= true and false
+is_false ~= not true
+comparison ~= 5 is 5
+
+-- Variable mutation (proper syntax)
+int_var = int_var + 1
+sum = sum * 2

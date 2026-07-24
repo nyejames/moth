@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0016-MAP"]
+diagnostic_codes = ["MOTH-SYNTAX-0016-MAP"]
 message_contains = ["Fixed or capacity map syntax"]

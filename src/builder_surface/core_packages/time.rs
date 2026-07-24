@@ -168,7 +168,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             returns: vec![ExternalReturnSlot::fresh(timestamp_type.clone())],
             error_return_type: Some(ExternalSignatureType::BuiltinError),
             js_lowering: ExternalJsLowering::RuntimeFunction(
-                "__bs_time_timestamp_from_iso_string".to_owned(),
+                "__moth_time_timestamp_from_iso_string".to_owned(),
             ),
         },
     );

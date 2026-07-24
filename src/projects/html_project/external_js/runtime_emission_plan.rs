@@ -26,7 +26,7 @@ pub(crate) struct HtmlExternalRuntimeEmissionPlan {
     /// Only `asset_kind == "js"` assets are included, preserving current backend behavior.
     js_assets: BTreeMap<PathBuf, RuntimeAssetIdentity>,
 
-    /// Required runtime module specifiers, e.g. `"@beanstalk/runtime"`.
+    /// Required runtime module specifiers, e.g. `"@moth/runtime"`.
     runtime_module_specifiers: BTreeSet<String>,
 }
 

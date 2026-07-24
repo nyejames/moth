@@ -70,8 +70,8 @@ fn handle_connection_with_timeouts(
     };
 
     match site_local_path.as_str() {
-        "/__beanstalk/events" => sse::handle_sse_connection(stream, state),
-        "/__beanstalk/ping" => {
+        "/__moth/events" => sse::handle_sse_connection(stream, state),
+        "/__moth/ping" => {
             send_text_response(&mut stream, "200 OK", "text/plain; charset=utf-8", "ok")
         }
         _ => serve_static_request(

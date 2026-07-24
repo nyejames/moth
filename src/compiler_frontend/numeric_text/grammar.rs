@@ -1,7 +1,7 @@
 //! Pure numeric-text grammar predicates.
 //!
 //! WHAT: tiny, testable building blocks for recognizing characters that may appear
-//!       in Beanstalk numeric literals.
+//!       in Moth numeric literals.
 //! WHY: keeping these predicates separate from the scanner makes the grammar rules
 //!      explicit and avoids duplicating character classes across tokenizer and casts.
 
@@ -10,7 +10,7 @@ pub fn is_numeric_digit(character: char) -> bool {
     character.is_ascii_digit()
 }
 
-/// The only lowercase exponent marker supported in Beanstalk numeric literals.
+/// The only lowercase exponent marker supported in Moth numeric literals.
 pub fn is_exponent_marker(character: char) -> bool {
     character == 'e' || character == 'E'
 }

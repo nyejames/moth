@@ -143,11 +143,11 @@ pub enum DiagnosticPayload {
         extension: StringId,
     },
 
-    InvalidBeandownApiScopeItem {
+    InvalidMothTemplateApiScopeItem {
         path: InternedPath,
     },
 
-    DuplicateBeandownInputPath {
+    DuplicateMothTemplateInputPath {
         path: InternedPath,
         first_location: SourceLocation,
     },

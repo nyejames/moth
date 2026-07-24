@@ -1,0 +1,13 @@
+-- Test that nested struct field access composes __moth_field calls.
+-- Validates the computed-place layer for nested struct paths.
+
+Inner = |
+    value Int,
+|
+
+Outer = |
+    inner Inner,
+|
+
+wrapper = Outer(Inner(42))
+io.line([: [wrapper.inner.value]])

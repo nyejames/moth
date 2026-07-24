@@ -121,7 +121,7 @@ pub(crate) fn invalid_function_signature_message(
             "The error return slot must be the final return slot in v1.".to_string()
         }
         InvalidFunctionSignatureReason::GenericWhereConstraintsUnsupported => {
-            "`where` syntax is not part of Beanstalk generic constraints. Use declaration-site bounds such as `type A is TRAIT`."
+            "`where` syntax is not part of Moth generic constraints. Use declaration-site bounds such as `type A is TRAIT`."
                 .to_string()
         }
     }
@@ -184,7 +184,7 @@ pub(crate) fn invalid_declaration_message(
             format!("Generic parameter '{parameter_name_str}' collides with a builtin type name.")
         }
         InvalidDeclarationReason::GenericTraitsUnsupported => {
-            "Generic trait declarations are outside Beanstalk's trait design scope. Trait declarations cannot have generic parameters."
+            "Generic trait declarations are outside Moth's trait design scope. Trait declarations cannot have generic parameters."
                 .to_string()
         }
         InvalidDeclarationReason::InvalidTraitName => {
@@ -232,10 +232,10 @@ pub(crate) fn invalid_generic_instantiation_message(
             )
         }
         InvalidGenericInstantiationReason::OptionTypeSyntaxNotSupported => {
-            "`Option of T` is not Beanstalk type syntax. Use the `T?` optional suffix.".to_string()
+            "`Option of T` is not Moth type syntax. Use the `T?` optional suffix.".to_string()
         }
         InvalidGenericInstantiationReason::ResultTypeSyntaxNotSupported => {
-            "`Result of T, E` is not Beanstalk type syntax. Fallible functions declare a final `E!` error return slot.".to_string()
+            "`Result of T, E` is not Moth type syntax. Fallible functions declare a final `E!` error return slot.".to_string()
         }
         InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments => {
             format!("Type {type_name_str} does not accept generic arguments.")

@@ -10,5 +10,5 @@ must_contain = [
     "1.5707963267948966",
 ]
 must_not_contain = [
-    "function __bs_math_sin(",
+    "function __moth_math_sin(",
 ]

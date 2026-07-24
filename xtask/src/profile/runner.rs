@@ -5,7 +5,7 @@
 //! provides a compatibility check that the profile can be parsed.
 //!
 //! WHY: Samply is invoked as an external command (not a Rust dependency)
-//! to capture stack samples while the Beanstalk compiler runs benchmark
+//! to capture stack samples while the Moth compiler runs benchmark
 //! cases. Separating the runner from the orchestrator keeps command
 //! construction testable without requiring Samply to be installed.
 //!
@@ -77,9 +77,9 @@ impl PresymbolicationFlag {
 /// WHY: A named struct makes the runner's inputs explicit and testable
 /// without threading many arguments through function signatures.
 pub(crate) struct SamplyRunInput {
-    /// Path to the built bean binary to profile.
-    pub(crate) bean_path: PathBuf,
-    /// The bean subcommand (e.g., "check", "build").
+    /// Path to the built moth binary to profile.
+    pub(crate) moth_path: PathBuf,
+    /// The moth subcommand (e.g., "check", "build").
     pub(crate) command: String,
     /// Arguments to the subcommand.
     pub(crate) args: Vec<String>,
@@ -203,9 +203,9 @@ pub(crate) fn build_samply_command(input: &SamplyRunInput) -> Command {
         cmd.arg("--symbol-dir").arg(symbol_dir);
     }
 
-    // The `--` separator followed by the bean command and its arguments.
+    // The `--` separator followed by the moth command and its arguments.
     cmd.arg("--")
-        .arg(&input.bean_path)
+        .arg(&input.moth_path)
         .arg(&input.command)
         .args(&input.args);
 

@@ -292,7 +292,7 @@ fn formatted_doc_template_with_direct_tir(
 #[test]
 fn doc_fragment_folding_reads_directly_constructed_formatted_tir_root() {
     let mut string_table = StringTable::new();
-    let entry_dir = InternedPath::from_single_str("main.bst", &mut string_table);
+    let entry_dir = InternedPath::from_single_str("main.moth", &mut string_table);
     let entry_scope = entry_dir.to_owned();
 
     let (doc_template, store) =
@@ -349,7 +349,7 @@ doc body
 #[test]
 fn collects_const_top_level_fragments_from_tir_result_record() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let path = InternedPath::from_single_str("main.moth", &mut string_table);
     let value = string_table.intern("const html");
 
     let mut results = FxHashMap::default();
@@ -372,7 +372,7 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
 #[test]
 fn collects_const_top_level_fragments_from_folded_value() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let path = InternedPath::from_single_str("main.moth", &mut string_table);
     let value = string_table.intern("folded html");
 
     let mut results = FxHashMap::default();
@@ -395,8 +395,8 @@ fn collects_const_top_level_fragments_from_folded_value() {
 #[test]
 fn collects_mixed_const_top_level_fragments_in_source_order() {
     let mut string_table = StringTable::new();
-    let first_path = InternedPath::from_single_str("first.bst", &mut string_table);
-    let second_path = InternedPath::from_single_str("second.bst", &mut string_table);
+    let first_path = InternedPath::from_single_str("first.moth", &mut string_table);
+    let second_path = InternedPath::from_single_str("second.moth", &mut string_table);
 
     let first_value = string_table.intern("first");
     let second_value = string_table.intern("second");
@@ -437,7 +437,7 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
 #[test]
 fn missing_const_top_level_fragment_result_returns_compiler_error() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("main.bst", &mut string_table);
+    let path = InternedPath::from_single_str("main.moth", &mut string_table);
 
     let results = FxHashMap::<InternedPath, FoldedConstTemplateResult>::default();
     let fragments = vec![TopLevelConstFragment {

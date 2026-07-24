@@ -1,0 +1,51 @@
+### Fresh results
+
+A fresh result root has a new root allocation but may retain legal references. Fresh results include literals, templates, constructor calls and computed aggregates.
+
+[codeblock, $code("moth"):
+    name = "Priya"                    -- fresh string slice
+    greeting = [: Hello, [name]]      -- fresh owned template
+    items = {1, 2, 3}                 -- fresh collection
+]
+
+### Alias results
+
+An alias result reuses an existing root or projection. Shared bindings, field access and shared function returns produce alias results.
+
+[codeblock, $code("moth"):
+    original = load_items()
+    view = original                   -- alias result
+    first = original.get(0)           -- alias result (shared access)
+]
+
+### Independent results
+
+An independent result graph has no retained Moth reference to pre-existing storage. `copy` produces independent results.
+
+### Aggregate storage
+
+Existing values stored in structs, choices, collections, maps, tuples, templates or other aggregates retain shared reference semantics by default. `copy` creates independent storage.
+
+Maps own their entry structure while keys and values follow the same shared/copy/inferred-transfer rules. Map lookup keys are borrowed. `get` returns a shared alias. `remove` returns the removed value under normal lifetime and ownership rules.
+
+### Optional inferred transfer
+
+There is no move syntax and no ordinary mandatory-consuming value operation. Inferred transfer is optional. When safe transfer isn't proven on every relevant path, the operation remains a borrow.
+
+Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site. Parameter access mode remains separate from optional ownership effect.
+
+### Source-visible lifetime consequences
+
+- A shared alias blocks overlapping mutation until its last potential use.
+- A live shared value returned by `get` prevents mutation of the same map.
+- `remove` returns the removed value under normal lifetime rules.
+- Aggregate storage retains shared references unless `copy` is explicit.
+
+### Read next
+
+- @#reference-semantics (Reference semantics)
+- @#copy-and-exclusive-access (Copy and exclusive access)
+- @#declared-memory-groups (Declared memory groups)
+
+For the formal lifetime-region rules, see
+@../../codebase/memory-management/lifetime-regions-and-escape-validation (Lifetime regions and escape validation).

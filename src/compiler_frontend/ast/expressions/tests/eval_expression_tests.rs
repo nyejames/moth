@@ -72,13 +72,13 @@ fn assert_unsupported_operator(source: &str, expected_operator: DiagnosticOperat
 #[test]
 fn ordinary_expression_rejects_path_string_concatenation() {
     let mut string_table = StringTable::new();
-    let source_scope = InternedPath::from_single_str("#page.bst", &mut string_table);
+    let source_scope = InternedPath::from_single_str("#page.moth", &mut string_table);
     let asset_path = InternedPath::from_single_str("assets", &mut string_table)
         .join_str("logo.png", &mut string_table);
     let compile_time_paths = CompileTimePaths {
         paths: vec![CompileTimePath {
             source_path: asset_path.clone(),
-            filesystem_path: std::env::temp_dir().join("beanstalk_eval_expression_logo.png"),
+            filesystem_path: std::env::temp_dir().join("moth_eval_expression_logo.png"),
             public_path: asset_path.clone(),
             base: CompileTimePathBase::EntryRoot,
             kind: CompileTimePathKind::File,
@@ -94,7 +94,7 @@ fn ordinary_expression_rejects_path_string_concatenation() {
     )
     .with_source_file_scope(source_scope.clone())
     .with_path_format_config(PathStringFormatConfig {
-        origin: String::from("/beanstalk"),
+        origin: String::from("/moth"),
         ..PathStringFormatConfig::default()
     });
 
@@ -135,7 +135,7 @@ fn ordinary_expression_rejects_path_string_concatenation() {
         diagnostic.kind,
         DiagnosticKind::Type(TypeDiagnosticKind::UnsupportedOperatorTypes)
     );
-    assert_eq!(diagnostic.kind.code(), "BST-TYPE-0003");
+    assert_eq!(diagnostic.kind.code(), "MOTH-TYPE-0003");
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::UnsupportedOperatorTypes {
@@ -415,7 +415,7 @@ fn template_shaped_string_operand_is_rejected() {
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
-        InternedPath::from_single_str("#page.bst", &mut string_table),
+        InternedPath::from_single_str("#page.moth", &mut string_table),
         Rc::new(TopLevelDeclarationTable::new(vec![])),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
@@ -439,7 +439,7 @@ fn template_shaped_string_operand_is_rejected() {
     let crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError::Diagnostic(diagnostic) = error else {
         panic!("expected an expression type diagnostic");
     };
-    assert_eq!(diagnostic.kind.code(), "BST-TYPE-0003");
+    assert_eq!(diagnostic.kind.code(), "MOTH-TYPE-0003");
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::UnsupportedOperatorTypes {

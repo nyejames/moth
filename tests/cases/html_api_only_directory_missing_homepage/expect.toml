@@ -3,9 +3,9 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-CONFIG-0001"]
+diagnostic_codes = ["MOTH-CONFIG-0001"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-CONFIG-0001"]
+diagnostic_codes = ["MOTH-CONFIG-0001"]

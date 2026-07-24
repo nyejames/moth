@@ -1,0 +1,46 @@
+A payload capture alias renames a choice payload field inside one match arm. It is the third narrow `as` surface in Moth.
+
+### Definition and syntax
+
+[codeblock, $code("moth"):
+    if response is:
+        Err(message as error_message) => io.line(error_message)
+        Success(value as body) => io.line(body)
+    ;
+]
+
+The name before `as` is the declared payload field name. The name after `as` is an arm-local binding.
+
+### Exact contract
+
+- The name before `as` must be the declared payload field name.
+- The name after `as` is an arm-local binding.
+- The alias does not rename the field.
+- The alias does not leak into other arms.
+- The alias is visible in the arm guard and body.
+- Without `as`, the field name becomes the local binding.
+- The local binding follows naming and no-shadowing rules.
+- Duplicate local bindings in the same arm are invalid.
+- Payload capture aliases do not create value aliases.
+- `value as Type` is not cast syntax.
+- Expression aliases are unsupported.
+
+### Avoiding outer-name collisions
+
+Use a capture alias when the field name would collide with an existing variable or when the local meaning is clearer.
+
+[codeblock, $code("moth"):
+    message = "outer message"
+
+    if response is:
+        Err(message as error_message) => io.line(error_message)
+        else => io.line(message)
+    ;
+]
+
+Inside the first arm, `error_message` holds the payload. In the `else` arm, `message` still refers to the outer binding.
+
+### Related concepts
+
+- For choice declarations and variants see @../choices (Choices).
+- For pattern matching and exhaustiveness see @../branching (Branching).

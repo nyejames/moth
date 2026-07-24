@@ -1,7 +1,7 @@
 //! Tests for hotspot extraction from parsed profile data.
 //!
 //! WHAT: Validates filter-mode thresholds, percentage calculations,
-//! millisecond estimation, Beanstalk vs non-Beanstalk prioritization,
+//! millisecond estimation, Moth vs non-Moth prioritization,
 //! and edge population.
 //!
 //! WHY: Hotspot extraction is the bridge between raw parser output and
@@ -146,7 +146,7 @@ fn terse_mode_filters_by_minimum_inclusive_pct() {
 
     for func in &result.functions {
         // Each function must meet either inclusive or self threshold.
-        let is_beanstalk = func.bucket.label != "unknown"
+        let is_moth = func.bucket.label != "unknown"
             && func.bucket.label != "other"
             && func.bucket.label != "std"
             && func.bucket.label != "core"
@@ -155,8 +155,8 @@ fn terse_mode_filters_by_minimum_inclusive_pct() {
             && func.bucket.label != "samply/profiler";
 
         let passes = func.inclusive_pct >= 2.0
-            || (is_beanstalk && func.self_pct >= 1.0)
-            || (!is_beanstalk && func.self_pct >= NON_BEANSTALK_MIN_SELF_PCT);
+            || (is_moth && func.self_pct >= 1.0)
+            || (!is_moth && func.self_pct >= NON_MOTH_MIN_SELF_PCT);
 
         assert!(
             passes,
@@ -238,12 +238,12 @@ fn raw_address_functions_mark_symbolication_failed() {
 }
 
 // ----------------------------
-//  Beanstalk vs non-Beanstalk prioritization
+//  Moth vs non-Moth prioritization
 // ----------------------------
 
 #[test]
-fn non_beanstalk_function_filtered_by_higher_self_threshold() {
-    // Create a profile where a non-Beanstalk function has low self time.
+fn non_moth_function_filtered_by_higher_self_threshold() {
+    // Create a profile where a non-Moth function has low self time.
     // Using per-thread tables (Samply 0.13.1 format).
     let json = r#"{
         "threads": [{
@@ -266,7 +266,7 @@ fn non_beanstalk_function_filtered_by_higher_self_threshold() {
 
     let summary = parse_profile_json(json, Path::new("test")).expect("should parse");
     // std::mem::drop: inclusive = 4/54 ~7.4%, self = 4/54 ~7.4%
-    // This exceeds the non-Beanstalk threshold of 5%.
+    // This exceeds the non-Moth threshold of 5%.
     let result = extract_hotspots(&summary, ProfileFilterMode::Normal, 1000.0);
     let drop_func = result.functions.iter().find(|f| f.name == "std::mem::drop");
     // It should appear because self_pct > 5%.
@@ -277,14 +277,14 @@ fn non_beanstalk_function_filtered_by_higher_self_threshold() {
 }
 
 #[test]
-fn low_self_non_beanstalk_function_is_filtered() {
-    // Create a profile where a non-Beanstalk function has low self time.
+fn low_self_non_moth_function_is_filtered() {
+    // Create a profile where a non-Moth function has low self time.
     // Using per-thread tables (Samply 0.13.1 format).
     let json = r#"{
         "threads": [{
             "name": "Main",
             "isMainThread": true,
-            "stringArray": ["beanstalk::main", "std::mem::drop"],
+            "stringArray": ["moth::main", "std::mem::drop"],
             "funcTable": {"name": [0, 1]},
             "frameTable": {"func": [0, 1]},
             "stackTable": {
@@ -304,7 +304,7 @@ fn low_self_non_beanstalk_function_is_filtered() {
     //   std::mem::drop: inclusive = 1, self = 1, total_weight = 100
     //   inclusive_pct = 1.0%, self_pct = 1.0%
     //   1.0% < terse minimum (2.0%) for inclusive
-    //   1.0% < NON_BEANSTALK_MIN_SELF_PCT (5.0%) for non-Beanstalk self path
+    //   1.0% < NON_MOTH_MIN_SELF_PCT (5.0%) for non-Moth self path
     // -> should be filtered out
     let result = extract_hotspots(&summary, ProfileFilterMode::Terse, 1000.0);
     let drop_func = result.functions.iter().find(|f| f.name == "std::mem::drop");
@@ -370,14 +370,14 @@ fn result_preserves_wall_time() {
 // ----------------------------
 
 #[test]
-fn beanstalk_functions_have_correct_bucket_labels() {
+fn moth_functions_have_correct_bucket_labels() {
     let summary = parse_fixture();
     let result = extract_hotspots(&summary, ProfileFilterMode::Deep, 1000.0);
 
     let resolve_type = result
         .functions
         .iter()
-        .find(|f| f.name == "beanstalk::compiler_frontend::ast::resolve_type");
+        .find(|f| f.name == "moth::compiler_frontend::ast::resolve_type");
     if let Some(f) = resolve_type {
         assert_eq!(f.bucket.label, "AST");
         assert_eq!(f.bucket.suggested_paths, vec!["src/compiler_frontend/ast/"]);
@@ -386,14 +386,14 @@ fn beanstalk_functions_have_correct_bucket_labels() {
     let generate = result
         .functions
         .iter()
-        .find(|f| f.name == "beanstalk::compiler_frontend::hir::generate");
+        .find(|f| f.name == "moth::compiler_frontend::hir::generate");
     if let Some(f) = generate {
         assert_eq!(f.bucket.label, "HIR");
     }
 }
 
 #[test]
-fn non_beanstalk_functions_have_correct_bucket_labels() {
+fn non_moth_functions_have_correct_bucket_labels() {
     let summary = parse_fixture();
     let result = extract_hotspots(&summary, ProfileFilterMode::Deep, 1000.0);
 
@@ -419,7 +419,7 @@ fn deep_mode_populates_top_callers() {
     let resolve_type = result
         .functions
         .iter()
-        .find(|f| f.name == "beanstalk::compiler_frontend::ast::resolve_type");
+        .find(|f| f.name == "moth::compiler_frontend::ast::resolve_type");
     if let Some(f) = resolve_type {
         let main_caller = f.top_callers.iter().find(|e| e.function_name == "main");
         assert!(
@@ -440,7 +440,7 @@ fn deep_mode_populates_top_callees() {
         let resolve_type_callee = f
             .top_callees
             .iter()
-            .find(|e| e.function_name == "beanstalk::compiler_frontend::ast::resolve_type");
+            .find(|e| e.function_name == "moth::compiler_frontend::ast::resolve_type");
         assert!(
             resolve_type_callee.is_some(),
             "main should have resolve_type as a top callee"

@@ -1,0 +1,83 @@
+# Design scope
+
+Accepted language and compiler design boundaries.
+
+## Authority
+
+`docs/language-overview.md` owns the complete compiler-facing language-scope
+list. This page is a compact summary of the main boundaries. The progress
+matrix reports current implementation and diagnostic coverage.
+
+## Central bias
+
+- Keep the source language small, explicit and statically inspectable.
+- Compiler complexity is acceptable when it makes source code simpler.
+- Prefer constrained built-in mechanisms over general metaprogramming.
+- Prefer static resolution over runtime dynamism.
+- Keep backend optimisations hidden behind stable source semantics.
+- Avoid features that need pervasive solver-heavy reasoning.
+
+## Deferred versus outside scope
+
+- **Deferred implementation** fits accepted design but has not landed or is
+  incomplete.
+- **Outside scope** conflicts with the intended language model and needs an
+  explicit design change before implementation.
+
+The progress matrix reports whether a deferred surface is implemented today.
+This page explains whether the surface belongs in the language at all.
+
+## Preferred constrained mechanisms
+
+| Need | Preferred mechanism |
+| ---- | ------------------- |
+| Compile-time generation | Templates, constants and builder directives |
+| Static reuse | Generic functions and explicit trait bounds |
+| Runtime heterogeneity | Choices |
+| Expected failure | `Error!`, postfix propagation and `catch` |
+| Platform integration | Builder packages, external packages and source-backed packages |
+| Memory safety | GC baseline plus mandatory borrow and lifetime-region validation |
+| Mutation | Explicit exclusive access rather than implicit mutation |
+| Ownership | Compiler-inferred optional transfer rather than source-visible move or lifetime syntax |
+| Declared bulk lifetimes | Accepted deferred `group` / `into` hard lifetime regions |
+| Performance | Hidden compiler and backend optimisation |
+
+## Major outside-scope families
+
+The exact list lives in `docs/language-overview.md`. Major families include:
+
+- general-purpose macros and second compile-time languages
+- general closures, anonymous function values and broad higher-order polymorphism
+- dynamic trait values and erased runtime dispatch
+- broad trait or type-level programming systems
+- structural, blanket, conditional, negative or specialized conformance
+- operator overloading and general user-defined constraint systems
+- reflection, runtime type inspection and type-returning functions
+- higher-kinded types, partial type application and broad const generics
+- user-extensible builtin hashmap key semantics
+- public exceptions and competing broad result systems
+- source-visible lifetime, reference-category and ownership annotation systems
+- source-visible RC, retain/release, weak ownership and unrestricted dynamic shared ownership
+- backend-specific semantics leaking into the language
+
+Diagnostics plus common-owner groups, `copy` and builder lifecycle roots are the intended replacement for source-level RC. Internal backend RC remains allowed for already-legal topology. See `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`.
+
+## Review questions
+
+- Does this add a new source-language category when an existing constrained
+  mechanism is sufficient?
+- Does it make behaviour more implicit?
+- Does it need whole-program or solver-heavy reasoning?
+- Does it introduce runtime type or erased-dispatch machinery?
+- Does it leak backend representation into source semantics?
+- Does it expose optimisation mechanics through source syntax?
+- Is it merely unimplemented, or explicitly outside scope?
+- Would the feature make code harder to inspect locally?
+
+## Read next
+
+- `docs/language-overview.md`
+- `docs/src/docs/codebase/memory-management/overview.mtf`
+- `docs/compiler-design-overview.md`
+- `docs/src/docs/codebase/language/overview.mtf`
+- `docs/src/docs/progress/#page.moth`

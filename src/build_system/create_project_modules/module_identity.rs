@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 ///
 /// `ModuleId` is the build-local index assigned by sorting canonical logical module paths, so
 /// it is independent of traversal completion order and cosmetic root filename suffixes
-/// (`#mod.bst` and `#page.bst` in the same directory collapse to one root whose identity comes
+/// (`#mod.moth` and `#page.moth` in the same directory collapse to one root whose identity comes
 /// from the directory, not the filename).
 ///
 /// It is deliberately not the persistent semantic identity: its numeric value is a build-local
@@ -62,8 +62,8 @@ impl ModuleId {
 
 /// The root role implied by a canonical root filename, or `None` for non-root files.
 ///
-/// WHAT: maps the filename marker to a root role. A `+*.bst` filename maps to `Support`; Stage 0
-///      discovery upgrades a project-root `+*.bst` beside `config.bst` to
+/// WHAT: maps the filename marker to a root role. A `+*.moth` filename maps to `Support`; Stage 0
+///      discovery upgrades a project-root `+*.moth` beside `config.moth` to
 ///      `ProjectPackageFacade` from its location, which this filename-only classifier cannot
 ///      infer.
 pub(crate) fn module_root_role_for_file_name(file_name: &str) -> Option<ModuleRootRole> {

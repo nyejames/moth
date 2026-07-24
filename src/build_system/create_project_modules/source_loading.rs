@@ -1,4 +1,4 @@
-//! Raw file I/O for Beanstalk source files.
+//! Raw file I/O for Moth source files.
 //!
 //! Reads source file content from disk with structured error diagnostics.
 

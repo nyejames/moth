@@ -22,13 +22,13 @@ pub(crate) fn sanitize_hint(raw: &str) -> String {
 }
 
 pub(crate) fn expected_dev_function_name(leaf: &str, id: u32) -> String {
-    format!("bst_{}_fn{}", sanitize_hint(leaf), id)
+    format!("moth_{}_fn{}", sanitize_hint(leaf), id)
 }
 
 pub(crate) fn expected_dev_local_name(leaf: &str, id: u32) -> String {
-    format!("bst_{}_l{}", sanitize_hint(leaf), id)
+    format!("moth_{}_l{}", sanitize_hint(leaf), id)
 }
 
 pub(crate) fn expected_dev_field_name(leaf: &str, id: u32) -> String {
-    format!("bst_{}_fld{}", sanitize_hint(leaf), id)
+    format!("moth_{}_fld{}", sanitize_hint(leaf), id)
 }

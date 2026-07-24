@@ -94,11 +94,11 @@ fn header_name(
 fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last() {
     let (headers, mut string_table) = parse_module_headers(
         &[
-            ("src/a.bst", "import @b { Middle }\nTop #Middle = Middle\n"),
-            ("src/b.bst", "import @c { Thing }\nMiddle #Thing = Thing\n"),
-            ("src/c.bst", "Thing #Int = 1\n"),
+            ("src/a.moth", "import @b { Middle }\nTop #Middle = Middle\n"),
+            ("src/b.moth", "import @c { Thing }\nMiddle #Thing = Thing\n"),
+            ("src/c.moth", "Thing #Int = 1\n"),
         ],
-        "src/a.bst",
+        "src/a.moth",
     );
 
     let sorted = resolve_module_dependencies(headers, &mut string_table)
@@ -127,13 +127,13 @@ fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last(
         .map(|header| header.source_file.to_portable_string(&string_table))
         .collect::<Vec<_>>();
 
-    assert_eq!(start_order, vec!["src/a.bst"]);
+    assert_eq!(start_order, vec!["src/a.moth"]);
 }
 
 #[test]
 fn dependency_sort_preserves_root_activity_metadata() {
     let (headers, mut string_table) =
-        parse_module_headers(&[("src/a.bst", "#[static]\n[runtime]\n")], "src/a.bst");
+        parse_module_headers(&[("src/a.moth", "#[static]\n[runtime]\n")], "src/a.moth");
 
     let sorted = resolve_module_dependencies(headers, &mut string_table)
         .expect("dependency sorting should preserve root activity metadata");
@@ -147,10 +147,10 @@ fn dependency_sort_preserves_root_activity_metadata() {
 fn reports_circular_dependencies() {
     let (headers, mut string_table) = parse_module_headers(
         &[
-            ("src/a.bst", "import @b { Middle }\nTop #Middle = Middle\n"),
-            ("src/b.bst", "import @a { Top }\nMiddle #Top = Top\n"),
+            ("src/a.moth", "import @b { Middle }\nTop #Middle = Middle\n"),
+            ("src/b.moth", "import @a { Top }\nMiddle #Top = Top\n"),
         ],
-        "src/a.bst",
+        "src/a.moth",
     );
 
     let bag = resolve_module_dependencies(headers, &mut string_table)
@@ -188,10 +188,10 @@ fn constant_initializer_creates_dependency_sort_edge() {
         &[
             // Config's initializer references Value.
             // That reference creates a dependency edge from Config to Value.
-            ("src/a.bst", "import @b { Value }\nConfig #= Value\n"),
-            ("src/b.bst", "Value #Int = 42\n"),
+            ("src/a.moth", "import @b { Value }\nConfig #= Value\n"),
+            ("src/b.moth", "Value #Int = 42\n"),
         ],
-        "src/a.bst",
+        "src/a.moth",
     );
 
     let sorted = resolve_module_dependencies(headers, &mut string_table)
@@ -217,8 +217,8 @@ fn same_file_backward_constant_reference_is_accepted() {
     // WHY: a constant that references an earlier constant in the same file is a backward
     // reference and must be accepted in source order.
     let (headers, mut string_table) = parse_module_headers(
-        &[("src/a.bst", "Value #Int = 42\nConfig #= Value\n")],
-        "src/a.bst",
+        &[("src/a.moth", "Value #Int = 42\nConfig #= Value\n")],
+        "src/a.moth",
     );
 
     let sorted = resolve_module_dependencies(headers, &mut string_table)
@@ -245,10 +245,10 @@ fn function_body_references_do_not_influence_header_provided_sort_order() {
     // for otherwise-independent declarations.
     let (headers, mut string_table) = parse_module_headers(
         &[(
-            "src/a.bst",
+            "src/a.moth",
             "first|| -> Int:\n    return second()\n;\n\nsecond|| -> Int:\n    return 1\n;\n",
         )],
-        "src/a.bst",
+        "src/a.moth",
     );
 
     let sorted = resolve_module_dependencies(headers, &mut string_table)
@@ -275,12 +275,12 @@ fn function_error_return_dependency_orders_error_type_before_function() {
     let (headers, mut string_table) = parse_module_headers(
         &[
             (
-                "src/app.bst",
+                "src/app.moth",
                 "import @errors { AppError }\nparse|| -> Int, AppError!:\n    return 1\n;\n",
             ),
-            ("src/errors.bst", "AppError = |message String|\n"),
+            ("src/errors.moth", "AppError = |message String|\n"),
         ],
-        "src/app.bst",
+        "src/app.moth",
     );
 
     let sorted = resolve_module_dependencies(headers, &mut string_table)
@@ -307,12 +307,12 @@ fn capacity_reference_in_collection_type_orders_constant_before_user() {
     let (headers, mut string_table) = parse_module_headers(
         &[
             (
-                "src/a.bst",
+                "src/a.moth",
                 "import @b { capacity }\nmake |items ~{capacity Int}| -> Int:\n    return 1\n;\n",
             ),
-            ("src/b.bst", "capacity #Int = 64\n"),
+            ("src/b.moth", "capacity #Int = 64\n"),
         ],
-        "src/a.bst",
+        "src/a.moth",
     );
 
     let sorted = resolve_module_dependencies(headers, &mut string_table)
@@ -340,8 +340,8 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
     let external_package_registry = ExternalPackageRegistry::new();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let entry_path = PathBuf::from("src/a.bst");
-    let file_path = PathBuf::from("src/a.bst");
+    let entry_path = PathBuf::from("src/a.moth");
+    let file_path = PathBuf::from("src/a.moth");
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let file_tokens = tokenize(
@@ -394,12 +394,12 @@ fn capacity_reference_in_function_signature_creates_dependency_edge() {
     let (headers, mut string_table) = parse_module_headers(
         &[
             (
-                "src/a.bst",
+                "src/a.moth",
                 "import @b { size }\nmake |items ~{size Int}| -> Int:\n    return 1\n;\n",
             ),
-            ("src/b.bst", "size #Int = 8\n"),
+            ("src/b.moth", "size #Int = 8\n"),
         ],
-        "src/a.bst",
+        "src/a.moth",
     );
 
     let sorted =
@@ -423,10 +423,10 @@ fn capacity_reference_in_function_signature_creates_dependency_edge() {
 fn capacity_reference_in_type_alias_creates_dependency_edge() {
     let (headers, mut string_table) = parse_module_headers(
         &[
-            ("src/a.bst", "import @b { limit }\nItems as {limit Int}\n"),
-            ("src/b.bst", "limit #Int = 16\n"),
+            ("src/a.moth", "import @b { limit }\nItems as {limit Int}\n"),
+            ("src/b.moth", "limit #Int = 16\n"),
         ],
-        "src/a.bst",
+        "src/a.moth",
     );
 
     let sorted =
@@ -451,7 +451,7 @@ fn capacity_references_across_header_type_surfaces_create_dependency_edges() {
     let (headers, mut string_table) = parse_module_headers(
         &[
             (
-                "src/a.bst",
+                "src/a.moth",
                 "import @b { limit }\n\
                  Buffer = |\n\
                      items {limit Int},\n\
@@ -463,9 +463,9 @@ fn capacity_references_across_header_type_surfaces_create_dependency_edges() {
                      return {}\n\
                  ;\n",
             ),
-            ("src/b.bst", "limit #Int = 16\n"),
+            ("src/b.moth", "limit #Int = 16\n"),
         ],
-        "src/a.bst",
+        "src/a.moth",
     );
 
     let sorted =
@@ -490,15 +490,15 @@ fn trait_requirement_type_dependencies_order_required_type_before_trait() {
     let (headers, mut string_table) = parse_module_headers(
         &[
             (
-                "src/traits.bst",
+                "src/traits.moth",
                 "import @types { Message }\n\
                  DISPLAYABLE must:\n\
                      display |This| -> Message\n\
                  ;\n",
             ),
-            ("src/types.bst", "Message = | text String |\n"),
+            ("src/types.moth", "Message = | text String |\n"),
         ],
-        "src/traits.bst",
+        "src/traits.moth",
     );
 
     let sorted =
@@ -523,19 +523,19 @@ fn trait_conformance_references_do_not_create_dependency_sort_edges() {
     let (headers, mut string_table) = parse_module_headers(
         &[
             (
-                "src/app.bst",
+                "src/app.moth",
                 "import @traits { DISPLAYABLE }\n\
                  Label = | text String |\n\
                  Label must DISPLAYABLE\n",
             ),
             (
-                "src/traits.bst",
+                "src/traits.moth",
                 "DISPLAYABLE must:\n\
                      display |This| -> String\n\
                  ;\n",
             ),
         ],
-        "src/app.bst",
+        "src/app.moth",
     );
 
     let sorted =
@@ -564,15 +564,15 @@ fn trait_incompatibility_references_do_not_create_dependency_sort_edges() {
     let (headers, mut string_table) = parse_module_headers(
         &[
             (
-                "src/app.bst",
+                "src/app.moth",
                 "import @traits { SERIALIZABLE }\n\
                  DISPLAYABLE must:\n\
                  ;\n\
                  DISPLAYABLE must not SERIALIZABLE\n",
             ),
-            ("src/traits.bst", "SERIALIZABLE must:\n;\n"),
+            ("src/traits.moth", "SERIALIZABLE must:\n;\n"),
         ],
-        "src/app.bst",
+        "src/app.moth",
     );
 
     let sorted =
@@ -599,8 +599,8 @@ fn trait_incompatibility_references_do_not_create_dependency_sort_edges() {
 #[test]
 fn source_package_public_export_dependency_edges_do_not_require_concrete_header_paths() {
     let (mut headers, mut string_table) = parse_module_headers(
-        &[("src/page.bst", "NeedsWidget #String = \"ok\"\n")],
-        "src/page.bst",
+        &[("src/page.moth", "NeedsWidget #String = \"ok\"\n")],
+        "src/page.moth",
     );
 
     let helper_prefix = string_table.intern("helper");
@@ -655,10 +655,10 @@ fn external_package_import_type_hint_does_not_survive_binding_as_graph_participa
     // that resolve to external symbols so they never become Stage 3 graph participants.
     let (headers, mut string_table) = parse_module_headers(
         &[(
-            "src/app.bst",
+            "src/app.moth",
             "import @core/io { print }\nwidget #print = \"x\"\n",
         )],
-        "src/app.bst",
+        "src/app.moth",
     );
 
     let widget_header = headers

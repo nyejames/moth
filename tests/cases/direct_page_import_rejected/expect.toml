@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-IMPORT-0008"]
+diagnostic_codes = ["MOTH-IMPORT-0008"]

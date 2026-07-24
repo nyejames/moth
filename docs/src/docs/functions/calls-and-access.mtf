@@ -1,0 +1,66 @@
+Function calls use positional arguments, named arguments or both.
+
+[codeblock, $code("moth"):
+    render_card(title, body)
+    render_card(title = title, body = body)
+    render_card(title, body = body)
+]
+
+### Argument routing
+
+- Positional arguments must come before the first named argument.
+- A positional argument is invalid after a named argument.
+- A named argument must match a real parameter name.
+- Each parameter may be supplied once.
+- Omitted defaulted parameters use their declared default.
+- Every non-defaulted parameter must receive an argument.
+- Extra positional arguments are invalid.
+- Argument values are checked and contextually coerced against their parameter types.
+
+Named arguments can skip earlier defaults.
+
+User functions, struct constructors, choice payload constructors and
+source-authored receiver methods share this routing policy.
+
+Host functions and compiler-owned builtin member calls are positional-only.
+
+### Shared parameters
+
+A shared parameter receives an ordinary argument without `~`.
+
+[codeblock, $code("moth"):
+    show |value String|:
+        io.line(value)
+    ;
+
+    show("hello")
+]
+
+Passing `~value` to a shared parameter is invalid.
+
+### Mutable parameters
+
+An existing mutable place needs explicit `~` at the call site.
+
+[codeblock, $code("moth"):
+    increment |value ~Int|:
+        value += 1
+    ;
+
+    count ~= 1
+    increment(~count)
+]
+
+Passing an existing place without `~` to a mutable parameter is invalid.
+
+A fresh rvalue can satisfy a mutable parameter without source `~`:
+
+[codeblock, $code("moth"):
+    increment(1)
+]
+
+Literals, templates, constructor calls and computed values are fresh. Writing
+`~` on them is invalid because `~` is place-only access syntax.
+
+Binding mutability and call-site access are separate. See
+@../bindings/#mutable-bindings (Mutable bindings).

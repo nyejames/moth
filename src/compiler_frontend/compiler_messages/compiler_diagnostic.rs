@@ -293,7 +293,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn explicit_bst_extension(path: InternedPath, location: SourceLocation) -> Self {
+    pub(crate) fn explicit_moth_extension(path: InternedPath, location: SourceLocation) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::ExplicitBstExtension),
             location,
@@ -337,27 +337,27 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_beandown_api_scope_item(
+    pub(crate) fn invalid_moth_template_api_scope_item(
         path: InternedPath,
         location: SourceLocation,
     ) -> Self {
         Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::InvalidBeandownApiScopeItem),
+            DiagnosticKind::Import(ImportDiagnosticKind::InvalidMothTemplateApiScopeItem),
             location,
-            DiagnosticPayload::InvalidBeandownApiScopeItem { path },
+            DiagnosticPayload::InvalidMothTemplateApiScopeItem { path },
         )
     }
 
-    pub(crate) fn duplicate_beandown_input_path(
+    pub(crate) fn duplicate_moth_template_input_path(
         path: InternedPath,
         first_location: SourceLocation,
         duplicate_location: SourceLocation,
     ) -> Self {
         let payload_first_location = first_location.clone();
         Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::DuplicateBeandownInputPath),
+            DiagnosticKind::Import(ImportDiagnosticKind::DuplicateMothTemplateInputPath),
             duplicate_location.clone(),
-            DiagnosticPayload::DuplicateBeandownInputPath {
+            DiagnosticPayload::DuplicateMothTemplateInputPath {
                 path,
                 first_location: payload_first_location,
             },
@@ -724,7 +724,7 @@ impl CompilerDiagnostic {
     //  Warning Constructors
     // ------------------------------------------------------------------
 
-    pub(crate) fn bst_file_path_in_template_output(
+    pub(crate) fn moth_file_path_in_template_output(
         path: StringId,
         location: SourceLocation,
     ) -> Self {

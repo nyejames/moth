@@ -18,7 +18,7 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
         ("css", "[$css:\n.button { color: red; }\n]"),
         ("escape_html", "[$escape_html:\n<b>Hello</b>\n]"),
     ] {
-        let entry_file = root.join(format!("{directive_name}.bst"));
+        let entry_file = root.join(format!("{directive_name}.moth"));
         fs::write(&entry_file, source).expect("should write source file");
 
         let builder = ProjectBuilder::new(Box::new(NoDirectiveBuilder));
@@ -55,7 +55,7 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     let root = temp_dir("frontend_builtin_boundary");
     fs::create_dir_all(&root).expect("should create temp root");
 
-    let entry_file = root.join("builtins.bst");
+    let entry_file = root.join("builtins.moth");
     fs::write(
         &entry_file,
         "[$children([:<li>[$slot]</li>]):\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]",

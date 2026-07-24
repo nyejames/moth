@@ -66,8 +66,8 @@ pub(super) fn collect_referenced_exports(
 /// Produces a stable local import alias for a raw external export.
 pub(super) fn raw_export_import_name(id: ExternalFunctionId) -> String {
     match id {
-        ExternalFunctionId::Synthetic(n) => format!("__bs_external_fn{n}"),
-        other => format!("__bs_external_{}", other.name()),
+        ExternalFunctionId::Synthetic(n) => format!("__moth_external_fn{n}"),
+        other => format!("__moth_external_{}", other.name()),
     }
 }
 

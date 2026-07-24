@@ -1,6 +1,6 @@
-//! BFS traversal over Beanstalk import graphs to find all reachable source files.
+//! BFS traversal over Moth import graphs to find all reachable source files.
 //!
-//! Given an entry `.bst` file, walks its import declarations transitively to build the complete
+//! Given an entry `.moth` file, walks its import declarations transitively to build the complete
 //! set of source files that belong to a module. Also assembles `PreparedSourceInput` payloads
 //! from those paths for downstream compilation stages.
 // Stage 0 deliberately returns full diagnostic/infrastructure payloads in `SourceDiscoveryError`
@@ -42,7 +42,7 @@ use super::source_loading::{extract_source_code, read_source_code, source_read_e
 ///
 /// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
 ///      observation in the active collection scope and emits the stable
-///      `BST_BENCH timing` line when the output mode permits.
+///      `MOTH_BENCH timing` line when the output mode permits.
 /// WHY:  reachable-file discovery uses dotted `stage0.reachable_discovery.*` metric
 ///      names. The start token is zero-sized when `timers` is off, so regular builds
 ///      do not read clocks for instrumentation-only measurements.
@@ -79,7 +79,7 @@ pub(super) struct ReachableSourceFile {
 /// Stage 0 inventory produced by reachable-file discovery.
 ///
 /// WHAT: owns the deterministic input-file list plus the retained `ScannedImportSource` for every
-///       reachable `.bst` file read while scanning imports.
+///       reachable `.moth` file read while scanning imports.
 /// WHY: source loading policy belongs to Stage 0. `assemble_input_files_from_inventory` turns
 ///      this into `PreparedSourceInput` values, so header parsing and later frontend stages
 ///      receive the state-safe prepared type without knowing whether text came from the
@@ -134,19 +134,19 @@ pub(super) struct CollectedReachableInputs {
 /// Retained Stage 0 source proven provider-free during the serial classification pass.
 ///
 /// WHAT: keeps the `ScannedImportSource` (source text, structural provider references, and the
-///       exact `FileTokens` from the single lexical pass) for every reachable `.bst` file.
+///       exact `FileTokens` from the single lexical pass) for every reachable `.moth` file.
 /// WHY: provider-free workers reuse this retained lexical data instead of re-reading or
-///      re-tokenizing each classified `.bst` file. The serial provider-capable fallback also
+///      re-tokenizing each classified `.moth` file. The serial provider-capable fallback also
 ///      reuses it when a worker fails, so the lexer never runs twice for the same source.
 pub(super) struct ProviderFreeProjectInventory {
     pub(super) source_cache: FxHashMap<PathBuf, ScannedImportSource>,
     /// Whether provider-capable serial replay is required.
     ///
-    /// WHAT: set when classification traversed the complete reachable local `.bst` graph and
+    /// WHAT: set when classification traversed the complete reachable local `.moth` graph and
     ///       encountered a provider-backed import or unsupported package condition that only the
     ///       serial provider-capable owner can resolve.
     /// WHY: the inventory is still returned with its complete retained scan cache so the serial
-    ///      fallback reuses it instead of re-tokenizing every already-scanned `.bst`.
+    ///      fallback reuses it instead of re-tokenizing every already-scanned `.moth`.
     pub(super) provider_capable_required: bool,
 }
 
@@ -176,11 +176,11 @@ struct LoadedMissingSourceFile {
 
 /// Build a `PreparedSourceInput` from a cache-miss load.
 ///
-/// WHAT: selects the Beandown or PlainMarkdown variant from the resolved source kind. Cache
-///       misses are never Beanstalk — every reachable `.bst` is scanned and cached during
-///       traversal — so no Beanstalk variant carries a raw load here.
+/// WHAT: selects the Moth template or PlainMarkdown variant from the resolved source kind. Cache
+///       misses are never Moth — every reachable `.moth` is scanned and cached during
+///       traversal — so no Moth variant carries a raw load here.
 /// WHY: keeps the strict source-kind/token relationship: a loaded file has no retained tokens
-///      and cannot become a Beanstalk `PreparedSourceInput`.
+///      and cannot become a Moth `PreparedSourceInput`.
 fn prepared_input_from_loaded(loaded: LoadedMissingSourceFile) -> PreparedSourceInput {
     let LoadedMissingSourceFile {
         source_file,
@@ -188,7 +188,7 @@ fn prepared_input_from_loaded(loaded: LoadedMissingSourceFile) -> PreparedSource
         ..
     } = loaded;
     match source_file.kind {
-        SourceFileKind::Beandown => PreparedSourceInput::Beandown {
+        SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate {
             source_code,
             source_path: source_file.path,
         },
@@ -196,12 +196,12 @@ fn prepared_input_from_loaded(loaded: LoadedMissingSourceFile) -> PreparedSource
             source_code,
             source_path: source_file.path,
         },
-        SourceFileKind::Beanstalk => {
-            // Every reachable Beanstalk file is scanned and cached during traversal, so a cache
-            // miss can only be Beandown or PlainMarkdown. Reaching this arm is a proven
+        SourceFileKind::Moth => {
+            // Every reachable Moth file is scanned and cached during traversal, so a cache
+            // miss can only be Moth template or PlainMarkdown. Reaching this arm is a proven
             // invariant violation rather than a user-facing failure.
             unreachable!(
-                "Stage 0 cache-miss load produced a Beanstalk file without retained tokens"
+                "Stage 0 cache-miss load produced a Moth file without retained tokens"
             )
         }
     }
@@ -259,13 +259,13 @@ pub(super) fn collect_reachable_input_files(
 
 /// Assemble `PreparedSourceInput` values from a deterministic Stage 0 inventory.
 ///
-/// WHAT: reuses the retained `ScannedImportSource` cached during import scanning for Beanstalk
-///       files and loads remaining Beandown/PlainMarkdown files through the serial/parallel
+/// WHAT: reuses the retained `ScannedImportSource` cached during import scanning for Moth
+///       files and loads remaining Moth template/PlainMarkdown files through the serial/parallel
 ///       cache-miss path.
 /// WHY: inventory assembly is the same whether discovery was provider-capable or provider-free,
 ///      so it is shared between both paths to keep ordering and loading policy in one place. The
-///      import-scan cache only holds Beanstalk files, so cache hits always carry the retained
-///      Stage 0 `FileTokens`; cache misses are Beandown/PlainMarkdown, which never carry tokens.
+///      import-scan cache only holds Moth files, so cache hits always carry the retained
+///      Stage 0 `FileTokens`; cache misses are Moth template/PlainMarkdown, which never carry tokens.
 pub(super) fn assemble_input_files_from_inventory(
     inventory: ReachableSourceInventory,
     string_table: &mut StringTable,
@@ -280,9 +280,9 @@ pub(super) fn assemble_input_files_from_inventory(
         if let Some(scanned_source) = source_cache.remove(&source_file.path) {
             add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
 
-            // The import-scan cache only holds Beanstalk files, so the retained token stream is
-            // always present here. Non-Beanstalk files fall through to the cache-miss load path.
-            input_slots[input_index] = Some(PreparedSourceInput::Beanstalk {
+            // The import-scan cache only holds Moth files, so the retained token stream is
+            // always present here. Non-Moth files fall through to the cache-miss load path.
+            input_slots[input_index] = Some(PreparedSourceInput::Moth {
                 source_code: scanned_source.source_code,
                 source_path: source_file.path,
                 tokens: Box::new(scanned_source.tokens),
@@ -339,7 +339,7 @@ pub(super) fn assemble_input_files_from_inventory(
 
 /// Origin of source text used during shared reachable-file traversal.
 ///
-/// WHAT: distinguishes Beanstalk source read from disk from source reused from the provider-free
+/// WHAT: distinguishes Moth source read from disk from source reused from the provider-free
 ///       classification cache.
 /// WHY: Stage 0 counters should only count bytes loaded during the current traversal; reused text
 ///      was already counted when it was first read.
@@ -353,13 +353,13 @@ enum SourceScanOrigin {
 enum ImportPolicyAction {
     /// Do not follow this import.
     Skip,
-    /// Resolve and queue the import as a normal local Beanstalk import.
+    /// Resolve and queue the import as a normal local Moth import.
     QueueLocal,
     /// Skip this external edge and record that provider-capable serial replay is required.
     ///
     /// WHAT: classification returns this for provider-backed imports and unsupported package
     ///       conditions that only the serial provider-capable owner can resolve. The traversal
-    ///       keeps scanning every reachable local `.bst` file and retains its complete cache, only
+    ///       keeps scanning every reachable local `.moth` file and retains its complete cache, only
     ///       declining to follow the external edge.
     SkipProviderCapableRequired,
 }
@@ -374,7 +374,7 @@ enum ImportPolicy<'a, 'b> {
     /// Full provider-capable path. Mutates provider cache and resolution tables.
     ///
     /// `classification_cache` is `Some` when a provider-free classification pass already
-    /// tokenized every reachable `.bst` file and the provider-free worker path failed. The
+    /// tokenized every reachable `.moth` file and the provider-free worker path failed. The
     /// serial fallback reuses those retained tokens instead of re-tokenizing.
     Capable {
         external_imports: &'a mut ExternalImportDiscoveryState<'b>,
@@ -390,7 +390,7 @@ enum ImportPolicy<'a, 'b> {
 }
 
 impl<'a, 'b> ImportPolicy<'a, 'b> {
-    /// Scan imports for the current Beanstalk file, reusing classified source text when available.
+    /// Scan imports for the current Moth file, reusing classified source text when available.
     fn scan_imports(
         &self,
         canonical_file: &Path,
@@ -421,11 +421,11 @@ impl<'a, 'b> ImportPolicy<'a, 'b> {
                 }
 
                 // Classification walks the full import graph from every entry point, so its
-                // cache covers every Beanstalk file any single-module worker can reach. A miss
+                // cache covers every Moth file any single-module worker can reach. A miss
                 // here is an invariant violation; fail so the parent retries on the serial
                 // provider-capable path where the lexer can run safely.
                 Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-                    "Provider-free worker reached a Beanstalk file absent from the classification cache",
+                    "Provider-free worker reached a Moth file absent from the classification cache",
                 )))
             }
             ImportPolicy::FreeClassification(_) => {
@@ -477,7 +477,7 @@ impl<'a, 'b> ImportPolicy<'a, 'b> {
 
 /// Shared BFS over import declarations with a policy-controlled import handler.
 ///
-/// WHAT: follows each Beanstalk file's declared imports, resolves them to canonical typed source
+/// WHAT: follows each Moth file's declared imports, resolves them to canonical typed source
 ///       files, and returns the full ordered set of files reachable from the entry points.
 /// WHY: queue seeding, canonicalization, visited-set handling, root queueing, Markdown skipping,
 ///      import scanning, source-cache insertion, and local import queueing are identical across all
@@ -488,7 +488,7 @@ impl<'a, 'b> ImportPolicy<'a, 'b> {
 /// WHAT: the complete retained inventory plus whether a provider-backed or unsupported package
 ///       import required the serial provider-capable owner.
 /// WHY: classification never discards its cache when replay is required. The serial fallback
-///      consumes the retained cache for every already-scanned `.bst`, so the flag stays separate
+///      consumes the retained cache for every already-scanned `.moth`, so the flag stays separate
 ///      from the inventory itself.
 struct ReachableTraversalOutcome {
     inventory: ReachableSourceInventory,
@@ -514,7 +514,7 @@ fn traverse_reachable_source_files(
     for entry_path in entry_paths {
         queue.push_back(ReachableSourceFile {
             path: entry_path.clone(),
-            kind: SourceFileKind::Beanstalk,
+            kind: SourceFileKind::Moth,
         });
     }
 
@@ -524,7 +524,7 @@ fn traverse_reachable_source_files(
     for (_, root_path) in project_path_resolver.source_package_public_surface_files() {
         queue.push_back(ReachableSourceFile {
             path: root_path.clone(),
-            kind: SourceFileKind::Beanstalk,
+            kind: SourceFileKind::Moth,
         });
     }
 
@@ -546,12 +546,12 @@ fn traverse_reachable_source_files(
         }
 
         match next_file.kind {
-            SourceFileKind::Beandown => {
-                // Beandown is a Beanstalk template body with a small compile-time scope, so the
+            SourceFileKind::MothTemplate => {
+                // Moth template is a Moth template body with a small compile-time scope, so the
                 // same-directory root may supply visible constants. Plain Markdown is raw
-                // content and has no Beanstalk scope; the root still re-exports it normally
-                // because the root file itself is scanned as ordinary Beanstalk source.
-                queue_same_directory_root_for_beandown(
+                // content and has no Moth scope; the root still re-exports it normally
+                // because the root file itself is scanned as ordinary Moth source.
+                queue_same_directory_root_for_moth_template(
                     &canonical_file,
                     project_path_resolver,
                     &reachable,
@@ -564,7 +564,7 @@ fn traverse_reachable_source_files(
                 // header-stage preparation but are never scanned for imports.
                 continue;
             }
-            SourceFileKind::Beanstalk => {}
+            SourceFileKind::Moth => {}
         }
 
         let import_scan_start = crate::timing::start_pipeline_timing();
@@ -632,7 +632,7 @@ fn traverse_reachable_source_files(
 
     // Record concise counters for the completed traversal. Counters are only
     // recorded when `benchmark_counters` is active, and reach stdout only when
-    // `BST_COUNTERS` requests it (summary/full).
+    // `MOTH_COUNTERS` requests it (summary/full).
     crate::timing::record_counter(
         "stage0.reachable_discovery.reachable_files",
         reachable.len() as f64,
@@ -654,10 +654,10 @@ fn traverse_reachable_source_files(
 
 /// BFS over import declarations starting from `entry_point`, preserving source kind.
 ///
-/// WHAT: follows each Beanstalk file's declared imports, resolves them to canonical typed source
+/// WHAT: follows each Moth file's declared imports, resolves them to canonical typed source
 /// files, and returns the full ordered set of files reachable from the entry point.
 /// WHY: source kind belongs to Stage 0 input discovery. Builder-supported content assets can be
-///      loaded and carried forward without being treated as Beanstalk module roots.
+///      loaded and carried forward without being treated as Moth module roots.
 pub(super) fn discover_reachable_source_files(
     entry_point: &Path,
     project_path_resolver: &ProjectPathResolver,
@@ -689,7 +689,7 @@ pub(super) fn discover_reachable_source_files(
     })
 }
 
-/// Resolve a normal Beanstalk import to a filesystem path and enqueue reachable files.
+/// Resolve a normal Moth import to a filesystem path and enqueue reachable files.
 ///
 /// WHAT: handles cross-module root queuing, implementation-file discovery and local structural
 ///       dependency-fact retention for an import that is not provider-backed and not a
@@ -742,12 +742,12 @@ fn resolve_and_queue_local_import(
         && let Some(root_path) = project_path_resolver.module_root_file_for_directory(&target_root)
         && !reachable.contains(&ReachableSourceFile {
             path: root_path.clone(),
-            kind: SourceFileKind::Beanstalk,
+            kind: SourceFileKind::Moth,
         })
     {
         queue.push_back(ReachableSourceFile {
             path: root_path,
-            kind: SourceFileKind::Beanstalk,
+            kind: SourceFileKind::Moth,
         });
     }
 
@@ -788,7 +788,7 @@ fn handle_provider_capable_import(
     // Detect provider-backed import prefixes (e.g. `./drawing.js` from
     //    `@./drawing.js/draw` or `@./drawing.js`).
     //    If a provider supports the extension, resolve the prefix, call the provider,
-    //    and register the result. Do not add external files to the Beanstalk input list.
+    //    and register the result. Do not add external files to the Moth input list.
     if let Some((prefix_path, prefix_str, extension)) =
         provider_backed_import_prefix(import_path, string_table)
     {
@@ -836,7 +836,7 @@ fn handle_provider_capable_import(
 
 /// Conservative pre-scan that proves a directory build has no reachable provider-backed imports.
 ///
-/// WHAT: walks the same import graph as discovery, tokenizing and caching every reachable `.bst`
+/// WHAT: walks the same import graph as discovery, tokenizing and caching every reachable `.moth`
 ///       file. It always completes the full local traversal and retains the complete scan cache.
 ///       When a provider-backed import or unsupported package condition requires the serial
 ///       provider-capable owner, it records `provider_capable_required` and skips that external
@@ -896,7 +896,7 @@ fn handle_provider_free_classification_import(
 
     if provider_backed_import_prefix(import_path, string_table).is_some() {
         // Registered provider extensions need the serial provider-capable path so the provider is
-        // called and the resolution table is populated. Unsupported non-Beanstalk extensions also
+        // called and the resolution table is populated. Unsupported non-Moth extensions also
         // fall back so the existing diagnostic shape is preserved. Skip the external edge and mark
         // replay required without discarding the retained cache.
         return Ok(ImportPolicyAction::SkipProviderCapableRequired);
@@ -1119,13 +1119,13 @@ fn resolved_source_file(path: &Path, kind: SourceFileKind) -> ReachableSourceFil
     }
 }
 
-fn queue_same_directory_root_for_beandown(
-    beandown_path: &Path,
+fn queue_same_directory_root_for_moth_template(
+    moth_template_path: &Path,
     project_path_resolver: &ProjectPathResolver,
     reachable: &BTreeSet<ReachableSourceFile>,
     queue: &mut VecDeque<ReachableSourceFile>,
 ) {
-    let Some(directory) = beandown_path.parent() else {
+    let Some(directory) = moth_template_path.parent() else {
         return;
     };
 
@@ -1135,7 +1135,7 @@ fn queue_same_directory_root_for_beandown(
 
     let root_source_file = ReachableSourceFile {
         path: root_path,
-        kind: SourceFileKind::Beanstalk,
+        kind: SourceFileKind::Moth,
     };
     if !reachable.contains(&root_source_file) {
         queue.push_back(root_source_file);
@@ -1147,7 +1147,7 @@ fn queue_same_directory_root_for_beandown(
 // -------------------------
 
 /// Scans the components of an import path and returns the first file prefix whose final component
-/// has an explicit non-`.bst` extension.
+/// has an explicit non-`.moth` extension.
 ///
 /// WHAT: for grouped syntax such as `import @./drawing.js { draw }` the tokenized path is
 /// `@./drawing.js/draw`; this helper extracts the prefix `./drawing.js` and the extension `js`.
@@ -1202,7 +1202,7 @@ fn resolve_provider_backed_import(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
-    // Resolve the prefix to a canonical filesystem path without .bst extension or public-surface fallback.
+    // Resolve the prefix to a canonical filesystem path without .moth extension or public-surface fallback.
     let canonical_source_path = resolve_provider_prefix_to_canonical_path(
         request.prefix_path,
         request.importer_canonical_path,
@@ -1316,11 +1316,11 @@ fn insert_external_import_resolution(
     }
 }
 
-/// Resolves a provider import prefix to a canonical filesystem path without appending `.bst` or
+/// Resolves a provider import prefix to a canonical filesystem path without appending `.moth` or
 /// using public-surface fallback.
 ///
 /// WHAT: reuses the normal base/boundary/case rules from `ProjectPathResolver` but skips the
-/// `.bst` extension logic and public-surface fallback used for Beanstalk source imports.
+/// `.moth` extension logic and public-surface fallback used for Moth source imports.
 fn resolve_provider_prefix_to_canonical_path(
     prefix_path: &InternedPath,
     importer_file: &Path,
@@ -1372,7 +1372,7 @@ fn source_file_logical_path(
         SourceDiscoveryError::from(CompilerError::file_error(
             &logical,
             format!(
-                "Source file logical path {logical:?} contains a non-UTF-8 component; Beanstalk identity requires UTF-8 paths."
+                "Source file logical path {logical:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
             ),
             string_table,
         ))
@@ -1388,7 +1388,7 @@ fn source_file_logical_path(
 ///
 /// WHAT: .js files are private implementation details of the module or package that owns them.
 ///       Cross-module or cross-package .js imports bypass the public surface and are rejected.
-/// WHY: provider-backed imports must obey the same visibility boundaries as .bst source imports.
+/// WHY: provider-backed imports must obey the same visibility boundaries as .moth source imports.
 fn check_provider_import_module_boundary(
     importer_file: &Path,
     target_file: &Path,

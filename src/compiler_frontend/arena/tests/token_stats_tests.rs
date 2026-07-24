@@ -10,8 +10,9 @@ use std::path::Path;
 
 fn tokenize_source(source: &str) -> (TokenStats, StringTable) {
     let mut string_table = StringTable::new();
-    let path = InternedPath::try_from_filesystem_path(Path::new("src/main.bst"), &mut string_table)
-        .expect("test path should be UTF-8");
+    let path =
+        InternedPath::try_from_filesystem_path(Path::new("src/main.moth"), &mut string_table)
+            .expect("test path should be UTF-8");
     let directives = StyleDirectiveRegistry::built_ins();
 
     let file_tokens = tokenize(

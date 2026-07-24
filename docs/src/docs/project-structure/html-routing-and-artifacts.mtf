@@ -1,0 +1,50 @@
+The HTML builder derives routes from directory position under the configured `entry_root`. The hash-root filename does not choose the route name.
+
+### Directory-based routes
+
+The module root's directory determines the HTML output path:
+
+[codeblock, $code("text"):
+    src/#page.moth              -> index.html
+    src/docs/#page.moth         -> docs/index.html
+    src/docs/basics/#page.moth  -> docs/basics/index.html
+    src/#home.moth              -> index.html
+    src/#api.moth               -> index.html
+]
+
+The root module maps to the project index. A nested directory maps to a nested index route. The hash-root filename (`#page.moth`, `#home.moth`, `#api.moth`) has no effect on the route name.
+
+### API-only modules
+
+A module root with no builder-relevant top-level activity is API-only. It does not emit an HTML artifact merely because a root file exists. Artifact emission requires builder-relevant root activity: runtime code, const fragments or runtime fragments.
+
+### Builder ownership
+
+The HTML builder owns route and artifact policy. The frontend remains builder-neutral. The builder decides:
+
+- which modules produce HTML artifacts
+- how routes are derived
+- how output files are organised
+- whether to reject unsupported reachable features
+
+### Output folders
+
+Output folders are generated and manifest-managed. Builder sections in `config.moth` own output settings. HTML defaults are development `dev` and release `release`. Generated output folders should be treated as build artifacts, not source.
+
+### Release versus development output
+
+The default build writes to the dev folder. The `--release` flag writes to the output folder. The dev server serves from the dev folder.
+
+### Entry root artifact requirement
+
+The HTML builder requires at least one artifact-producing module root at the configured entry root. If the entry root contains only API-only roots, the build is rejected with `MOTH-CONFIG-0001`.
+
+### Experimental Wasm mode
+
+In the experimental `--html-wasm` mode, the builder can emit a route folder containing `index.html`, `page.js` and `page.wasm` instead of a single HTML file with embedded JavaScript.
+
+### Related concepts
+
+- For module root rules see @#module-roots (Module roots).
+- For root activity see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For project layout see @#project-layout (Project layout).

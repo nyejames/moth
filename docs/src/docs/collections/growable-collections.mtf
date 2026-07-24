@@ -1,0 +1,31 @@
+`{T}` is a growable collection of `T`.
+
+[codeblock, $code("moth"):
+    names ~{String} = {}
+    values {Int} = {1, 2, 3}
+]
+
+### Contract
+
+- The element type is part of semantic type identity.
+- A growable `{Int}` is not compatible with `{String}`.
+- Growable and fixed collections are different types.
+- A mutable binding is required for operations that change the collection.
+- An immutable growable collection remains readable but cannot be mutated through that binding.
+- `length()` returns the current logical number of items.
+- The element type is not widened by later mutation.
+
+`push` remains fallible and must be handled even for a growable collection.
+Runtime allocation and backend failures must not become unchecked language
+behaviour.
+
+[codeblock, $code("moth"):
+    names ~{String} = {}
+
+    ~names.push("Priya") catch:
+        assert(false, "growable push failed")
+    ;
+]
+
+Use @../bindings/#mutable-bindings (Mutable bindings) for the distinction
+between mutable storage and one exclusive operation.

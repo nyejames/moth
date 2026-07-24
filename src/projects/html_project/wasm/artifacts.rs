@@ -202,9 +202,9 @@ pub(crate) fn build_html_wasm_plan(
 ) -> Result<HtmlWasmBuildPlan, CompilerError> {
     let export_plan = build_html_wasm_export_plan(hir_module)?;
     let wasm_request = build_wasm_backend_request(&export_plan);
-    // WHY: entry start() is exported as "bst_start"; JS evaluates it directly and consumes the
+    // WHY: entry start() is exported as "moth_start"; JS evaluates it directly and consumes the
     //      returned fragment Vec handle. No JS-side wrapper installation is part of the contract.
-    let js_start_invocation = String::from("instance.exports.bst_start()");
+    let js_start_invocation = String::from("instance.exports.moth_start()");
 
     Ok(HtmlWasmBuildPlan {
         export_plan,
@@ -306,7 +306,7 @@ fn build_debug_outputs(
 
     let helper = &plan.export_plan.helper_exports;
     debug.helper_exports_summary = Some(format!(
-        "helper_exports: memory={} bst_str_ptr={} bst_str_len={} bst_vec_new={} bst_vec_push={} bst_vec_len={} bst_vec_get={} bst_release={}",
+        "helper_exports: memory={} moth_str_ptr={} moth_str_len={} moth_vec_new={} moth_vec_push={} moth_vec_len={} moth_vec_get={} moth_release={}",
         helper.export_memory,
         helper.export_str_ptr,
         helper.export_str_len,

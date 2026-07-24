@@ -45,7 +45,7 @@ fn trait_header(
             InternedPath::from_single_str(name, string_table),
             Vec::new(),
         ),
-        source_file: InternedPath::from_single_str("root.bst", string_table),
+        source_file: InternedPath::from_single_str("root.moth", string_table),
         capacity_references: Vec::new(),
     }
 }
@@ -69,7 +69,7 @@ fn function_header(
             InternedPath::from_single_str(name, string_table),
             Vec::new(),
         ),
-        source_file: InternedPath::from_single_str("root.bst", string_table),
+        source_file: InternedPath::from_single_str("root.moth", string_table),
         capacity_references: Vec::new(),
     }
 }

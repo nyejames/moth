@@ -1,12 +1,12 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-RULE-0043"]
+diagnostic_codes = ["MOTH-RULE-0043"]
 message_contains = ["Duplicate generic parameter 'T'"]
 
 [[backends.html.diagnostic_assertions]]
-code = "BST-RULE-0043"
+code = "MOTH-RULE-0043"
 reason = "invalid_declaration.duplicate_generic_parameter"
-path = "input/#page.bst"
+path = "input/#page.moth"
 line = 1
 count = 1

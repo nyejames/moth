@@ -1,0 +1,14 @@
+Choices can use `is` and `is not` when their payloads are equality-safe.
+
+[codeblock, $code("moth"):
+    first = Status::Ready
+    second = Status::Ready
+
+    same = first is second
+]
+
+Two choice values are equal when they use the same variant and their payload
+values are equal.
+
+A choice with a collection, struct or another unsupported payload cannot use
+structural equality. Pattern matching still works.

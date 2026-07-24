@@ -4468,10 +4468,10 @@ contract = "language.options.match_value_unsupported_inner_rejected"
 role = "primary"
 
 [[case]]
-id = "path_bst_template_warning"
-path = "path_bst_template_warning"
+id = "path_moth_template_warning"
+path = "path_moth_template_warning"
 tags = ["integration", "paths"]
-contract = "language.templates.bst_in_template_head_warned"
+contract = "language.templates.moth_in_template_head_warned"
 role = "primary"
 
 [[case]]
@@ -9291,10 +9291,10 @@ contract = "language.imports.import_name_collision_rejected"
 role = "boundary"
 
 [[case]]
-id = "namespace_import_explicit_bst_extension_rejected"
-path = "namespace_import_explicit_bst_extension_rejected"
+id = "namespace_import_explicit_moth_extension_rejected"
+path = "namespace_import_explicit_moth_extension_rejected"
 tags = ["integration", "imports", "namespace-imports", "diagnostics"]
-contract = "language.imports.explicit_bst_extension_rejected"
+contract = "language.imports.explicit_moth_extension_rejected"
 role = "primary"
 
 [[case]]
@@ -10439,94 +10439,94 @@ contract = "language.imports.facade_export_private_imported_type_rejected"
 role = "primary"
 
 [[case]]
-id = "beandown_namespace_import_html_parity"
-path = "beandown_namespace_import_html_parity"
-tags = ["integration", "beandown", "html", "imports"]
-contract = "language.imports.beandown_content_import_acceptance"
+id = "moth_template_namespace_import_html_parity"
+path = "moth_template_namespace_import_html_parity"
+tags = ["integration", "moth_template", "html", "imports"]
+contract = "language.imports.moth_template_content_import_acceptance"
 role = "primary"
 
 [[case]]
-id = "beandown_grouped_alias_import"
-path = "beandown_grouped_alias_import"
-tags = ["integration", "beandown", "html", "imports"]
-contract = "language.imports.beandown_content_import_acceptance"
+id = "moth_template_grouped_alias_import"
+path = "moth_template_grouped_alias_import"
+tags = ["integration", "moth_template", "html", "imports"]
+contract = "language.imports.moth_template_content_import_acceptance"
 role = "boundary"
 
 [[case]]
-id = "beandown_facade_reexport_content"
-path = "beandown_facade_reexport_content"
-tags = ["integration", "beandown", "html", "imports"]
-contract = "language.imports.beandown_content_import_acceptance"
+id = "moth_template_facade_reexport_content"
+path = "moth_template_facade_reexport_content"
+tags = ["integration", "moth_template", "html", "imports"]
+contract = "language.imports.moth_template_content_import_acceptance"
 role = "boundary"
 
 [[case]]
-id = "beandown_source_package_import"
-path = "beandown_source_package_import"
-tags = ["integration", "beandown", "html", "imports"]
-contract = "language.imports.beandown_content_import_acceptance"
+id = "moth_template_source_package_import"
+path = "moth_template_source_package_import"
+tags = ["integration", "moth_template", "html", "imports"]
+contract = "language.imports.moth_template_content_import_acceptance"
 role = "boundary"
 
 [[case]]
-id = "beandown_unimported_entry_root_ignored"
-path = "beandown_unimported_entry_root_ignored"
-tags = ["integration", "beandown", "html", "imports"]
-contract = "language.imports.beandown_unimported_entry_root_ignored_acceptance"
+id = "moth_template_unimported_entry_root_ignored"
+path = "moth_template_unimported_entry_root_ignored"
+tags = ["integration", "moth_template", "html", "imports"]
+contract = "language.imports.moth_template_unimported_entry_root_ignored_acceptance"
 role = "primary"
 
 [[case]]
-id = "beandown_direct_entry_rejected"
-path = "beandown_direct_entry_rejected"
-tags = ["integration", "beandown", "html", "diagnostics"]
-contract = "language.imports.beandown_direct_entry_rejected"
+id = "moth_template_direct_entry_rejected"
+path = "moth_template_direct_entry_rejected"
+tags = ["integration", "moth_template", "html", "diagnostics"]
+contract = "language.imports.moth_template_direct_entry_rejected"
 role = "primary"
 
 [[case]]
-id = "beandown_direct_extension_import_rejected"
-path = "beandown_direct_extension_import_rejected"
-tags = ["integration", "beandown", "html", "diagnostics", "imports"]
-contract = "language.imports.beandown_direct_extension_import_rejected"
+id = "moth_template_direct_extension_import_rejected"
+path = "moth_template_direct_extension_import_rejected"
+tags = ["integration", "moth_template", "html", "diagnostics", "imports"]
+contract = "language.imports.moth_template_direct_extension_import_rejected"
 role = "primary"
 
 [[case]]
-id = "beandown_ambiguous_bst_same_stem"
-path = "beandown_ambiguous_bst_same_stem"
-tags = ["integration", "beandown", "html", "diagnostics", "imports"]
+id = "moth_template_ambiguous_source_same_stem"
+path = "moth_template_ambiguous_source_same_stem"
+tags = ["integration", "moth_template", "html", "diagnostics", "imports"]
 contract = "language.imports.ambiguous_source_stem_collision_rejected"
 role = "primary"
 
 [[case]]
-id = "beandown_ambiguous_folder_same_stem"
-path = "beandown_ambiguous_folder_same_stem"
-tags = ["integration", "beandown", "html", "diagnostics", "imports"]
+id = "moth_template_ambiguous_folder_same_stem"
+path = "moth_template_ambiguous_folder_same_stem"
+tags = ["integration", "moth_template", "html", "diagnostics", "imports"]
 contract = "language.imports.ambiguous_source_stem_collision_rejected"
 role = "boundary"
 
 [[case]]
-id = "beandown_runtime_call_rejected"
-path = "beandown_runtime_call_rejected"
-tags = ["integration", "beandown", "html", "diagnostics"]
-contract = "language.beandown.runtime_call_in_content_rejected"
+id = "moth_template_runtime_call_rejected"
+path = "moth_template_runtime_call_rejected"
+tags = ["integration", "moth_template", "html", "diagnostics"]
+contract = "language.moth_template.runtime_call_in_content_rejected"
 role = "primary"
 
 [[case]]
-id = "beandown_facade_nonconstant_not_visible"
-path = "beandown_facade_nonconstant_not_visible"
-tags = ["integration", "beandown", "html", "diagnostics", "imports"]
-contract = "language.beandown.facade_nonconstant_not_visible_in_content_rejected"
+id = "moth_template_facade_nonconstant_not_visible"
+path = "moth_template_facade_nonconstant_not_visible"
+tags = ["integration", "moth_template", "html", "diagnostics", "imports"]
+contract = "language.moth_template.facade_nonconstant_not_visible_in_content_rejected"
 role = "primary"
 
 [[case]]
-id = "beandown_html_runtime_api_not_visible"
-path = "beandown_html_runtime_api_not_visible"
-tags = ["integration", "beandown", "html", "diagnostics", "imports"]
-contract = "language.beandown.html_runtime_api_not_visible_in_content_rejected"
+id = "moth_template_html_runtime_api_not_visible"
+path = "moth_template_html_runtime_api_not_visible"
+tags = ["integration", "moth_template", "html", "diagnostics", "imports"]
+contract = "language.moth_template.html_runtime_api_not_visible_in_content_rejected"
 role = "primary"
 
 [[case]]
-id = "beandown_unescaped_outer_close_rejected"
-path = "beandown_unescaped_outer_close_rejected"
-tags = ["integration", "beandown", "html", "diagnostics"]
-contract = "language.beandown.unescaped_outer_close_rejected"
+id = "moth_template_unescaped_outer_close_rejected"
+path = "moth_template_unescaped_outer_close_rejected"
+tags = ["integration", "moth_template", "html", "diagnostics"]
+contract = "language.moth_template.unescaped_outer_close_rejected"
 role = "primary"
 
 [[case]]
@@ -10544,10 +10544,10 @@ contract = "language.imports.markdown_content_import_acceptance"
 role = "boundary"
 
 [[case]]
-id = "html_markdown_plain_not_beanstalk"
-path = "html_markdown_plain_not_beanstalk"
+id = "html_markdown_plain_not_moth"
+path = "html_markdown_plain_not_moth"
 tags = ["integration", "markdown", "html", "imports"]
-contract = "language.imports.markdown_plain_text_not_parsed_as_beanstalk"
+contract = "language.imports.markdown_plain_text_not_parsed_as_moth"
 role = "primary"
 
 [[case]]
@@ -10586,8 +10586,8 @@ contract = "language.imports.markdown_direct_extension_import_rejected"
 role = "primary"
 
 [[case]]
-id = "html_markdown_collision_with_beandown"
-path = "html_markdown_collision_with_beandown"
+id = "html_markdown_collision_with_moth_template"
+path = "html_markdown_collision_with_moth_template"
 tags = ["integration", "markdown", "html", "diagnostics", "imports"]
 contract = "language.imports.ambiguous_source_stem_collision_rejected"
 role = "boundary"
@@ -11461,10 +11461,10 @@ contract = "language.imports.legacy_inline_export_rejected"
 role = "primary"
 
 [[case]]
-id = "beandown_same_directory_root_constant"
-path = "beandown_same_directory_root_constant"
-tags = ["integration", "beandown", "html", "imports", "module-roots"]
-contract = "language.imports.beandown_same_directory_root_constant_acceptance"
+id = "moth_template_same_directory_root_constant"
+path = "moth_template_same_directory_root_constant"
+tags = ["integration", "moth_template", "html", "imports", "module-roots"]
+contract = "language.imports.moth_template_same_directory_root_constant_acceptance"
 role = "primary"
 
 [[case]]

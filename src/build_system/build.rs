@@ -1,4 +1,4 @@
-//! Core build orchestration and output writing for Beanstalk projects.
+//! Core build orchestration and output writing for Moth projects.
 //!
 //! This module provides the canonical project build flow (`build_project`) and a dedicated output
 //! writer (`write_project_outputs`). Build tools can compile once and choose where artifacts are
@@ -442,7 +442,7 @@ pub fn resolve_project_output_root(config: &Config, flags: &[Flag]) -> PathBuf {
     config.entry_dir.join(configured_folder)
 }
 
-/// Build a Beanstalk project by running path validation, frontend compilation, and backend build.
+/// Build a Moth project by running path validation, frontend compilation, and backend build.
 ///
 /// This function intentionally does not write output files so callers can decide where artifacts
 /// should be emitted.
@@ -551,7 +551,7 @@ pub fn build_project(
 
 /// Build the shared Stage 0/bootstrap state used by both CLI builds and the dev server.
 ///
-/// WHAT: merges frontend/project directives, loads `config.bst`, and runs backend-specific
+/// WHAT: merges frontend/project directives, loads `config.moth`, and runs backend-specific
 /// config validation into one reusable setup step.
 /// WHY: directory builds and the dev server must share one bootstrap path so config/output
 /// behavior does not drift between "build" and "serve" flows.
@@ -640,7 +640,7 @@ pub(crate) fn bootstrap_project_build(
 ///
 /// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
 ///      observation in the active collection scope and emits the stable
-///      `BST_BENCH timing` line when the output mode permits.
+///      `MOTH_BENCH timing` line when the output mode permits.
 /// WHY:  `build_project` and `write_project_outputs` use dotted `build_project.*`
 ///      and `output.*` metric names through the concise `timers` substrate.
 ///      The start token is zero-sized when `timers` is off, so regular builds

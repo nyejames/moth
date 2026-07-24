@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0029"]
+diagnostic_codes = ["MOTH-SYNTAX-0029"]
 message_contains = ["Collection loop source", "{String = Int}"]

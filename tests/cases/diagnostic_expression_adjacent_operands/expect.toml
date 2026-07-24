@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0023"]
+diagnostic_codes = ["MOTH-SYNTAX-0023"]
 message_contains = ["Expected an operator before this expression."]

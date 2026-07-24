@@ -58,7 +58,7 @@ pub(super) struct TypeIds {
 ///      through the matching closing brace of its body.
 /// WHY: assertions focus on one helper at a time instead of the whole prelude. A simple
 ///      "next `function `" bound stops at nested function expressions such as the callback inside
-///      `__bs_format_float`, so this helper balances braces to find the real end of the outer
+///      `__moth_format_float`, so this helper balances braces to find the real end of the outer
 ///      function body.
 pub(super) fn helper_source<'a>(source: &'a str, name: &str) -> &'a str {
     let prefix = format!("function {name}(");

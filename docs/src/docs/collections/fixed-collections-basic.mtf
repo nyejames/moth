@@ -1,0 +1,18 @@
+A fixed collection has a maximum number of items in its type.
+
+[codeblock, $code("moth"):
+    values {3 Int} = {10, 20}
+]
+
+This value has length `2` and capacity `3`.
+
+A compile-time constant can name the capacity:
+
+[codeblock, $code("moth"):
+    capacity #Int = 4
+    names ~{capacity String} = {}
+]
+
+Different capacities create different types.
+
+A `{4 Int}` does not silently become `{8 Int}` or growable `{Int}`.

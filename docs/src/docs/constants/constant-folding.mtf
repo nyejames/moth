@@ -1,0 +1,65 @@
+A constant initializer must fully evaluate during AST construction.
+
+[codeblock, $code("moth"):
+    base #Int = 4
+    larger #Int = base + 2
+    label #= [: size [larger]]
+]
+
+### Allowed dependency shape
+
+A constant may depend on:
+
+- literals
+- earlier same-file constants
+- imported constants
+- foldable operators
+- foldable casts
+- foldable struct construction
+- foldable templates
+- other compile-time values accepted by the current language surface
+
+It may not depend on:
+
+- runtime bindings
+- runtime function calls
+- host calls
+- runtime-only template content
+- mutable state
+
+### Ordering
+
+Same-file constant evaluation follows source order.
+
+A same-file forward reference is invalid.
+
+Cross-file constant dependencies are represented in the top-level dependency
+graph and evaluated in dependency order.
+
+Circular constant dependencies are compilation errors.
+
+### Compile-time and runtime agreement
+
+Folding must preserve runtime language semantics.
+
+Examples:
+
+- a statically known checked-numeric failure is a compile-time diagnostic
+- `String -> Int` and `Float -> Int` enforce the signed 32-bit range
+- `String -> Float` rejects non-finite materialization
+- `Float -> String` uses Moth's stable formatter
+- compile-time and runtime template interpolation use the same Float formatting
+
+The compiler must not accept one result during folding and produce another at
+runtime.
+
+### Advisory const facts
+
+The compiler may discover private const facts for optimization.
+
+Those facts do not:
+
+- change source semantics
+- create importable declarations
+- participate in header dependency sorting
+- turn a runtime binding into a source constant

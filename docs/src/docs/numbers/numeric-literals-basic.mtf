@@ -1,0 +1,27 @@
+Whole numbers are `Int` values:
+
+[codeblock, $code("moth"):
+    score = 42
+]
+
+Numbers with a decimal point are `Float` values:
+
+[codeblock, $code("moth"):
+    progress = 0.5
+]
+
+Large and tiny values can use lowercase `e` notation:
+
+[codeblock, $code("moth"):
+    population = 1e6
+    tolerance = 1e-6
+]
+
+Keep a minus sign attached to the value:
+
+[codeblock, $code("moth"):
+    temperature = -5
+    opposite = -count
+]
+
+`1E6`, `+1` and `- count` are not valid numeric forms.

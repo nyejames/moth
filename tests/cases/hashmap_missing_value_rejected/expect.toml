@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["BST-SYNTAX-0033"]
+diagnostic_codes = ["MOTH-SYNTAX-0033"]
 message_contains = ["missing a value expression"]

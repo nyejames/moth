@@ -1,0 +1,131 @@
+Moth has two string source forms and one character form. Both string forms share one semantic `String` type at ordinary typed boundaries.
+
+[codeblock, $code("moth"):
+    escaped_slice = "Hello\nworld"
+    letter = 'ʚĭɞ'
+
+    name = "Priya"
+    message = [:
+        Hello, [name]
+    ]
+]
+
+### Quoted string slices
+
+Double quotes create escaped string slices. They support exactly these escapes:
+
+- `\\` for a backslash
+- `\"` for a double quote
+- `\n` for a newline
+- `\r` for a carriage return
+- `\t` for a tab
+
+Every other escape is invalid. A backslash can't continue a quoted string
+across a physical newline.
+
+A quoted string slice is read-only content. It has no character or substring
+mutation surface and isn't concatenated with `+`. A slice may be read,
+compared, passed, returned, stored and inserted into templates. A mutable
+binding that currently holds a slice may be reassigned. That doesn't make the
+slice contents mutable.
+
+[codeblock, $code("moth"):
+    name = "Priya"
+    name = "Aisha"  -- reassigns the binding, doesn't mutate the slice
+]
+
+### Characters
+
+Single quotes create `Char` values.
+
+### Template strings
+
+Square brackets create string templates. Templates produce owned string values
+and may fold at compile time or lower to runtime string construction.
+
+Templates are the idiomatic and canonical way to:
+
+- concatenate strings
+- interpolate values
+- build runtime or compile-time text
+- produce strings that need full template composition
+
+[codeblock, $code("moth"):
+    first = "Hello, "
+    second = "world"
+    message = [first, second]
+
+    name = "Priya"
+    greeting = [: Hello, [name]]
+]
+
+Use ["[left, right]"] for concatenation. Don't use `+`:
+
+[codeblock, $code("moth"):
+    -- VALID: template concatenation
+    joined = [left, right]
+
+    -- INVALID: + is a numeric operator only
+    joined = left + right
+]
+
+The compiler rejects `String + String` and every mixed string `+` form with
+the ordinary invalid-operator diagnostic.
+
+### One semantic `String` type
+
+Quoted slices and template-produced strings share one `String` type at
+ordinary typed boundaries. They share:
+
+- parameter and return compatibility
+- equality
+- choice payload equality
+- collection and map value use
+- `String` map-key use
+- casts
+- IO and external `StringContent` boundaries
+- template insertion
+- aliases and generic use where `String` is concrete
+
+Construction origin doesn't create hidden equality, hashing, map-key or
+call-compatibility rules.
+
+### Equality
+
+`String` supports `is` and `is not`. `String` doesn't support ordering
+operators (`<`, `<=`, `>`, `>=`).
+
+[codeblock, $code("moth"):
+    slice = "hello"
+    template = [: hello]
+
+    -- VALID: equality across both forms
+    same = slice is template
+
+    -- INVALID: ordering is not supported
+    -- ordered = slice < template
+]
+
+### Binding reassignment versus content mutation
+
+A mutable binding that holds a string can be reassigned. The string content
+itself is always read-only. There is no in-place string mutation API.
+
+[codeblock, $code("moth"):
+    text ~= "initial"
+    text = "replacement"  -- valid: reassigns the binding
+
+    -- No mutation API exists:
+    -- text.append("more")  -- invalid
+    -- text[0] = 'X'        -- invalid
+]
+
+### Templates
+
+Templates own interpolation, formatting, slots, wrappers and structured
+content. See @../templates (Templates) for the complete system.
+
+Quoted slices and templates both participate in the language's `String` surface.
+Expression-position raw backtick slices aren't implemented. Inside a template
+body, backticks, backslashes and physical newlines are ordinary body text
+available to the active formatter.

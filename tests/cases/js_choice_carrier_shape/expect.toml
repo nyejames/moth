@@ -5,5 +5,5 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["{ tag: 0 }", "__bs_read"]
+must_contain = ["{ tag: 0 }", "__moth_read"]
 must_not_contain = ["variant", "Status("]

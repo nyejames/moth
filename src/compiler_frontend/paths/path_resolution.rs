@@ -190,7 +190,7 @@ impl ProjectPathResolver {
     }
 
     /// WHAT: returns the builder-supported source file kinds for this project.
-    /// WHY: Stage 0 and import resolution need to know which non-`.bst` extensions are valid.
+    /// WHY: Stage 0 and import resolution need to know which non-`.moth` extensions are valid.
     pub(crate) fn source_file_kinds(&self) -> &SourceFileKindRegistry {
         &self.source_file_kinds
     }
@@ -241,8 +241,8 @@ impl ProjectPathResolver {
     }
 
     /// WHAT: resolves an import path to a concrete source file and its source kind.
-    /// WHY: Stage 0 must preserve the source kind so `.bd` files can be discovered without being
-    ///      scanned or prepared as normal Beanstalk source.
+    /// WHY: Stage 0 must preserve the source kind so `.mtf` files can be discovered without being
+    ///      scanned or prepared as normal Moth source.
     pub(crate) fn resolve_import_to_source_file(
         &self,
         import_path: &InternedPath,
@@ -272,7 +272,7 @@ impl ProjectPathResolver {
     }
 
     /// WHAT: resolves an import path with public-surface fallback while preserving source kind.
-    /// WHY: Stage 0 needs source kind for implementation files and Beanstalk kind for root files.
+    /// WHY: Stage 0 needs source kind for implementation files and Moth kind for root files.
     pub(crate) fn resolve_import_to_source_file_with_public_surface_fallback(
         &self,
         import_path: &InternedPath,
@@ -291,7 +291,7 @@ impl ProjectPathResolver {
                 {
                     Ok(ResolvedImportFile {
                         path: root_file,
-                        kind: SourceFileKind::Beanstalk,
+                        kind: SourceFileKind::Moth,
                     })
                 } else {
                     if self.import_root_policy == ImportRootPolicy::SourceAndBindingPackagesOnly {
@@ -305,7 +305,7 @@ impl ProjectPathResolver {
                     ) {
                         Ok(Some(root_file)) => Ok(ResolvedImportFile {
                             path: root_file,
-                            kind: SourceFileKind::Beanstalk,
+                            kind: SourceFileKind::Moth,
                         }),
                         Ok(None) => Err(original_error),
                         Err(diagnostic_error) => Err(diagnostic_error),
@@ -382,7 +382,7 @@ impl ProjectPathResolver {
 
     /// WHAT: resolves one import path to both a typed compile-time path and a canonical file path.
     /// WHY: imports use the same resolution model as general path literals, but additionally
-    ///      apply `.bst` extension fallback logic. Returns both representations so callers
+    ///      apply `.moth` extension fallback logic. Returns both representations so callers
     ///      can choose what they need.
     ///
     /// NOTE: `string_table` is used for diagnostic path interning and case-mismatch strings.
@@ -394,8 +394,8 @@ impl ProjectPathResolver {
     ) -> Result<(CompileTimePath, PathBuf), ImportPathResolutionError> {
         if let Some(extension) = explicit_source_extension(import_path, string_table) {
             let location = SourceLocation::from_path(importer_file, string_table);
-            let diagnostic = if extension == SourceFileKind::Beanstalk.extension() {
-                CompilerDiagnostic::explicit_bst_extension(import_path.to_owned(), location)
+            let diagnostic = if extension == SourceFileKind::Moth.extension() {
+                CompilerDiagnostic::explicit_moth_extension(import_path.to_owned(), location)
             } else {
                 let extension_id = string_table.intern(&extension);
                 CompilerDiagnostic::explicit_source_extension(
@@ -539,7 +539,7 @@ impl ProjectPathResolver {
     }
 
     /// WHAT: checks whether a file already admitted to config parsing belongs to a source-backed package.
-    /// WHY: `config.bst` cannot use relative imports, but builder/core source-backed package roots often
+    /// WHY: `config.moth` cannot use relative imports, but builder/core source-backed package roots often
     /// re-export support declarations through relative imports inside the package root.
     fn importer_is_inside_source_package(&self, importer_file: &Path) -> bool {
         let canonical_importer =
@@ -556,7 +556,7 @@ impl ProjectPathResolver {
     // -----------------------------------------------------------------------
 
     /// WHAT: resolves a general path literal to a typed compile-time path value.
-    /// WHY: all Beanstalk path literals must use the same resolution rules as
+    /// WHY: all Moth path literals must use the same resolution rules as
     ///       imports, but additionally classify file vs directory, reject
     ///       escapes outside the project root, and carry public-path metadata.
     pub(crate) fn resolve_compile_time_path(
@@ -607,7 +607,7 @@ impl ProjectPathResolver {
 
     /// WHAT: exposes the normal path base calculation for provider-backed external files.
     /// WHY: Stage 0 external providers need the same relative/package/module boundary base as
-    /// Beanstalk imports, but they must not append `.bst` or use public-surface fallback.
+    /// Moth imports, but they must not append `.moth` or use public-surface fallback.
     ///
     /// NOTE: `string_table` is only used on error paths to intern diagnostic file paths.
     pub(crate) fn resolve_path_base_for_provider(
@@ -651,7 +651,7 @@ impl ProjectPathResolver {
     }
 
     /// WHAT: rejects paths that would escape the project root after normalization.
-    /// WHY: paths outside the project root are a semantic error in Beanstalk.
+    /// WHY: paths outside the project root are a semantic error in Moth.
     ///
     /// NOTE: `string_table` is only used on error paths to intern diagnostic file paths.
     fn validate_inside_project_root(

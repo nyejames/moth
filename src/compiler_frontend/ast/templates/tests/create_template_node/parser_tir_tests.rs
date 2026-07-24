@@ -790,7 +790,7 @@ fn parser_tir_records_rendered_path_head_as_tir_only() {
 #[test]
 fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let source_name = string_table.intern("source");
     let source_path = scope.append(source_name);
     let source_location = SourceLocation {
@@ -921,7 +921,7 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
     // `DynamicExpression` anchors, so markdown inline code can pair across the
     // inserted scalar string through the TIR formatter path.
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let value_name = string_table.intern("value");
     let declarations = vec![Declaration {
         id: scope.append(value_name),
@@ -1151,8 +1151,10 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
     // body-origin dynamic expression, so the body TIR is constructed directly
     // via `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
-    let context =
-        new_constant_context(InternedPath::from_single_str("main.bst", &mut string_table));
+    let context = new_constant_context(InternedPath::from_single_str(
+        "main.moth",
+        &mut string_table,
+    ));
     let location = SourceLocation::default();
 
     let mut template = build_template_with_direct_tir_root(
@@ -1210,11 +1212,13 @@ fn reactive_body_segment_records_formatted_tir_phase() {
     // this body reactive dynamic-expression payload is constructed directly via
     // `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
-    let context =
-        new_constant_context(InternedPath::from_single_str("main.bst", &mut string_table));
+    let context = new_constant_context(InternedPath::from_single_str(
+        "main.moth",
+        &mut string_table,
+    ));
     let location = SourceLocation::default();
 
-    let source_path = InternedPath::from_single_str("main.bst/#reactive0", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth/#reactive0", &mut string_table);
     let expected_source_path = source_path.clone();
     let source = ReactiveSource {
         path: source_path.clone(),
@@ -1316,11 +1320,13 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
     // Source parsing only emits reactive head text, so this body reactive text
     // payload is constructed directly via `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
-    let context =
-        new_constant_context(InternedPath::from_single_str("main.bst", &mut string_table));
+    let context = new_constant_context(InternedPath::from_single_str(
+        "main.moth",
+        &mut string_table,
+    ));
     let location = SourceLocation::default();
 
-    let source_path = InternedPath::from_single_str("main.bst/#reactive0", &mut string_table);
+    let source_path = InternedPath::from_single_str("main.moth/#reactive0", &mut string_table);
     let expected_source_path = source_path.clone();
     let subscription = ReactiveSubscription {
         source: ReactiveSource {
@@ -1642,7 +1648,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = wrapper_scope.append(wrapper_name);
 
@@ -1696,7 +1702,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = wrapper_scope.append(wrapper_name);
 
@@ -1772,7 +1778,7 @@ fn formatter_children_wrapper_composition_keeps_formatted_reference() {
 fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     let mut string_table = StringTable::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let scope = InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
 
     let mut wrapper_tokens = template_tokens_from_source(
         "[$md:title[$slot(\"title\")]body[$slot]]",
@@ -2169,7 +2175,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = wrapper_scope.append(wrapper_name);
 
@@ -2244,7 +2250,7 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
-        InternedPath::from_single_str("main.bst/#const_template0", &mut string_table);
+        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = wrapper_scope.append(wrapper_name);
 

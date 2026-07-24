@@ -295,8 +295,8 @@ impl BackendBuilder for HtmlProjectBuilder {
         Self::register_html_config_keys(&mut builder_surface);
 
         builder_surface.source_file_kinds.register(
-            SourceFileKind::Beandown.extension(),
-            SourceFileKind::Beandown,
+            SourceFileKind::MothTemplate.extension(),
+            SourceFileKind::MothTemplate,
         );
         builder_surface.source_file_kinds.register(
             SourceFileKind::PlainMarkdown.extension(),

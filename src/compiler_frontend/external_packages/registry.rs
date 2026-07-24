@@ -158,7 +158,7 @@ impl ExternalPackageRegistry {
     ///
     /// WHAT: creates the owned package identity and path-to-ID index entry.
     /// The registry always constructs `PackageMetadata::binding(origin)` so a
-    /// `BeanstalkSource`-backed package is unrepresentable through this API.
+    /// `MothSource`-backed package is unrepresentable through this API.
     /// WHY: built-in packages and later dynamic provider results must flow through the
     /// same identity path.
     pub fn register_package(

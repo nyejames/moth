@@ -40,13 +40,13 @@ pub(crate) struct PublicFoldedField {
     pub(crate) value: PublicFoldedValue,
 }
 
-/// A finite `f64` folded value with an equivalence relation consistent with Beanstalk
+/// A finite `f64` folded value with an equivalence relation consistent with Moth
 /// semantics.
 ///
 /// WHAT: a narrow validated wrapper that rejects non-finite input (`NaN`, `+inf`, `-inf`) and
 /// normalizes negative zero to positive zero at construction. Finiteness makes `PartialEq` a
 /// total equivalence relation, so the draft hierarchy can derive `Eq`.
-/// WHY: `f64` itself does not implement `Eq` because `NaN != NaN`. Beanstalk formatting renders
+/// WHY: `f64` itself does not implement `Eq` because `NaN != NaN`. Moth formatting renders
 /// negative zero as ordinary zero, so `-0.0` is unobservable as text; normalizing it keeps the
 /// folded value canonical and equality consistent with the accepted formatting contract.
 #[derive(Clone, Debug, PartialEq)]

@@ -13,7 +13,7 @@ use std::path::Path;
 fn bootstrap_script_calls_start_once_and_hydrates_slots() {
     // WHAT: with runtime slots, the bootstrap calls start() to get fragments and hydrates them.
     // WHY: start() is the sole fragment producer; no per-function wrapper calls needed.
-    let slot_ids = vec![String::from("bst-slot-0")];
+    let slot_ids = vec![String::from("moth-slot-0")];
     let script = render_runtime_bootstrap_script_html(
         "start_entry",
         "function start_entry() { return []; }",
@@ -23,11 +23,11 @@ fn bootstrap_script_calls_start_once_and_hydrates_slots() {
     );
 
     assert!(
-        script.contains("bst_frags = start_entry()"),
+        script.contains("moth_frags = start_entry()"),
         "bootstrap must call start() to get the fragment array"
     );
     assert!(
-        script.contains("bst_slots"),
+        script.contains("moth_slots"),
         "bootstrap must set up the slot ID list"
     );
     assert!(
@@ -36,9 +36,9 @@ fn bootstrap_script_calls_start_once_and_hydrates_slots() {
     );
     // Verify start() call comes before slot list setup in emission order.
     let start_frag_pos = script
-        .find("bst_frags = start_entry()")
+        .find("moth_frags = start_entry()")
         .expect("start call must be present");
-    let slot_list_pos = script.find("bst_slots").expect("slot list must be present");
+    let slot_list_pos = script.find("moth_slots").expect("slot list must be present");
     assert!(
         start_frag_pos < slot_list_pos,
         "start() must be called before the slot ID list is set up"
@@ -50,25 +50,25 @@ fn render_entry_fragments_preserves_runtime_slot_order() {
     let (body_html, slot_ids) = render_entry_fragments(&[], 2);
 
     let slot0_pos = body_html
-        .find("bst-slot-0")
-        .expect("bst-slot-0 must be present");
+        .find("moth-slot-0")
+        .expect("moth-slot-0 must be present");
     let slot1_pos = body_html
-        .find("bst-slot-1")
-        .expect("bst-slot-1 must be present");
+        .find("moth-slot-1")
+        .expect("moth-slot-1 must be present");
 
     assert!(
         slot0_pos < slot1_pos,
         "runtime slots must appear in source fragment order"
     );
     assert_eq!(slot_ids.len(), 2);
-    assert_eq!(slot_ids[0], "bst-slot-0");
-    assert_eq!(slot_ids[1], "bst-slot-1");
+    assert_eq!(slot_ids[0], "moth-slot-0");
+    assert_eq!(slot_ids[1], "moth-slot-1");
 }
 
 #[test]
 fn no_runtime_fragments_still_emits_start_call() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(std::path::PathBuf::from("#page.bst"), &mut string_table);
+    let module = create_test_module(std::path::PathBuf::from("#page.moth"), &mut string_table);
     let function_names = HashMap::from([(
         module.executable.hir.start_function,
         String::from("start_entry"),
@@ -93,7 +93,7 @@ fn no_runtime_fragments_still_emits_start_call() {
     .expect("render_html_document should succeed");
 
     assert!(
-        !html.contains("bst-slot-"),
+        !html.contains("moth-slot-"),
         "no runtime slots should be present when there are no runtime fragments"
     );
     assert!(
@@ -152,7 +152,7 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
 fn bootstrap_uses_mount_helper_for_reactive_runtime_fragments() {
     // WHAT: when the module has reachable reactive runtime fragments, the bootstrap must call the
     // backend mount helper so template objects register for rerendering instead of being snapshot.
-    let slot_ids = vec![String::from("bst-slot-0")];
+    let slot_ids = vec![String::from("moth-slot-0")];
     let script = render_runtime_bootstrap_script_html(
         "start_entry",
         "function start_entry() { return []; }",
@@ -162,11 +162,11 @@ fn bootstrap_uses_mount_helper_for_reactive_runtime_fragments() {
     );
 
     assert!(
-        script.contains("__bs_mount_template_fragment(el, bst_frags[i])"),
+        script.contains("__moth_mount_template_fragment(el, moth_frags[i])"),
         "reactive bootstrap must hydrate slots through the mount helper"
     );
     assert!(
-        !script.contains("el.insertAdjacentHTML(\"beforeend\", bst_frags[i] || \"\")"),
+        !script.contains("el.insertAdjacentHTML(\"beforeend\", moth_frags[i] || \"\")"),
         "reactive bootstrap must not use the plain direct insertion path"
     );
 }
@@ -174,7 +174,7 @@ fn bootstrap_uses_mount_helper_for_reactive_runtime_fragments() {
 #[test]
 fn bootstrap_uses_plain_insertion_for_non_reactive_runtime_fragments() {
     // WHAT: non-reactive pages must not reference the optional mount helper global.
-    let slot_ids = vec![String::from("bst-slot-0")];
+    let slot_ids = vec![String::from("moth-slot-0")];
     let script = render_runtime_bootstrap_script_html(
         "start_entry",
         "function start_entry() { return []; }",
@@ -184,11 +184,11 @@ fn bootstrap_uses_plain_insertion_for_non_reactive_runtime_fragments() {
     );
 
     assert!(
-        script.contains("el.insertAdjacentHTML(\"beforeend\", bst_frags[i] || \"\")"),
+        script.contains("el.insertAdjacentHTML(\"beforeend\", moth_frags[i] || \"\")"),
         "non-reactive bootstrap must keep the plain direct insertion path"
     );
     assert!(
-        !script.contains("__bs_mount_template_fragment"),
+        !script.contains("__moth_mount_template_fragment"),
         "non-reactive bootstrap must not reference the mount helper"
     );
 }

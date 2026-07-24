@@ -28,7 +28,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 fn test_scope(string_table: &mut StringTable) -> (InternedPath, ScopeContext) {
-    let scope = InternedPath::from_single_str("test.bst", string_table);
+    let scope = InternedPath::from_single_str("test.moth", string_table);
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope.clone(),
@@ -110,7 +110,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
     );
-    assert_eq!(diagnostic.kind.code(), "BST-SYNTAX-0002");
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::UnexpectedToken {
@@ -250,7 +250,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
     );
-    assert_eq!(diagnostic.kind.code(), "BST-SYNTAX-0002");
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::UnexpectedToken {
