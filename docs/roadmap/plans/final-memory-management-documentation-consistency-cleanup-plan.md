@@ -58,12 +58,12 @@ This is not another design exercise. Every semantic correction is fixed below.
 
 Use this order whenever documents disagree:
 
-1. `docs/src/docs/codebase/memory-management/overview.bd`
+1. `docs/src/docs/codebase/memory-management/overview.mtf`
 2. The relevant detailed memory leaf
 3. `docs/compiler-design-overview.md`
 4. `docs/build-system-design.md`
 5. `docs/language-overview.md`
-6. `docs/src/docs/progress/#page.bst`
+6. `docs/src/docs/progress/#page.moth`
 7. Roadmap plans for sequencing only
 8. Educational and user-facing pages
 9. Current implementation code
@@ -195,13 +195,13 @@ Do not label them active or queued unless a separate approved plan changes roadm
 - [ ] Read:
   - `AGENTS.md`
   - `CONTRIBUTING.md`
-  - `docs/src/docs/codebase/style-guide/style-guide.bd`
-  - `docs/src/docs/codebase/style-guide/validation.bd`
+  - `docs/src/docs/codebase/style-guide/style-guide.mtf`
+  - `docs/src/docs/codebase/style-guide/validation.mtf`
   - all memory authority pages
   - `docs/compiler-design-overview.md`
   - `docs/build-system-design.md`
   - `docs/language-overview.md`
-  - `docs/src/docs/progress/#page.bst`
+  - `docs/src/docs/progress/#page.moth`
   - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md`
   - `docs/roadmap/plans/grouped-memory-design.md`
   - both completed memory documentation plans
@@ -223,7 +223,7 @@ Do not label them active or queued unless a separate approved plan changes roadm
 
 ```text
 docs/language-overview.md
-docs/src/docs/collections/hash-maps.bd
+docs/src/docs/collections/hash-maps.mtf
 ```
 
 ## 1.1 Language overview
@@ -295,7 +295,7 @@ with:
 File:
 
 ```text
-docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.bd
+docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf
 ```
 
 Replace:
@@ -335,7 +335,7 @@ results lift into independent Moth result graphs
 File:
 
 ```text
-docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.bd
+docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.mtf
 ```
 
 Replace the ambiguous hidden-result prose with:
@@ -359,7 +359,7 @@ A fresh-result-root summary and its retained-edge constraints must be backend-ne
 File:
 
 ```text
-docs/src/docs/codebase/memory-management/ownership-and-drops/ownership-and-drops.bd
+docs/src/docs/codebase/memory-management/ownership-and-drops/ownership-and-drops.mtf
 ```
 
 Replace:
@@ -407,7 +407,7 @@ calls whose result root is fresh may allocate that root directly into a hidden c
 File:
 
 ```text
-docs/src/docs/bindings/explicit-copies-basic.bd
+docs/src/docs/bindings/explicit-copies-basic.mtf
 ```
 
 Replace:
@@ -543,13 +543,13 @@ docs/compiler-design-overview.md
 Replace:
 
 ```markdown
-- `docs/src/docs/codebase/memory-management/overview.bd` for access, borrow, GC, ownership and destruction semantics
+- `docs/src/docs/codebase/memory-management/overview.mtf` for access, borrow, GC, ownership and destruction semantics
 ```
 
 with:
 
 ```markdown
-- `docs/src/docs/codebase/memory-management/overview.bd` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
+- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
 ```
 
 ## 4.2 Public semantic interface
@@ -727,7 +727,7 @@ Ensure public-interface fingerprint inputs include:
 File:
 
 ```text
-docs/src/docs/codebase/compiler-design/linking-entries-and-reachability/linking-entries-and-reachability.bd
+docs/src/docs/codebase/compiler-design/linking-entries-and-reachability/linking-entries-and-reachability.mtf
 ```
 
 Replace:
@@ -747,7 +747,7 @@ That work is parsed, type-checked, lowered, borrow-validated and locally lifetim
 File:
 
 ```text
-docs/src/docs/codebase/compiler-design/borrow-validation-and-drops/borrow-validation-and-drops.bd
+docs/src/docs/codebase/compiler-design/borrow-validation-and-drops/borrow-validation-and-drops.mtf
 ```
 
 Replace:
@@ -767,9 +767,9 @@ Borrow diagnostics distinguish concrete access conflicts from conservative acces
 Review:
 
 ```text
-docs/src/docs/codebase/compiler-design/module-artefacts-and-reuse/module-artefacts-and-reuse.bd
-docs/src/docs/codebase/compiler-design/target-planning-and-validation/target-planning-and-validation.bd
-docs/src/docs/codebase/compiler-design/backend-lowering/backend-lowering.bd
+docs/src/docs/codebase/compiler-design/module-artefacts-and-reuse/module-artefacts-and-reuse.mtf
+docs/src/docs/codebase/compiler-design/target-planning-and-validation/target-planning-and-validation.mtf
+docs/src/docs/codebase/compiler-design/backend-lowering/backend-lowering.mtf
 ```
 
 Only edit if they conflict with the final authority.
@@ -821,7 +821,7 @@ If the SHA is not known before commit:
 File:
 
 ```text
-docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.bd
+docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf
 ```
 
 Replace:
@@ -841,7 +841,7 @@ declared lifetimes, placement, exits and group-crossing restrictions
 File:
 
 ```text
-docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.bd
+docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.mtf
 ```
 
 Replace the raw URL with:
@@ -855,7 +855,7 @@ Replace the raw URL with:
 File:
 
 ```text
-docs/src/docs/codebase/memory-management/#page.bst
+docs/src/docs/codebase/memory-management/#page.moth
 ```
 
 Replace:
@@ -1117,7 +1117,7 @@ The compiler owns generic template validation, call-site inference, request iden
 ### Memory companion authority
 
 ```markdown
-- `docs/src/docs/codebase/memory-management/overview.bd` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
+- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
 ```
 
 ### Public interface summaries

@@ -51,11 +51,11 @@ Do not append worktree-specific notes, complete validation histories or worker t
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
 - `docs/language-overview.md`
-- `docs/src/docs/codebase/memory-management/borrow-validation/overview.bd`
-- `docs/src/docs/codebase/style-guide/style-guide.bd`
-- `docs/src/docs/codebase/style-guide/testing.bd`
-- `docs/src/docs/codebase/style-guide/validation.bd`
-- `docs/src/docs/progress/#page.bst`
+- `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`
+- `docs/src/docs/codebase/style-guide/style-guide.mtf`
+- `docs/src/docs/codebase/style-guide/testing.mtf`
+- `docs/src/docs/codebase/style-guide/validation.mtf`
+- `docs/src/docs/progress/#page.moth`
 - downstream config, entry-config and HTML-Wasm plans
 
 The two architecture overviews remain authoritative. This plan fixes implementation order and fills missing ownership details. It does not reopen accepted TIR, language, memory or backend-neutrality decisions.
@@ -463,7 +463,7 @@ Fingerprint encoding has one deterministic owner. It does not hash process-local
 | `DiscoveredModule` and per-entry input closures | Delete at graph cutover | `ModuleCompilationJob` over one `SemanticSourceSet` |
 | reachable-file BFS seeded per entry | Replace | one project/package source scan plus per-module semantic source classification |
 | `ProjectPathResolver` import fallback behavior | Split and delete | Stage 0 source namespace resolver; separate path-literal resolver |
-| project-local source package discovery and `package_folders` | Delete | structural `+*.bst` support packages and project facade |
+| project-local source package discovery and `package_folders` | Delete | structural `+*.moth` support packages and project facade |
 | AST emitter generic instance materialisation | Delete | build-owned generated sidecar worklist |
 | `CallTarget::UserFunction` for foreign source calls | Replace | explicit local/cross-module/generated source targets |
 | module-local `start` reachability filtering | Delete | entry/package link planning |
@@ -661,10 +661,10 @@ This is the main cutover milestone. Its internal slices are not accepted as sepa
 ### R4a: Build the canonical namespace and semantic source sets
 
 - Scan each selected project or package source boundary once.
-- Tokenize/scan each `.bst` source candidate once and retain structural provider references.
+- Tokenize/scan each `.moth` source candidate once and retain structural provider references.
 - Build `SemanticSourceSet` per module from its root and same-owner reachable sources/assets.
 - Stop traversal at child module and support package boundaries.
-- Build check-only orphan units as owned `.bst` minus canonical semantic `.bst`.
+- Build check-only orphan units as owned `.moth` minus canonical semantic `.moth`.
 - Build a graph-aware import namespace from module ownership, direct children, visible support packages, registered packages and provider contracts.
 - Resolve ordinary source imports from the owning module root, not the importing file.
 - Reject `@./`, parent traversal and entry-root fallback.
@@ -920,7 +920,7 @@ Validation:
 
 - documentation release build for documentation-only final slices
 - otherwise `cargo fmt` and `just validate`
-- manual architecture audit from `validation.bd`
+- manual architecture audit from `validation.mtf`
 
 ## Required end-to-end contracts
 
@@ -969,11 +969,11 @@ cargo fmt
 just validate
 ```
 
-Also perform the manual architecture audit required by `validation.bd` whenever the milestone changes stage ownership, HIR, diagnostics, types, provider binding, graph scheduling or backend handoff.
+Also perform the manual architecture audit required by `validation.mtf` whenever the milestone changes stage ownership, HIR, diagnostics, types, provider binding, graph scheduling or backend handoff.
 
 A focused command is iteration evidence only. It is not a milestone acceptance gate.
 
-Documentation-only slices use the documentation release-build gate from `validation.bd` and do not claim full compiler validation.
+Documentation-only slices use the documentation release-build gate from `validation.mtf` and do not claim full compiler validation.
 
 ## Final architecture acceptance
 

@@ -78,9 +78,9 @@ Implementation is not automatically language design. When accepted design and cu
 
 | Source | Responsibility |
 |---|---|
-| Unsuffixed focused `.bd` files | Complete Advanced source syntax and observable semantics |
-| Paired `-basic.bd` files | Beginner teaching consistent with Advanced |
-| Public `#page.bst` files | Composition, introductions, ordering, navigation and presentation |
+| Unsuffixed focused `.mtf` files | Complete Advanced source syntax and observable semantics |
+| Paired `-basic.mtf` files | Beginner teaching consistent with Advanced |
+| Public `#page.moth` files | Composition, introductions, ordering, navigation and presentation |
 | `docs/language-overview.md` | Maintained parity baseline until authority switch |
 | Focused language index | Routing map to every final focused owner |
 | Memory references | Formal alias, lifetime, ownership and backend-neutral memory rules |
@@ -143,7 +143,7 @@ When Stage B lands, remove the temporary implementation-gap note and update the 
 
 ### 3.6 Editing constraints
 
-- Follow `docs/src/docs/codebase/style-guide/style-guide.bd`.
+- Follow `docs/src/docs/codebase/style-guide/style-guide.mtf`.
 - Use straight apostrophes.
 - Avoid em dashes.
 - Use exact Moth syntax.
@@ -253,7 +253,7 @@ An unknown bare name in choice pattern position is an unknown choice variant. A 
 
 ### 4.6 Moth Templates implicit scope does not shadow
 
-A `.bd` body may receive implicit compile-time constants from:
+A `.mtf` body may receive implicit compile-time constants from:
 
 - the HTML builder package
 - its same-directory module root public surface
@@ -309,17 +309,17 @@ Perform a repository-wide review for every accepted decision in section 4.
 At minimum review and correct:
 
 ```text
-docs/src/docs/language-overview/strings-and-characters.bd
-docs/src/docs/language-overview/strings-and-characters-basic.bd
-docs/src/docs/numbers/operators.bd
-docs/src/docs/numbers/operators-basic.bd
+docs/src/docs/language-overview/strings-and-characters.mtf
+docs/src/docs/language-overview/strings-and-characters-basic.mtf
+docs/src/docs/numbers/operators.mtf
+docs/src/docs/numbers/operators-basic.mtf
 docs/src/docs/functions/**
-docs/src/docs/choices/choice-equality.bd
-docs/src/docs/errors/options.bd
-docs/src/docs/collections/hash-maps.bd
+docs/src/docs/choices/choice-equality.mtf
+docs/src/docs/errors/options.mtf
+docs/src/docs/collections/hash-maps.mtf
 docs/src/docs/templates/**
 docs/src/docs/generics/**
-docs/src/docs/traits/generic-trait-bounds.bd
+docs/src/docs/traits/generic-trait-bounds.mtf
 docs/src/docs/packages/core/**
 docs/language-overview.md
 docs/compiler-design-overview.md
@@ -407,7 +407,7 @@ Delete temporary probes before completion.
 
 The public route exists. Its Advanced content is not yet complete enough to replace the monolith's source-facing memory section.
 
-#### `reference-semantics.bd`
+#### `reference-semantics.mtf`
 
 Ensure it covers:
 
@@ -419,7 +419,7 @@ Ensure it covers:
 
 Do not reproduce borrow-checker algorithms or side-table layouts.
 
-#### `copy-and-exclusive-access.bd`
+#### `copy-and-exclusive-access.mtf`
 
 Ensure it covers:
 
@@ -435,7 +435,7 @@ Ensure it covers:
 - fresh values satisfying ordinary mutable parameters without source `~`
 - temporaries remaining invalid mutable receivers
 
-#### `lifetimes-and-result-shapes.bd`
+#### `lifetimes-and-result-shapes.mtf`
 
 Add the source-facing contract for:
 
@@ -458,7 +458,7 @@ Keep region-solving algorithms and compiler artefact details in the formal memor
 
 Correct the Basic statement that every fresh value is independent. A fresh root may retain legal references. `copy` provides an independent graph.
 
-#### `declared-memory-groups.bd`
+#### `declared-memory-groups.mtf`
 
 Preserve the complete accepted source contract, including:
 
@@ -514,13 +514,13 @@ The route scaffolding exists, but the final source-facing surface is incomplete.
 
 Provide complete Advanced ownership for:
 
-- self-contained `config.bst`
+- self-contained `config.moth`
 - direct project `#Import`
 - source `#Import`
 - `@project`
 - entry-local `config:` blocks
-- normal `#*.bst` module roots
-- API-only `+*.bst` support roots
+- normal `#*.moth` module roots
+- API-only `+*.moth` support roots
 - the project package facade
 - active versus dormant normal-root work
 - directory-based routes and builder-owned artefacts
@@ -533,14 +533,14 @@ Provide complete Advanced ownership for:
 Split concepts when a direct-readable Advanced file would otherwise become dense. Suggested pairs remain:
 
 ```text
-build-inputs.bd
-build-inputs-basic.bd
+build-inputs.mtf
+build-inputs-basic.mtf
 
-entry-config.bd
-entry-config-basic.bd
+entry-config.mtf
+entry-config-basic.mtf
 
-project-package-facade.bd
-project-package-facade-basic.bd
+project-package-facade.mtf
+project-package-facade-basic.mtf
 ```
 
 Correct every claim that support-root runtime work or fragments merely remain inactive. Support roots and the project package facade reject top-level runtime work and page fragments.
@@ -603,7 +603,7 @@ Basic should explain the language's bias without reproducing the complete exclus
 Update:
 
 ```text
-docs/src/docs/codebase/language/overview.bd
+docs/src/docs/codebase/language/overview.mtf
 ```
 
 It must list the new Memory and Design Scope owners and every completed focused route.

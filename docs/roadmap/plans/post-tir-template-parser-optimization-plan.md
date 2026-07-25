@@ -26,10 +26,10 @@ ACTIVATION_GATE: representative profiling or counters must identify a material b
   neutral HIR boundary
 - `docs/build-system-design.md` for canonical source/module identity, fingerprints, dependency
   graphs, incremental compilation and output ownership
-- `docs/src/docs/codebase/style-guide/style-guide.bd`, `testing.bd` and `validation.bd`
-- `docs/src/docs/codebase/memory-management/overview.bd` and selected leaves when source slices,
+- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/src/docs/codebase/memory-management/overview.mtf` and selected leaves when source slices,
   arenas or borrowed storage change lifetime or ownership
-- `docs/src/docs/progress/#page.bst` for current support and backend coverage
+- `docs/src/docs/progress/#page.moth` for current support and backend coverage
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for stable source and
   module identities required by persistent reuse
 - `docs/roadmap/plans/html_project_backend_wasm_final_implementation_plan.md` for backend output and
@@ -107,7 +107,7 @@ every semantic input relevant to that result. Depending on the owner, this inclu
 
 - stable project, package, module and source identity
 - source content digest and relevant source spans or token ranges
-- source kind (`.bst`, Moth Templates or raw Markdown) and parser grammar/version
+- source kind (`.moth`, Moth Templates or raw Markdown) and parser grammar/version
 - formatter identity/version, directive registry fingerprint, whitespace policy and formatting
   configuration
 - exact template root, phase and full view context for AST-local fold reuse

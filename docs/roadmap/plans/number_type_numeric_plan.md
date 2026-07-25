@@ -26,8 +26,8 @@ IMPLEMENTATION_SCOPE: frontend types, AST folding, HIR numeric ops, JS lowering,
 - `docs/compiler-design-overview.md` for numeric ownership, HIR numeric domain, target validation and per-function link facts
 - `docs/build-system-design.md` for build-owned target assignment and root selection
 - `docs/language-overview.md` for source syntax
-- `docs/src/docs/codebase/style-guide/style-guide.bd`, `testing.bd` and `validation.bd`
-- `docs/src/docs/progress/#page.bst` for current support
+- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/src/docs/progress/#page.moth` for current support
 
 ## Required architecture alignment
 

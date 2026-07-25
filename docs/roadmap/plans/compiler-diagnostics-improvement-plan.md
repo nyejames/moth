@@ -12,7 +12,7 @@ This is an implementation plan, not a research backlog. Each phase should leave 
 
 - `docs/compiler-design-overview.md` for diagnostic lanes, type rendering and stage ownership
 - `docs/build-system-design.md` when config, graph or output diagnostics are in scope
-- `docs/src/docs/codebase/style-guide/style-guide.bd`, `testing.bd` and `validation.bd`
+- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 
 ## Architecture alignment
 
@@ -1137,7 +1137,7 @@ Labels:
 
 Use the same opening-location support for truncated template heads, bodies and nested templates. Do not create separate ad hoc EOF strings for each parser.
 
-### 6.3 Bind `@bst.sig` to the nearest JavaScript declaration
+### 6.3 Bind `@moth.sig` to the nearest JavaScript declaration
 
 **Original finding:** DIAG-042
 
@@ -1146,16 +1146,16 @@ The annotation scanner currently sees only supported exports, so an annotation b
 #### Implementation
 
 - Scan an ordered stream of supported exported declarations and supported-looking unexported declarations.
-- Bind `@bst.sig` only to the nearest following top-level declaration.
+- Bind `@moth.sig` only to the nearest following top-level declaration.
 - Permit only whitespace and comments between annotation and declaration.
 - Add a typed external-JS reason `MissingExportKeyword`.
 - For a plain function:
 
-  > `@bst.sig` for `add` applies to JavaScript function `add`, but the function is not exported. Add `export` before `function`.
+  > `@moth.sig` for `add` applies to JavaScript function `add`, but the function is not exported. Add `export` before `function`.
 
 - For a block-bodied arrow:
 
-  > `@bst.sig` for `add` applies to JavaScript constant `add`, but it is not exported. Add `export` before `const`.
+  > `@moth.sig` for `add` applies to JavaScript constant `add`, but it is not exported. Add `export` before `const`.
 
 - Consume the matched unexported declaration after reporting so the annotation cannot drift.
 - Keep a separate orphaned-annotation reason when no supported declaration follows.

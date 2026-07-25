@@ -187,9 +187,9 @@ body {
                 ),
                 linear-gradient(
                     145deg,
-                    #0c1711 0%,
-                    #1b2019 48%,
-                    #081b06 100%
+                    #050d1b 0%,
+                    #0a0a17 48%,
+                    #0d1a31 100%
                 );
 
             background-repeat: no-repeat;
@@ -211,10 +211,10 @@ body {
                 ),
                 linear-gradient(
                     145deg,
-                    #dcf9d3 0%,
-                    #f5f5f5 27%,
-                    #e6f2e6 86%,
-                    #ade8cd 100%
+                    #abd7ed 0%,
+                    #eff6ff 23%,
+                    #cde3ff 83%,
+                    #bac9ff 100%
                 );
 
             background-repeat: no-repeat;
@@ -222,7 +222,11 @@ body {
     }
 
     a {
-        color: light-dark(hsl(217, 83%, 39%), hsl(217, 82%, 67%));
+        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    }
+
+    h1 {
+        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
     }
 
     .container {
@@ -244,7 +248,7 @@ body {
         padding: 1em;
         overflow-x: auto;
         border-radius: 5px;
-        background-color: #262626fc;
+        background-color: #151515e9;
     }
 
     table {
@@ -326,7 +330,6 @@ body {
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -338,10 +341,10 @@ body {
                     font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
+                    color: light-dark( #234970, #97b7ef );
                 "
             >ʚĭɞ</span>
 
-            <span>Moth</span>
         </a>
 
         <div
@@ -447,7 +450,6 @@ body {
 
     </table><p>The intended model is:</p><p>&gt; Async is structured control flow plus safe message passing.</p></section>
     <section class="container"><h1>Channels</h1><p>Coroutines should not share mutable state by default.</p><p>Instead, they communicate by sending values through typed channels.</p><p>A channel is created with <code>Channel</code>, which takes a carried value type and returns two endpoints:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -457,7 +459,6 @@ body {
     reader, writer <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Channel</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><p>In this example:</p><ul><li><code>writer</code> is the sending endpoint</li><li><code>reader</code> is the receiving endpoint</li><li>the channel carries values of type <code>Int</code></li></ul><p>You can think of this as a one-way pipe for values of a specific type.</p></section>
     <section class="container"><h1>Sending values</h1><p>Values are sent into a channel with <code>&gt;&gt;</code>.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -467,7 +468,6 @@ body {
     value <span class='moth-code-operator'>&gt;</span><span class='moth-code-operator'>&gt;</span> writer
     </code></pre><p>The value flows to the right into the channel.</p><p>Sending may suspend the current coroutine if the receiver is not ready.</p><p>This is an intentional visible suspension point.</p></section>
     <section class="container"><h1>Receiving values</h1><p>Values are received from a channel with <code>&lt;&lt;</code>.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -477,7 +477,6 @@ body {
     value <span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>&lt;</span> reader
     </code></pre><p>The value flows left out of the channel and is assigned to <code>value</code>.</p><p>Receiving may suspend the current coroutine until a value is available.</p><p>Like sending, this is a visible suspension point.</p></section>
     <section class="container"><h1>Coroutines</h1><p>A coroutine is a function that can suspend and resume execution.</p><p>Coroutines are started with <code>spawn</code> and must run inside an <code>async</code> scope.</p><p>Example coroutine functions:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -499,7 +498,6 @@ body {
     ;
     </code></pre><p>In this example:</p><ul><li><code>producer</code> sends integers into the channel</li><li><code>consumer</code> receives and prints them</li><li>neither coroutine shares mutable memory directly</li><li>all interaction happens through the channel</li></ul></section>
     <section class="container"><h1>Yield</h1><p><code>yield</code> explicitly suspends the current coroutine and allows other coroutines to run.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -508,7 +506,6 @@ body {
     "><code class='codeblock'>
     yield
     </code></pre><p>This is a cooperative pause point.</p><p>It does not block the whole program. It tells the scheduler that the current coroutine is ready to let something else run.</p><p>Example:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -524,7 +521,6 @@ body {
     ;
     </code></pre><p>Here, <code>yield</code> prevents one long-running coroutine from starving others.</p><p>Suspension is always visible in the code.</p><p>There are no hidden pause points.</p></section>
     <section class="container"><h1>Structured async scopes</h1><p>Coroutines run inside an <code>async</code> scope.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -535,7 +531,6 @@ body {
         ...
     ;
     </code></pre><p>An <code>async</code> scope means:</p><ul><li>coroutines may be spawned inside the scope</li><li>suspension is allowed inside the scope</li><li>channel send and receive operations may suspend inside the scope</li><li>spawned coroutines are bounded by the scope</li><li>no detached background task can silently outlive its data</li></ul><p>Example:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -556,7 +551,6 @@ body {
     <section class="container"><h1>Why not viral async types?</h1><p>Moth should avoid making async infect every function type by default.</p><p>The draft model does not rely on a special <code>Future[T]</code> return type everywhere, and it does not require every caller to become async just because one operation may suspend.</p><p>Instead:</p><ul><li>suspension is only valid in async-capable contexts</li><li>suspension points are explicit</li><li>channels make communication visible</li><li>spawned work is scoped</li><li>the compiler can reject unsafe use across scope boundaries</li></ul><p>The goal is not to hide async.</p><p>The goal is to make async local and visible.</p></section>
     <section class="container"><h1>Safety model</h1><p>The async model should preserve Moth&#39;s normal safety rules.</p><p>Async code should not allow:</p><ul><li>data races</li><li>dangling references into completed scopes</li><li>detached tasks that keep using local state</li><li>hidden mutable sharing between coroutines</li><li>unbounded background work by default</li></ul><p>Channels are the main communication primitive because they give the compiler a clear place to reason about ownership, borrowing, and transfer.</p><p>Mutable shared state may be possible later through specific safe abstractions, but it should not be the default async model.</p></section>
     <section class="container"><h1>Full example</h1><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;

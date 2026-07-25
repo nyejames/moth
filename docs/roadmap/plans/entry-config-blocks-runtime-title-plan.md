@@ -31,8 +31,8 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 - `docs/compiler-design-overview.md` for header syntax preparation, AST folding, module artefact metadata and target validation
 - `docs/build-system-design.md` for entry-local `config:` block placement rules, section schemas and entry assembly
 - `docs/language-overview.md` for source syntax
-- `docs/src/docs/codebase/style-guide/style-guide.bd`, `testing.bd` and `validation.bd`
-- `docs/src/docs/progress/#page.bst` for current support
+- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/src/docs/progress/#page.moth` for current support
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for the module graph
 - `docs/roadmap/plans/import_values_anonymous_records_plan.md` for config schemas and `@project`
 
@@ -45,7 +45,7 @@ The block is not an isolated config compilation unit. It uses ordinary module vi
 Placement and cardinality:
 - valid only at the top level of a normal module root
 - at most one block per normal root
-- invalid in normal non-root files, support roots, the project package facade, inside `export:`, inside executable bodies, and in `config.bst`
+- invalid in normal non-root files, support roots, the project package facade, inside `export:`, inside executable bodies, and in `config.moth`
 
 Block contents:
 - section records only
@@ -164,7 +164,7 @@ See `docs/build-system-design.md` "Entry-local config: blocks" placement rules.
 - Capture the block body with original source file identity, token or source locations and block start location.
 - Ensure block tokens are not emitted as normal module headers, constants, exports, `start` body tokens or page fragments.
 - Enforce one block per normal module root. A second block is a structured duplicate-block diagnostic.
-- Reject `config:` in normal non-root files, support roots, the project facade, inside `export:`, inside executable bodies and in `config.bst`.
+- Reject `config:` in normal non-root files, support roots, the project facade, inside `export:`, inside executable bodies and in `config.moth`.
 - Reject nested `config:` blocks.
 - Reject malformed or missing colon and unterminated forms.
 - Use one canonical normal-root parse path: every selected normal module captures its own optional block whether it later becomes an entry or is imported by another module.

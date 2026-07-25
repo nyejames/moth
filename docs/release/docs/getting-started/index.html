@@ -187,9 +187,9 @@ body {
                 ),
                 linear-gradient(
                     145deg,
-                    #0c1711 0%,
-                    #1b2019 48%,
-                    #081b06 100%
+                    #050d1b 0%,
+                    #0a0a17 48%,
+                    #0d1a31 100%
                 );
 
             background-repeat: no-repeat;
@@ -211,10 +211,10 @@ body {
                 ),
                 linear-gradient(
                     145deg,
-                    #dcf9d3 0%,
-                    #f5f5f5 27%,
-                    #e6f2e6 86%,
-                    #ade8cd 100%
+                    #abd7ed 0%,
+                    #eff6ff 23%,
+                    #cde3ff 83%,
+                    #bac9ff 100%
                 );
 
             background-repeat: no-repeat;
@@ -222,7 +222,11 @@ body {
     }
 
     a {
-        color: light-dark(hsl(217, 83%, 39%), hsl(217, 82%, 67%));
+        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    }
+
+    h1 {
+        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
     }
 
     .container {
@@ -244,7 +248,7 @@ body {
         padding: 1em;
         overflow-x: auto;
         border-radius: 5px;
-        background-color: #262626fc;
+        background-color: #151515e9;
     }
 
     table {
@@ -599,7 +603,6 @@ body {
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -611,10 +614,10 @@ body {
                     font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
+                    color: light-dark( #234970, #97b7ef );
                 "
             >ʚĭɞ</span>
 
-            <span>Moth</span>
         </a>
 
         <div
@@ -669,7 +672,6 @@ body {
         </div>
     </nav>
     <section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with moth</h1><p><code>moth</code> is the Moth compiler and project tool. You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.</p><p>It has a bunch of other tooling that is under rapid developemnt.</p><p>If you are running the compiler from the repository instead of an installed <code>moth</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -779,7 +781,6 @@ body {
 
     </table></section>
     <section class="container"><h2>Create a new HTML project</h2><p>The scaffold creates a complete default project including config, a starter page, package folder, output folders with build manifests, and an optional .gitignore. The HTML project builder itself has more rules than this page needs to cover; see <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments, and generated output details.</p><p>Start a new project:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -790,7 +791,6 @@ body {
     moth new html my<span class='moth-code-operator'>-</span>site
     moth new html <span class='moth-code-operator'>~</span><span class='moth-code-operator'>/</span>projects<span class='moth-code-operator'>/</span>my<span class='moth-code-operator'>-</span>site
     </code></pre><p>If you omit the path, moth asks for confirmation in the current directory:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -800,7 +800,6 @@ body {
             No project path specified. Current directory: /your/path
             Create the new HTML project in this directory? y/N:
         </code></pre><p>If the target directory already exists, you are given three choices:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -817,7 +816,6 @@ body {
 
             Choose 1/2/3:
         </code></pre><p>If the path contains directories that do not exist, moth asks before creating them:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -829,7 +827,6 @@ body {
 
     <span class='moth-code-struct'>Create</span> the missing directories and scaffold the project there<span class='moth-code-operator'>?</span> y<span class='moth-code-operator'>/</span><span class='moth-code-struct'>N</span><span class='moth-code-operator'>:</span>
     </code></pre><p>After the final directory is chosen, moth asks for the project name:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -838,7 +835,6 @@ body {
     "><code class='codeblock'>
     <span class='moth-code-struct'>Project</span> name <span class='moth-code-parenthesis'>(</span>press <span class='moth-code-struct'>Enter</span> to use project directory name<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span>
     </code></pre><p>Then it asks whether to add a .gitignore with Moth defaults:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -847,7 +843,6 @@ body {
     "><code class='codeblock'>
     <span class='moth-code-struct'>Add</span> a .gitignore with <span class='moth-code-struct'>Moth</span> defaults<span class='moth-code-operator'>?</span> <span class='moth-code-struct'>Y</span><span class='moth-code-operator'>/</span>n<span class='moth-code-operator'>:</span>
     </code></pre><p>If .gitignore already exists, moth asks whether to append missing defaults instead of overwriting.</p><h3>Generated project structure</h3><p>A scaffolded project looks like this:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -865,7 +860,6 @@ body {
         │   └── .moth_manifest
         └── .gitignore
     </code></pre><ul><li><code>lib/</code> is created empty by default for project-local source-backed packages.</li><li><code>dev/</code> and <code>release/</code> are output folders.</li><li>.moth_manifest files are build-system metadata for safe stale-output cleanup.</li><li><code>src/#page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -874,7 +868,6 @@ body {
     "><code class='codeblock'>
     moth new html my<span class='moth-code-operator'>-</span>site <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>force
     </code></pre><p>It still asks for a second confirmation and never overwrites .gitignore or unrelated files.</p><p>After creation, check and run the project:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -886,7 +879,6 @@ body {
     moth dev .
     </code></pre></section>
     <section class="container"><h2>Run the dev server</h2><p><code>dev</code> is currently the most useful command for normal Moth project work. It builds the project, serves the generated files locally, watches for source changes, and sends reload events to the browser.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -895,7 +887,6 @@ body {
     "><code class='codeblock'>
     moth dev .
     </code></pre><p>By default, open:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -904,7 +895,6 @@ body {
     "><code class='codeblock'>
             http://127.0.0.1:6342/
         </code></pre><p>Useful dev-server options:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -916,7 +906,6 @@ body {
     moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>poll<span class='moth-code-operator'>-</span>interval<span class='moth-code-operator'>-</span>ms <span class='moth-code-number'>100</span>
     </code></pre><p>When a build fails, fix the reported error and save again. The dev server is designed around fast feedback rather than a manual rebuild loop.</p></section>
     <section class="container"><h2>Build a project</h2><p>Use <code>build</code> when you want files written to disk without running the dev server.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -925,7 +914,6 @@ body {
     "><code class='codeblock'>
     moth build .
     </code></pre><p>For a release build:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -935,7 +923,6 @@ body {
     moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release
     </code></pre><p>For HTML projects, generated files are written under the configured output folder. The default scaffold currently uses <code>dev</code> for development output and <code>release</code> for release output.</p></section>
     <section class="container"><h2>Check without building</h2><p><code>check</code> is the fastest correctness command for editor loops and CI-style validation. It does not write output artifacts, but it still runs the shared frontend diagnostics used by all backends.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -944,7 +931,6 @@ body {
     "><code class='codeblock'>
     moth check .
     </code></pre><p>Use terse mode when another tool will read the output:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -953,7 +939,6 @@ body {
     "><code class='codeblock'>
     moth check . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>terse
     </code></pre><p>Terse diagnostics have a stable compact shape:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -964,7 +949,6 @@ body {
             W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch
         </code></pre></section>
     <section class="container"><h2>Reading compiler errors</h2><p>Moth uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors, and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -1042,7 +1026,6 @@ body {
 
     </table></section>
     <section class="container"><h2>Warnings and future suggestions</h2><p>Warnings are for code that can still compile but deserves attention. Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues, and import alias case mismatches.</p><p>Moth deliberately separates correctness from style pressure. The future <code>suggest</code> command is planned to become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code. That is where noisy suggestions such as unused variables, unused imports, unused declarations, and more specific style improvements should live.</p><p>The intended workflow will be:</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;

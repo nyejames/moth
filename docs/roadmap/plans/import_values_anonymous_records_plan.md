@@ -31,8 +31,8 @@ This plan must complete before entry-local config blocks.
 - `docs/compiler-design-overview.md` for frontend stages, synthetic interfaces and AST folding
 - `docs/build-system-design.md` for config bootstrap, `@project`, source `#Import` contracts, section schemas and output ownership
 - `docs/language-overview.md` for source syntax
-- `docs/src/docs/codebase/style-guide/style-guide.bd`, `testing.bd` and `validation.bd`
-- `docs/src/docs/progress/#page.bst` for current support
+- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/src/docs/progress/#page.moth` for current support
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for the module graph this plan builds on
 
 ## Delete rejected design
@@ -56,10 +56,10 @@ Remove every statement that says:
 
 ## Accepted config design
 
-See `docs/build-system-design.md` "Self-contained config.bst", "Project record", "Builder and tooling sections" and "Entry-local config: blocks" for full contracts.
+See `docs/build-system-design.md` "Self-contained config.moth", "Project record", "Builder and tooling sections" and "Entry-local config: blocks" for full contracts.
 
 - command and builder selected before config schema validation (see "Selected command and capability surface")
-- one authored `config.bst` with no source imports or package resolution
+- one authored `config.moth` with no source imports or package resolution
 - one required open `project` record
 - private helper constants declared before use
 - top-level builder and tooling records
@@ -205,7 +205,7 @@ See `docs/build-system-design.md` "Builder and tooling sections" for the section
 
 Context: accepted design is one authored config source identity with no source imports.
 
-See `docs/build-system-design.md` "Self-contained config.bst" for the full contract.
+See `docs/build-system-design.md` "Self-contained config.moth" for the full contract.
 
 - Config bootstrap operates on exactly one authored source identity.
 - Delete the package resolver, config import graph, config source set and any second project source scan.
@@ -298,7 +298,7 @@ Context: the refactor is not complete while old flat config, builder selector or
 
 Context: documentation and scaffolding must teach the accepted config model.
 
-- Update `moth new` scaffold `config.bst` output to the grouped record shape with `project` record, builder sections and direct `#Import` fields.
+- Update `moth new` scaffold `config.moth` output to the grouped record shape with `project` record, builder sections and direct `#Import` fields.
 - Update all integration fixtures containing old flat hidden keys.
 - Update `docs/language-overview.md` with config, `#Import` and anonymous record source semantics.
 - Update project-structure and imported-build-values source pages.
@@ -350,7 +350,7 @@ Cover:
 - update `docs/language-overview.md` with config, `#Import` and anonymous record source semantics
 - update `docs/build-system-design.md` only if a durable config contract is confirmed missing
 - update project-structure and imported-build-values source pages
-- update scaffold `config.bst` output
+- update scaffold `config.moth` output
 - progress matrix rows: anonymous records, imported build values, grouped project config, `@project`, deferred input syntaxes
 
 ## Validation requirements

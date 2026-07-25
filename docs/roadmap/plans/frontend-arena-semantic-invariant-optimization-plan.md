@@ -366,9 +366,9 @@ samply record ./target/profiling/moth build docs --release
 Targeted fixture examples:
 
 ```bash
-samply record ./target/profiling/moth check benchmarks/template-stress.bst
-samply record ./target/profiling/moth check benchmarks/environment-stress.bst
-samply record ./target/profiling/moth check benchmarks/adversarial/one-module-kitchen-sink.bst
+samply record ./target/profiling/moth check benchmarks/template-stress.moth
+samply record ./target/profiling/moth check benchmarks/environment-stress.moth
+samply record ./target/profiling/moth check benchmarks/adversarial/one-module-kitchen-sink.moth
 ```
 
 ### Regression threshold
@@ -494,8 +494,8 @@ function-level attribution.
   - [x] `just profile-build`, or `cargo build --profile profiling --features detailed_timers` if needed.
 - [x] Record baseline Samply profiles:
   - [x] `samply record ./target/profiling/moth build docs --release`;
-  - [x] one targeted profile for existing `template-stress.bst`;
-  - [x] one targeted profile for existing `environment-stress.bst`.
+  - [x] one targeted profile for existing `template-stress.moth`;
+  - [x] one targeted profile for existing `environment-stress.moth`.
 - [x] Summarize top findings in `benchmarks/frontend-optimization-results.md`:
   - [x] top stage timings;
   - [x] top counters;
@@ -659,13 +659,13 @@ fixtures are clearer as static source inputs.
 
 - [x] Add a `benchmarks/adversarial/` directory.
 - [x] Add static committed fixtures first:
-  - [x] `one-module-kitchen-sink.bst` — many constructs in one module to stress combined AST/environment/type/template paths.
-  - [x] `deep-scope-churn.bst` — nested functions/control/value blocks/templates to stress scope frame creation and lookup.
-  - [x] `template-render-plan-churn.bst` — nested templates, slots, `$children`, `$md`, runtime template control flow.
-  - [x] `constant-dag-churn.bst` — many constants, cross-constant references, folded templates, arithmetic trees.
-  - [x] `expression-rpn-churn.bst` — large expressions, casts, operators, value-producing blocks at valid receiving sites.
-  - [x] `generic-trait-churn.bst` — generic functions/types, trait bounds, conformances, concrete instantiations.
-  - [x] `collection-map-borrow-churn.bst` — collections, maps, mutable access, fallible operations, borrow-valid aliases.
+  - [x] `one-module-kitchen-sink.moth` — many constructs in one module to stress combined AST/environment/type/template paths.
+  - [x] `deep-scope-churn.moth` — nested functions/control/value blocks/templates to stress scope frame creation and lookup.
+  - [x] `template-render-plan-churn.moth` — nested templates, slots, `$children`, `$md`, runtime template control flow.
+  - [x] `constant-dag-churn.moth` — many constants, cross-constant references, folded templates, arithmetic trees.
+  - [x] `expression-rpn-churn.moth` — large expressions, casts, operators, value-producing blocks at valid receiving sites.
+  - [x] `generic-trait-churn.moth` — generic functions/types, trait bounds, conformances, concrete instantiations.
+  - [x] `collection-map-borrow-churn.moth` — collections, maps, mutable access, fallible operations, borrow-valid aliases.
   - [x] `import-external-churn/` — project fixture with import fanout and repeated external package usage.
 
 - [x] Keep fixtures representative; do not add many near-duplicates.
@@ -681,7 +681,7 @@ fixtures are clearer as static source inputs.
 - [x] Ensure benchmark groups remain readable.
 - [x] Run `just bench-frontend-check`.
 - [x] Run `just bench-check`.
-- [x] Run targeted Samply profile for `one-module-kitchen-sink.bst` after it is added.
+- [x] Run targeted Samply profile for `one-module-kitchen-sink.moth` after it is added.
 - [x] Run `just validate` before committing the accepted slice.
 
 ### Backtrack criteria
@@ -868,9 +868,9 @@ Use the current module shape if it differs, but keep arena internals out of high
 - [x] Run `just validate`.
 - [x] Run five repeated frontend benchmark invocations and compare medians.
 - [x] Run targeted Samply profiles for:
-  - [x] `environment-stress.bst`;
-  - [x] `deep-scope-churn.bst`;
-  - [x] `one-module-kitchen-sink.bst`.
+  - [x] `environment-stress.moth`;
+  - [x] `deep-scope-churn.moth`;
+  - [x] `one-module-kitchen-sink.moth`.
 
 ### Backtrack criteria
 
@@ -900,10 +900,10 @@ frontend and end-to-end benchmark invocations showed no measurable regression.
 
 - [x] Record estimate-vs-actual data for scope frames across:
   - [x] docs build;
-  - [x] `environment-stress.bst`;
-  - [x] `template-stress.bst`;
-  - [x] `deep-scope-churn.bst`;
-  - [x] `one-module-kitchen-sink.bst`;
+  - [x] `environment-stress.moth`;
+  - [x] `template-stress.moth`;
+  - [x] `deep-scope-churn.moth`;
+  - [x] `one-module-kitchen-sink.moth`;
   - [x] import/module fixtures.
 
 - [x] Add reported ratios behind detailed timers:
@@ -952,7 +952,7 @@ until a future report shows expression-specific pressure.
 
 - [ ] Samply or counters show meaningful expression allocation/clone pressure. Phase 5 evidence
       and the Phase 6 gate profile did not establish this for a broad expression arena pilot.
-- [ ] `expression-rpn-churn.bst` or real docs/build profiles show expression paths as top movers.
+- [ ] `expression-rpn-churn.moth` or real docs/build profiles show expression paths as top movers.
       Phase 5 and gate reports point first at file preparation and docs AST emission instead.
 - [x] Phase 4 and 5 are complete and stable.
 
@@ -1020,7 +1020,7 @@ sketch.
 
 - [ ] Samply or counters show template/render-plan clone/allocation pressure after earlier phases.
       Gate profiles did not isolate this pressure.
-- [ ] `template-stress.bst`, `template-render-plan-churn.bst`, or docs profiles show template paths
+- [ ] `template-stress.moth`, `template-render-plan-churn.moth`, or docs profiles show template paths
       as top movers. Docs shows AST emit/finalize pressure, but not yet template/render-plan
       clone pressure specifically.
 - [ ] Existing template semantics and goldens are stable.

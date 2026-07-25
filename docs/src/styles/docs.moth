@@ -42,9 +42,9 @@ theme_css #= [docs_font, $css:
                 ),
                 linear-gradient(
                     145deg,
-                    #0c1711 0%,
-                    #1b2019 48%,
-                    #081b06 100%
+                    #050d1b 0%,
+                    #0a0a17 48%,
+                    #0d1a31 100%
                 );
 
             background-repeat: no-repeat;
@@ -66,10 +66,10 @@ theme_css #= [docs_font, $css:
                 ),
                 linear-gradient(
                     145deg,
-                    #dcf9d3 0%,
-                    #f5f5f5 27%,
-                    #e6f2e6 86%,
-                    #ade8cd 100%
+                    #abd7ed 0%,
+                    #eff6ff 23%,
+                    #cde3ff 83%,
+                    #bac9ff 100%
                 );
 
             background-repeat: no-repeat;
@@ -77,7 +77,11 @@ theme_css #= [docs_font, $css:
     }
 
     a {
-        color: light-dark(hsl(217, 83%, 39%), hsl(217, 82%, 67%));
+        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    }
+
+    h1 {
+        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
     }
     
     .container {
@@ -99,7 +103,7 @@ theme_css #= [docs_font, $css:
         padding: 1em;
         overflow-x: auto;
         border-radius: 5px;
-        background-color: #262626fc;
+        background-color: #151515e9;
     }
 
     table {
@@ -174,7 +178,7 @@ theme_css #= [docs_font, $css:
 
 Palette = |
     red String = [$html:<span style="color: light-dark(hsl(0, 84%, 35%), hsl(0, 73%, 65%));">[$slot]</span>],
-    highlight String = [$html:<span style="color: light-dark(hsl(43, 98%, 21%), hsl(110, 62%, 66%));">[$slot]</span>],
+    highlight String = [$html:<span style="color: light-dark(hsl(254, 86%, 42%), hsl(184, 85%, 76%));">[$slot]</span>],
 |
 
 palette #= Palette()
@@ -588,7 +592,6 @@ navbar #= [$html:
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -600,10 +603,10 @@ navbar #= [$html:
                     font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
+                    color: light-dark( #234970, #97b7ef );
                 "
             >ʚĭɞ</span>
 
-            <span>Moth</span>
         </a>
 
         <div
@@ -693,7 +696,6 @@ data #= [$html:
 
 codeblock #= [$html:
     <pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;

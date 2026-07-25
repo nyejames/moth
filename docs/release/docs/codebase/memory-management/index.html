@@ -187,9 +187,9 @@ body {
                 ),
                 linear-gradient(
                     145deg,
-                    #0c1711 0%,
-                    #1b2019 48%,
-                    #081b06 100%
+                    #050d1b 0%,
+                    #0a0a17 48%,
+                    #0d1a31 100%
                 );
 
             background-repeat: no-repeat;
@@ -211,10 +211,10 @@ body {
                 ),
                 linear-gradient(
                     145deg,
-                    #dcf9d3 0%,
-                    #f5f5f5 27%,
-                    #e6f2e6 86%,
-                    #ade8cd 100%
+                    #abd7ed 0%,
+                    #eff6ff 23%,
+                    #cde3ff 83%,
+                    #bac9ff 100%
                 );
 
             background-repeat: no-repeat;
@@ -222,7 +222,11 @@ body {
     }
 
     a {
-        color: light-dark(hsl(217, 83%, 39%), hsl(217, 82%, 67%));
+        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    }
+
+    h1 {
+        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
     }
 
     .container {
@@ -244,7 +248,7 @@ body {
         padding: 1em;
         overflow-x: auto;
         border-radius: 5px;
-        background-color: #262626fc;
+        background-color: #151515e9;
     }
 
     table {
@@ -326,7 +330,6 @@ body {
                 align-items: center;
                 gap: 0.6rem;
                 padding: 0.9rem 0;
-                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
                 font-weight: 700;
                 letter-spacing: 0.04rem;
@@ -338,10 +341,10 @@ body {
                     font-family: var(--moth-font-family-emoji);
                     font-size: 1.4rem;
                     line-height: 1;
+                    color: light-dark( #234970, #97b7ef );
                 "
             >ʚĭɞ</span>
 
-            <span>Moth</span>
         </a>
 
         <div
@@ -397,7 +400,6 @@ body {
     </nav>
     <section class="container"><p><a href="../">Codebase</a> / Memory management</p><h1>Memory management</h1><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Moth keeps the source model small. Reads are shared, copies are explicit and mutation has to announce itself.</p><p>Borrow validation enforces exclusive mutation and optional transfer safety. Lifetime-region validation enforces one lifetime owner and legal retained edges. A GC representation keeps execution practical while ownership analysis leaves room for future allocation and deterministic-drop optimisations.</p></section>
     <section class="container"><h2>Shared access vs copy</h2><p>Existing values use shared, read-only access by default. Binding a new name to an existing value doesn&#39;t copy it. Use <code>copy</code> when you need an independent value.</p><p>Shared aliases use last-potential-use activity, not pure lexical lifetime. After the final potential use of a shared alias, later mutation may proceed.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -410,7 +412,6 @@ body {
     change<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>items<span class='moth-code-parenthesis'>)</span>       <span class='moth-code-comment'>-- invalid: shared_items is used again</span>
     inspect<span class='moth-code-parenthesis'>(</span>shared_items<span class='moth-code-parenthesis'>)</span>
     </code></pre><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -423,7 +424,6 @@ body {
 
     change<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>items<span class='moth-code-parenthesis'>)</span>       <span class='moth-code-comment'>-- valid: shared_items has no later potential use</span>
     </code></pre><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -437,7 +437,6 @@ body {
     inspect<span class='moth-code-parenthesis'>(</span>copied_items<span class='moth-code-parenthesis'>)</span>
     </code></pre></section>
     <section class="container"><h2>Exclusive access</h2><p><code>~place</code> requests temporary mutation-capable access to an existing mutable place. It isn&#39;t a move marker or a type identity. Fresh rvalues satisfy ordinary mutable parameters without source <code>~</code>. Mutable receivers still require an existing mutable place.</p><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -448,7 +447,6 @@ body {
     </code></pre></section>
     <section class="container"><h2>Lifetime owners</h2><p>Every runtime allocation has exactly one semantic lifetime owner. Multiple bindings or fields may alias that allocation without becoming additional owners.</p><p>An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.</p><p>The compiler rejects illegal sibling sharing and cross-region cycles even under GC. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.</p><p>Declared <code>group</code> / <code>into</code> syntax is accepted end-state design with implementation deferred. See <a href="./declared-memory-groups">Declared memory groups</a> for the source contract and <a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a> for the general topology model.</p></section>
     <section class="container"><h2>How the compiler layers it</h2><pre style="
-        background-color: hsla(0, 0%, 42%, 0.12);
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;

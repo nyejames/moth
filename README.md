@@ -10,8 +10,6 @@
   A language for creating reliable software in elegant codebases
 </em></p>
 
-# ʚĭɞ
- 
 <p>⚠️ This project is in early Alpha ⚠️</p> 
 
 <p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using <a href="https://github.com/nyejames/moth/blob/main/docs/src">Moth</a>. </p>
