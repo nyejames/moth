@@ -43,7 +43,7 @@ Result ::
 ;
 
 Optional ::
-    None,
+    NoneVariant,
     Some | value Int |,
 ;
 
@@ -162,7 +162,7 @@ handle_result |result Result| -> String:
 
 handle_optional |opt Optional| -> String:
     if opt is:
-        None => return "No value"
+        NoneVariant => return "No value"
         Some(value) => return [: Value: [value]]
     ;
 ;
@@ -285,7 +285,7 @@ large_match |value Int| -> String:
 -- Payload capture with guards
 guarded_payload |opt Optional| -> String:
     if opt is:
-        None => return "no value"
+        NoneVariant => return "no value"
         Some(value) if value < 0 => return "negative value"
         Some(value) if value is 0 => return "zero value"
         Some(value) if value < 100 => return "small positive"
@@ -362,7 +362,7 @@ run_pattern_stress ||:
     -- Payload captures
     io.line([: [handle_result(Result::Ok)]])
     io.line([: [handle_result(Result::Err("something went wrong"))]])
-    io.line([: [handle_optional(Optional::None)]])
+    io.line([: [handle_optional(Optional::NoneVariant)]])
     io.line([: [handle_optional(Optional::Some(42))]])
     io.line([: [handle_message(Message::Text("hello"))]])
     io.line([: [handle_message(Message::Pair(10, 20))]])

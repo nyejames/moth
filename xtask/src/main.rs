@@ -27,6 +27,7 @@ mod bench_summary;
 mod bench_system;
 mod bench_time;
 mod bench_types;
+mod bench_validate;
 mod case_parser;
 mod compiler_binary;
 mod frontend_bench;
@@ -36,6 +37,7 @@ mod profile;
 
 use bench::{BenchMode, BenchOptions, run_benchmarks};
 use bench_report::run_benchmark_report;
+use bench_validate::validate_all_benchmarks;
 use frontend_bench::{FrontendBenchMode, FrontendBenchOptions, run_frontend_benchmarks};
 use mode::{BenchmarkMode, ModeParseResult};
 use std::env;
@@ -108,6 +110,9 @@ fn main() {
         BenchmarkMode::BenchProfile(options) => {
             exit_with_result(profile::run_profile_benchmarks(options));
         }
+        BenchmarkMode::BenchValidate => {
+            exit_with_result(validate_all_benchmarks());
+        }
     }
 }
 
@@ -127,6 +132,7 @@ fn print_usage() {
         "  bench-frontend-check Run the focused frontend benchmark suite without writing history"
     );
     eprintln!("  bench-frontend       Run the focused frontend benchmark suite and record");
+    eprintln!("  bench-validate       Validate all benchmark cases compile without errors");
     eprintln!("  bench-profile        Run Samply-backed profiling (use --help for options)");
 }
 

@@ -233,7 +233,7 @@ fn run_frontend_measurements(
     Ok((durations, observations))
 }
 
-fn run_one_frontend_case(case: &BenchmarkCase) -> Result<FrontendBenchmarkReport, String> {
+pub fn run_one_frontend_case(case: &BenchmarkCase) -> Result<FrontendBenchmarkReport, String> {
     if case.args.len() != 1 {
         return Err(format!(
             "Frontend case '{}' must have exactly one path argument",

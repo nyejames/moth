@@ -16,6 +16,12 @@ validate:
     @echo "benchmark check"
     cargo run --package xtask --bin xtask -- bench-check
 
+    @echo "benchmark compilation validate"
+    cargo run --package xtask --bin xtask -- bench-validate
+
+    @echo "frontend benchmark check"
+    cargo run --package xtask --bin xtask -- bench-frontend-check
+
 ship:
     cargo fmt
     just validate
@@ -40,6 +46,9 @@ bench-report:
 
 bench-frontend-check:
     cargo run --package xtask --bin xtask -- bench-frontend-check
+
+bench-validate:
+    cargo run --package xtask --bin xtask -- bench-validate
 
 profile filter="terse":
     cargo run --package xtask --bin xtask -- bench-profile --filter {{filter}}

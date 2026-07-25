@@ -26,6 +26,8 @@ pub enum BenchmarkMode {
     BenchFrontend,
     /// Run the focused frontend benchmark suite without writing history.
     BenchFrontendCheck,
+    /// Validate all benchmark cases compile without errors (no timing).
+    BenchValidate,
     /// Run Samply-backed profiling on benchmark cases.
     BenchProfile(ProfileOptions),
 }
@@ -66,6 +68,7 @@ impl BenchmarkMode {
             "bench-report" => Some(BenchmarkMode::BenchReport),
             "bench-frontend" => Some(BenchmarkMode::BenchFrontend),
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
+            "bench-validate" => Some(BenchmarkMode::BenchValidate),
             _ => None,
         };
 
@@ -107,6 +110,7 @@ impl BenchmarkMode {
             "bench-report" => Some(BenchmarkMode::BenchReport),
             "bench-frontend" => Some(BenchmarkMode::BenchFrontend),
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
+            "bench-validate" => Some(BenchmarkMode::BenchValidate),
             _ => None,
         }
     }
