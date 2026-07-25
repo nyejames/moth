@@ -1,10 +1,8 @@
 <div align="center">
 
-<div style="max-width: 17%;">
+<img src="./docs/assets/moth-logo.webp" width="10%"/>
 
-![Moth logo](./docs/assets/moth-logo.webp)
-
-</div>
+<br>
 
 # Moth
 
@@ -36,13 +34,13 @@ The goal is to provide everything you need. Designed from the ground up to work 
 Web development is the current focus with the home-grown HTML project builder.
 
 
-![Moth code example 1](./docs/assets/code-snippet-2.webp)
+<img src="./docs/assets/code-snippet-2.webp" width="600px"/>
 
 `@html` is the built-in, source-backed Builder package for HTML projects.
 
 The HTML build system will generate an HTML page from this code:
 
-![Moth code example 2](./docs/assets/code-snippet-3.webp)
+<img src="./docs/assets/code-snippet-3.webp" width="600px"/>
 
 <div align="center">
 
@@ -53,7 +51,7 @@ The HTML build system will generate an HTML page from this code:
 Templates are first-class language values in Moth.
 They are the main way you create strings, but are far more powerful than regular string formatters. 
 
-![Moth code snippet](./docs/assets/code-snippet.webp)
+<img src="./docs/assets/code-snippet.webp" width="800px"/>
 
 Moth's custom flavor of Markdown can live inside normal templates, so content can capture values, compose styles and fold straight into HTML at compile time.
 
