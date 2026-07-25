@@ -1,19 +1,21 @@
-# Canonical module compilation and scoped packages recovery implementation plan
+# Canonical module compilation and scoped packages implementation plan
 
 ## Purpose
 
-Continue the canonical-module work from the last accepted implementation checkpoint while correcting the phase order that caused Phase 7 to accumulate producer-side interface fragments without a real provider consumer.
+Continue the canonical-module work from the current accepted checkpoint while correcting the R2 ownership and sequencing problems before implementation resumes.
 
-The target remains unchanged:
+The target remains:
 
 - one canonical semantic compilation per physical module inside one project or package boundary
-- immutable module artefacts with complete public semantic interfaces
-- source-provider binding against completed interfaces rather than donor headers or copied bodies
-- generated functions in project- or package-owned sidecars
+- one deterministic Stage 0 source inventory with no repeated filesystem discovery
+- source preparation, tokenization and header syntax produced at most once per selected source
+- immutable completed provider interfaces rather than copied donor headers, AST or HIR
+- generated concrete functions in build-owned sidecars
 - explicit graph outcomes, entry assemblies, package assemblies and link plans
 - strict scoped support packages and module-root-relative imports
+- small data-oriented owners with dense IDs, contiguous records and no abstraction hierarchy
 
-This document replaces the previous incremental phase sequence at the same path. The accepted implementation through `4a0cd4e01` is retained. The replacement changes what happens next and when incomplete migration owners are deleted.
+This file is a drop-in replacement for the previous plan at the same path. Accepted semantic identity, graph, direct-interface and R2 leaf-value work is retained. The remaining implementation order is replaced.
 
 ## Current state
 
@@ -44,243 +46,872 @@ STOP_REASON: Correction 1 completed parent-direct; ready for next slice assignme
 NEXT_RESUME_ACTION: assign the next audit finding or R2k/R3 slice through the preferred worker path
 ```
 
-Do not append worktree-specific notes, complete validation histories or worker transcripts to this plan. Keep this status block current and concise. Git history is the validation history.
+Do not change this block as part of the plan replacement. Later implementers update its values only after parent acceptance of a slice. Do not append worker transcripts, complete validation logs or worktree journals. Git history is the durable implementation history.
 
-## Required authority documents
+## Required authorities
+
+Read these before every implementation or review phase:
 
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
 - `docs/language-overview.md`
+- `docs/src/docs/codebase/memory-management/overview.mtf`
 - `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`
+- `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`
 - `docs/src/docs/codebase/style-guide/testing.mtf`
 - `docs/src/docs/codebase/style-guide/validation.mtf`
 - `docs/src/docs/progress/#page.moth`
 - downstream config, entry-config and HTML-Wasm plans
 
-The two architecture overviews remain authoritative. This plan fixes implementation order and fills missing ownership details. It does not reopen accepted TIR, language, memory or backend-neutrality decisions.
+The compiler and build-system overviews remain authoritative. This plan owns implementation order, migration boundaries and deletion gates. It must not create a competing language, memory or backend design.
 
-## Architecture checkpoint conclusion
+## Accepted foundation
 
-The accepted Phase 7 work is coherent and should not be reverted:
+Keep the accepted work unless a correction slice below explicitly replaces its owner:
 
-- stable package, module and exported declaration origins
-- canonical closed and open type identities
-- stable exported generic parameter identities
-- canonical generic trait-bound identities
-- total direct-export and direct public-type projection
-- provider-independent prepared syntax
-- deterministic graph identities and wave calculations
-- explicit executable, link and compiler-metadata lanes
-- diagnosed-versus-infrastructure module outcomes
+- stable package, module, declaration, trait, evidence and exported generic identities
+- canonical cross-module type identities
+- provider-independent retained header syntax and structural provider references
+- one Stage 0 `SourceTreeIndex` traversal with module identities and owned source classification
+- the canonical `ProjectModuleGraph` identity, ancestry and dependency-wave model
+- separate successful, diagnosed and infrastructure failure classes
+- explicit executable, link-fact and compiler-metadata lanes
+- the aggregate declaration-centric direct-interface result
+- folded public values and defaults
+- trait requirements, incompatibilities and reusable evidence
+- generic declaration descriptors
+- direct synthetic-interface provenance vocabulary
+- concrete local call-summary vocabulary and borrow-side summary production
 
-The churn is caused by phase order rather than repeated correctness failures.
+Do not recreate these facts under new parallel names.
 
-The current implementation keeps adding donor-independent facts to a transient `CompiledModuleResult`, while the production build still:
+The following accepted implementations are migration scaffolding rather than final ownership:
 
-- compiles per-entry reachable source closures
-- filters graph waves down to normal entry jobs
-- omits support roots and the project facade from semantic compilation
-- reconstructs source public surfaces from headers and `ProjectPathResolver`
-- carries only local `FunctionId` and binding-backed external call targets in HIR
-- performs entry-`start` reachability during module compilation
-- drops the accepted `DefinedPublic*` facts at the legacy `Vec<Module>` handoff
-- materialises generic instances into the requesting module AST
-- retains configured `package_folders`, default `/lib`, `@./` and entry-root fallback paths
+- the current phase-mutable `PublicInterfaceDraft`
+- the current broad AST public-projection handoff
+- duplicate receiver catalog and receiver surface paths
+- the incomplete validated generic-template body store
+- the direct-draft canonical byte encoder
+- per-entry reachable source closures and `ModuleEntryCompileWaves`
+- path-based source import fallback and donor-header binding
+- the flat `Vec<Module>` backend handoff
 
-That is the drift. More independent interface components would deepen it.
+They may be refactored or deleted only through the bounded slices below.
 
-## Locked recovery decisions
+## Course correction
 
-These decisions resolve the Phase 7 ambiguities and bind the replacement plan.
+R1 corrected the module-result shape but did not fully consolidate production. R2 then added many producer-side facts before a real provider consumer existed.
 
-### 1. Aggregate the interface producer now
+The resulting churn has five causes:
 
-No new independent `DefinedPublic*` field may be added to `CompiledModuleResult`.
+1. Direct declarations are still assembled from several complete projection aggregates and rejoined by path, name or origin.
+2. `PublicInterfaceDraft` represents pre-HIR facts, post-borrow facts and future generated facts through mutable pending states.
+3. `Ast` carries transient public projection and generic-template stores that HIR never consumes.
+4. The generic-template artefact is intentionally incomplete, so sidecar requirements keep changing its boundary.
+5. Stage 0 already owns one source-tree traversal, but later per-entry discovery still rescans import graphs, builds duplicate caches and compiles entry closures rather than canonical module jobs.
 
-The accepted export-origin and type-surface projectors, plus the corrected trait-requirement projector, become private constituents of one `PublicInterfaceDraft` construction path. The draft is the sole pre-HIR public-semantic handoff.
-
-Exact Rust names may change. The single aggregate ownership boundary may not.
-
-### 2. Keep a draft/final split
-
-Public facts are produced at two semantic times:
-
-- AST owns declaration semantics, canonical public types, folded values, trait contracts, evidence, receiver surfaces, generic-template descriptors and direct provenance.
-- HIR and borrow validation own executable effects, return aliasing, mutation/consumption summaries, reactive effects and per-function executable provenance.
-
-Therefore:
+The replacement order is:
 
 ```text
-AST semantic result
--> PublicInterfaceDraft
--> HIR and borrow summaries
--> provider re-export join
--> PublicSemanticInterface
+close R2 ownership gaps
+-> prove the provider consumer contract
+-> remove duplicated source discovery
+-> implement provider interfaces and generated sidecars as one integration train
+-> cut production over to canonical module jobs
+-> add per-function link planning and assemblies
+-> migrate backends, check, dev and fingerprints
+-> delete all legacy paths
 ```
 
-`PublicSemanticInterface` is complete or absent. A diagnosed module exposes neither a partial interface nor a draft.
+Do not add more producer schema before the next listed consumer or deletion gate exists.
 
-### 3. Make the final interface declaration-centric
+## Non-negotiable architecture
 
-The final interface must not remain a set of parallel arrays joined by public name at every consumer.
+### One owner per fact
 
-Conceptually:
+- `SourceTreeIndex` owns physical source inventory, module roots, nearest ownership and canonical source IDs.
+- A prepared-source store owns source text, tokenization and retained syntax for each selected source.
+- `ProjectModuleGraph` owns module identities, structural edges, support visibility and compile order.
+- The compiler owns direct declaration semantics and local executable summaries.
+- Completed module artefacts own immutable provider interfaces.
+- The generated worklist owns concrete generic request deduplication and sidecars.
+- Link planning owns reachability, entry activation and package assembly.
+- Backends consume explicit plans and never rediscover source meaning.
+
+A later stage must not reconstruct a fact from source, rendered names, filesystem probing or foreign IR when an earlier owner already produced it.
+
+### Data-oriented storage
+
+Prefer:
+
+- dense build-local IDs such as `SourceId`, `ModuleId` and `GeneratedRequestId`
+- contiguous `Vec` storage in deterministic ID order
+- small enums for source kind, module role, graph outcome and call target
+- construction-time hash maps for lookup only
+- sorted adjacency vectors after graph construction
+- explicit indexes into immutable stores
+- one context struct at stage boundaries
+
+Avoid:
+
+- trait-object provider hierarchies
+- nested object graphs with repeated identity fields
+- maps of maps where one dense table and side index is sufficient
+- `Arc` or `Rc` per semantic leaf
+- generic registries that obscure ownership
+- open-ended context bags
+- parallel representations of the same declaration, receiver or source file
+
+Exact Rust names may change. These ownership and storage rules may not.
+
+### Interface phases are distinct types
+
+Use three semantic phases, not one object with pending variants:
 
 ```rust
+pub struct DirectInterfaceSeed {
+    pub module_origin: StableModuleOriginIdentity,
+    pub direct_export_bindings: Vec<ExportBinding>,
+    pub declarations: Vec<DirectDeclarationRecord>,
+    pub reusable_evidence: Vec<PublicEvidenceRecord>,
+}
+
+pub struct LocalPublicInterface {
+    pub direct: DirectInterfaceSeed,
+    pub concrete_call_summaries: Vec<PublicFunctionSummaryRecord>,
+    pub concrete_lifetime_summaries: Vec<PublicLifetimeSummaryRecord>,
+    pub provenance: Vec<PublicProvenanceRecord>,
+}
+
 pub struct PublicSemanticInterface {
     pub module_origin: StableModuleOriginIdentity,
     pub export_bindings: Vec<ExportBinding>,
-    pub declarations: Vec<PublicDeclarationEntry>,
-    pub reusable_evidence: Vec<PublicEvidenceEntry>,
-}
-
-pub struct PublicDeclarationEntry {
-    pub origin: OriginDeclarationId,
-    pub semantics: PublicDeclarationSemantics,
-    pub provenance: SemanticProvenance,
-}
-
-pub enum PublicDeclarationSemantics {
-    Function(PublicFunctionInterface),
-    Struct(PublicStructInterface),
-    Choice(PublicChoiceInterface),
-    TransparentAlias(PublicAliasInterface),
-    Constant(PublicConstantInterface),
-    Trait(PublicTraitInterface),
+    pub declarations: Vec<PublicDeclarationRecord>,
+    pub reusable_evidence: Vec<PublicEvidenceRecord>,
+    pub concrete_call_summaries: Vec<PublicFunctionSummaryRecord>,
+    pub concrete_lifetime_summaries: Vec<PublicLifetimeSummaryRecord>,
+    pub provenance: Vec<PublicProvenanceRecord>,
 }
 ```
 
-The interface may use deterministic vectors plus indexes rather than the exact containers above. The invariants are:
+These are conceptual shapes. Current unimplemented lifetime analysis must not be faked with placeholder facts. The module architecture must provide a narrow slot and stable join point for real lifetime summaries when that owner exists.
 
-- one semantic record per origin
-- zero or more export bindings may name the same origin
-- re-exports preserve the donor origin
-- receiver methods remain attached to receiver surfaces
-- all consumer-visible facts are owned and donor-independent
-- backend planning facts are excluded
+Rules:
 
-### 4. Treat the existing `DefinedPublic*` values as internal projection components
+- `DirectInterfaceSeed` is complete for direct declaration facts or construction fails.
+- `LocalPublicInterface` is complete for directly defined concrete functions or absent.
+- `PublicSemanticInterface` is complete after provider re-export joining or absent.
+- No durable interface type contains `PendingLocal`, `PendingGenerated` or another temporal state.
+- Generic templates are declaration contracts, not unfinished concrete functions.
+- Concrete generated summaries live on generated sidecars.
+- Declared parameter access is part of the signature.
+- Mutation, optional transfer, aliasing, reactivity and lifetime facts are analysis summaries.
+- Receiver methods remain attached to their receiver records.
+- Re-export bindings preserve donor origin identity.
 
-`DefinedPublicExportOrigins`, `DefinedPublicTypeSurface` and the unaccepted trait surface are not long-term build-boundary payloads.
+### Module result phases are distinct
 
-Keep their proven projection logic where useful, but either:
+A module may temporarily produce an internal semantic draft while generated requests are unresolved:
 
-- make them private builder steps inside `PublicInterfaceDraftBuilder`, or
-- merge their value types into declaration-centric draft records.
+```text
+prepared module
+-> bound headers
+-> AST build result
+-> validated base HIR
+-> generated request fixed point
+-> generated summaries
+-> base borrow and local lifetime analysis
+-> local interface finalization
+-> provider re-export join
+-> successful CompiledModuleArtifact
+```
 
-They must not remain separate fields that every later phase has to rejoin.
+The internal draft is not a provider interface and cannot enter the successful graph result.
 
-### 5. Salvage Phase 7c2e, but do not commit it as-is
+### No duplicate work
 
-The uncommitted Phase 7c2e work is review input only.
+Inside one project or package compilation boundary:
 
-Keep only the parts that fit the aggregate draft:
+- each directory is visited once by source-tree indexing
+- each selected source file is read once
+- each `.moth` source is tokenized once
+- each selected source has header syntax prepared once
+- each import shell is namespace-resolved once
+- each physical module is semantically compiled once
+- each generated identity is materialised once
+- each provider diagnosis is produced once
+- each final fingerprint is encoded once by its final owner
 
-- stable trait requirement identities and owned requirement signatures
-- canonical `This` representation
-- deterministic requirement order
-- total trait-origin joins
-- focused invariant coverage
+Add or retain counters that can prove these counts in integration tests. Timing data and benchmark output do not prove absence of duplicated work.
 
-Correct the parent-review gap before reuse:
+## Slice discipline and churn controls
 
-- every requirement receiver `this_type` must equal the owning `ResolvedTraitDefinition::this_type`
-- direct parameter or return occurrences of the same local `This` type become a canonical trait-self placeholder
-- no unrelated local `TypeId` may be classified as trait self
-- mutable versus immutable receiver access is stored separately from the self type
+Every implementation slice must define:
 
-Do not retain a broadly renamed AST handoff merely because it can hold more future fields. Replace it with one narrowly owned interface-projection input/result.
+- one owning subsystem
+- exact inputs and outputs
+- the production consumer introduced or changed
+- files and legacy owners expected to be deleted
+- focused tests
+- the final validation gate
+- explicit non-goals
+- stop conditions
 
-### 6. Provider interfaces are the next structural consumer
+A slice is not accepted when it only adds dormant future data, test-only accessors or `allow(dead_code)` for a later consumer.
 
-After the aggregate direct draft is complete enough to represent every current public declaration category, the next structural milestone is completed source-provider interfaces and canonical per-node scheduling.
+### Default churn tripwires
 
-Do not continue adding producer-side facts while provider binding remains header/path based.
+Pause implementation and perform a read-only review when any of these occurs:
 
-### 7. Source re-exports are finalized from provider interfaces
+- the slice must change more than two stage boundaries not named in its scope
+- a second long-lived representation of the same fact appears necessary
+- the old and new production path cannot both be removed by the stated deletion gate
+- a new abstraction exists only to bridge old and new APIs
+- the implementation needs a test-only production accessor
+- a future-consumer `allow(dead_code)` would be required
+- the same ownership invariant needs a second correction pass
+- the slice grows beyond roughly 12 production files or 600 net production lines, excluding mechanical moves, without a parent-approved split
+- source loading, tokenization, preparation or module compilation counts increase
+- a provider or generated-function identity cannot be defined without rendered names, source positions or donor-local IDs
+- user-visible failures would need `CompilerError`
+- a required validation gate is unreliable or fails for an unrelated infrastructure reason
 
-Direct declaration facts are built by the declaring module. Re-exporting modules consume completed provider interfaces, add their own `ExportBinding` values and retain the original declaration origins.
+The implementer must stop cleanly, preserve the work, update the current-state block with the exact unresolved question and request plan-owner review. Do not improvise a compatibility layer.
 
-A consumer never opens provider headers, AST or HIR to reconstruct a re-export.
+### Commit and acceptance policy
 
-The exporting interface owns an immutable canonical copy or self-contained view of every semantic record required by its bindings so package facades can later be serialized without reopening dependencies.
+- Focused commands are iteration evidence.
+- Each parent-accepted code slice runs `cargo fmt` and full `just validate`.
+- A review phase is read-only. Corrections become separate bounded slices.
+- Intermediate commits on an integration branch are allowed.
+- Do not merge an integration phase to the accepted baseline while it leaves a second callable production architecture.
+- Documentation-only plan edits use the documentation release-build gate.
+- Review the progress matrix only when current support or rejection behaviour changes.
 
-### 8. Trait requirement self types use an explicit canonical placeholder
+## Preserved review phases
 
-Trait requirements do not project their local synthetic `This` `TypeId` through ordinary canonical type identity.
+The existing parent-review model remains. These reviews are mandatory pauses, not optional summaries.
 
-Use a dedicated requirement type vocabulary equivalent to:
+### Review phase 1: R2 boundary audit
+
+Scope:
+
+- the four retained R2 audit findings
+- direct-interface stage ownership
+- receiver and callable identity ownership
+- generic template contract versus concrete generated summary
+- encoder and folded-float semantics
+- module/file organisation
+
+No R3 work starts until every accepted finding is fixed or explicitly moved to a named later owner.
+
+### Review phase 2: provider consumer contract
+
+Scope:
+
+- one provider and one consumer
+- imported function, type and folded constant
+- canonical-to-local type projection
+- declared parameter access
+- cross-module call summary lookup
+- no provider AST, HIR or private header access
+
+This review happens before generated sidecar implementation. A bounded disposable spike is allowed only when static inspection cannot settle the contract.
+
+### Review phase 3: discovery and graph audit
+
+Scope:
+
+- one source-tree traversal
+- lazy prepare-once source storage
+- module-root-relative namespace resolution
+- semantic source sets
+- support visibility
+- graph edge and wave construction
+- deletion of parallel import scanning and path fallback
+
+### Review phase 4: generated sidecar audit
+
+Scope:
+
+- complete immutable template artefacts
+- request identity and deduplication
+- private declaring-module helper targets
+- fixed-point scheduling
+- generated HIR, borrow facts and real lifetime facts where available
+- requester finalization
+- deletion of consumer-local materialisation
+
+### Review phase 5: canonical production cutover
+
+Scope:
+
+- every selected module role
+- completed provider registry
+- graph outcomes
+- blocked consumers
+- string-table merge order
+- deletion of entry closures, donor copying and fallback resolution
+- one production compiler path
+
+### Review phase 6: link, backend and reuse audit
+
+Scope:
+
+- per-function link facts
+- entry and package assemblies
+- project-context provenance
+- target and lifetime-topology roots
+- `ProjectCompilation`
+- backend handoff
+- five fingerprints
+- `check` and dev reuse
+- final deletion audit
+
+Each review reports findings only. Parent-approved correction slices must complete before the next implementation phase.
+
+## Current owner disposition
+
+Keep and evolve:
+
+- `source_tree_index.rs` as the only directory-project filesystem inventory owner
+- `module_identity.rs` as the dense module identity owner
+- `project_module_graph.rs` as the structural graph and scheduling owner
+- `prepared_source.rs` as the source-kind-safe prepared value concept
+- `semantic_identity.rs` and `canonical_type_identity.rs`
+- stable folded-value, evidence, provenance and call-summary leaf types
+- `ModuleCompilationOutcome` and diagnosed versus infrastructure separation
+
+Refactor:
+
+- `public_interface_draft.rs` into a small module tree with separate model, projection and finalization owners
+- `AstPublicInterfaceProjectionInput` into an AST side result
+- receiver method projection into one callable seed authority
+- local call-summary finalization into stable tables keyed by origin
+- validated generic-template metadata into a complete materialisation artefact
+- `ProjectModuleGraph` edge storage into sorted dense adjacency when construction is complete
+- `PreparedSourceInput` storage to use `SourceId` slots rather than per-entry owned copies
+
+Delete at the named phase:
+
+- `PublicCallSummaryState`
+- duplicate receiver catalogs/surfaces used only for public projection
+- direct-draft canonical bytes and encoder-only accessors
+- `DiscoveredModule`
+- `ModuleEntryCompileWaves`
+- per-entry reachable source caches
+- provider-free versus provider-capable duplicate discovery paths
+- path-pair structural dependency facts
+- source import fallback through `ProjectPathResolver`
+- configured `package_folders` and default `/lib`
+- donor header/body copying into consumers
+- consumer-local generic materialisation
+- module-level `start` reachability as link authority
+- complete external package registries on every module
+- flat `Vec<Module>` backend input
+- compatibility wrappers introduced during migration
+
+## Phase R2C: close the direct-interface boundary
+
+Goal: finish the current R2 audit by fixing ownership and phase modelling. Do not add another public semantic feature.
+
+### R2C1: declaration-owned parameter access
+
+Change:
+
+- add declared access to public function and receiver parameter slots
+- derive it from the resolved source signature before HIR
+- keep mutation, transfer, alias and reactive effects in analysis summaries
+- make generic template contracts carry declared access without needing a concrete generated function
+
+Delete:
+
+- any code that treats borrow-observed access as the only public signature access authority
+
+Tests:
+
+- shared, mutable and reactive free-function parameters
+- shared and mutable receiver access
+- generic free functions and aligned generic receiver methods
+- signature access remains stable before borrow validation
+
+Stop if the source signature has more than one competing access owner.
+
+### R2C2: replace temporal callable states
+
+Change:
+
+- replace `PublicCallSummaryState`
+- model concrete local callables and generic template declarations as distinct semantic categories
+- require a complete summary for each non-generic concrete exported function after borrow validation
+- leave concrete generated summaries exclusively on generated sidecars
+
+Delete:
+
+- `PendingLocal`
+- `PendingGenerated`
+- encoder branches that treat temporal states as semantic bytes
+
+Tests:
+
+- a completed direct concrete interface cannot omit a summary
+- a generic declaration cannot carry a concrete base summary
+- malformed category/summary combinations are unrepresentable or fail at one construction boundary
+
+Stop if generic template effects cannot be distinguished from concrete generated effects. Record the unresolved contract for Review phase 1.
+
+### R2C3: one receiver and callable seed owner
+
+Create one transient callable seed table during AST environment finalization. Each entry carries only the facts required before stable projection:
+
+- exact donor-local declaration path
+- stable public origin when public
+- stable receiver origin when applicable
+- resolved signature reference or index
+- generic-template classification
+- nominal-owned generic parameter aliases where required
+
+Consumers:
+
+- direct export projection
+- declaration record projection
+- HIR origin seeding
+- generic-template extraction
+
+Delete one of the current duplicate receiver authorities from the public projection path. Evidence projection must consume completed declaration records rather than iterate the receiver catalog.
+
+Tests:
+
+- same-named methods on different receivers
+- methods before and after receiver declarations
+- generic nominal receiver aliases
+- private methods on public receivers
+- duplicate path and duplicate origin rejection
+
+Stop if any consumer needs to reconstruct a receiver origin.
+
+### R2C4: move public projection out of `Ast`
+
+Introduce a typed AST result equivalent to:
 
 ```rust
-pub enum CanonicalTraitRequirementType {
-    SelfType,
-    Concrete(CanonicalTypeIdentity),
+pub struct AstBuildResult {
+    pub ast: Ast,
+    pub direct_interface_input: DirectInterfaceProjectionInput,
+    pub generic_template_input: GenericTemplateProjectionInput,
 }
 ```
 
-Composed `This` forms remain rejected by the language. This keeps the canonical requirement surface small and prevents a synthetic local generic parameter from masquerading as an exported generic parameter.
+Rules:
 
-### 9. Reusable evidence identity is target-plus-trait
+- `Ast` contains only state HIR consumes
+- HIR never receives public projection roots, trait/evidence environments or generic template maps
+- no `Rc` or `RefCell` crosses into module artefacts
+- the side result has a closed field list and one consumer
 
-A canonical conformance is uniquely identified inside a compilation boundary by:
+Delete:
 
-```text
-canonical target type identity + canonical trait identity
-```
+- `Ast::public_interface_projection_input`
+- `Ast::generic_function_templates`
+- broad take-before-HIR comments and fixtures that preserve this temporary shape
 
-A stable evidence record also maps each stable trait requirement identity to the stable implementing receiver-function origin where source evidence is used.
+Tests:
 
-Source locations, `TraitEvidenceId`, `TraitId`, `TypeId`, `InternedPath` and declaration order are not evidence identity.
+- production AST construction returns all three outputs
+- HIR test helpers build only executable AST state
+- no public projection fact remains reachable from completed HIR input
 
-Builtin evidence uses the same target-plus-trait semantic key with a builtin ownership classification.
+### R2C5: direct declaration-oriented projection
 
-### 10. Generic template descriptors and bodies are separate artefact facts
-
-The public interface exposes the generic semantic contract required for inference:
-
-- stable declaration origin
-- stable generic parameters and bounds
-- canonical parameter and return types
-- required evidence shape
-- call/access/effect contract
-
-The declaring module artefact retains the validated template body and its immutable compilation context, keyed by the stable declaration origin. Raw body tokens and donor-local semantic tables are compiler metadata for materialisation, not public semantic identity.
-
-Consumers emit stable requests. They do not copy or mutate the provider template.
-
-### 11. Generated requests that affect borrow transfer must be resolved before the requesting module becomes a successful artefact
-
-The build system owns a compilation-boundary worklist and deduplicates by:
+Split `public_interface_draft.rs` into focused modules. The recommended structure is:
 
 ```text
-stable generic declaration origin
-+ canonical concrete type identities
-+ required evidence identities
+src/compiler_frontend/public_interface/
+├── mod.rs
+├── model.rs
+├── direct_projection.rs
+├── receiver_projection.rs
+├── trait_projection.rs
+├── evidence_projection.rs
+├── local_finalization.rs
+└── tests/
 ```
 
-A module may reach validated HIR with pending generated requests, but it is not finalized as a successful `CompiledModuleArtifact` until the worklist has produced the call summaries required by its borrow validation.
+Build one declaration record table directly from stable export/callable seeds. Category helpers project leaf values into that table. Do not first build several complete aggregate vectors and then index and rejoin all of them.
 
-The accepted flow is therefore:
+Rules:
+
+- one record per direct origin
+- separate export bindings
+- receiver methods attached once
+- evidence consumes the completed receiver surface
+- construction-time maps are dropped before the seed boundary
+- no file should become a second orchestration monolith
+- production functions should normally stay below the style-guide size targets
+
+Delete aggregate `DefinedPublic*` containers once their projection logic has moved. Leaf types may remain when they have one clear owner.
+
+Tests should cover the final record contract rather than each deleted intermediate getter.
+
+### R2C6: concrete summary join and HIR injectivity
+
+Change:
+
+- validate both directions of the stable origin and local `FunctionId` relationship
+- reject two origins mapped to one local function
+- reject one origin mapped to two local functions
+- retain concrete call summaries in one stable-origin table
+- finalize the local interface from that table without mutating declaration variants
+
+Borrow validation remains read-only over HIR. No foreign HIR lookup is introduced.
+
+Tests:
+
+- missing, duplicate and wrong-category origin mappings
+- private functions and `start` remain excluded from public summary tables
+- concrete free and receiver functions join once
+- deterministic ordering does not depend on `FxHashMap` iteration
+
+### R2C7: folded Float decision and encoder rollback
+
+Before code changes, perform a focused semantic review of negative zero across:
+
+- constant equality
+- arithmetic and checked failure behaviour
+- casts
+- external value boundaries
+- canonical type/value identity
+- formatting
+
+Formatting `-0.0` as `0` does not by itself prove that signed zero is globally unobservable.
+
+Decision rule:
+
+- if the language authority explicitly makes both signs semantically identical, normalize at folded-value construction and document it
+- otherwise preserve exact finite IEEE bits and normalize only at the formatting boundary
+
+Do not guess. Stop until the decision is written into `docs/language-overview.md` when necessary.
+
+Remove or demote the current direct-draft byte encoder:
+
+- do not claim incomplete direct seed bytes are the public-interface fingerprint input
+- remove encoder-only getters and dead-code allowances
+- recreate canonical encoding only after the final `PublicSemanticInterface` and all five fingerprint fact sets exist
+- a test-only deterministic ordering helper may remain only when it is small and has no production API
+
+### R2C exit gate
+
+- all four retained audit findings are resolved
+- no durable interface type has pending states
+- declared access exists before borrow analysis
+- one receiver/callable seed owner exists
+- public projection is outside executable `Ast`
+- direct interface construction is declaration-oriented
+- HIR origin mapping is injective
+- signed-zero semantics are explicit
+- the incomplete encoder no longer defines future fingerprint policy
+- `cargo fmt` and `just validate` pass
+
+Run Review phase 1 before proceeding.
+
+## Phase R3: prove the provider consumer contract
+
+Goal: validate the interface against one real consumer before expanding more producer data.
+
+This phase is read-only by default. It produces a precise binding contract. It does not add dormant production scaffolding.
+
+### R3A: static provider-consumer trace
+
+Trace one directly exported:
+
+- non-generic free function
+- nominal type
+- folded constant
+
+from provider preparation through the current direct interface and into a hypothetical consumer.
+
+Record the exact required operations:
+
+- provider lookup by `ModuleId`
+- export binding lookup by public name
+- canonical type projection into the consumer `TypeEnvironment`
+- folded value import
+- declared parameter access import
+- stable cross-module function target creation
+- concrete call-summary lookup
+- file-local visibility and collision insertion
+
+List every current field that is unnecessary and every missing field.
+
+### R3B: bounded disposable spike
+
+Use a disposable branch only when R3A cannot settle the contract.
+
+Limits:
+
+- one provider module
+- one consumer module
+- one function, one type and one constant
+- no traits, receiver methods, re-exports, generics, packages or backend changes
+- no production feature flag
+- no compatibility adapter
+- no accepted dead code
+- maximum one review cycle
+
+The spike must prove that the consumer never opens provider headers, AST, HIR or private source.
+
+Do not merge the spike merely because tests pass. Its durable output is the reviewed contract.
+
+### R3C: binding contract decision
+
+Before R4 begins, lock:
+
+- final lookup keys
+- canonical-to-local type interning owner
+- provider interface storage owner
+- imported visibility record shape
+- cross-module call-summary resolver inputs
+- diagnostic ownership for missing or private symbols
+- re-export record requirements
+- string ownership/remapping requirements
+
+Update this plan only when the reviewed contract changes implementation order.
+
+Run Review phase 2.
+
+## Phase R4: eliminate duplicated source discovery
+
+Goal: evolve the existing `SourceTreeIndex` and `ProjectModuleGraph` into the complete Stage 0 data path without adding a second index.
+
+### R4A: central source IDs
+
+Evolve `SourceTreeIndex` in place.
+
+Conceptual storage:
+
+```rust
+pub struct SourceTreeIndex {
+    pub sources: Vec<SourceRecord>,
+    pub module_identities: ModuleIdentityTable,
+    pub owned_source_ids: Vec<Vec<SourceId>>,
+    pub unrooted_source_ids: Vec<SourceId>,
+    pub stats: SourceTreeDiscoveryStats,
+}
+```
+
+Each source record owns:
+
+- dense `SourceId`
+- canonical physical path for IO
+- portable logical identity
+- `SourceFileKind`
+- owning `ModuleId` or explicit unrooted state
+
+Rules:
+
+- do not introduce `ProjectSourceIndex`
+- assign IDs in deterministic logical path order
+- absolute paths never become semantic identity
+- each source record exists once
+- owned sets store IDs rather than duplicate source records
+
+Keep the current one-traversal root and collision logic.
+
+### R4B: prepare-once source store
+
+Add one build-boundary `PreparedSourceStore` indexed by `SourceId`.
+
+Each slot has a small explicit state:
 
 ```text
-module AST and validated base HIR
--> enqueue generated requests
--> materialise/deduplicate generated sidecars to a fixed point
--> borrow-validate generated functions
--> produce generated local lifetime constraints and summaries
--> borrow-validate the requesting base module using resolved generated summaries
--> produce base-module local lifetime constraints and summaries
--> finalize module interface, link facts and artefact
+Unprepared
+Prepared
+Diagnosed
 ```
 
-Complete lifetime topology is instantiated later by project/link planning over reachable functions and builder lifecycle roots. This plan preserves the accepted artefact lanes and summary boundaries without claiming that deferred lifetime-region analysis has been implemented.
+Preparation is lazy and deterministic:
 
-The worklist may process requests incrementally between graph waves. It remains build-owned and global to the project or package boundary.
+- build prepares roots first in `ModuleId` order
+- retained structural references enqueue additional `SourceId`s
+- `check` eventually prepares owned orphan `.moth` sources
+- each slot may transition once
+- `.moth` text is read once, tokenized once and header-prepared once
+- `.mtf` and `.md` use their one source-kind adapter path
+- completed syntax is retained for later binding and AST use
 
-### 12. HIR call targets become explicit source target classes
+Do not retain a separate lexical import scanner when header syntax preparation already produces structural provider references.
 
-Replace the current two-way `UserFunction`/`ExternalFunction` call target with explicit classes equivalent to:
+Provider-backed discovery may remain serial while it mutates provider caches. It still uses the same source slot and never repeats tokenization.
+
+### R4C: module namespaces without filesystem probing
+
+Build one `ResolvedModuleNamespace` per module from:
+
+- owned source IDs
+- direct child module IDs
+- visible support package IDs
+- registered Core, Builder and dependency packages
+- explicit provider-owned files
+- synthetic compile-time interfaces
+
+Namespace entries use explicit tagged records. No precedence or ordered fallback exists.
+
+Source import resolution:
+
+- starts from the owning module root
+- resolves through the namespace and owned logical paths
+- stops at child module and support boundaries
+- rejects `@./`, parent components and private path bypass
+- never calls `read_dir`, `exists` or fallback-candidate probing
+- remains separate from compile-time path-literal resolution
+
+Wire the existing support visibility query or replace it in the same slice. Do not leave it dead.
+
+### R4D: semantic source sets
+
+Build each `SemanticSourceSet` by traversing retained structural references over `SourceId`s.
+
+Classification:
+
+- same-owner source reference adds a source ID
+- cross-module source reference adds a module graph edge and does not add provider source to the consumer set
+- binding/provider reference adds the appropriate package/provider edge
+- child module or support boundary exposes only its interface
+- unsupported or missing source kinds produce structured diagnostics
+- a source cannot belong to two semantic module sets
+
+For `check`:
+
+```text
+check-only source IDs
+= owned .moth source IDs
+- canonical semantic source IDs
+```
+
+Check-only units reuse the same prepared source and provider namespace. They never enter canonical artefacts or backend roots.
+
+### R4E: graph edges and waves
+
+Insert module dependency edges directly by `ModuleId` while resolving structural references. Do not create canonical path-pair facts and remap them later.
+
+After edge construction:
+
+- sort and deduplicate adjacency
+- freeze provider and consumer vectors
+- compute indegrees in dense arrays
+- produce deterministic waves in `ModuleId` order
+- retain authored edge locations in a separate sorted side table
+- keep project, Core, Builder and dependency package graphs separate
+
+Produce one `ModuleCompilationJob` per selected normal, support or project-facade node. The job contains IDs and immutable store references, not cloned token streams or source text.
+
+### R4F: remove duplicate discovery
+
+Delete production use of:
+
+- per-entry import BFS over filesystem paths
+- `ProviderFreeProjectInventory`
+- provider-free versus provider-capable replay
+- per-entry `ScannedImportSource` caches
+- path-pair `LocalStructuralDependencyFact`
+- repeated `PreparedSourceInput` ownership per entry
+
+Delete `reachable_file_discovery.rs` and `import_scanning.rs` when no other real owner remains.
+
+The legacy entry-closure semantic compiler may remain only until the canonical cutover phase. Do not introduce a new adapter type for it. It may consume the new prepared store through its existing boundary for at most one integration phase and may not gain features.
+
+Remove `package_folders` and default `/lib` discovery with their production owner. Update or delete tests that assert the obsolete config surface.
+
+### R4 tests and counters
+
+Add focused counters and integration assertions for:
+
+- one source-tree traversal
+- one source read
+- one tokenization
+- one header preparation
+- one import-shell resolution
+- deterministic source and module IDs
+- no filesystem calls during source import resolution
+- semantic sets stop at module boundaries
+- support visibility and overlap diagnostics
+- check-only orphan exclusion
+- separate package graphs
+
+Use counters or explicit hooks owned by existing instrumentation. Do not add timing-sensitive tests.
+
+### R4 exit gate
+
+- `SourceTreeIndex` is the only directory source inventory
+- every selected source has one prepare-once slot
+- source imports resolve from frozen namespace data
+- semantic source sets and graph edges use IDs
+- duplicate scanning paths are deleted
+- no new legacy adapter was introduced
+- `cargo fmt` and `just validate` pass
+
+Run Review phase 3.
+
+## Phase R5: canonical provider and generated-sidecar integration train
+
+Goal: implement provider binding and generated sidecars together so neither is designed around the legacy entry-closure compiler.
+
+Work may use bounded commits on an integration branch. Do not accept the phase onto the baseline until R5K deletes the old production path.
+
+### R5A: internal module semantic draft
+
+Introduce one internal, non-provider result for a module whose base HIR is validated but generated requests are unresolved.
+
+It may contain:
+
+- `ModuleId` and stable origin
+- direct interface seed
+- local `TypeEnvironment`
+- validated base HIR
+- generated requests
+- compiler metadata
+- incomplete per-function link facts
+- diagnostic render context
+
+It must not implement provider lookup and must not be stored in `GraphCompilationOutcome::successful`.
+
+### R5B: completed provider store
+
+Create one completed provider store indexed by package graph and `ModuleId`.
+
+A slot is one of:
+
+```text
+Unavailable
+Successful(CompiledModuleArtifactId)
+Diagnosed
+Blocked
+```
+
+The successful slot points into immutable artefact storage. Do not clone a full interface into every consumer.
+
+Consumer jobs receive:
+
+- their resolved namespace
+- the IDs of completed required providers
+- immutable access to provider interfaces
+- binding package interfaces
+- synthetic compile-time interfaces
+
+A diagnosed provider exposes no interface.
+
+### R5C: non-generic vertical provider path
+
+Implement the R3 reviewed contract for:
+
+- imported free functions
+- imported nominal types
+- imported folded constants
+- stable cross-module source calls
+- provider call-summary lookup
+
+Use explicit call targets:
 
 ```rust
 pub enum SourceCallTarget {
@@ -295,146 +926,408 @@ pub enum HirCallTarget {
 }
 ```
 
-Private helper calls from a generated sidecar back into its declaring module use an artefact-local declaring-module reference. They do not create consumer-visible public declaration identities.
+Borrow transfer matches the target enum through one context struct. Do not add dynamic dispatch.
 
-Borrow validation resolves:
+Tests:
 
-- local calls from local HIR summaries
-- cross-module calls from completed provider interface summaries
-- generated calls from generated sidecar summaries
-- binding calls from immutable binding package metadata
+- provider compiled once for two consumers
+- canonical type equality through distinct consumer-local `TypeId`s
+- declared mutable access imported correctly
+- cross-module return alias and transfer facts consumed without foreign HIR
+- private symbol rejection is a source diagnostic
+- missing provider summary is `CompilerError`
 
-It never opens foreign HIR as local control flow.
+Pause for Review phase 2 findings if the binding contract changes materially.
 
-### 13. Link facts are recorded per function before entry reachability
+### R5D: generic materialisation design checkpoint
 
-Remove `collect_reachability_from_start` from module finalization.
+No implementation begins until the complete immutable generic artefact is defined.
 
-Each source or generated function records backend-neutral facts independently. Entry and package planning later compute exact reachable unions from explicit roots.
+It must answer:
 
-A module artefact does not filter external imports, helpers, assets or target-gated features through its dormant `start` during compilation.
+- how validated body syntax is retained without AST or TIR
+- how generic parameter ownership is represented
+- how provider visibility and imported identities are retained
+- how canonical types become generated-local types
+- how required evidence is supplied
+- how source locations and strings remain self-contained or remappable
+- how private declaring-module helper calls are identified
+- how nested generated requests are emitted
+- how project-context provenance is retained
+- how dependency artefacts remain immutable
 
-### 14. Project-context provenance uses a general synthetic-interface dependency vocabulary
+Define a module-private executable identity distinct from public `OriginFunctionId`. It may change when private implementation identity changes. It must not use donor-local `FunctionId` outside its artefact.
 
-This plan establishes provenance plumbing even though the downstream config plan supplies the full `@project` surface.
+Stop if the artefact is still described as "body now, context later".
 
-Public facts and functions record stable dependencies on synthetic compile-time interface members. An empty dependency set is portable. A non-empty project-global dependency set is project-context provenance.
+### R5E: complete generic template artefacts
 
-The same representation can support builder-owned synthetic interfaces without pretending they are `@project`.
+Replace the current incomplete validated-template store with one deterministic store keyed by public generic declaration origin.
 
-Package-facade validation walks public facts and reachable source/generated call edges. It rejects prohibited project-context dependence without reparsing source.
+Rules:
 
-### 15. Import semantics cut over before canonical compilation is accepted
+- one complete artefact per exported generic callable
+- no `InternedPath` identity beyond extraction
+- no `GenericParameterId`, `TypeId`, `StringId` or local evidence ID crosses without a defined remap/context owner
+- no raw `Ast`, TIR store or mutable environment
+- private helper targets use module-private executable identities
+- values are `Send`
+- the artefact is consumed by the worklist before backend handoff
 
-The production canonical module path may not continue to depend on:
+Delete the old body-only store and its explicit discard-before-remap path.
 
-- importing-file-relative `@./`
-- entry-root fallback
-- path probing through another module's private files
-- configured `package_folders`
-- default `/lib`
-- public-surface fallback by walking filesystem parents
+### R5F: stable generated requests
 
-Split source import namespace resolution from general compile-time path-literal resolution. Source imports resolve from the owning module root against a Stage 0 namespace and explicit provider contracts.
+Define request identity from:
 
-### 16. No long-lived dual production architecture
+```text
+generic declaration origin
++ ordered canonical concrete type identities
++ ordered required evidence identities
+```
 
-Internal implementation slices may prepare the cutover, but a milestone is not accepted while both old and new production paths remain callable.
+AST call inference emits the stable request and a generated call target. It does not materialise the function.
 
-Do not add compatibility wrappers, feature flags, fallback adapters or parallel payloads to preserve entry-closure compilation.
+Rules:
 
-### 17. Worker validation is provisional
+- aliases do not change identity
+- local `TypeId` allocation does not change identity
+- request order does not change identity
+- source location is diagnostic context, not identity
+- duplicate requests retain deterministic primary diagnostic context
+- base AST and HIR remain immutable after emission
 
-A worker-reported check, Clippy run or unit-test pass is not an accepted checkpoint.
+### R5G: deterministic worklist
 
-Every code-bearing checkpoint requires:
+The build system owns one worklist per project or package compilation boundary.
 
-- parent review of ownership, invariants and deletion scope
-- focused validation
-- `cargo fmt`
-- full `just validate`
-- a clean source diff inspection
+Use:
 
-## Target artefact boundary
+- dense `GeneratedRequestId`
+- a vector of request records
+- one construction-time deduplication map
+- deterministic queue order by stable request identity
+- explicit requester sets
+- explicit dependency edges between generated requests
 
-Conceptual final shape:
+A generated body may enqueue more requests. Continue to a fixed point.
+
+Outcomes:
+
+```text
+Successful sidecar
+Diagnosed request
+Blocked requester
+Infrastructure failure
+```
+
+A diagnosed request exposes no partial sidecar.
+
+### R5H: generated compilation
+
+For each accepted request:
+
+- build generated-local type context
+- materialise concrete typed body
+- lower and validate HIR
+- borrow-validate
+- produce real local lifetime facts and summaries when the memory-analysis owner exists
+- produce concrete call summaries
+- produce per-function link facts
+- retain implementation, runtime and compatibility fingerprint inputs
+
+Do not borrow or mutate the requesting module's `TypeEnvironment`.
+
+Generated calls to private provider helpers use the reviewed module-private target, not public interface identity and not foreign local `FunctionId`.
+
+### R5I: finalize requester modules
+
+After the generated fixed point:
+
+- resolve every generated target
+- make generated call summaries available to base-module borrow validation
+- run base borrow validation
+- run real local lifetime analysis when available
+- finalize `LocalPublicInterface`
+- join provider re-exports
+- construct `PublicSemanticInterface`
+- construct the successful module artefact
+
+A module with an unresolved or diagnosed required generated request is blocked or diagnosed according to the owning error. It is never successful with pending state.
+
+### R5J: complete provider surfaces
+
+Extend binding from the vertical subset to:
+
+- aliases
+- defaults
+- choices
+- receiver surfaces
+- traits and requirements
+- incompatibilities
+- reusable evidence
+- generic template contracts
+- public re-exports
+- provenance
+
+Re-exports add bindings and preserve donor origin. The exporting interface remains self-contained for all records its bindings expose. Consumers do not reopen transitive providers.
+
+### R5K: canonical graph scheduler and cutover
+
+Compile every selected graph role:
+
+- normal modules
+- scoped support modules
+- project package facade
+- source-backed Core packages
+- source-backed Builder packages
+- dependency package graphs
+
+For each wave:
+
+1. ensure required provider slots succeeded
+2. mark blocked consumers without semantic compilation
+3. compile independent ready jobs in parallel
+4. complete generated requests needed by those jobs
+5. finalize successful artefacts
+6. merge string-table deltas in `ModuleId` order
+7. publish interfaces for the next wave
+8. retain one diagnostic set per diagnosed module
+
+Build:
 
 ```rust
-pub struct CompiledModuleArtifact {
-    pub interface: PublicSemanticInterface,
-    pub executable: ModuleExecutable,
-    pub link_facts: ModuleLinkFacts,
-    pub metadata: ModuleCompilerMetadata,
-    pub fingerprints: ModuleFingerprints,
+pub struct GraphCompilationOutcome {
+    pub successful: Vec<CompiledModuleArtifact>,
+    pub diagnosed: Vec<ModuleDiagnostics>,
+    pub blocked: Vec<BlockedModule>,
 }
 ```
 
-### `PublicSemanticInterface`
+Cut production over in the same accepted phase.
 
-Contains only semantic facts visible to a source consumer:
+Delete:
 
-- stable declaration origins and export bindings
-- canonical type shapes
-- function parameter names, access modes, defaults and canonical return channels
-- function mutation and optional-transfer eligibility/effect categories
-- return-alias and projection-alias summaries
-- retained-parameter and outlives summaries
-- external-boundary classifications
-- reactive summaries
-- folded exported constants and const-template values
-- struct fields and folded defaults
-- choice variants and payload fields
-- transparent alias targets
-- generic signatures, parameters, bounds and required evidence
-- trait requirements and incompatibility facts that are part of the public contract
-- reusable conformance evidence
-- receiver surfaces and visible methods
-- semantic provenance
+- `DiscoveredModule`
+- `ModuleEntryCompileWaves`
+- entry-closure semantic compilation
+- donor header/body copying
+- public-surface fallback by filesystem walk
+- old source binding from combined headers
+- consumer-local generic materialisation
+- source `@./` and entry-root fallback
+- production source-import use of `ProjectPathResolver`
+- compatibility code added during the integration train
 
-### `ModuleExecutable`
+No feature flag or legacy fallback remains.
 
-Contains module-local executable state only:
+### R5 tests
 
-- one local `TypeEnvironment`
-- validated module-local HIR
-- borrow facts
-- local lifetime-region and escape facts
+Required end-to-end cases:
 
-The accepted artefact lane reserves these facts conceptually. The current canonical-module milestone must preserve the lane and stable handoff without claiming the deferred lifetime analysis has landed.
+- one provider compiled once for multiple entries
+- one provider failure diagnosed once
+- blocked consumers emit no secondary name/type cascades
+- independent graph branches continue
+- imported functions, types, constants, defaults, aliases, traits, evidence, receivers and re-exports use interfaces
+- cross-module borrow and return-alias effects
+- same generated request deduplicated across entries
+- nested generated fixed point
+- generated private helper call
+- generated diagnosis blocks only requesters
+- base module artefacts remain unchanged when another consumer requests a sidecar
+- support and facade roots have no `start`
+- deterministic results under varied Rayon completion order
+- no source read, tokenization, preparation or module compile count exceeds one
 
-Normal modules may have an optional dormant `start`. Support roots and facades have none.
+### R5 exit gate
 
-### `ModuleLinkFacts`
+- completed provider interfaces are the only source-module binding input
+- generated functions live only in sidecars
+- one canonical scheduler is the only directory-project production compiler
+- all legacy entry-closure, donor-copy and fallback paths are deleted
+- no successful artefact contains pending state
+- `cargo fmt` and `just validate` pass
 
-Contains per-function backend-neutral planning facts:
+Run Review phases 4 and 5 before proceeding.
 
-- local, cross-module and generated source calls
+## Phase R6: per-function link facts and assemblies
+
+Goal: move runtime reachability, root activation and package selection entirely after semantic compilation.
+
+### R6A: per-function link-fact records
+
+Record for every base and generated function:
+
+- local, cross-module, module-private and generated source calls
 - binding-backed calls
-- helper and capability requirements
+- helper and capability families
 - reactive features
 - numeric, cast, map and target-gated operations
-- runtime paths and asset usages
+- runtime paths and assets
 - generated request references
-- executable provenance
-- a stable origin-to-local-function lookup for exported callable roots
+- project-context provenance
 
-It does not carry a complete `ExternalPackageRegistry`.
+Store facts in deterministic function identity order. Module-wide unions may be derived caches only.
 
-### `ModuleCompilerMetadata`
+Delete the complete `ExternalPackageRegistry` from each module artefact. Link facts refer to stable binding identities.
 
-Contains non-HIR compiler and builder metadata:
+### R6B: remove `start`-filtered module finalization
 
-- dormant root activity
-- folded top-level fragment values and insertion indexes
-- resolved entry-local metadata
-- documentation and API-index facts
-- rendered path usages
-- validated generic-template body artefacts and materialisation context
-- structured warnings
+Delete `collect_reachability_from_start` as a module finalization authority.
 
-### `ModuleFingerprints`
+A normal module artefact retains dormant `start` and its per-function facts. Support and facade roots have no `start`.
 
-Contains exactly the five accepted base fingerprints:
+Unsupported private code remains semantically compiled. Target validation later checks only supplied reachable roots.
+
+### R6C: entry assemblies
+
+Build `EntryAssembly` from already successful artefacts.
+
+It selects:
+
+- one normal module's dormant `start`
+- root runtime work
+- compile-time and runtime fragments
+- entry-local settings
+- exact reachable source/generated/binding functions
+- runtime and asset union
+
+Imported modules never activate their root work.
+
+Assembly cannot invoke tokenization, binding, AST, HIR, borrow or lifetime analysis.
+
+### R6D: project package assembly
+
+Build `ProjectPackageAssembly` over:
+
+- the compiled project facade
+- selected descendant public interfaces
+- reachable generated sidecars
+- permitted runtime requirements
+
+It never bypasses `export:`.
+
+Propagate project-context provenance through direct facts and reachable source/generated call edges. Reject direct or transitive prohibited project context.
+
+### R6E: lifetime and target roots
+
+Link planning supplies:
+
+- reachable function roots
+- builder lifecycle roots
+- generated sidecar roots
+- external package exports
+
+Use these to instantiate complete lifetime topology through the memory-analysis owner before target planning. Do not implement a second lifetime solver in the build system.
+
+### R6F: success-only project compilation
+
+Construct:
+
+```rust
+pub struct ProjectCompilation {
+    pub structure: ProjectModuleGraph,
+    pub project_globals: ProjectGlobalsInterface,
+    pub modules: Vec<CompiledModuleArtifact>,
+    pub generated: Vec<GeneratedFunctionSidecar>,
+    pub entries: Vec<EntryAssembly>,
+    pub package_facade: Option<ProjectPackageAssembly>,
+}
+```
+
+Only complete required successes enter this payload. A project builder never receives diagnosed or blocked required work.
+
+### R6 exit gate
+
+- per-function facts are the linking authority
+- module compilation performs no entry reachability filtering
+- assemblies perform no semantic compilation
+- project-context validation uses stable provenance
+- complete lifetime topology is supplied by the correct owner
+- `cargo fmt` and `just validate` pass
+
+Run the link portion of Review phase 6.
+
+## Phase R7: backend handoff, commands and fingerprints
+
+### R7A: backend API cutover
+
+Replace flat `BackendBuilder::build_backend(Vec<Module>, ...)` input with `ProjectCompilation`.
+
+Backends receive:
+
+- explicit selected functions
+- stable call targets
+- paired type environments
+- borrow and lifetime facts
+- link plans
+- import and capability plans
+- entry/package plans
+
+They do not scan source, rebuild imports, infer generics or choose roots.
+
+Delete the flat module backend loop.
+
+### R7B: HTML builder migration
+
+Use `EntryAssembly` for:
+
+- route generation
+- exact-once `start` activation
+- fragment interleaving
+- external JavaScript glue
+- tracked assets
+- JavaScript/Wasm partition inputs
+
+Keep physical Wasm partition and Component Model work in its downstream plan.
+
+Tests:
+
+- HTML-JS output parity
+- route and homepage parity
+- exact-once root and fragment output
+- external runtime and asset deduplication
+- duplicate route/output diagnostics
+- no backend source discovery
+
+### R7C: `check`
+
+`check` consumes graph outcomes:
+
+- compile every selected project module
+- compile check-only orphan units
+- retain successful independent artefacts
+- report diagnosed modules once
+- report blocked modules without cascades
+- run real link and target validation roots
+- stop before backend lowering and output writing
+
+Delete the all-or-error `Vec<Module>` check path.
+
+### R7D: dev reuse
+
+Retain immutable in-memory:
+
+- source preparation slots
+- successful module artefacts
+- package artefacts
+- generated sidecars
+- graph and namespace data
+
+Invalidation:
+
+- source change reparses only changed source slots
+- module rebuild occurs when its semantic source or imported interface changes
+- semantic consumers rebuild only when provider public-interface fingerprint changes
+- entries relink for implementation, root, runtime, generated, entry-setting or relevant config changes
+- diagnostic and output ordering remains deterministic
+
+Do not create a second dev compiler architecture.
+
+### R7E: final fingerprint encoders
+
+Only now implement canonical encoders for the five accepted fingerprints:
 
 - public interface
 - implementation
@@ -442,491 +1335,88 @@ Contains exactly the five accepted base fingerprints:
 - runtime dependency
 - documentation
 
-Fingerprint encoding has one deterministic owner. It does not hash process-local IDs, absolute paths, source locations or unordered map iteration.
+Rules:
 
-## Current implementation disposition
+- encode final facts, not direct seeds or pending states
+- one domain tag and version per fingerprint family
+- stable identities and owned values only
+- no source locations, warnings, absolute paths or process-local IDs
+- sort semantic sets by stable identity
+- preserve authored order where order is semantic
+- generated request set affects implementation/worklist invalidation, not runtime-dependency content
+- choose digest and persistent format separately
 
-| Current owner | Decision | Replacement or final owner |
-|---|---|---|
-| `semantic_identity.rs` | Keep | Stable semantic identity vocabulary |
-| `canonical_type_identity.rs` | Keep and narrow dead-code allowances | Canonical cross-module type projection |
-| `DefinedPublicExportOrigins` | Keep projection logic; internalize | `PublicInterfaceDraftBuilder` |
-| `DefinedPublicTypeSurface` | Keep projection logic; internalize | declaration-centric draft records |
-| uncommitted `DefinedPublicTraitSurface` | Salvage after invariant fix | declaration-centric trait draft records |
-| `ResolvedPublicTypeRootTable` / proposed generalized AST table | Replace | one narrow interface-projection input/result outside executable AST |
-| separate `CompiledModuleResult.defined_public_*` fields | Delete in R1 | one `PublicInterfaceDraft` field, then final artefact |
-| `Module` three-lane payload | Retain lane contents temporarily | `CompiledModuleArtifact` |
-| `ModuleLinkFacts.external_package_registry` | Delete | build-boundary binding registry plus per-function link facts |
-| `ProjectModuleGraph` identity, ancestry, edges and waves | Keep and make production-complete | canonical project graph and scheduler |
-| dead-code support visibility query | Wire or delete | graph-aware source namespace resolution |
-| `ModuleEntryCompileWaves` | Delete at graph cutover | canonical node jobs for every selected role |
-| `DiscoveredModule` and per-entry input closures | Delete at graph cutover | `ModuleCompilationJob` over one `SemanticSourceSet` |
-| reachable-file BFS seeded per entry | Replace | one project/package source scan plus per-module semantic source classification |
-| `ProjectPathResolver` import fallback behavior | Split and delete | Stage 0 source namespace resolver; separate path-literal resolver |
-| project-local source package discovery and `package_folders` | Delete | structural `+*.moth` support packages and project facade |
-| AST emitter generic instance materialisation | Delete | build-owned generated sidecar worklist |
-| `CallTarget::UserFunction` for foreign source calls | Replace | explicit local/cross-module/generated source targets |
-| module-local `start` reachability filtering | Delete | entry/package link planning |
-| flat `BackendBuilder::build_backend(Vec<Module>, ...)` | Delete after assembly cutover | `ProjectCompilation` |
-| `FileKind::NotBuilt` | Delete if no longer required | tooling outcome without fake output artefact |
+Delete any remaining R2 direct-draft encoding API.
 
-## Milestone policy
+### R7F: output ownership
 
-The recovery is organized by architectural milestones rather than dozens of accepted micro-components.
+Backends and project builders return output records. The build system owns:
 
-A milestone may contain several implementation commits. It is accepted only when its exit gate is met and obsolete production owners named by that milestone are deleted.
+- output-root validation
+- conflict diagnostics
+- manifests
+- skip-unchanged writes
+- stale cleanup
 
-## Milestone R0: Freeze the accepted baseline and preserve unaccepted work
+Remove `FileKind::NotBuilt` if no tooling owner remains.
 
-Status: completed by this architecture checkpoint and replacement plan.
+### R7 exit gate
 
-Actions:
+- all project builders consume `ProjectCompilation`
+- `check` and dev use the canonical graph
+- five final fingerprint owners exist
+- no duplicate invalidation policy exists
+- no backend writes final project files directly
+- `cargo fmt` and `just validate` pass
 
-- Treat `4a0cd4e01` as the last accepted compiler implementation checkpoint.
-- Preserve the uncommitted Phase 7c2e diff as a patch or named stash outside the accepted branch.
-- Do not merge or commit 7c2e wholesale.
-- Record the salvage/deletion decisions from this plan in the active status block.
-- Replace the previous plan contents without modifying accepted implementation code.
+Complete Review phase 6.
 
-Exit gate:
+## Phase R8: repository migration and final deletion audit
 
-- replacement plan reviewed against the architecture authorities
-- accepted and unaccepted work clearly separated
-- no claim that worker-only validation accepted 7c2e
+Update:
 
-## Milestone R1: Consolidate the public-interface producer boundary
+- module-root-relative import fixtures
+- support and project-facade examples
+- `moth new` scaffolding
+- package and project-structure docs
+- compiler educational docs
+- progress matrix only where support changed
+- generated documentation through the release build
 
-Status: completed by the accepted R1 aggregate-draft checkpoint.
+Prune:
 
-Goal: one pre-HIR aggregate instead of another parallel interface component.
-
-Implementation:
-
-1. Introduce one `PublicInterfaceDraftBuilder` and one owned `PublicInterfaceDraft`.
-2. Move the accepted direct export-origin and canonical type-surface outputs behind that builder.
-3. Rework the useful Phase 7c2e trait-requirement projection into the same builder.
-4. Validate trait receiver `this_type` against the owning trait and emit explicit canonical `SelfType` facts.
-5. Replace the AST-owned public-root field family with one narrow projection input/result. Prefer an `AstBuildResult` or semantic side result over widening executable `Ast`.
-6. Replace all separate `CompiledModuleResult.defined_public_*` fields with one draft field.
-7. Remove test-only getters and dead-code allowances that existed only because each component lacked a production consumer.
-8. Keep the draft private to compiler/build orchestration. Do not expose it to backends.
-
-Required direct draft coverage:
-
-- free functions
-- structs and choices
-- transparent aliases
-- constants
-- receiver methods attached to direct public receivers
-- generic parameters and bounds
-- traits and requirement signatures
-- direct export bindings and origins
-
-Tests:
-
-- table-driven projection tests for all declaration categories
-- trait self-type positive and mismatch invariant tests
-- direct/imported/alias-target origin stability cases retained from accepted coverage
-- one orchestration test proving the module result carries exactly one aggregate draft
-- no duplicate getter-level tests for fields already covered by a declaration projection case
-
-Deletion gate:
-
-- no separate `defined_public_export_origins`, `defined_public_type_surface` or trait-surface field on `CompiledModuleResult`
-- no generalized transient AST bag with open-ended future fields
-
-Validation:
-
-- focused interface projection and orchestration tests
-- `cargo fmt`
-- `just validate`
-
-## Milestone R2: Complete direct semantic facts and artefact finalization inputs
-
-R2a checkpoint: completed by the declaration-centric direct-record implementation. The draft now
-owns module identity, separate export bindings and exactly one closed semantic record per unique
-direct declaration origin. Transient `DefinedPublic*` aggregates are consumed before the boundary,
-and receiver methods attach to their nominal records through total deterministic joins.
-
-R2e checkpoint: direct source-canonical evidence now uses canonical target-plus-trait identity and
-maps authored-order stable trait requirements to the exact stable receiver origins already attached
-to declaration records. Private targets and traits remain excluded, builtin evidence remains
-compiler-global and no donor-local evidence, trait, requirement, type or path identity crosses the
-draft boundary.
-
-R2i checkpoint: borrow validation and the direct declaration draft now share one frontend-owned
-call-summary vocabulary. Non-generic exported free functions and receiver methods join exactly once
-through stable function origins and local HIR IDs after borrow validation. Exported generic
-templates carry an explicit pending-generated state until R3 sidecars produce concrete summaries.
-
-R2j checkpoint: one frontend-owned encoder now produces deterministic, unambiguous canonical
-bytes for every semantic fact retained by the completed direct draft. It sorts semantic sets by
-stable identity, preserves authored-order contracts, rejects incomplete or wrong-owner states and
-chooses neither a digest nor a persistent cache format ahead of R7.
-
-Goal: make one declaring module able to produce every direct semantic fact required by a future provider interface.
-
-Implementation:
-
-1. Convert draft records to the declaration-centric shape.
-2. Add folded exported constant values, const-template values and const-record field values using owned backend-neutral value types.
-3. Add function and field defaults where they are part of the callable/constructor contract.
-4. Add complete struct/choice constructor semantics and receiver surfaces.
-5. Add stable trait requirements, public incompatibility facts and reusable evidence.
-6. Introduce target-plus-trait evidence identity and stable requirement-to-method mappings.
-7. Retain validated generic template descriptors in the draft and template body artefacts in compiler metadata.
-8. Produce direct function provenance dependencies from AST/HIR facts.
-9. Extend borrow analysis to retain public-call summaries keyed by local `FunctionId`:
-   - parameter access mode
-   - mutation effect
-   - optional transfer eligibility and effect category
-   - return alias summary
-   - relevant reactive effect
-10. Finalize direct declaration records after borrow validation by joining stable function origins to local summaries exactly once.
-11. Add deterministic canonical encoders for later fingerprinting, but do not introduce persistent serialization.
-
-The result of R2 is still an internal direct interface draft because source re-exports require completed provider interfaces. Do not call it a complete `PublicSemanticInterface` yet.
-
-Tests:
-
-- folded constant and default values survive without AST/TIR IDs
-- evidence identity is stable across local `TypeId`/`TraitId` allocation changes
-- requirement mappings preserve authored order and stable implementing function origins
-- public function summaries are complete and reject missing local summary joins
-- private declarations do not leak into direct interface records
-- project-context provenance plumbing has empty and synthetic non-empty unit cases
-
-Deletion gate:
-
-- no public semantic fact is reconstructed from HIR display names or rendered type names
-- no trait/evidence public fact retains donor-local IDs
-- no generic body token stream is treated as public semantic identity
-
-Validation:
-
-- focused AST/HIR/borrow/interface tests
-- canonical integration cases where existing user-visible behavior is involved
-- `cargo fmt`
-- `just validate`
-
-## Milestone R3: Move generated functions to build-owned sidecars
-
-Goal: remove consumer-local generic body emission before canonical provider compilation depends on it.
-
-Implementation:
-
-1. Replace `GenericFunctionInstanceKey` path-plus-local-`TypeId` identity with stable declaration origin, canonical concrete type identities and required evidence identities.
-2. Change AST generic calls to emit stable requests and explicit generated call targets.
-3. Extract directly-defined validated generic templates into the declaring module's template store.
-4. Split module semantic compilation so a module can return validated base HIR plus pending generated requests before final borrow/artefact finalization.
-5. Add one project/package-boundary generated worklist with deterministic deduplication.
-6. Materialize sidecars using the declaring module's immutable template body/context and a generated-local type environment.
-7. Allow generated bodies to enqueue more requests until a fixed point.
-8. Borrow-validate each generated function and publish its call summary before final borrow validation of requesters that need it.
-9. Associate each sidecar with its declaring module while keeping ownership in the consuming compilation boundary.
-10. Support private declaring-module helper calls without making private helpers source-visible identities.
-11. Delete AST-emitter materialisation and base-module mutation.
-
-Every generated sidecar carries generated-local type context, HIR, borrow facts, local lifetime facts and summaries, link facts and fingerprints.
-
-Tests:
-
-- two entries requesting the same concrete instance produce one sidecar
-- nested generic requests reach a deterministic fixed point
-- concrete type/evidence identity, not local IDs or aliases, controls deduplication
-- a generated body can call a private helper in its declaring module
-- a diagnosed request blocks only dependent roots
-- recursive request diagnostics remain source-attributed
-- base module HIR and interface fingerprints do not change when another consumer requests a new instance
-
-Deletion gate:
-
-- `AstEmitter` no longer materializes concrete generic functions
-- base module AST/HIR is never extended by a consumer request
-- no path-plus-local-`TypeId` generated identity remains in production
-
-Validation:
-
-- focused generic/worklist/HIR/borrow tests
-- existing generic integration contracts
-- `cargo fmt`
-- `just validate`
-
-## Milestone R4: Canonical graph and provider-interface cutover
-
-Goal: replace entry closures, fallback import resolution and header-based foreign surfaces with one canonical project/package compilation path.
-
-This is the main cutover milestone. Its internal slices are not accepted as separate production architectures.
-
-### R4a: Build the canonical namespace and semantic source sets
-
-- Scan each selected project or package source boundary once.
-- Tokenize/scan each `.moth` source candidate once and retain structural provider references.
-- Build `SemanticSourceSet` per module from its root and same-owner reachable sources/assets.
-- Stop traversal at child module and support package boundaries.
-- Build check-only orphan units as owned `.moth` minus canonical semantic `.moth`.
-- Build a graph-aware import namespace from module ownership, direct children, visible support packages, registered packages and provider contracts.
-- Resolve ordinary source imports from the owning module root, not the importing file.
-- Reject `@./`, parent traversal and entry-root fallback.
-- Split source import resolution from general compile-time path-literal resolution.
-- Make provider-backed explicit-extension imports module-root-relative unless their provider contract declares another explicit owner.
-- Remove configured `package_folders`, default `/lib` and project-local source-package scanning.
-
-### R4b: Compile every selected graph role
-
-- Create one `ModuleCompilationJob` per selected normal, support or project-facade node.
-- Compile source-backed Core and Builder packages as separate package graphs before consumers.
-- Treat registered package facades as API-only semantic roots supplied by package metadata, independent of cosmetic root filename.
-- Include support private descendants before their facade.
-- Include project-facade dependencies before the facade.
-- Normal modules compile dormant root work whether or not an entry later activates it.
-- API-only roots have no implicit or sentinel `start`.
-
-### R4c: Bind completed provider interfaces
-
-Replace the current binding signature with an input equivalent to:
-
-```rust
-pub struct InterfaceBindingInput<'a> {
-    pub prepared: PreparedHeaderSyntax,
-    pub module_namespace: &'a ResolvedModuleNamespace,
-    pub source_providers: &'a CompletedSourceProviderInterfaces,
-    pub binding_packages: &'a BindingInterfaceRegistry,
-    pub synthetic_interfaces: &'a SyntheticCompileTimeInterfaceRegistry,
-}
-```
-
-Binding must:
-
-- resolve imported stable declaration origins
-- project canonical provider types into the consumer `TypeEnvironment`
-- import folded values without re-folding
-- import trait requirements, evidence and receiver surfaces
-- retain final file-local visibility and collision results
-- resolve public re-exports from provider interfaces
-- produce explicit cross-module source call targets
-- never inspect provider AST/HIR/private headers
-
-### R4d: Finalize interfaces, effects and graph outcomes
-
-- Join direct drafts, provider re-exports and local borrow/effect summaries into complete `PublicSemanticInterface` values.
-- Construct `CompiledModuleArtifact` with all four lanes and five fingerprints.
-- Merge successful wave string-table deltas in canonical `ModuleId` order before later consumers use remapped payloads.
-- Build `GraphCompilationOutcome { successful, diagnosed, blocked }`.
-- A diagnosed provider exposes no interface.
-- Mark consumers blocked without semantically compiling them.
-- Continue independent branches.
-- Abort the boundary only on `CompilerError`.
-- Emit shared diagnostics once.
-
-### R4e: Delete the old production path
-
-Delete in the same milestone:
-
-- `DiscoveredModule`
-- `ModuleEntryCompileWaves`
-- per-entry reachable source closures
-- provider-body copying into consumers
-- module-root public-surface fallback by filesystem walk
-- `package_folders` and `/lib` project package discovery
-- source `@./` and entry-root import fallback
-- old source import binding from combined donor headers
-- compatibility adapters introduced during the cutover
-
-Tests:
-
-- one shared provider compiled once for multiple entries
-- one shared provider failure emits one diagnostic set
-- blocked consumers emit no secondary name/type cascades
-- independent branches continue
-- imported function/type/constant/trait/evidence/receiver/generic behavior uses provider interfaces
-- module-root-relative nested-file imports
-- no private path bypass through child modules or support packages
-- strict support scope visibility and overlap diagnostics
-- separate `@html` Builder package graph
-- API-only support/facade roots have no start
-- deterministic results under varied Rayon completion order
-
-Acceptance gate:
-
-- one canonical node scheduler is the only directory-project production path
-- source-provider binding consumes completed interfaces
-- no entry closure or fallback import path remains
-- full `just validate` passes
-
-## Milestone R5: Per-function link facts, entry assemblies and package assemblies
-
-Goal: move runtime reachability and activation out of module compilation.
-
-Implementation:
-
-1. Record per-function link facts during HIR construction/finalization for base and generated functions.
-2. Remove module-finalization reachability from `start` and remove reachability-filtered external import lists.
-3. Remove the complete external package registry from every module artefact.
-4. Build exact cross-artefact source/generated call resolution through the compiled graph.
-5. Build `EntryAssembly` values that activate only one normal module's dormant root work, fragments and entry settings.
-6. Build `ProjectPackageAssembly` over the compiled project facade and reachable descendant surfaces.
-7. Propagate provenance through local, cross-module and generated call edges.
-8. Reject package exports whose public facts or reachable implementation depend on prohibited project context.
-9. Provide explicit target-validation roots from each entry or package assembly.
-10. Build success-only `ProjectCompilation` only when every selected requirement succeeded.
-
-Tests:
-
-- importing a normal module never activates its root work
-- one canonical normal module can produce multiple assemblies without recompilation
-- exact reachable binding/runtime assets differ correctly by entry
-- unreachable private target-unsupported code does not fail `check`/build validation
-- project facade never bypasses `export:`
-- direct and transitive project-context exposure is rejected
-- unreachable private project-context implementation remains allowed where the authority permits it
-
-Deletion gate:
-
-- no module-wide start reachability is a linking authority
-- entry/package assembly never invokes compiler semantic stages
-- no backend derives call or package identity from rendered names
-
-Validation:
-
-- focused link/assembly/provenance tests
-- integration output exact-once and imported-root suppression contracts
-- `cargo fmt`
-- `just validate`
-
-## Milestone R6: Migrate HTML, backend and output consumers to `ProjectCompilation`
-
-Goal: make backends consume explicit assemblies and link plans without rediscovering project structure.
-
-Implementation:
-
-- replace `BackendBuilder::build_backend(Vec<Module>, ...)` with `ProjectCompilation`
-- migrate HTML route generation to `EntryAssembly`
-- preserve fragment interleaving and root `start` activation exactly once
-- compute target partitions and validation from per-function reachable unions
-- generate external JavaScript runtime/glue from reachable binding calls
-- plan tracked assets from reachable link facts and compiler metadata
-- preserve output ownership, manifests, stale cleanup and path validation
-- remove `FileKind::NotBuilt` if tooling no longer needs it
-- keep physical Wasm partition/layout work in the downstream Wasm plan
-
-Tests:
-
-- current HTML-JS output parity
-- homepage and route policy parity
-- duplicate route/output diagnostics
-- external runtime asset/glue deduplication by reachable entry use
-- tracked asset conflicts and relative output behavior
-- no backend source scan or import reconstruction
-
-Deletion gate:
-
-- no flat module loop in the HTML builder
-- no backend accepts a partial graph outcome
-- no backend writes final project outputs directly
-
-Validation:
-
-- backend artifact and runtime integration contracts
-- `cargo fmt`
-- `just validate`
-
-## Milestone R7: Complete `check`, dev reuse and fingerprint invalidation
-
-Goal: finish command policy and in-memory reuse on the canonical artefact model.
-
-Implementation:
-
-### `check`
-
-- compile every discovered project module in the selected boundary
-- compile check-only orphan units without adding them to canonical artefacts
-- retain successful independent artefacts from `GraphCompilationOutcome`
-- validate actual linkable roots without backend lowering or output writing
-- report diagnosed modules once and blocked modules without cascades
-
-### `dev`
-
-- retain successful immutable module/package/generated artefacts
-- invalidate changed modules from source/config fingerprints
-- recompile semantic consumers only when public-interface fingerprints change
-- relink/regenerate entries for implementation, root, runtime, generated, entry-setting or relevant config changes
-- keep diagnostic and output ordering deterministic across rebuilds
-
-### Fingerprints
-
-- finalize one canonical fingerprint encoder for all five module fingerprints
-- include access/effect summaries in public-interface fingerprints, including optional-transfer summaries, alias/projection summaries, retained-parameter relationships, outlives constraints and external-boundary classifications
-- exclude docs-only facts from semantic/implementation fingerprints
-- include generated request-set changes in implementation/worklist invalidation
-- preserve package capability compatibility facts without implementing persistent caches
-
-Tests:
-
-- private body edit relinks without semantic consumer recompilation
-- public effect edit recompiles consumers
-- root-only edit relinks its entries
-- docs-only edit avoids executable invalidation
-- failed branch does not discard reusable independent artefacts
-- orphan unit diagnostics do not alter module public interfaces or backend roots
-
-Deletion gate:
-
-- `projects/check.rs` has no all-or-error `Vec<Module>` path
-- dev has no compile-everything path when artefacts are reusable
-- no duplicate invalidation policy exists in builders/backends
-
-Validation:
-
-- focused reuse/invalidation tests
-- dev/check integration tests
-- `cargo fmt`
-- `just validate`
-
-## Milestone R8: Repository migration, documentation and final deletion audit
-
-Goal: leave one documented architecture with no legacy migration owners.
-
-Implementation:
-
-- update all fixtures and source imports to module-root-relative syntax
-- remove `@./`, `package_folders` and `/lib` examples
-- update `moth new` scaffolding
-- update language, project-structure, packages, imports and compiler educational pages
-- add complete normal/support/facade project trees and legal/illegal topology examples
-- update the progress matrix only for behavior that is now implemented
-- rebuild generated documentation
-- prune superseded implementation-shaped unit tests and dead-code allowances
-- remove stale plan comments naming future consumers that now exist
+- obsolete implementation-shaped unit tests
+- dead-code allowances for future consumers that now exist
+- stale comments naming old phases or owners
+- benchmark cases that do not validate successful compilation
+- old package-folder fixtures
+- any remaining Beanstalk, `.bst`, `.bd`, `bean` or `BST-*` references in this plan's affected surfaces
 
 Final deletion audit:
 
 - no `DiscoveredModule`
+- no `ModuleEntryCompileWaves`
 - no entry-closure compilation
-- no flat `Vec<Module>` backend handoff
-- no configured project-local source-package scanning
+- no parallel import scanner
+- no configured `package_folders`
 - no default `/lib`
 - no source `@./`
 - no entry-root import fallback
-- no donor header/body copying into consumers
+- no donor header/body copying
 - no donor-local cross-module type/evidence transport
 - no consumer-local generic materialisation
-- no borrow path opening foreign HIR
-- no module-level start reachability used as link authority
-- no API-only sentinel start
+- no foreign HIR borrow lookup
+- no module-level `start` reachability authority
+- no API-only sentinel `start`
+- no flat `Vec<Module>` backend handoff
+- no incomplete direct-draft encoder
 - no compatibility wrappers around removed paths
-
-Validation:
-
-- documentation release build for documentation-only final slices
-- otherwise `cargo fmt` and `just validate`
-- manual architecture audit from `validation.mtf`
 
 ## Required end-to-end contracts
 
-The canonical integration suite remains the primary owner of user-visible behavior. Add focused Rust tests only for hidden graph, identity, interface, scheduling and fingerprint facts.
+The canonical integration suite owns user-visible behaviour. Focused Rust tests own hidden identity, graph, summary and scheduling invariants.
 
-Required canonical contracts:
+Required contracts:
 
 - shared module compiled once across entries
 - shared failure diagnosed once
@@ -937,65 +1427,87 @@ Required canonical contracts:
 - strict scoped support visibility
 - support-scope overlap diagnostics
 - project facade assembly
-- separate Builder/Core/dependency package graphs
-- stable identities under source-file moves and declaration reordering
+- separate Builder, Core and dependency package graphs
+- stable identities under ordinary source-file moves and declaration reordering
 - re-export alias changes binding identity without changing declaration origin
-- canonical type/evidence identity independent of local allocation
+- canonical type and evidence identity independent of local allocation
 - generated sidecar reuse and fixed point
-- cross-module borrow effects and return aliasing
-- exact per-entry runtime/link unions
+- cross-module borrow, alias and transfer summaries
+- exact per-entry runtime and asset unions
 - no source/provider fallback to `@./`
-- no API-only start
+- no API-only `start`
 - check-only orphans excluded from artefacts
-- deterministic diagnostics and output under parallel scheduling
+- deterministic diagnostics and output under parallel completion
 - direct and transitive project-context package-export rejection
 - consuming-project inputs do not satisfy dependency build-input contracts
+- one source read, tokenization and preparation per selected source
+- one semantic compilation per physical module
+- one materialisation per generated identity
 
 ## Test discipline
 
-- Prefer one realistic multi-module integration case over many getter-shaped unit tests.
-- Use table-driven unit tests for canonical declaration variants and total join failures.
-- Do not add public/test-only accessors solely to inspect a temporary component.
-- Remove superseded tests when an old API or owner is deleted.
-- Preserve one primary contract owner per behavior.
+- Prefer realistic multi-module integration cases over getter-shaped unit tests.
+- Use unit tests for pure identity, graph, projection, encoding and impossible-state invariants.
+- Keep one primary contract owner per behaviour.
+- Do not add public or test-only production accessors.
+- Remove tests for deleted APIs rather than preserving wrappers.
+- Use exact instrumentation counts for duplicate-work contracts.
 - Run `cargo run --quiet -- tests --audit` after fixture metadata changes.
+- Benchmark checks are sanity gates. They do not replace correctness assertions that compilation completed.
 
-## Validation requirements
+## Validation
 
-Every code-bearing milestone requires:
+Every parent-accepted code slice requires:
 
 ```bash
 cargo fmt
 just validate
 ```
 
-Also perform the manual architecture audit required by `validation.mtf` whenever the milestone changes stage ownership, HIR, diagnostics, types, provider binding, graph scheduling or backend handoff.
+Also perform the manual architecture audit from `validation.mtf` whenever a slice changes:
 
-A focused command is iteration evidence only. It is not a milestone acceptance gate.
+- stage ownership
+- source discovery
+- provider binding
+- AST or HIR boundaries
+- semantic identities
+- borrow or lifetime summary handoff
+- graph scheduling
+- backend handoff
 
-Documentation-only slices use the documentation release-build gate from `validation.mtf` and do not claim full compiler validation.
+A focused command is iteration evidence only.
 
-## Final architecture acceptance
+Documentation-only final slices use:
+
+```bash
+moth build docs --release
+```
+
+Do not claim full compiler validation for a documentation-only gate.
+
+## Final acceptance
 
 Before marking this plan complete, verify:
 
-- each physical module is semantically compiled once per project/package boundary
+- one physical module is compiled once per project or package boundary
+- one filesystem inventory and one prepare-once source store exist
 - every source consumer binds completed immutable provider interfaces
-- every successful module artefact has a complete public interface, executable lane, per-function link facts, metadata and five fingerprints
+- every successful module artefact has a complete interface, executable lane, per-function link facts, metadata and five fingerprints
 - diagnosed modules expose no partial interface
 - generated functions live only in sidecars
-- borrow validation uses local, provider, generated or binding summaries without foreign HIR inspection
+- borrow validation uses local, provider, generated or binding summaries without foreign HIR
+- lifetime topology is validated through the memory-analysis owner
 - entry and package assembly never trigger semantic compilation
 - support and project-facade roots are API-only
 - source imports are module-root-relative and topology-checked
 - project, Builder, Core and dependency source graphs remain separate
-- backends receive success-only explicit project/link plans
+- backends receive success-only explicit project and link plans
 - source, tests, docs, progress matrix and roadmap agree
-- the HTML-Wasm plan can proceed without redesigning frontend module identity, provider binding or linking
+- the HTML-Wasm plan can proceed without redesigning module identity, provider binding or linking
 
 ## Deliberately deferred work
 
-- persistent module/package/generated artefact serialization
+- persistent module, package and generated artefact serialization
 - on-disk cache layout, eviction and migration
 - dependency declaration syntax and local path dependencies
 - package registries, remote fetching, versions and lockfiles
