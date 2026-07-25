@@ -51,7 +51,7 @@ The HTML build system will generate an HTML page from this code:
 Templates are first-class language values in Moth.
 They are the main way you create strings, but are far more powerful than regular string formatters. 
 
-<img src="./docs/assets/code-snippet.webp" width="800px"/>
+<img src="./docs/assets/code-snippet.png" width="800px"/>
 
 Moth's custom flavor of Markdown can live inside normal templates, so content can capture values, compose styles and fold straight into HTML at compile time.
 
