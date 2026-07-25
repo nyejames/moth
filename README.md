@@ -172,7 +172,7 @@ examples can grow around the language that exists and the agent will have to fol
 
 </div>
 
-<a href="https://github.com/nyejames/moth-plugin">Syntax highlighting for Visual Studio Code</a>
+<a href="https://github.com/nyejames/moth-vscode-highlighting">Syntax highlighting for Visual Studio Code</a>
 
 (LSP and more tooling to come in the future as the language stabilises)
 
