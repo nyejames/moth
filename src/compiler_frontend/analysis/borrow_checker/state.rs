@@ -55,10 +55,11 @@ pub(super) struct FunctionLayoutInputs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FutureUseKind {
     // WHAT: No reachable future read from this program point.
-    // WHY: Call/assignment transfer may consume ownership when all roots are None.
+    // WHY: Call/assignment transfer may receive optional destruction responsibility when all roots
+    //      are unused.
     None,
     // WHAT: Some paths use the root, others do not.
-    // WHY: Mixed outcomes are rejected for move-sensitive operations.
+    // WHY: Mixed outcomes conservatively fall back to borrowing for optional transfer.
     May,
     // WHAT: Every reachable path uses the root again.
     // WHY: Operations must treat the root as borrowed to preserve later uses.
@@ -322,34 +323,6 @@ impl BorrowState {
         BorrowStateSnapshot { locals }
     }
 
-    pub(super) fn invalidate_root(&mut self, root_index: usize) {
-        let local_count = self.locals.len();
-
-        for local_index in 0..local_count {
-            if local_index == root_index {
-                self.locals[local_index] = LocalState::uninit(local_count);
-                continue;
-            }
-
-            let mut next = self.locals[local_index].clone();
-            if next.mode.contains(LocalMode::ALIAS) && next.alias_roots.contains(root_index) {
-                next.alias_roots.remove(root_index);
-                next.direct_alias_roots.remove(root_index);
-                if next.alias_roots.is_empty() {
-                    next = if next.mode.contains(LocalMode::SLOT) {
-                        LocalState::slot(local_count)
-                    } else {
-                        LocalState::uninit(local_count)
-                    };
-                }
-            }
-
-            self.locals[local_index] = next;
-        }
-
-        self.recompute_root_ref_counts();
-    }
-
     fn effective_roots_from_state(&self, local_index: usize, state: &LocalState) -> RootSet {
         let local_count = self.locals.len();
         let mut roots = RootSet::empty(local_count);
@@ -461,16 +434,6 @@ impl RootSet {
         let word_index = bit_index / 64;
         let bit_offset = bit_index % 64;
         (self.words[word_index] & (1u64 << bit_offset)) != 0
-    }
-
-    pub(super) fn remove(&mut self, bit_index: usize) {
-        if bit_index >= self.bit_len {
-            return;
-        }
-
-        let word_index = bit_index / 64;
-        let bit_offset = bit_index % 64;
-        self.words[word_index] &= !(1u64 << bit_offset);
     }
 
     pub(super) fn union_with(&mut self, other: &Self) {

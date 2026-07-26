@@ -1,0 +1,9 @@
+-- An immutable non-copy value is shared into `set` and remains usable afterward.
+scores ~{String = String} = {}
+value String = "hello"
+~scores.set("key", value) catch:
+;
+stored = scores.get("key") catch:
+    then ""
+;
+[:map_set_immutable_non_copy_value_later_use value=[value] stored=[stored]]

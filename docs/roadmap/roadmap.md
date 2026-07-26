@@ -11,7 +11,6 @@ Use the [Progress Matrix](docs/src/docs/progress/#page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Benchmark system fixes](./plans/moth-benchmark-correctness-implementation-plan.md)
 - [Canonical module compilation and scoped packages](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
 
 ## Queued implementation chain

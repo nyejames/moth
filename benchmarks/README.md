@@ -2,20 +2,26 @@
 
 ## Purpose
 
-The benchmark system is a rough compiler-development sanity check. It is meant to answer whether a change obviously helped, hurt, or did nothing measurable.
+The benchmark system provides a rough compiler-development sanity check. It answers whether a change obviously helped, hurt or did nothing measurable.
 
-It is not a Criterion-style statistical benchmark suite, a CI timing gate, or a public performance report. Public summaries stay terse so they can be tracked in the repo without becoming noisy.
+It doesn't enforce a pass/fail performance threshold and it doesn't replace correctness tests. Public summaries stay terse so the repository can track them without noise.
 
 ## Commands
 
 ```bash
+just bench-ci
+just bench-validate
 just bench-check
 just bench-frontend-check
 just bench
 just bench-frontend
 ```
 
-`just bench-check` runs the end-to-end CLI suite without writing local history or tracked summaries. Use it for validation.
+`just bench-ci` runs the bounded development gate used by `just validate`. It preflights every manifest case once, then measures the quick subset with three iterations. The command never writes local history or tracked summaries.
+
+`just bench-validate` preflights every case without measuring it. Use this when you only need to check the benchmark inventory and execution contracts.
+
+`just bench-check` runs the full end-to-end CLI suite without writing local history or tracked summaries.
 
 `just bench-frontend-check` runs the focused in-process frontend suite without writing local history or tracked summaries. Use it when compiler-stage changes are too small to read through subprocess noise.
 
@@ -23,7 +29,84 @@ just bench-frontend
 
 `just bench-frontend` records the focused frontend suite through the same local history and monthly summary flow, but under a separate suite kind.
 
-Each suite uses one warmup iteration and ten measured iterations per case.
+Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights all 58 cases before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
+
+Non-recording commands never append local JSONL history or change tracked summaries.
+
+## Manifest And Stable Identity
+
+`benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 32 workloads and 58 cases.
+
+A workload names the source inputs that determine one compilation workload:
+
+```toml
+[[workload]]
+id = "speed_test"
+entry = "benchmarks/speed-test.moth"
+fingerprint_roots = ["benchmarks/speed-test.moth"]
+fingerprint_excludes = []
+```
+
+`id` gives the workload a stable authored identity. `entry` selects the file or project passed to the runner. `fingerprint_roots` list every authored input boundary that affects compilation. `fingerprint_excludes` remove generated output trees inside those roots, such as `dev` and `release`.
+
+Each case connects a workload to one typed runner:
+
+```toml
+[[case]]
+id = "speed_test_build"
+workload = "speed_test"
+group = "core"
+quick = true
+expectation = "clean"
+
+[case.runner]
+kind = "cli"
+command = "build"
+args = []
+```
+
+Frontend cases use the in-process frontend API:
+
+```toml
+[[case]]
+id = "type_stress_frontend"
+workload = "type_stress"
+group = "core"
+quick = false
+expectation = "clean"
+
+[case.runner]
+kind = "frontend"
+profile = "dev"
+```
+
+Case IDs identify measurements and reports. CLI profiling also selects cases by this ID. They don't derive from paths, commands or compiler names, so moving a fixture doesn't rename its history. Workload IDs let CLI and frontend cases share the same source identity.
+
+The workload fingerprint covers the benchmark protocol, runner declaration, authored root and exclude paths and every included file path and byte. A changed fingerprint marks the workload as changed. Comparison output never presents a speed delta for that case until a new matching fingerprint baseline exists.
+
+Schema 1 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
+
+## Execution Contract
+
+All benchmark modes use the same case executor. The executor validates the runner and observations during preflight and during every measured iteration. One failure aborts the suite before any history write.
+
+CLI cases run the prebuilt timer-enabled compiler. Benchmark subprocesses receive:
+
+```text
+MOTH_TIMERS=bench
+MOTH_COUNTERS=off
+MOTH_BENCH_STATUS=1
+```
+
+A completed `check` or `build` emits exactly one machine status record:
+
+```text
+MOTH_BENCH status errors=<usize> warnings=<usize>
+```
+
+The executor also requires stable `MOTH_BENCH timing` observations, including the matching `command.check.total` or `command.build.total` metric. Missing, duplicate or malformed status and timing records fail closed. A zero process status can't compensate for reported diagnostics, and a clean status can't compensate for a non-zero process status.
+
+Frontend cases call the production in-process API. The same executor checks typed error and warning facts, a positive finite total duration and a non-empty stable stage set.
 
 ## Timing And Counter Controls
 
@@ -96,16 +179,16 @@ identity explicitly.
 Use `just bench-frontend` only when you intentionally want a recorded run. Default-thread runs
 append raw local data under `benchmarks/local-data/` and may update the concise tracked monthly
 summary. Recorded fixed-thread runs stay in local JSONL and never update tracked summaries. Raw
-local data, expanded counter tables and profile artifacts stay untracked.
+local data, expanded counter tables and profile artefacts stay untracked.
 
 ### Profiling commands
 
 ```bash
 just profile                  # default terse filter across all cases
 just profile <filter>         # named filter: terse, normal, deep, raw-index
-just profile-case <case-name> [filter]   # profile one specific case
+just profile-case <case-id> [filter]     # profile one manifest case ID
 just profile-symbolicated [filter]       # request Samply presymbolication
-just profile-case-symbolicated <case-name> [filter] # request presymbolication for one case
+just profile-case-symbolicated <case-id> [filter] # request presymbolication for one case
 just profile-build            # build the profiling binary (target/profiling/moth)
 ```
 
@@ -120,7 +203,7 @@ Compiler stage timings are attribution and debugging evidence. They help explain
 Stage observations are emitted as stable `MOTH_BENCH timing <metric>=<ms>ms`
 lines when the compiler is built with `timers` and run with
 `MOTH_TIMERS=bench` or `MOTH_TIMERS=verbose`. Human timer prose is developer
-output only; benchmark parsing should prefer the stable metric lines.
+output only. Benchmark parsing should prefer the stable metric lines.
 
 Stage 0/bootstrap/path-resolution timings are first-class attribution metrics. A CLI benchmark whose wall time is much larger than the sum of relevant top-level command phases should be treated as an instrumentation gap, not as harmless subprocess noise.
 
@@ -128,7 +211,7 @@ Counter observations are local diagnostic evidence, not public benchmark
 results. Stable counter metric names use snake_case or dotted subsystem names
 and are emitted as `MOTH_BENCH counter <metric>=<value>` lines only when
 counter output is explicitly requested. Counters are stored in local JSONL and
-used by local report tooling; raw counter tables must not be added to tracked
+used by local report tooling. Raw counter tables must not be added to tracked
 summaries.
 
 The current `frontend.file_prepare` metric is the combined parallel
@@ -151,15 +234,7 @@ Local history records the suite kind and primary metric so CLI and frontend runs
 
 ## Case Groups
 
-End-to-end benchmark cases live in `benchmarks/cases.txt`. Focused frontend cases live in `benchmarks/frontend-cases.txt`.
-
-Both files use group directives:
-
-```text
-# group: core
-check benchmarks/speed-test.moth
-build benchmarks/speed-test.moth
-```
+The typed manifest assigns every case a public summary group. Groups organise reports without changing compiler or runner behaviour.
 
 Groups are public summary labels, not compiler architecture boundaries:
 
@@ -176,7 +251,7 @@ Monthly summaries show absolute average times for `all` cases and for each group
 
 `Case spread latest` is spread across different benchmark cases. It is not timing uncertainty.
 
-`**-18ms avg**; 5 faster, 0 slower` means an obvious improvement across shared cases.
+`**-18ms avg** with 5 faster and 0 slower` means an obvious improvement across shared cases.
 
 `no measurable change` means no overlapping benchmark case exceeded the rough per-case threshold.
 
@@ -184,13 +259,15 @@ Monthly summaries show absolute average times for `all` cases and for each group
 
 `case set changed` means cases were added or removed, so only shared cases are directly comparable.
 
+`workload changed` means a stable case ID still exists but its workload fingerprint differs. The report excludes that case from speed claims and compares any unchanged cases separately.
+
 ## Optimization Phase Protocol
 
-For compiler optimization phases, run both focused frontend and end-to-end suites five independent
+For compiler optimisation phases, run both focused frontend and end-to-end suites five independent
 times and compare the benchmark-system medians. Keep the suite's normal warmup/measured iteration
-model; repeat the whole recorded command rather than changing per-case iteration counts.
+model. Repeat the whole recorded command rather than changing per-case iteration counts.
 
-Use `just bench-report` and targeted `just profile-case <case-name>` runs for attribution. Record
+Use `just bench-report` and targeted `just profile-case <case-id>` runs for attribution. Record
 only concise conclusions in `benchmarks/frontend-optimization-results.md` and the tracked monthly
 summary. Raw benchmark history, raw profiles, and expanded counter tables stay local-only.
 
@@ -215,7 +292,7 @@ The tracked Markdown summaries under `benchmarks/summaries/` are the public reco
 `just bench-report` reads local JSONL only. It does not update tracked summaries or append local history.
 
 Use it for compact per-case, stage, counter, ratio, and unattributed wall-time
-detail during active optimization work. The unattributed wall-time section
+detail during active optimisation work. The unattributed wall-time section
 compares CLI wall time with the sum of non-nested top-level command phase
 timers, such as `command.check.*`, `build_project.*`, and
 `command.build.output_write`, and flags cases whose visible phase timings no
@@ -224,15 +301,15 @@ longer explain the command cost.
 ## Local Profiling
 
 Use `just bench-report` to choose a case and stage before profiling. Then run
-`just profile` or `just profile-case <case-name>` to collect Samply-backed stack
+`just profile` or `just profile-case <case-id>` to collect Samply-backed stack
 samples alongside detailed timing observations.
 
 ### Two-run model
 
 Each profiling case runs twice:
 
-1. **Observation pass** — a non-profiled run that collects detailed stage timings.
-2. **Samply pass** — records stack samples into a raw profile.
+1. **Observation pass** runs without profiling and collects detailed stage timings.
+2. **Samply pass** records stack samples into a raw profile.
 
 The observation pass provides reliable stage attribution without profiler
 overhead. Counter fields may still appear in older local records or explicit
@@ -245,12 +322,12 @@ The profiling binary is built to `target/profiling/moth` using
 `just profile-build`. It uses release settings with full debug info and
 `detailed_timers` for verbose timing evidence. `detailed_timers` no longer
 enables high-volume counters by itself. Profile runs prepare symbol directories
-for the profiling binary where available; on macOS the xtask path also tries to
+for the profiling binary where available. On macOS the xtask path also tries to
 materialize `target/profiling/moth.dSYM` with `dsymutil` and reports whether its
 UUID matches the binary when `dwarfdump` is available. Do not commit the binary
 or `.dSYM` bundle.
 
-`--presymbolicate` remains an explicit profiling option. Use `just profile-symbolicated` or `just profile-case-symbolicated <case-name>` when a normal profile reports raw-address function names. xtask maps that request to the Samply flag supported by the installed CLI (`--presymbolicate` or `--unstable-presymbolicate`) and warns when neither flag is available.
+`--presymbolicate` remains an explicit profiling option. Use `just profile-symbolicated` or `just profile-case-symbolicated <case-id>` when a normal profile reports raw-address function names. xtask maps that request to the Samply flag supported by the installed CLI (`--presymbolicate` or `--unstable-presymbolicate`) and warns when neither flag is available.
 
 ### Filter modes
 
@@ -261,7 +338,7 @@ Filter modes control how much detail appears in summaries:
 | `terse` | agent-first default | top 8 Moth-owned functions per case, top 3 cases in root summary |
 | `normal` | human + agent investigation | top 20 functions per case, top 8 cases in root summary |
 | `deep` | pre-refactor investigation | top 50 functions per case, all profiled cases, caller/callee context |
-| `raw-index` | artifact generation only | raw profile and observation logs, no parsed hotspots |
+| `raw-index` | artefact generation only | raw profile and observation logs, no parsed hotspots |
 
 `terse` is the default when no filter is specified.
 
@@ -276,7 +353,7 @@ benchmarks/local-data/
         ├── profile-drift.md        # drift report when comparable history exists
         ├── profile-hotspots.json   # aggregated hotspot metadata
         └── cases/
-            └── <case-name>/
+            └── <case-id>/
                 ├── summary.md
                 ├── detailed-observations.json
                 ├── profile-shape.txt      # written when symbolication fails
@@ -293,7 +370,7 @@ When comparable profiling history exists, drift reports flag significant changes
 - **Stage drift**: at least 5% change and at least 10ms absolute delta.
 - **Counter drift**: at least 3% change with a meaningful absolute delta.
 
-Drift is attribution evidence. It does not prove an optimization or regression.
+Drift is attribution evidence. It does not prove an optimisation or regression.
 
 ### Rules
 
@@ -303,15 +380,20 @@ Drift is attribution evidence. It does not prove an optimization or regression.
 
 ## Adding Cases
 
-Benchmark cases are end-to-end CLI measurements such as `check path` or `build path`. Frontend benchmark cases are in-process frontend measurements such as `frontend path`.
+Add cases through `benchmarks/manifest.toml`:
 
-New cases should be valid programs or projects that exercise a distinct compiler or build-system path. Prefer one representative fixture over many near-duplicates.
+1. Choose an existing workload when the new runner measures the same source inputs. Add a workload only when the entry or authored input boundary differs.
+2. Give the workload and case descriptive lowercase IDs with underscores. Treat both IDs as persistent history keys.
+3. List every source or config input under `fingerprint_roots`. Exclude only generated paths inside those roots. Never exclude authored assets.
+4. Choose the typed CLI `check` or `build` runner, or the frontend `dev` profile. Keep runner arguments explicit and ordered.
+5. Set `expectation = "clean"`. Add the case to the quick subset only when it gives useful bounded coverage for normal development validation.
+6. Run `just bench-validate`, then `just bench-ci`. Run the matching full non-recording suite when the case affects performance work.
 
-Do not add negative diagnostic tests as benchmarks. Failure cases belong in `tests/cases/` where diagnostics can be asserted directly.
+New fixtures must compile successfully and exercise a distinct compiler or build-system path. Prefer one representative fixture over near-duplicates. If a fixture exposes a compiler bug, fix the compiler and add canonical coverage under `tests/cases/`. Don't weaken, annotate or reshape the benchmark source to hide the failure.
 
-Project fixtures should commit only source inputs. Generated `dev/` and `release/` output directories are ignored and must not be committed.
+Negative diagnostic cases belong under `tests/cases/`, where their stable codes and source context can be asserted. Project fixtures commit source inputs only. Generated `dev` and `release` directories stay untracked.
 
-Keep the public group list short. Use existing groups unless a new group gives clearly better summary readability.
+Keep the public group list short. Reuse an existing group unless a new group makes summaries clearer.
 
 Adversarial fixtures under `benchmarks/adversarial/` are compiler churn discovery workloads, not
 public language examples. They should remain valid successful programs or projects, but they may
@@ -364,8 +446,11 @@ allocation, lookup, folding, import, and lowering pressure.
 - Do not add per-case tables to tracked summaries.
 - Do not add raw counter dumps to tracked summaries.
 - Do not add expensive counters that require new full-pipeline traversals without a targeted investigation.
-- Do not treat counter movement as an optimization result unless timing moved meaningfully too.
+- Do not treat counter movement as an optimisation result unless timing moved meaningfully too.
 - Do not compare CLI and frontend suite results manually as if they were the same metric.
 - Do not commit `benchmarks/local-data/`, generated benchmark outputs, or old benchmark result folders.
 - Do not add failing diagnostic cases to benchmark suites.
+- Do not weaken a valid benchmark fixture to avoid fixing a compiler regression.
+- Do not derive new case IDs from paths or commands.
+- Do not compare changed workload fingerprints as speed movement.
 - Do not add many fixtures that stress the same path in slightly different ways.

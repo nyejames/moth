@@ -595,8 +595,10 @@ fn parse_inferred_curly_literal(
 ) -> CollectionParseResult<Expression> {
     let literal_location = token_stream.current_location();
 
-    // The current token is an open curly brace; skip to the first entry.
+    // Collection delimiters own intervening newlines; normalize them before the bounded
+    // expression parser sees the first entry as a possible statement terminator.
     token_stream.advance();
+    token_stream.skip_newlines();
 
     // Empty inferred `{}` keeps existing collection ambiguity behavior.
     if token_stream.current_token_kind() == &TokenKind::CloseCurly {

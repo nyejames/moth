@@ -15,7 +15,7 @@ fn test_record(run_id: &str) -> ProfileHistoryRecord {
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
-            case_name: "check_foo_bst".to_string(),
+            case_id: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -57,7 +57,7 @@ fn test_record_b(run_id: &str) -> ProfileHistoryRecord {
         filter_mode: "terse".to_string(),
         sample_rate_hz: Some(1000.0),
         cases: vec![HistoryCaseRecord {
-            case_name: "check_foo_bst".to_string(),
+            case_id: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -101,7 +101,7 @@ fn append_and_read_single_record() {
     assert_eq!(records[0].system_uuid, "TEST-UUID-001");
     assert_eq!(records[0].filter_mode, "terse");
     assert_eq!(records[0].cases.len(), 1);
-    assert_eq!(records[0].cases[0].case_name, "check_foo_bst");
+    assert_eq!(records[0].cases[0].case_id, "check_foo_bst");
     assert_eq!(records[0].cases[0].sample_count, 500);
 }
 
@@ -205,6 +205,20 @@ fn roundtrip_preserves_case_data() {
 }
 
 #[test]
+fn legacy_v1_case_name_is_adapted_to_current_case_id() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let path = temp_dir.path().join("profile-runs.jsonl");
+    let legacy = r#"{"format_version":1,"run_id":"legacy","timestamp":"June 18th - 09:00","commit":null,"system_uuid":"TEST-UUID-001","system_display":"Test System","filter_mode":"terse","sample_rate_hz":null,"cases":[{"case_name":"authored_case","group_name":"core","command":"check","args":["foo.moth"],"observation_wall_ms":10.0,"sample_count":2,"sample_weight":2.0,"stage_timings":[],"counters":[],"hot_functions":[],"top_bucket_label":"unknown","run_directory_path":"benchmarks/local-data/profiles/legacy"}]}"#;
+    std::fs::write(&path, legacy).expect("write legacy record");
+
+    let records = read_profile_runs(&path).expect("read");
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].format_version, 1);
+    assert_eq!(records[0].cases[0].case_id, "authored_case");
+}
+
+#[test]
 fn roundtrip_preserves_null_commit() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let path = temp_dir.path().join("profile-runs.jsonl");
@@ -280,7 +294,9 @@ fn format_record_as_jsonl_produces_valid_json() {
     assert!(json.starts_with('{'));
     assert!(json.ends_with('}'));
     // Must contain expected fields.
-    assert!(json.contains(r#""format_version":1"#));
+    assert!(json.contains(r#""format_version":2"#));
+    assert!(json.contains(r#""case_id":"check_foo_bst""#));
+    assert!(!json.contains(r#""case_name""#));
     assert!(json.contains(r#""run_id":"2026-06-18T10-30-abc1234""#));
     assert!(json.contains(r#""system_uuid":"TEST-UUID-001""#));
     assert!(json.contains(r#""filter_mode":"terse""#));

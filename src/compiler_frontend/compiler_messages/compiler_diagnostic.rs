@@ -507,19 +507,6 @@ impl CompilerDiagnostic {
         .with_labels(labels)
     }
 
-    pub(crate) fn invalid_access_after_possible_ownership_transfer(
-        place: DiagnosticPlace,
-        location: SourceLocation,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Borrow(
-                BorrowDiagnosticKind::InvalidAccessAfterPossibleOwnershipTransfer,
-            ),
-            location,
-            DiagnosticPayload::InvalidAccessAfterPossibleOwnershipTransfer { place },
-        )
-    }
-
     pub(crate) fn use_of_uninitialized_local(
         place: DiagnosticPlace,
         location: SourceLocation,

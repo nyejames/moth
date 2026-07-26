@@ -196,9 +196,9 @@ fn borrow_assignment_emits_assign_borrow() {
     let source_name = expected_dev_local_name("source", 0);
 
     assert!(
-        output
-            .source
-            .contains(&format!("__moth_assign_borrow({alias_name}, {source_name})")),
+        output.source.contains(&format!(
+            "__moth_assign_borrow({alias_name}, {source_name})"
+        )),
         "Load assignment to a fresh local must emit __moth_assign_borrow"
     );
 }

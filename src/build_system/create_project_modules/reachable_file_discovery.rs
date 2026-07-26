@@ -200,9 +200,7 @@ fn prepared_input_from_loaded(loaded: LoadedMissingSourceFile) -> PreparedSource
             // Every reachable Moth file is scanned and cached during traversal, so a cache
             // miss can only be Moth template or PlainMarkdown. Reaching this arm is a proven
             // invariant violation rather than a user-facing failure.
-            unreachable!(
-                "Stage 0 cache-miss load produced a Moth file without retained tokens"
-            )
+            unreachable!("Stage 0 cache-miss load produced a Moth file without retained tokens")
         }
     }
 }

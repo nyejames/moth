@@ -1,10 +1,10 @@
 //! Borrow-checker fact-generation regression tests.
 //!
-//! WHAT: checks the low-level facts emitted for borrows, moves, assignments, and returns.
+//! WHAT: checks the low-level facts emitted for borrows, optional transfers, assignments, and returns.
 //! WHY: these facts are the borrow checker's source of truth, so targeted tests catch drift
 //! before it reaches higher-level diagnostics.
 
-use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
+use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression::{
@@ -303,7 +303,7 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
 }
 
 #[test]
-fn statement_entry_state_marks_source_uninitialized_after_inferred_assignment_move() {
+fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
@@ -351,7 +351,7 @@ fn statement_entry_state_marks_source_uninitialized_after_inferred_assignment_mo
 
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect("inferred assignment move should pass");
+        .expect("inferred assignment transfer should pass");
 
     let source_local = find_assigned_local_for_line(&hir, 10)
         .expect("should locate the source local by declaration line");
@@ -376,29 +376,52 @@ fn statement_entry_state_marks_source_uninitialized_after_inferred_assignment_mo
         .expect("entry snapshot should include the target local");
 
     assert!(
-        source_snapshot.mode.contains(LocalMode::UNINIT),
-        "moved-from source should be uninitialized at the sentinel statement, got source mode {:?} with aliases {:?}; target mode {:?} with aliases {:?}",
+        source_snapshot.mode.contains(LocalMode::SLOT),
+        "optional transfer must keep the source initialized in mandatory state, got source mode {:?} with aliases {:?}; target mode {:?} with aliases {:?}",
         source_snapshot.mode,
         source_snapshot.alias_roots,
         target_snapshot.mode,
         target_snapshot.alias_roots
     );
     assert!(
-        target_snapshot.mode.contains(LocalMode::SLOT),
-        "move target should own an independent slot at the sentinel statement, got mode {:?} with aliases {:?}",
+        target_snapshot.mode.contains(LocalMode::ALIAS),
+        "borrow fallback should keep the target rooted in the source, got mode {:?} with aliases {:?}",
         target_snapshot.mode,
         target_snapshot.alias_roots
     );
     assert!(
-        target_snapshot.alias_roots.is_empty(),
-        "move target should not retain alias roots at the sentinel statement"
+        target_snapshot.alias_roots.contains(&source_local),
+        "borrow fallback should retain the source root on the target"
+    );
+
+    let assignment_value = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| {
+            if let HirStatementKind::Assign { target, value } = &statement.kind
+                && matches!(target, HirPlace::Local(local) if *local == target_local)
+            {
+                Some(value.id)
+            } else {
+                None
+            }
+        })
+        .expect("should locate the optional assignment value");
+    assert_eq!(
+        report
+            .analysis
+            .value_fact(assignment_value)
+            .expect("assignment value should have a borrow fact")
+            .optional_transfer,
+        OptionalTransferStatus::Transfer
     );
 }
 
 // WHAT: hidden map-operation transfer facts that integration output cannot inspect.
 // WHY: Phase 6 integration owns user-visible map borrow behavior; these narrow state
 //      assertions protect the receiver-alias shape, MayConsume last-use classification,
-//      and recursive aggregate-literal ownership transfer.
+//      and recursive aggregate-literal advisory transfer facts.
 
 #[test]
 fn map_get_operation_result_alias_retains_receiver_root() {
@@ -497,10 +520,9 @@ sentinel = 0"#;
 }
 
 #[test]
-fn map_set_final_use_moves_inserted_non_copy_roots() {
-    // WHAT: `set` MayConsume on final-use non-copy key and value inputs moves their roots.
-    // WHY: last-use classification must consume ownership; a regression to a borrow would
-    //      leave the root live, which integration output cannot distinguish from a move.
+fn map_set_final_use_records_advisory_transfer_without_invalidating_roots() {
+    // WHAT: `set` MayConsumeShared on final-use non-copy key and value inputs records transfer advice.
+    // WHY: optional destruction responsibility must not rewrite mandatory source state.
     let source = r#"scores ~{String = String} = {}
 key ~= "key"
 value ~= "hello"
@@ -512,6 +534,43 @@ sentinel = 0"#;
     let external_package_registry = default_external_package_registry(&mut string_table);
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("a final-use set with no later value use should pass");
+
+    let set_statement_id = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| {
+            matches!(
+                statement.kind,
+                HirStatementKind::MapOp {
+                    op: HirMapOp::Set,
+                    ..
+                }
+            )
+            .then_some(statement.id)
+        })
+        .expect("should locate the final-use set operation");
+    let set_fact = report
+        .analysis
+        .statement_fact(set_statement_id)
+        .expect("set operation should have a statement fact");
+    assert_eq!(
+        set_fact.conflicts_checked, 3,
+        "the isolated transfer probe must not increment the caller conflict count"
+    );
+    assert_eq!(
+        set_fact.mutable_roots.len(),
+        3,
+        "the isolated transfer probe must not duplicate caller access roots"
+    );
+    assert_eq!(
+        report.analysis.statement_facts.len(),
+        hir.blocks
+            .iter()
+            .map(|block| block.statements.len())
+            .sum::<usize>(),
+        "the isolated transfer probe must not duplicate statement facts"
+    );
 
     let sentinel_statement =
         find_assign_statement_id_for_local_name(&hir, &string_table, "sentinel")
@@ -531,17 +590,25 @@ sentinel = 0"#;
             .unwrap_or_else(|| panic!("entry snapshot should include the inserted {name} local"));
 
         assert!(
-            snapshot.mode.is_definitely_uninit(),
-            "final-use set should move the inserted {name} root, got mode {:?} with aliases {:?}",
+            snapshot.mode.contains(LocalMode::SLOT),
+            "final-use set should keep the inserted {name} root initialized, got mode {:?} with aliases {:?}",
             snapshot.mode,
             snapshot.alias_roots
+        );
+
+        assert!(
+            report.analysis.value_facts.values().any(|fact| {
+                fact.optional_transfer == OptionalTransferStatus::Transfer
+                    && fact.roots.contains(&local)
+            }),
+            "final-use set should record advisory transfer for {name}"
         );
     }
 }
 
 #[test]
 fn map_set_later_use_keeps_mutable_inputs_borrowed() {
-    // WHAT: `set` MayConsume on later-use mutable key and value inputs borrows rather than moving.
+    // WHAT: `set` MayConsumeShared on later-use key and value inputs borrows rather than moving.
     // WHY: last-use classification must not unconditionally move; the root stays live so
     //      the binding remains usable, which a regression to always-move would break.
     let source = r#"scores ~{String = String} = {}
@@ -587,14 +654,61 @@ label = value
             snapshot.mode,
             snapshot.alias_roots
         );
+        assert!(
+            report.analysis.value_facts.values().any(|fact| {
+                fact.optional_transfer == OptionalTransferStatus::Borrow
+                    && fact.roots.contains(&local)
+            }),
+            "later-use set should record advisory borrow fallback for {name}"
+        );
     }
 }
 
 #[test]
-fn nested_map_literal_moves_inner_non_copy_value_root() {
-    // WHAT: a nested map literal recursively moves an inner inserted non-copy value.
-    // WHY: aggregate ownership transfer must recurse into inner literals; integration
-    //      only proves the outer rejection, not the inner root invalidation.
+fn later_use_nested_map_literal_records_borrow_without_invalidating_root() {
+    let source = r#"value ~= "hello"
+scores ~{String = {String = String}} = {"outer" = {"inner" = value}}
+label = value
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("a later-use nested literal should retain shared storage");
+
+    let value_local = find_local_by_name(&hir, &string_table, "value")
+        .expect("should locate the inner inserted value local by name");
+    assert!(
+        report.analysis.value_facts.values().any(|fact| {
+            fact.optional_transfer == OptionalTransferStatus::Borrow
+                && fact.roots.contains(&value_local)
+        }),
+        "later-use nested literal should record advisory borrow fallback"
+    );
+
+    let label_statement = find_assign_statement_id_for_local_name(&hir, &string_table, "label")
+        .expect("should locate the later value use");
+    let entry_state = report
+        .analysis
+        .statement_entry_states
+        .get(&label_statement)
+        .expect("later value use should have an entry snapshot");
+    let value_snapshot = entry_state
+        .locals
+        .iter()
+        .find(|snapshot| snapshot.local == value_local)
+        .expect("entry snapshot should include the inserted value local");
+    assert!(
+        value_snapshot.mode.contains(LocalMode::SLOT),
+        "later-use nested literal should keep the source initialized, got mode {:?}",
+        value_snapshot.mode
+    );
+}
+
+#[test]
+fn nested_map_literal_records_inner_transfer_without_invalidating_root() {
+    // WHAT: a nested map literal recursively records transfer advice for its inner value.
+    // WHY: aggregate analysis must recurse while leaving mandatory source state intact.
     let source = r#"value ~= "hello"
 scores ~{String = {String = String}} = {"outer" = {"inner" = value}}
 sentinel = 0"#;
@@ -621,10 +735,17 @@ sentinel = 0"#;
         .expect("entry snapshot should include the inner inserted value local");
 
     assert!(
-        value_snapshot.mode.is_definitely_uninit(),
-        "nested literal should move the inner inserted value root, got mode {:?} with aliases {:?}",
+        value_snapshot.mode.contains(LocalMode::SLOT),
+        "nested literal should keep the inner inserted value initialized, got mode {:?} with aliases {:?}",
         value_snapshot.mode,
         value_snapshot.alias_roots
+    );
+    assert!(
+        report.analysis.value_facts.values().any(|fact| {
+            fact.optional_transfer == OptionalTransferStatus::Transfer
+                && fact.roots.contains(&value_local)
+        }),
+        "nested literal should record advisory transfer for the inner value"
     );
 }
 
@@ -688,7 +809,8 @@ fn transparent_fallible_success_projection_preserves_retained_alias_root() {
     // WHAT: a fallible success projection passed to an alias-retaining call is one direct
     //      place access, and the returned alias must retain that place's root.
     // WHY: optional transfer first records argument roots before deciding whether the call
-    //      borrows or moves; treating the unwrap as an aggregate creates a self-conflict and
+    //      borrows or receives optional transfer responsibility; treating the unwrap as an aggregate
+    //      creates a self-conflict and
     //      can lose the root needed by the retained-result state.
     let source = r#"User = |
     score Int,

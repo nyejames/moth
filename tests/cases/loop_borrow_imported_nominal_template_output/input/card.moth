@@ -1,0 +1,7 @@
+Card = |
+    title String,
+|
+
+render_card |card Card| -> String:
+    return [: [card.title]]
+;

@@ -223,9 +223,9 @@ fn receiver_method_call_assigns_value_for_fresh_return() {
     let callee_name = expected_dev_function_name("bump", 1);
 
     assert!(
-        output
-            .source
-            .contains(&format!("__moth_assign_value({result_name}, {callee_name}(")),
+        output.source.contains(&format!(
+            "__moth_assign_value({result_name}, {callee_name}("
+        )),
         "fresh-return receiver call must assign result with __moth_assign_value"
     );
 }
@@ -329,9 +329,9 @@ fn receiver_method_call_assigns_borrow_for_alias_return() {
     let callee_name = expected_dev_function_name("self_ref", 1);
 
     assert!(
-        output
-            .source
-            .contains(&format!("__moth_assign_borrow({result_name}, {callee_name}(",)),
+        output.source.contains(&format!(
+            "__moth_assign_borrow({result_name}, {callee_name}(",
+        )),
         "alias-return receiver call must assign result with __moth_assign_borrow"
     );
 }

@@ -339,7 +339,8 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("function __moth_io_input_key_released(handle, key) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (!handle || handle.closed) return false;");
-            emitter.emit_line("return handle.releasedKeys.has(__moth_io_input_normalize_key(key));");
+            emitter
+                .emit_line("return handle.releasedKeys.has(__moth_io_input_normalize_key(key));");
         });
         self.emit_line("}");
 

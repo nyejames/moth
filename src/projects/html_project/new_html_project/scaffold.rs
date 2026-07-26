@@ -200,8 +200,7 @@ fn handle_gitignore(
     let gitignore_path = project_dir.join(GITIGNORE_FILE);
 
     if !gitignore_path.exists() {
-        let should_create =
-            prompt.confirm("Add a .gitignore with Moth defaults? [Y/n]: ", true)?;
+        let should_create = prompt.confirm("Add a .gitignore with Moth defaults? [Y/n]: ", true)?;
         if should_create {
             fs::write(
                 &gitignore_path,

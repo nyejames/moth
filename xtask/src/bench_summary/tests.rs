@@ -2,10 +2,11 @@ use super::*;
 use crate::bench_history::{LocalCaseRecord, LocalGroupRecord, LocalRunRecord};
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{
-    BenchmarkCaseObservations, BenchmarkCaseResult, BenchmarkChangeKind, BenchmarkComparison,
-    BenchmarkMetric, BenchmarkRun, BenchmarkSuiteKind, BenchmarkSystem, SuiteStats,
-    calculate_group_stats,
+    BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
+    BenchmarkChangeKind, BenchmarkComparison, BenchmarkMetric, BenchmarkRun, BenchmarkSuiteKind,
+    BenchmarkSystem, GitRevision, SuiteStats, calculate_group_stats,
 };
+use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
 
 fn benchmark_case(case_name: &str, mean_ms: f64) -> BenchmarkCaseResult {
     benchmark_group_case(case_name, "ungrouped", mean_ms)
@@ -13,10 +14,14 @@ fn benchmark_case(case_name: &str, mean_ms: f64) -> BenchmarkCaseResult {
 
 fn benchmark_group_case(case_name: &str, group_name: &str, mean_ms: f64) -> BenchmarkCaseResult {
     BenchmarkCaseResult {
-        case_name: case_name.to_string(),
+        case_id: case_name.to_string(),
+        workload_id: Some(format!("{case_name}_workload")),
+        workload_fingerprint: Some(format!("{case_name}_fingerprint")),
         group_name: group_name.to_string(),
-        command: "check".to_string(),
-        args: vec![],
+        runner: BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Check,
+            args: Vec::new(),
+        },
         mean_ms,
         median_ms: mean_ms,
         stddev_ms: 0.0,
@@ -29,12 +34,14 @@ fn local_record_from_cases(cases: Vec<BenchmarkCaseResult>) -> LocalRunRecord {
     let suite = SuiteStats::from_case_results(&cases);
 
     LocalRunRecord {
-        format_version: 4,
+        format_version: 6,
+        benchmark_protocol_version: BENCHMARK_PROTOCOL_VERSION,
         suite_kind: "end_to_end_cli".to_string(),
         primary_metric_name: "wall_time_ms".to_string(),
         timestamp: "2026-05-10T15:21".to_string(),
         month_key: "2026-05".to_string(),
         commit: Some("abc123".to_string()),
+        git_dirty: Some(false),
         system_uuid: "UUID123".to_string(),
         public_system_id: "B7F2A9".to_string(),
         display_name: "macOS M1".to_string(),
@@ -54,10 +61,11 @@ fn local_record_from_cases(cases: Vec<BenchmarkCaseResult>) -> LocalRunRecord {
         cases: cases
             .into_iter()
             .map(|case| LocalCaseRecord {
-                name: case.case_name,
+                case_id: case.case_id,
+                workload_id: case.workload_id,
+                workload_fingerprint: case.workload_fingerprint,
                 group_name: case.group_name,
-                command: case.command,
-                args: case.args,
+                runner: case.runner,
                 mean_ms: case.mean_ms,
                 median_ms: case.median_ms,
                 stddev_ms: case.stddev_ms,
@@ -70,10 +78,12 @@ fn local_record_from_cases(cases: Vec<BenchmarkCaseResult>) -> LocalRunRecord {
 
 fn local_record(average_ms: f64, case_spread_ms: f64) -> LocalRunRecord {
     LocalRunRecord {
-        format_version: 4,
+        format_version: 6,
+        benchmark_protocol_version: BENCHMARK_PROTOCOL_VERSION,
         timestamp: "2026-05-10T15:21".to_string(),
         month_key: "2026-05".to_string(),
         commit: Some("abc123".to_string()),
+        git_dirty: Some(false),
         system_uuid: "UUID123".to_string(),
         public_system_id: "B7F2A9".to_string(),
         display_name: "macOS M1".to_string(),
@@ -97,10 +107,14 @@ fn local_record(average_ms: f64, case_spread_ms: f64) -> LocalRunRecord {
             },
         ],
         cases: vec![LocalCaseRecord {
-            name: "check_docs".to_string(),
+            case_id: "check_docs".to_string(),
+            workload_id: Some("docs".to_string()),
+            workload_fingerprint: Some("docs_fingerprint".to_string()),
             group_name: "docs".to_string(),
-            command: "check".to_string(),
-            args: vec!["docs".to_string()],
+            runner: BenchmarkRunner::Cli {
+                command: CliBenchmarkCommand::Check,
+                args: Vec::new(),
+            },
             mean_ms: average_ms,
             median_ms: average_ms,
             stddev_ms: 1.0,
@@ -122,7 +136,11 @@ fn benchmark_run(cases: Vec<BenchmarkCaseResult>) -> BenchmarkRun {
             hour: 15,
             minute: 21,
         },
-        commit: Some("abc123".to_string()),
+        benchmark_protocol_version: BENCHMARK_PROTOCOL_VERSION,
+        git_revision: GitRevision {
+            commit: Some("abc123".to_string()),
+            dirty: Some(false),
+        },
         system: BenchmarkSystem {
             system_uuid: "UUID123".to_string(),
             public_system_id: "B7F2A9".to_string(),
@@ -168,20 +186,28 @@ fn test_format_average_and_case_spread() {
 fn test_format_group_average_line() {
     let cases = vec![
         BenchmarkCaseResult {
-            case_name: "a".to_string(),
+            case_id: "a".to_string(),
+            workload_id: Some("a_workload".to_string()),
+            workload_fingerprint: Some("a_fingerprint".to_string()),
             group_name: "core".to_string(),
-            command: "check".to_string(),
-            args: vec![],
+            runner: BenchmarkRunner::Cli {
+                command: CliBenchmarkCommand::Check,
+                args: Vec::new(),
+            },
             mean_ms: 100.0,
             median_ms: 100.0,
             stddev_ms: 0.0,
             observations: Default::default(),
         },
         BenchmarkCaseResult {
-            case_name: "b".to_string(),
+            case_id: "b".to_string(),
+            workload_id: Some("b_workload".to_string()),
+            workload_fingerprint: Some("b_fingerprint".to_string()),
             group_name: "docs".to_string(),
-            command: "check".to_string(),
-            args: vec![],
+            runner: BenchmarkRunner::Cli {
+                command: CliBenchmarkCommand::Check,
+                args: Vec::new(),
+            },
             mean_ms: 50.0,
             median_ms: 50.0,
             stddev_ms: 0.0,
@@ -325,10 +351,14 @@ fn test_generate_run_entry_baseline() {
 #[test]
 fn test_generate_run_entry_with_stage_movement() {
     let current = vec![BenchmarkCaseResult {
-        case_name: "a".to_string(),
+        case_id: "a".to_string(),
+        workload_id: Some("a_workload".to_string()),
+        workload_fingerprint: Some("a_fingerprint".to_string()),
         group_name: "ungrouped".to_string(),
-        command: "check".to_string(),
-        args: vec![],
+        runner: BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Check,
+            args: Vec::new(),
+        },
         mean_ms: 110.0,
         median_ms: 110.0,
         stddev_ms: 0.0,
@@ -341,10 +371,14 @@ fn test_generate_run_entry_with_stage_movement() {
         },
     }];
     let previous = vec![BenchmarkCaseResult {
-        case_name: "a".to_string(),
+        case_id: "a".to_string(),
+        workload_id: Some("a_workload".to_string()),
+        workload_fingerprint: Some("a_fingerprint".to_string()),
         group_name: "ungrouped".to_string(),
-        command: "check".to_string(),
-        args: vec![],
+        runner: BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Check,
+            args: Vec::new(),
+        },
         mean_ms: 100.0,
         median_ms: 100.0,
         stddev_ms: 0.0,
@@ -367,10 +401,14 @@ fn test_generate_run_entry_with_stage_movement() {
 #[test]
 fn test_generate_run_entry_baseline_hides_stage_movement() {
     let current = vec![BenchmarkCaseResult {
-        case_name: "a".to_string(),
+        case_id: "a".to_string(),
+        workload_id: Some("a_workload".to_string()),
+        workload_fingerprint: Some("a_fingerprint".to_string()),
         group_name: "ungrouped".to_string(),
-        command: "check".to_string(),
-        args: vec![],
+        runner: BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Check,
+            args: Vec::new(),
+        },
         mean_ms: 110.0,
         median_ms: 110.0,
         stddev_ms: 0.0,

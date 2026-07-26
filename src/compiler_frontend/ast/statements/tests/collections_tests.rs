@@ -75,6 +75,30 @@ fn parses_collection_literal_items() {
 }
 
 #[test]
+fn parses_multiline_inferred_collection_literal_with_constructor_items() {
+    let source = "Entry = |\n    value Int,\n|\n\nrender || -> String:\n    entries = {\n        Entry(1),\n        Entry(2),\n    }\n    return [entries.length()]\n;\n";
+    let (ast, string_table) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &string_table, "render");
+
+    let NodeKind::VariableDeclaration(entries_decl) = &body[0].kind else {
+        panic!("expected collection declaration");
+    };
+
+    let ExpressionKind::Collection(items) = &entries_decl.value.kind else {
+        panic!("expected collection expression");
+    };
+
+    assert_eq!(items.len(), 2);
+    assert_eq!(
+        entries_decl
+            .value
+            .diagnostic_type
+            .display_with_table(&string_table),
+        "{Entry}"
+    );
+}
+
+#[test]
 fn infers_collection_element_type_from_non_empty_literal() {
     let (ast, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n");
     let body = start_function_body(&ast, &string_table);

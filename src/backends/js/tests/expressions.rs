@@ -376,7 +376,9 @@ fn fixed_collection_expression_lowers_to_wrapper() {
     .expect("JS lowering should succeed");
 
     assert!(
-        output.source.contains("__moth_fixed_collection([10, 20], 4)"),
+        output
+            .source
+            .contains("__moth_fixed_collection([10, 20], 4)"),
         "fixed collection must lower to __moth_fixed_collection(items, capacity)"
     );
 }

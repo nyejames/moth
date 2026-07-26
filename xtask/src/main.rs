@@ -13,12 +13,15 @@
 //! Modes:
 //! - `bench`                - Run the full benchmark suite and update local/public summaries
 //! - `bench-check`          - Run the full benchmark suite without writing benchmark history
+//! - `bench-ci`             - Preflight all cases, then measure the quick subset read-only
 //! - `bench-report`         - Print a local-only benchmark drilldown report
 //! - `bench-frontend-check` - Run the focused frontend benchmark suite without writing history
 //! - `bench-frontend`       - Run the focused frontend benchmark suite and record
+//! - `bench-validate`       - Preflight every benchmark case without measurements
 //! - `bench-profile`        - Run Samply-backed profiling on benchmark cases
 
 mod bench;
+mod bench_ci;
 mod bench_history;
 mod bench_migration;
 mod bench_observations;
@@ -28,18 +31,23 @@ mod bench_system;
 mod bench_time;
 mod bench_types;
 mod bench_validate;
-mod case_parser;
+mod benchmark_execution;
+mod benchmark_manifest;
+mod benchmark_status;
 mod compiler_binary;
 mod frontend_bench;
 mod mode;
 mod process_runner;
 mod profile;
+mod workload_fingerprint;
 
-use bench::{BenchMode, BenchOptions, run_benchmarks};
+use bench::run_benchmarks;
+use bench_ci::run_bench_ci;
 use bench_report::run_benchmark_report;
+use bench_types::{BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSelection};
 use bench_validate::validate_all_benchmarks;
-use frontend_bench::{FrontendBenchMode, FrontendBenchOptions, run_frontend_benchmarks};
-use mode::{BenchmarkMode, ModeParseResult};
+use frontend_bench::run_frontend_benchmarks;
+use mode::{BenchmarkMode, ModeParseResult, TOP_LEVEL_USAGE};
 use std::env;
 use std::process;
 
@@ -69,43 +77,28 @@ fn main() {
 
     match mode {
         BenchmarkMode::Bench => {
-            let options = BenchOptions {
-                warmup_runs: 1,
-                measured_iterations: 10,
-                mode: BenchMode::Record,
-            };
-
-            exit_with_result(run_benchmarks(options));
+            exit_with_result(full_run_policy(BenchmarkRecording::Record).and_then(run_benchmarks));
         }
         BenchmarkMode::BenchCheck => {
-            let options = BenchOptions {
-                warmup_runs: 1,
-                measured_iterations: 10,
-                mode: BenchMode::Check,
-            };
-
-            exit_with_result(run_benchmarks(options));
+            exit_with_result(
+                full_run_policy(BenchmarkRecording::ReadOnly).and_then(run_benchmarks),
+            );
+        }
+        BenchmarkMode::BenchCi => {
+            exit_with_result(run_bench_ci());
         }
         BenchmarkMode::BenchReport => {
             exit_with_result(run_benchmark_report());
         }
         BenchmarkMode::BenchFrontendCheck => {
-            let options = FrontendBenchOptions {
-                warmup_runs: 1,
-                measured_iterations: 10,
-                mode: FrontendBenchMode::Check,
-            };
-
-            exit_with_result(run_frontend_benchmarks(options));
+            exit_with_result(
+                full_run_policy(BenchmarkRecording::ReadOnly).and_then(run_frontend_benchmarks),
+            );
         }
         BenchmarkMode::BenchFrontend => {
-            let options = FrontendBenchOptions {
-                warmup_runs: 1,
-                measured_iterations: 10,
-                mode: FrontendBenchMode::Record,
-            };
-
-            exit_with_result(run_frontend_benchmarks(options));
+            exit_with_result(
+                full_run_policy(BenchmarkRecording::Record).and_then(run_frontend_benchmarks),
+            );
         }
         BenchmarkMode::BenchProfile(options) => {
             exit_with_result(profile::run_profile_benchmarks(options));
@@ -118,22 +111,12 @@ fn main() {
 
 /// Print the top-level usage message listing all supported modes.
 fn print_usage() {
-    eprintln!("Usage: xtask <mode> [options]");
-    eprintln!();
-    eprintln!("Modes:");
-    eprintln!(
-        "  bench                Run the full benchmark suite and update local/public summaries"
-    );
-    eprintln!(
-        "  bench-check          Run the full benchmark suite without writing benchmark history"
-    );
-    eprintln!("  bench-report         Print a local-only benchmark drilldown report");
-    eprintln!(
-        "  bench-frontend-check Run the focused frontend benchmark suite without writing history"
-    );
-    eprintln!("  bench-frontend       Run the focused frontend benchmark suite and record");
-    eprintln!("  bench-validate       Validate all benchmark cases compile without errors");
-    eprintln!("  bench-profile        Run Samply-backed profiling (use --help for options)");
+    eprintln!("{TOP_LEVEL_USAGE}");
+}
+
+fn full_run_policy(recording: BenchmarkRecording) -> Result<BenchmarkRunPolicy, String> {
+    BenchmarkRunPolicy::new(10, BenchmarkSelection::Full, recording)
+        .map_err(|error| error.to_string())
 }
 
 fn exit_with_result(result: Result<(), String>) -> ! {

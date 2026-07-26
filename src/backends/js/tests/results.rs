@@ -551,15 +551,15 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
     let callee_name = expected_dev_function_name("aliasing_fallible", 1);
 
     assert!(
-        output
-            .source
-            .contains(&format!("__moth_assign_value({result_name}, {callee_name}(")),
+        output.source.contains(&format!(
+            "__moth_assign_value({result_name}, {callee_name}("
+        )),
         "fallible call result carriers must be stored as fresh values"
     );
     assert!(
-        !output
-            .source
-            .contains(&format!("__moth_assign_borrow({result_name}, {callee_name}(")),
+        !output.source.contains(&format!(
+            "__moth_assign_borrow({result_name}, {callee_name}("
+        )),
         "fallible call result carriers must not inherit the success payload alias mode"
     );
 }

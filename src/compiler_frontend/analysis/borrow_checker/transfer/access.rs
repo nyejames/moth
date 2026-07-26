@@ -13,11 +13,10 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
     BorrowState, FunctionLayout, LocalState, RootSet,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
-    LocalMode, ReactiveInvalidationFact, ReactiveInvalidationKind, ReactivePlaceWriteKind,
-    StatementBorrowFact, TerminatorBorrowFact, ValueAccessClassification,
+    LocalMode, OptionalTransferStatus, ReactiveInvalidationFact, ReactiveInvalidationKind,
+    ReactivePlaceWriteKind, StatementBorrowFact, TerminatorBorrowFact, ValueAccessClassification,
 };
 use crate::compiler_frontend::compiler_errors::SourceLocation;
-use crate::compiler_frontend::compiler_messages::InvalidMutableAccessReason;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
@@ -33,7 +32,7 @@ mod move_decision;
 mod statement;
 mod terminator;
 
-use conflicts::{check_mutable_access, check_shared_access};
+use conflicts::{check_mutable_access, check_shared_access, probe_mutable_access};
 use move_decision::{MoveDecision, classify_move_decision};
 pub(super) use statement::transfer_statement;
 pub(super) use terminator::transfer_terminator;
@@ -88,6 +87,7 @@ struct AssignTransferContext<'a, 'module> {
     block_id: BlockId,
     current_order: i32,
     tracker: &'a mut StatementAccessTracker,
+    value_fact_buffer: &'a mut ValueFactBuffer,
     location: SourceLocation,
     stats: &'a mut BlockTransferStats,
 }
@@ -162,14 +162,14 @@ fn transfer_assign_target(
             };
 
             let local_state = state.local_state(local_index).clone();
-            let mut rhs_alias_roots = direct_place_roots_from_expression(
+            let rhs_alias_roots = direct_place_roots_from_expression(
                 layout,
                 state,
                 value,
                 location.clone(),
                 &transfer_context.diagnostics,
             )?;
-            let mut rhs_direct_alias_roots = rhs_alias_roots.as_ref().map(|rhs_roots| {
+            let rhs_direct_alias_roots = rhs_alias_roots.as_ref().map(|rhs_roots| {
                 direct_root_aliases_from_expression(layout, state, value, rhs_roots)
             });
 
@@ -181,20 +181,21 @@ fn transfer_assign_target(
                         .all(|root_index| layout.local_mutable[root_index]);
 
                 if can_attempt_move {
-                    // WHAT: assignments can consume source ownership when target takes fresh slot ownership.
-                    // WHY: this keeps move propagation aligned with call-site move behavior.
+                    // WHAT: assignments can receive optional transfer responsibility when the target
+                    //      takes a fresh slot.
+                    // WHY: this records an optional transfer candidate while keeping source-visible
+                    //      initialization and alias state available for conservative validation.
                     match classify_move_decision(layout, block_id, rhs_roots, current_order) {
-                        MoveDecision::Borrow | MoveDecision::Inconsistent(_) => {
-                            // `May` means path-dependent usage. For assignments we conservatively
-                            // keep borrow semantics and let branch joins validate consistency.
-                        }
-                        MoveDecision::Move => {
-                            for root_index in rhs_roots.iter_ones() {
-                                state.invalidate_root(root_index);
-                            }
-                            rhs_alias_roots = None;
-                            rhs_direct_alias_roots = None;
-                        }
+                        MoveDecision::Borrow => context.value_fact_buffer.record_optional_transfer(
+                            value.id,
+                            OptionalTransferStatus::Borrow,
+                            rhs_roots,
+                        ),
+                        MoveDecision::Move => context.value_fact_buffer.record_optional_transfer(
+                            value.id,
+                            OptionalTransferStatus::Transfer,
+                            rhs_roots,
+                        ),
                     }
                 }
             }
@@ -836,10 +837,20 @@ fn collect_expression_roots(
     Ok(())
 }
 
-/// WHAT: transfers ownership for children of aggregate literals (MapLiteral and Collection)
-///        by moving their root locals into the freshly constructed value.
-/// WHY: aggregate literals own their children; without this transfer, the borrow checker
-///      would only read the children and leave them available for later use.
+/// Shared inputs for aggregate-literal optional transfer analysis.
+///
+/// WHAT: keeps diagnostic lookup and advisory fact emission together while aggregate traversal
+/// recurses through nested expressions.
+/// WHY: optional transfer facts must be emitted without threading a wide argument list through
+/// every aggregate child.
+pub(super) struct AggregateTransferContext<'a, 'module> {
+    pub(super) diagnostics: &'a BorrowDiagnostics<'module>,
+    pub(super) value_fact_buffer: &'a mut ValueFactBuffer,
+}
+
+/// WHAT: records optional transfer outcomes for children of aggregate literals.
+/// WHY: aggregate construction can receive destruction responsibility, but failed proof must
+///      leave mandatory source state available for conservative borrow validation.
 pub(super) fn transfer_aggregate_expression_ownership(
     layout: &FunctionLayout,
     state: &mut BorrowState,
@@ -847,7 +858,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
     block_id: BlockId,
     current_order: i32,
     location: SourceLocation,
-    diagnostics: &BorrowDiagnostics<'_>,
+    aggregate_context: &mut AggregateTransferContext<'_, '_>,
 ) -> Result<(), BorrowCheckError> {
     match &expression.kind {
         HirExpressionKind::MapLiteral(entries) => {
@@ -859,7 +870,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     block_id,
                     current_order,
                     location.clone(),
-                    diagnostics,
+                    aggregate_context,
                 )?;
                 transfer_aggregate_child(
                     layout,
@@ -868,7 +879,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     block_id,
                     current_order,
                     location.clone(),
-                    diagnostics,
+                    aggregate_context,
                 )?;
             }
         }
@@ -882,7 +893,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     block_id,
                     current_order,
                     location.clone(),
-                    diagnostics,
+                    aggregate_context,
                 )?;
             }
         }
@@ -895,7 +906,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 block_id,
                 current_order,
                 location.clone(),
-                diagnostics,
+                aggregate_context,
             )?;
             transfer_aggregate_expression_ownership(
                 layout,
@@ -904,7 +915,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 block_id,
                 current_order,
                 location,
-                diagnostics,
+                aggregate_context,
             )?;
         }
 
@@ -916,7 +927,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 block_id,
                 current_order,
                 location,
-                diagnostics,
+                aggregate_context,
             )?;
         }
 
@@ -928,7 +939,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 block_id,
                 current_order,
                 location,
-                diagnostics,
+                aggregate_context,
             )?;
         }
 
@@ -940,7 +951,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 block_id,
                 current_order,
                 location.clone(),
-                diagnostics,
+                aggregate_context,
             )?;
             transfer_aggregate_expression_ownership(
                 layout,
@@ -949,7 +960,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 block_id,
                 current_order,
                 location,
-                diagnostics,
+                aggregate_context,
             )?;
         }
 
@@ -963,7 +974,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 block_id,
                 current_order,
                 location,
-                diagnostics,
+                aggregate_context,
             )?;
         }
 
@@ -975,7 +986,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 block_id,
                 current_order,
                 location,
-                diagnostics,
+                aggregate_context,
             )?;
         }
 
@@ -988,7 +999,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     block_id,
                     current_order,
                     location.clone(),
-                    diagnostics,
+                    aggregate_context,
                 )?;
             }
         }
@@ -1002,7 +1013,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     block_id,
                     current_order,
                     location.clone(),
-                    diagnostics,
+                    aggregate_context,
                 )?;
             }
         }
@@ -1016,7 +1027,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     block_id,
                     current_order,
                     location.clone(),
-                    diagnostics,
+                    aggregate_context,
                 )?;
             }
         }
@@ -1033,10 +1044,9 @@ pub(super) fn transfer_aggregate_expression_ownership(
     Ok(())
 }
 
-/// WHAT: attempts to move one direct child of an aggregate literal into the constructed value.
-/// WHY: direct children that are places must be owned by the aggregate. Computed children
-///      produce fresh values, but any nested aggregate literals inside them still need this
-///      ownership pass before the outer aggregate stores the fresh result.
+/// WHAT: classifies one direct child of an aggregate literal for optional transfer.
+/// WHY: direct place children can receive destruction responsibility, while computed children
+///      still need recursive analysis before the outer aggregate stores the fresh result.
 fn transfer_aggregate_child(
     layout: &FunctionLayout,
     state: &mut BorrowState,
@@ -1044,11 +1054,13 @@ fn transfer_aggregate_child(
     block_id: BlockId,
     current_order: i32,
     location: SourceLocation,
-    diagnostics: &BorrowDiagnostics<'_>,
+    aggregate_context: &mut AggregateTransferContext<'_, '_>,
 ) -> Result<(), BorrowCheckError> {
-    // Nested aggregate literals own their own children before the outer aggregate stores
-    // the resulting fresh value. This keeps `{ "outer" = { "inner" = value } }`
-    // aligned with the direct `{ "inner" = value }` case.
+    let diagnostics = aggregate_context.diagnostics;
+
+    // Nested aggregate literals are traversed before the outer aggregate stores the resulting
+    // fresh value. This keeps `{ "outer" = { "inner" = value } }` aligned with the direct
+    // `{ "inner" = value }` case while preserving shared storage on failed transfer proofs.
     transfer_aggregate_expression_ownership(
         layout,
         state,
@@ -1056,7 +1068,7 @@ fn transfer_aggregate_child(
         block_id,
         current_order,
         location.clone(),
-        diagnostics,
+        aggregate_context,
     )?;
 
     if let HirExpressionKind::Load(place) = &expression.kind {
@@ -1065,8 +1077,8 @@ fn transfer_aggregate_child(
             return Ok(());
         }
 
-        // Scalar builtins are implicitly copied into aggregate literals.
-        // Only non-scalar values require an explicit move or mutable binding.
+        // Scalar builtins are implicitly copied into aggregate literals. Non-scalar values keep
+        // shared storage unless this site has a proven optional transfer opportunity.
         if expression.ty == builtin_type_ids::BOOL
             || expression.ty == builtin_type_ids::INT
             || expression.ty == builtin_type_ids::FLOAT
@@ -1078,29 +1090,22 @@ fn transfer_aggregate_child(
 
         match classify_move_decision(layout, block_id, &roots, current_order) {
             MoveDecision::Move => {
-                for root_index in roots.iter_ones() {
-                    state.invalidate_root(root_index);
-                }
+                aggregate_context
+                    .value_fact_buffer
+                    .record_optional_transfer(
+                        expression.id,
+                        OptionalTransferStatus::Transfer,
+                        &roots,
+                    );
             }
             MoveDecision::Borrow => {
-                let Some(root_index) = roots.iter_ones().next() else {
-                    return Ok(());
-                };
-                return Err(diagnostics.invalid_mutable_access(
-                    diagnostics.local_place(layout.local_ids[root_index]),
-                    InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
-                    None,
-                    None,
-                    location.clone(),
-                ));
-            }
-            MoveDecision::Inconsistent(root_index) => {
-                return Err(
-                    diagnostics.invalid_access_after_possible_ownership_transfer(
-                        diagnostics.local_place(layout.local_ids[root_index]),
-                        location.clone(),
-                    ),
-                );
+                aggregate_context
+                    .value_fact_buffer
+                    .record_optional_transfer(
+                        expression.id,
+                        OptionalTransferStatus::Borrow,
+                        &roots,
+                    );
             }
         }
     }

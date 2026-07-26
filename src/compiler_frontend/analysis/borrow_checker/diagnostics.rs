@@ -198,14 +198,6 @@ impl<'a> BorrowDiagnostics<'a> {
         .into()
     }
 
-    pub(super) fn invalid_access_after_possible_ownership_transfer(
-        &self,
-        place: DiagnosticPlace,
-        location: SourceLocation,
-    ) -> BorrowCheckError {
-        CompilerDiagnostic::invalid_access_after_possible_ownership_transfer(place, location).into()
-    }
-
     pub(super) fn use_of_uninitialized_local(
         &self,
         place: DiagnosticPlace,

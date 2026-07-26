@@ -355,7 +355,9 @@ impl<'hir> JsEmitter<'hir> {
                         "__moth_assign_value({local_name}, __moth_read({source}));",
                     ));
                 } else if alias_only {
-                    self.emit_line(&format!("__moth_write({local_name}, __moth_read({source}));",));
+                    self.emit_line(&format!(
+                        "__moth_write({local_name}, __moth_read({source}));",
+                    ));
                 } else {
                     self.emit_line(&format!("__moth_assign_borrow({local_name}, {source});"));
                 }

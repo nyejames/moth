@@ -245,6 +245,22 @@ fn int_division_resolves_to_float() {
 }
 
 #[test]
+fn grouped_integer_subexpression_does_not_override_division_result_type() {
+    let (ast, _string_table) =
+        parse_single_file_ast("value #= ((10 * 10) + (20 * 20)) / 10\n\ntyped Float = value\n");
+    let value = ast
+        .module_constants
+        .first()
+        .expect("the inferred constant should be retained in module constants");
+
+    assert_eq!(value.value.type_id, builtin_type_ids::FLOAT);
+    assert_eq!(value.value.diagnostic_type, DataType::Float);
+    assert!(
+        matches!(value.value.kind, ExpressionKind::Float(result) if (result - 50.0).abs() < f64::EPSILON)
+    );
+}
+
+#[test]
 fn integer_division_resolves_to_int() {
     let value = first_start_declaration_expression("value = 5 // 2\n");
 

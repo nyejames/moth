@@ -14,24 +14,25 @@
 //! - `ProfileHistoryRecord` and related structs for JSONL schema
 //! - `append_profile_run()` to write one record after a successful run
 //! - `read_profile_runs()` to load all records for drift comparison
-//! - Manual JSON serialization matching `bench_history` patterns
+//! - Profile-owned JSON serialization and one explicit v1 identity adapter
 //!
 //! # What this module does NOT own
 //! - Drift detection and reporting (see `drift.rs`)
 //! - Profile JSON parsing or hotspot extraction (see `parse.rs`, `hotspots.rs`)
 //! - Agent summaries and enriched per-case summaries (see `summary.rs`)
 
-use crate::bench_history::json_escape;
 use crate::bench_system::{SystemIdentityMode, load_or_create_system};
 use crate::bench_types::BenchmarkMetric;
 use std::fs;
 use std::path::Path;
 
+use super::json::escape;
+
 /// Path to the profile history file, relative to repo root.
 pub const PROFILE_RUNS_JSONL_PATH: &str = "benchmarks/local-data/profile-runs.jsonl";
 
 /// Current on-disk format version for profile history records.
-const HISTORY_FORMAT_VERSION: u32 = 1;
+const HISTORY_FORMAT_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 //  Data model
@@ -77,8 +78,8 @@ pub struct ProfileHistoryRecord {
 /// and avoids coupling drift comparison to the filesystem layout.
 #[derive(Debug, Clone)]
 pub struct HistoryCaseRecord {
-    /// Case name from the benchmark cases file.
-    pub case_name: String,
+    /// Authored case ID from the typed benchmark manifest.
+    pub case_id: String,
     /// Group name for the case.
     pub group_name: String,
     /// The command executed (e.g., "check", "build").
@@ -243,43 +244,36 @@ pub fn build_history_record(
 }
 
 // ---------------------------------------------------------------------------
-//  Manual JSON serialization (matching bench_history style)
+//  Profile JSON serialization
 // ---------------------------------------------------------------------------
 
 /// Serialize a `ProfileHistoryRecord` to a single JSONL line.
 ///
 /// WHAT: Produces compact, valid JSON using manual formatting to match
-/// `bench_history::format_record_as_jsonl()` style.
-///
-/// WHY: Keeps xtask consistent with the existing manual JSON approach
-/// and avoids depending on serde_json for serialization (serde_json
-/// is used for parsing profile JSON, not for writing history).
+/// the profile-local schema.
 fn format_record_as_jsonl(record: &ProfileHistoryRecord) -> String {
     let mut parts = Vec::new();
 
     parts.push(format!(r#""format_version":{}"#, record.format_version));
-    parts.push(format!(r#""run_id":"{}""#, json_escape(&record.run_id)));
-    parts.push(format!(
-        r#""timestamp":"{}""#,
-        json_escape(&record.timestamp)
-    ));
+    parts.push(format!(r#""run_id":"{}""#, escape(&record.run_id)));
+    parts.push(format!(r#""timestamp":"{}""#, escape(&record.timestamp)));
 
     match &record.commit {
-        Some(c) => parts.push(format!(r#""commit":"{}""#, json_escape(c))),
+        Some(c) => parts.push(format!(r#""commit":"{}""#, escape(c))),
         None => parts.push(r#""commit":null"#.to_string()),
     }
 
     parts.push(format!(
         r#""system_uuid":"{}""#,
-        json_escape(&record.system_uuid)
+        escape(&record.system_uuid)
     ));
     parts.push(format!(
         r#""system_display":"{}""#,
-        json_escape(&record.system_display)
+        escape(&record.system_display)
     ));
     parts.push(format!(
         r#""filter_mode":"{}""#,
-        json_escape(&record.filter_mode)
+        escape(&record.filter_mode)
     ));
 
     match record.sample_rate_hz {
@@ -297,17 +291,14 @@ fn format_record_as_jsonl(record: &ProfileHistoryRecord) -> String {
 fn format_case_record_json(case: &HistoryCaseRecord) -> String {
     let mut parts = Vec::new();
 
-    parts.push(format!(r#""case_name":"{}""#, json_escape(&case.case_name)));
-    parts.push(format!(
-        r#""group_name":"{}""#,
-        json_escape(&case.group_name)
-    ));
-    parts.push(format!(r#""command":"{}""#, json_escape(&case.command)));
+    parts.push(format!(r#""case_id":"{}""#, escape(&case.case_id)));
+    parts.push(format!(r#""group_name":"{}""#, escape(&case.group_name)));
+    parts.push(format!(r#""command":"{}""#, escape(&case.command)));
 
     let args_json: Vec<String> = case
         .args
         .iter()
-        .map(|a| format!(r#""{}""#, json_escape(a)))
+        .map(|a| format!(r#""{}""#, escape(a)))
         .collect();
     parts.push(format!(r#""args":[{}]"#, args_json.join(",")));
 
@@ -333,11 +324,11 @@ fn format_case_record_json(case: &HistoryCaseRecord) -> String {
 
     parts.push(format!(
         r#""top_bucket_label":"{}""#,
-        json_escape(&case.top_bucket_label)
+        escape(&case.top_bucket_label)
     ));
     parts.push(format!(
         r#""run_directory_path":"{}""#,
-        json_escape(&case.run_directory_path)
+        escape(&case.run_directory_path)
     ));
 
     format!("{{{}}}", parts.join(","))
@@ -347,7 +338,7 @@ fn format_case_record_json(case: &HistoryCaseRecord) -> String {
 fn format_metric_json(metric: &BenchmarkMetric) -> String {
     format!(
         r#"{{"name":"{}","value":{}}}"#,
-        json_escape(&metric.name),
+        escape(&metric.name),
         metric.value
     )
 }
@@ -356,8 +347,8 @@ fn format_metric_json(metric: &BenchmarkMetric) -> String {
 fn format_hot_function_json(func: &HistoryHotFunction) -> String {
     format!(
         r#"{{"name":"{}","bucket_label":"{}","inclusive_samples":{},"self_samples":{},"inclusive_pct":{},"self_pct":{}}}"#,
-        json_escape(&func.name),
-        json_escape(&func.bucket_label),
+        escape(&func.name),
+        escape(&func.bucket_label),
         func.inclusive_samples,
         func.self_samples,
         func.inclusive_pct,
@@ -366,20 +357,13 @@ fn format_hot_function_json(func: &HistoryHotFunction) -> String {
 }
 
 // ---------------------------------------------------------------------------
-//  Manual JSON parsing (matching bench_history style)
+//  Profile JSON parsing
 // ---------------------------------------------------------------------------
 
 /// Parse a single JSONL line into a `ProfileHistoryRecord`.
 fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
     let format_version =
         extract_u32_field(line, "format_version").ok_or("missing format_version")?;
-
-    if format_version != HISTORY_FORMAT_VERSION {
-        return Err(format!(
-            "unsupported profile history format_version {}",
-            format_version
-        ));
-    }
 
     let run_id = extract_string_field(line, "run_id").ok_or("missing run_id")?;
     let timestamp = extract_string_field(line, "timestamp").ok_or("missing timestamp")?;
@@ -392,7 +376,15 @@ fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
         extract_string_field(line, "filter_mode").unwrap_or_else(|| "terse".to_string());
     let sample_rate_hz = extract_f64_field(line, "sample_rate_hz");
 
-    let cases = extract_cases_array(line)?;
+    let cases = match format_version {
+        1 => extract_cases_array(line, parse_legacy_v1_case_object)?,
+        HISTORY_FORMAT_VERSION => extract_cases_array(line, parse_case_object)?,
+        _ => {
+            return Err(format!(
+                "unsupported profile history format_version {format_version}"
+            ));
+        }
+    };
 
     Ok(ProfileHistoryRecord {
         format_version,
@@ -408,7 +400,10 @@ fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
 }
 
 /// Extract the "cases" array from a JSON object line.
-fn extract_cases_array(line: &str) -> Result<Vec<HistoryCaseRecord>, String> {
+fn extract_cases_array(
+    line: &str,
+    parse_case: fn(&str) -> Result<HistoryCaseRecord, String>,
+) -> Result<Vec<HistoryCaseRecord>, String> {
     let key = r#""cases":"#;
     let start = line
         .find(key)
@@ -420,13 +415,24 @@ fn extract_cases_array(line: &str) -> Result<Vec<HistoryCaseRecord>, String> {
     let case_objects = extract_object_array_items(rest, "cases")?;
     case_objects
         .into_iter()
-        .map(|object| parse_case_object(&object))
+        .map(|object| parse_case(&object))
         .collect()
 }
 
 /// Parse a single case JSON object into a `HistoryCaseRecord`.
 fn parse_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
-    let case_name = extract_string_field(obj, "case_name").ok_or("case missing case_name")?;
+    let case_id = extract_string_field(obj, "case_id").ok_or("case missing case_id")?;
+    parse_case_fields(obj, case_id)
+}
+
+/// Adapt the sole profile-history v1 identity field into the current domain.
+fn parse_legacy_v1_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
+    let legacy_case_name =
+        extract_string_field(obj, "case_name").ok_or("legacy v1 case missing case_name")?;
+    parse_case_fields(obj, legacy_case_name)
+}
+
+fn parse_case_fields(obj: &str, case_id: String) -> Result<HistoryCaseRecord, String> {
     let group_name =
         extract_string_field(obj, "group_name").unwrap_or_else(|| "ungrouped".to_string());
     let command = extract_string_field(obj, "command").ok_or("case missing command")?;
@@ -442,7 +448,7 @@ fn parse_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
     let run_directory_path = extract_string_field(obj, "run_directory_path").unwrap_or_default();
 
     Ok(HistoryCaseRecord {
-        case_name,
+        case_id,
         group_name,
         command,
         args,
@@ -514,7 +520,7 @@ fn extract_metric_array(obj: &str, field: &str) -> Result<Vec<BenchmarkMetric>, 
 }
 
 // ---------------------------------------------------------------------------
-//  JSON field extraction helpers (matching bench_history style)
+//  Profile JSON field extraction helpers
 // ---------------------------------------------------------------------------
 
 /// Extract a quoted string field value from a JSON object line.

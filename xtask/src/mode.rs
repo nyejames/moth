@@ -6,6 +6,19 @@
 
 use crate::profile::{ProfileOptions, ProfileParseResult, parse_profile_args};
 
+pub(crate) const TOP_LEVEL_USAGE: &str = "\
+Usage: xtask <mode> [options]
+
+Modes:
+  bench                Run the full benchmark suite and update local/public summaries
+  bench-check          Run the full benchmark suite without writing benchmark history
+  bench-ci             Preflight all cases, then measure the quick subset without recording
+  bench-report         Print a local-only benchmark drilldown report
+  bench-frontend-check Run the focused frontend benchmark suite without writing history
+  bench-frontend       Run the focused frontend benchmark suite and record
+  bench-validate       Validate all benchmark cases compile without errors
+  bench-profile        Run Samply-backed profiling (use --help for options)";
+
 /// Distinguishes the supported xtask benchmark modes.
 ///
 /// WHAT: Each variant represents a valid CLI mode the user can pass to xtask.
@@ -20,6 +33,8 @@ pub enum BenchmarkMode {
     Bench,
     /// Run the full benchmark suite without writing benchmark history.
     BenchCheck,
+    /// Run the bounded all-preflight, quick-measurement development gate.
+    BenchCi,
     /// Read local benchmark history and print a drilldown report.
     BenchReport,
     /// Run the focused frontend benchmark suite and record.
@@ -65,6 +80,7 @@ impl BenchmarkMode {
         let single_mode = match mode_str.as_str() {
             "bench" => Some(BenchmarkMode::Bench),
             "bench-check" => Some(BenchmarkMode::BenchCheck),
+            "bench-ci" => Some(BenchmarkMode::BenchCi),
             "bench-report" => Some(BenchmarkMode::BenchReport),
             "bench-frontend" => Some(BenchmarkMode::BenchFrontend),
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
@@ -96,23 +112,6 @@ impl BenchmarkMode {
         }
 
         ModeParseResult::Error(format!("Unknown mode '{}'", mode_str))
-    }
-
-    /// Legacy single-argument parse for backward compatibility with tests.
-    ///
-    /// Returns `Some(mode)` for simple modes, `None` for unknown modes or
-    /// modes that require additional arguments (like `bench-profile`).
-    #[allow(dead_code)]
-    pub fn parse(mode_str: &str) -> Option<Self> {
-        match mode_str {
-            "bench" => Some(BenchmarkMode::Bench),
-            "bench-check" => Some(BenchmarkMode::BenchCheck),
-            "bench-report" => Some(BenchmarkMode::BenchReport),
-            "bench-frontend" => Some(BenchmarkMode::BenchFrontend),
-            "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
-            "bench-validate" => Some(BenchmarkMode::BenchValidate),
-            _ => None,
-        }
     }
 }
 

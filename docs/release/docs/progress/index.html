@@ -681,9 +681,9 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Borrow validation and ownership analysis</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
-     <td style="padding: 0.1em 0.5em; "> Broad borrow, aliasing, mutable/exclusive access, use-after-move, branch merge, loop, short-circuit, future-use, final-use, advisory drop-site, hashmap, reactivity and adversarial coverage.</td>
+     <td style="padding: 0.1em 0.5em; "> Broad borrow, aliasing, mutable/exclusive access, branch merge, loop, short-circuit, future-use, optional-transfer, advisory drop-site, hashmap, aggregate-storage, reactivity and adversarial coverage.</td>
      <td style="padding: 0.1em 0.5em; "> HIR analysis / JS GC baseline</td>
-     <td style="padding: 0.1em 0.5em; "> Borrow validation enforces exclusivity and current move-sensitive checks while ownership/drop facts remain advisory for GC-only JS. GC remains the language baseline representation. Current move-sensitive and aggregate behaviour may not yet match the accepted final memory design and is tracked as compiler drift for a later implementation plan.</td>
+     <td style="padding: 0.1em 0.5em; "> Borrow validation enforces shared/exclusive access while optional transfer and drop facts remain advisory. Path-dependent or imprecise transfer proof falls back to borrowing, and existing values stored in maps and collections retain shared semantics. GC remains the language baseline representation. Lifetime-region and escape validation remains deferred below.</td>
         </tr>
 
     <tr style="border-bottom: 1px dotted grey;">

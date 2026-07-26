@@ -751,13 +751,6 @@ fn borrow_descriptor(kind: BorrowDiagnosticKind) -> DiagnosticDescriptor {
             "Invalid mutable access",
             DiagnosticSeverity::Error,
         ),
-        BorrowDiagnosticKind::InvalidAccessAfterPossibleOwnershipTransfer => {
-            DiagnosticDescriptor::new(
-                "MOTH-BORROW-0008",
-                "Invalid access after possible ownership transfer",
-                DiagnosticSeverity::Error,
-            )
-        }
         BorrowDiagnosticKind::UseOfUninitializedLocal => DiagnosticDescriptor::new(
             "MOTH-BORROW-0009",
             "Use of uninitialized local",

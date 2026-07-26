@@ -73,6 +73,9 @@ fn audit_writes_hard_findings_before_returning_failure() {
         report_path
             .to_str()
             .expect("temporary path should be UTF-8"),
+        root.join("triage.json")
+            .to_str()
+            .expect("temporary path should be UTF-8"),
     );
 
     assert!(result.is_err());
@@ -103,6 +106,7 @@ fn normal_and_list_execution_reject_hard_findings_before_callback() {
                 successful_execution_result()
             },
             "target/test-reports/unused-policy-test.json",
+            "target/test-reports/unused-policy-triage-test.json",
         );
 
         assert!(result.is_err());
@@ -126,6 +130,9 @@ fn advisory_findings_are_serialized_without_failing_audit() {
         },
         |_| successful_execution_result(),
         report_path
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+        root.join("triage.json")
             .to_str()
             .expect("temporary path should be UTF-8"),
     );
@@ -168,6 +175,9 @@ fn contractless_smoke_case_passes_audit_without_findings() {
         report_path
             .to_str()
             .expect("temporary path should be UTF-8"),
+        root.join("triage.json")
+            .to_str()
+            .expect("temporary path should be UTF-8"),
     );
 
     assert!(result.is_ok());
@@ -183,6 +193,43 @@ fn contractless_smoke_case_passes_audit_without_findings() {
     assert_eq!(
         report_json["advisory_findings"].as_array().map(Vec::len),
         Some(0)
+    );
+
+    fs::remove_dir_all(&root).expect("should clean up temporary report directory");
+}
+
+#[test]
+fn triage_report_write_failure_returns_error() {
+    let root = temp_dir("runner_triage_write_failure");
+    fs::create_dir_all(&root).expect("should create temporary report directory");
+    let inventory_path = root.join("inventory.json");
+    let triage_parent = root.join("triage-parent");
+    fs::write(&triage_parent, "occupied").expect("should create triage path collision");
+    let triage_path = triage_parent.join("triage.json");
+
+    let result = run_loaded_suite(
+        suite_with_case(Some(CaseRole::Backend), Some("backend.lowering.shared")),
+        TestRunnerOptions::default(),
+        |_| CaseExecutionResult {
+            passed: false,
+            panic_message: None,
+            build_result: None,
+            messages: None,
+            failure_reason: Some("forced test failure".to_owned()),
+            failure_kind: None,
+        },
+        inventory_path
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+        triage_path
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+    );
+
+    let error = result.expect_err("triage report write failure should be returned");
+    assert!(
+        error.contains("Failed to create triage report directory"),
+        "unexpected error: {error}"
     );
 
     fs::remove_dir_all(&root).expect("should clean up temporary report directory");

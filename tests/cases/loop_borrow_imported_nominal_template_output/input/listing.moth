@@ -1,0 +1,9 @@
+import @card {Card, render_card}
+
+render_listing |cards {Card}| -> String:
+    output ~= [: <section>]
+    loop cards |card|:
+        output = [: [output][render_card(card)]]
+    ;
+    return [: [output]</section>]
+;

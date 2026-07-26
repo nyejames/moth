@@ -33,8 +33,7 @@ fn markdown_supports_h2_headings() {
 
 #[test]
 fn markdown_links_render_to_anchor_tags() {
-    let rendered =
-        folded_template_output("[$md:\nVisit @https://example.com/docs (Moth docs)\n]");
+    let rendered = folded_template_output("[$md:\nVisit @https://example.com/docs (Moth docs)\n]");
 
     assert!(rendered.contains("<a href=\"https://example.com/docs\">Moth docs</a>"));
 }

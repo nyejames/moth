@@ -1,0 +1,7 @@
+-- A map literal stores a non-copy value through shared storage; the source remains usable.
+value ~= "hello"
+scores ~{String = String} = {"key" = value}
+stored = scores.get("key") catch:
+    then ""
+;
+[:map_literal_stored_non_copy_value_later_use value=[value] stored=[stored]]

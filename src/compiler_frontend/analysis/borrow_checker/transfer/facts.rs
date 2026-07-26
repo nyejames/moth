@@ -5,7 +5,7 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::state::{FunctionLayout, RootSet};
 use crate::compiler_frontend::analysis::borrow_checker::types::{
-    AccessKind, ValueAccessClassification, ValueBorrowFact,
+    AccessKind, OptionalTransferStatus, ValueAccessClassification, ValueBorrowFact,
 };
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
@@ -77,7 +77,7 @@ impl StatementAccessTracker {
 #[derive(Debug, Clone)]
 pub(super) struct ValueFactBuffer {
     local_count: usize,
-    facts: FxHashMap<HirValueId, (ValueAccessClassification, RootSet)>,
+    facts: FxHashMap<HirValueId, (ValueAccessClassification, RootSet, OptionalTransferStatus)>,
 }
 
 impl ValueFactBuffer {
@@ -98,11 +98,30 @@ impl ValueFactBuffer {
             (
                 ValueAccessClassification::None,
                 RootSet::empty(self.local_count),
+                OptionalTransferStatus::NotAttempted,
             )
         });
 
         entry.0 = entry.0.merge(classification);
         entry.1.union_with(roots);
+    }
+
+    pub(super) fn record_optional_transfer(
+        &mut self,
+        value_id: HirValueId,
+        status: OptionalTransferStatus,
+        roots: &RootSet,
+    ) {
+        let entry = self.facts.entry(value_id).or_insert_with(|| {
+            (
+                ValueAccessClassification::None,
+                RootSet::empty(self.local_count),
+                OptionalTransferStatus::NotAttempted,
+            )
+        });
+
+        entry.1.union_with(roots);
+        entry.2 = entry.2.merge(status);
     }
 
     pub(super) fn into_serialized(
@@ -111,12 +130,13 @@ impl ValueFactBuffer {
     ) -> Vec<(HirValueId, ValueBorrowFact)> {
         self.facts
             .into_iter()
-            .map(|(value_id, (classification, roots))| {
+            .map(|(value_id, (classification, roots, optional_transfer))| {
                 (
                     value_id,
                     ValueBorrowFact {
                         classification,
                         roots: roots_to_local_ids(layout, &roots),
+                        optional_transfer,
                     },
                 )
             })

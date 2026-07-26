@@ -1,0 +1,11 @@
+value = -1
+match_result ~= "unset"
+
+if value is:
+    1 => match_result = "one"
+    -1 if
+        true => match_result = "negative"
+    else => match_result = "other"
+;
+
+[:literal_match_negative_literal_arm_boundary result=[match_result]]

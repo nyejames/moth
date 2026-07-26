@@ -1,0 +1,8 @@
+import @card {Card}
+import @listing {render_listing}
+
+card = Card("one")
+cards = {card}
+rendered = render_listing(cards)
+
+[:loop_borrow_imported_nominal_template_output [rendered]]

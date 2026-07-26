@@ -1,0 +1,17 @@
+Status ::
+    Pending,
+    Running,
+;
+
+handle_status |status Status| -> String:
+    if status is:
+        Pending => return "pending"
+        Running => return "running"
+    ;
+;
+
+run ||:
+    io.line([: [handle_status(Status::Running)]])
+;
+
+run()

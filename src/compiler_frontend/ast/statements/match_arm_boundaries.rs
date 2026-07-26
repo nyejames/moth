@@ -6,8 +6,9 @@
 //!
 //! Boundary rule:
 //! - A candidate normal arm starts only when the current token is the first real token
-//!   of a logical line and the same line contains a top-level `=>` before `Newline`,
-//!   `End`, or `Eof`.
+//!   of a logical line and its header contains a top-level `=>` before `End` or `Eof`.
+//! - Headers normally end on their physical line. A guarded header may continue across
+//!   parser-supported newlines immediately after `if`, before the guard expression.
 //! - `else` is handled separately by the match parser and is never reported as a
 //!   normal-arm candidate by this helper.
 //! - Delimiter depth is tracked so `=>` inside nested parentheses, collections, or
@@ -15,6 +16,7 @@
 
 use crate::compiler_frontend::tokenizer::line_scanning::{
     find_top_level_colon_on_line, find_top_level_fat_arrow_on_line,
+    find_top_level_match_arm_fat_arrow,
 };
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
@@ -68,13 +70,13 @@ pub(crate) fn token_is_line_initial(token_stream: &FileTokens, index: usize) -> 
     true
 }
 
-/// Returns true when the token at `start_index` has a top-level `=>` before the end
-/// of the current logical line.
+/// Returns true when the token at `start_index` has a top-level `=>` in a match
+/// header, including the narrow guarded-header newline exception.
 pub(crate) fn token_index_has_top_level_fat_arrow(
     token_stream: &FileTokens,
     start_index: usize,
 ) -> bool {
-    find_top_level_fat_arrow_on_line(token_stream, start_index).is_some()
+    find_top_level_match_arm_fat_arrow(token_stream, start_index).is_some()
 }
 
 /// Check whether the current token starts a line-initial match arm header.
@@ -82,7 +84,8 @@ pub(crate) fn token_index_has_top_level_fat_arrow(
 /// Returns `Some(candidate)` when:
 /// - the current token is line-initial;
 /// - the token is not `Else` or punctuation that cannot start a normal arm;
-/// - the same logical line contains a top-level `=>`.
+/// - the match header contains a top-level `=>`, with only the parser-supported
+///   newline exception after a guard `if`.
 pub(crate) fn current_token_starts_match_arm_header(
     token_stream: &FileTokens,
 ) -> Option<MatchArmHeaderCandidate> {
@@ -120,7 +123,7 @@ pub(crate) fn token_index_starts_match_arm_header(
         return None;
     }
 
-    let arrow_index = find_top_level_fat_arrow_on_line(token_stream, start_index)?;
+    let arrow_index = find_top_level_match_arm_fat_arrow(token_stream, start_index)?;
 
     Some(MatchArmHeaderCandidate {
         start_index,

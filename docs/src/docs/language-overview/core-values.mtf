@@ -5,7 +5,7 @@ or state it explicitly.
     enabled = true
     count Int = 42
     ratio Float = 0.5
-    letter Char = 'ʚĭɞ'
+    letter Char = '🦋'
     label String = "Moth"
 ]
 

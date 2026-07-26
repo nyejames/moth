@@ -289,7 +289,7 @@ fn parse_case_flag() {
 #[test]
 fn parse_case_flag_missing_value() {
     let error = unwrap_error(parse_profile_args(&["--case"]));
-    assert!(error.contains("--case requires a case name"));
+    assert!(error.contains("--case requires a case ID"));
 }
 
 #[test]

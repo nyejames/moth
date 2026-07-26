@@ -615,6 +615,181 @@ fn preserves_signed_numeric_literal_after_binary_operator() {
 }
 
 #[test]
+fn tokenizes_line_initial_negative_match_pattern_after_expression_body() {
+    let (file_tokens, string_table) = tokenize_source(
+        "value = 1\n\
+         if value is:\n\
+             1 => value = 1\n\
+             -42 => value = -42\n\
+             else => value = 0\n\
+         ;\n",
+    );
+
+    let pattern_token = file_tokens
+        .tokens
+        .windows(2)
+        .find_map(|tokens| match tokens {
+            [
+                Token {
+                    kind: TokenKind::NumericLiteral(numeric_token),
+                    ..
+                },
+                Token {
+                    kind: TokenKind::FatArrow,
+                    ..
+                },
+            ] if numeric_token.sign == NumericLiteralSign::Negative => Some(numeric_token),
+            _ => None,
+        })
+        .expect("expected a numeric literal immediately before the negative arm arrow");
+
+    assert_eq!(pattern_token.sign, NumericLiteralSign::Negative);
+    assert_eq!(
+        string_table.resolve(pattern_token.source_text),
+        "-42",
+        "the line-initial match pattern should retain its authored sign"
+    );
+}
+
+#[test]
+fn tokenizes_line_initial_negative_match_pattern_with_guard() {
+    let (file_tokens, _string_table) = tokenize_source(
+        "value = 1\n\
+         if value is:\n\
+             1 => value = 1\n\
+             -42 if enabled => value = -42\n\
+             else => value = 0\n\
+         ;\n",
+    );
+
+    let pattern_index = file_tokens
+        .tokens
+        .iter()
+        .position(|token| {
+            matches!(
+                &token.kind,
+                TokenKind::NumericLiteral(numeric_token)
+                    if numeric_token.sign == NumericLiteralSign::Negative
+            )
+        })
+        .expect("expected a negative numeric literal in the guarded match arm");
+
+    assert!(matches!(
+        file_tokens
+            .tokens
+            .get(pattern_index + 1)
+            .map(|token| &token.kind),
+        Some(TokenKind::If)
+    ));
+    assert!(
+        file_tokens.tokens[pattern_index..]
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::FatArrow))
+    );
+}
+
+#[test]
+fn tokenizes_line_initial_negative_match_pattern_with_multiline_guard() {
+    let (file_tokens, _string_table) = tokenize_source(
+        "value = 1\n\
+         if value is:\n\
+             1 => value = 1\n\
+             -42 if\n\
+                 true => value = -42\n\
+             else => value = 0\n\
+         ;\n",
+    );
+
+    let pattern_index = file_tokens
+        .tokens
+        .iter()
+        .position(|token| {
+            matches!(
+                &token.kind,
+                TokenKind::NumericLiteral(numeric_token)
+                    if numeric_token.sign == NumericLiteralSign::Negative
+            )
+        })
+        .expect("expected a negative numeric literal in the multiline guarded match arm");
+
+    assert!(matches!(
+        file_tokens
+            .tokens
+            .get(pattern_index + 1)
+            .map(|token| &token.kind),
+        Some(TokenKind::If)
+    ));
+    assert!(
+        file_tokens.tokens[pattern_index..]
+            .windows(2)
+            .any(|tokens| {
+                matches!(
+                    tokens,
+                    [
+                        Token {
+                            kind: TokenKind::BoolLiteral(true),
+                            ..
+                        },
+                        Token {
+                            kind: TokenKind::FatArrow,
+                            ..
+                        }
+                    ]
+                )
+            })
+    );
+}
+
+#[test]
+fn tokenizes_line_initial_negative_match_pattern_with_named_argument_guard() {
+    let (file_tokens, _string_table) = tokenize_source(
+        "value = 1\n\
+         if value is:\n\
+             1 => value = 1\n\
+             -42 if allowed(value = candidate) => value = -42\n\
+             else => value = 0\n\
+         ;\n",
+    );
+
+    let pattern_index = file_tokens
+        .tokens
+        .iter()
+        .position(|token| {
+            matches!(
+                &token.kind,
+                TokenKind::NumericLiteral(numeric_token)
+                    if numeric_token.sign == NumericLiteralSign::Negative
+            )
+        })
+        .expect("expected a negative numeric literal in the named-argument guarded match arm");
+
+    assert!(matches!(
+        file_tokens
+            .tokens
+            .get(pattern_index + 1)
+            .map(|token| &token.kind),
+        Some(TokenKind::If)
+    ));
+
+    let arm_arrow_index = file_tokens.tokens[pattern_index..]
+        .iter()
+        .position(|token| matches!(token.kind, TokenKind::FatArrow))
+        .map(|offset| pattern_index + offset)
+        .expect("expected the named-argument guarded match arm arrow");
+    assert!(matches!(
+        file_tokens
+            .tokens
+            .get(
+                arm_arrow_index
+                    .checked_sub(1)
+                    .expect("arrow must have a preceding token")
+            )
+            .map(|token| &token.kind),
+        Some(TokenKind::CloseParenthesis)
+    ));
+}
+
+#[test]
 fn tokenizes_attached_unary_negation_for_non_numeric_operands() {
     let (file_tokens, _string_table) = tokenize_source("value = -count\nother = total * -count\n");
 
@@ -646,6 +821,25 @@ fn rejects_unary_negation_with_whitespace() {
 }
 
 #[test]
+fn rejects_false_match_arm_arrows_inside_comments_and_strings() {
+    for source in [
+        "value = a\n-1 -- fake =>\n",
+        "value = a\n-1 \"fake =>\"\n",
+        "value = a\n-1 if \"fake =>\"\n",
+        "value = a\n-1 if allowed(fake => candidate)\n",
+    ] {
+        let (diagnostic, _string_table) = tokenize_source_error(source);
+        assert_symbolic_spacing(
+            &diagnostic,
+            SymbolicSpacingConstruct::BinaryOperator {
+                operator: DiagnosticOperator::Subtract,
+            },
+            MissingWhitespace::After,
+        );
+    }
+}
+
+#[test]
 fn rejects_binary_operator_spacing() {
     for (source, operator, missing) in [
         (
@@ -667,6 +861,11 @@ fn rejects_binary_operator_spacing() {
             "value = a- 1\n",
             DiagnosticOperator::Subtract,
             MissingWhitespace::Before,
+        ),
+        (
+            "value = a\n-1\n",
+            DiagnosticOperator::Subtract,
+            MissingWhitespace::After,
         ),
         (
             "value = a*-1\n",
@@ -1344,6 +1543,42 @@ fn tokenizes_style_directives_inside_template_heads() {
         file_tokens.tokens[fresh].kind,
         TokenKind::StyleDirective(..)
     ));
+}
+
+#[test]
+fn tokenizes_qualified_choice_inside_nested_template_head_before_body_delimiter() {
+    let (file_tokens, _string_table) =
+        tokenize_source("[: [handle_status(Status::Running): body]]");
+
+    let template_head_count = file_tokens
+        .tokens
+        .iter()
+        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+        .count();
+    let body_start_indices: Vec<usize> = file_tokens
+        .tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(index, token)| {
+            matches!(token.kind, TokenKind::StartTemplateBody).then_some(index)
+        })
+        .collect();
+    let double_colon_index = find_token_index(&file_tokens.tokens, |kind| {
+        matches!(kind, TokenKind::DoubleColon)
+    });
+
+    assert_eq!(template_head_count, 2);
+    assert_eq!(body_start_indices.len(), 2);
+    assert!(body_start_indices[0] < double_colon_index);
+    assert!(double_colon_index < body_start_indices[1]);
+    assert_eq!(
+        file_tokens
+            .tokens
+            .iter()
+            .filter(|token| matches!(token.kind, TokenKind::DoubleColon))
+            .count(),
+        1
+    );
 }
 
 #[test]

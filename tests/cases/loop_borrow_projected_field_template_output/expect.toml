@@ -1,0 +1,10 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "loop_borrow_projected_field_template_output",
+    "<section>",
+    "one",
+    "two",
+    "</section>",
+]

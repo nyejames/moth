@@ -2,7 +2,7 @@ Moth has two string source forms and one character form. Both string forms share
 
 [codeblock, $code("moth"):
     escaped_slice = "Hello\nworld"
-    letter = 'ʚĭɞ'
+    letter = '🦋'
 
     name = "Priya"
     message = [:

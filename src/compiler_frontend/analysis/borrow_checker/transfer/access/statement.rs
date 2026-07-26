@@ -86,6 +86,7 @@ pub(crate) fn transfer_statement(
                     block_id,
                     current_order: statement_order,
                     tracker: &mut tracker,
+                    value_fact_buffer,
                     location,
                     stats,
                 },
@@ -312,7 +313,12 @@ pub(crate) fn transfer_statement(
         }
     }
 
-    // Aggregate literal children must be moved into the constructed value.
+    // Aggregate literal children receive optional transfer analysis.
+    let mut aggregate_context = AggregateTransferContext {
+        diagnostics: &context.diagnostics,
+        value_fact_buffer,
+    };
+
     match &statement.kind {
         HirStatementKind::Assign { value, .. } => {
             transfer_aggregate_expression_ownership(
@@ -322,7 +328,7 @@ pub(crate) fn transfer_statement(
                 block_id,
                 statement_order,
                 context.diagnostics.statement_error_location(statement),
-                &context.diagnostics,
+                &mut aggregate_context,
             )?;
         }
         HirStatementKind::Expr(expression) => {
@@ -336,7 +342,7 @@ pub(crate) fn transfer_statement(
                     expression.id,
                     context.diagnostics.statement_error_location(statement),
                 ),
-                &context.diagnostics,
+                &mut aggregate_context,
             )?;
         }
         HirStatementKind::PushRuntimeFragment { value, .. } => {
@@ -350,7 +356,7 @@ pub(crate) fn transfer_statement(
                     value.id,
                     context.diagnostics.statement_error_location(statement),
                 ),
-                &context.diagnostics,
+                &mut aggregate_context,
             )?;
         }
         HirStatementKind::CastOp { source, .. } => {
@@ -364,7 +370,7 @@ pub(crate) fn transfer_statement(
                     source.id,
                     context.diagnostics.statement_error_location(statement),
                 ),
-                &context.diagnostics,
+                &mut aggregate_context,
             )?;
         }
         HirStatementKind::FormatFloat { source, .. }
@@ -379,7 +385,7 @@ pub(crate) fn transfer_statement(
                     source.id,
                     context.diagnostics.statement_error_location(statement),
                 ),
-                &context.diagnostics,
+                &mut aggregate_context,
             )?;
         }
         _ => {}
@@ -424,7 +430,7 @@ fn transfer_call_arguments_and_result(
     if args.iter().any(|arg| {
         matches!(
             arg.effect,
-            ArgEffect::MutableBorrow | ArgEffect::MayConsume | ArgEffect::MayConsumeMutable
+            ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
         )
     }) {
         input.stats.mutable_call_sites += 1;
@@ -496,10 +502,7 @@ fn record_call_argument_reads(
 ) -> Result<(), BorrowCheckError> {
     if matches!(
         effect,
-        ArgEffect::MutableBorrow
-            | ArgEffect::MayConsume
-            | ArgEffect::MayConsumeShared
-            | ArgEffect::MayConsumeMutable
+        ArgEffect::MutableBorrow | ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
     ) && let Some(place) = transparent_place_from_expression(argument)
     {
         let mut read_env = SharedReadEnv {
@@ -573,7 +576,7 @@ fn transfer_call_argument_access(
             );
             Ok(())
         }
-        ArgEffect::MayConsume | ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable => {
+        ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable => {
             let fallback_effect = fallback_call_argument_effect(effect);
             let mutable_roots = mutable_argument_roots(
                 input.layout,
@@ -582,7 +585,13 @@ fn transfer_call_argument_access(
                 argument_location.clone(),
                 &input.context.diagnostics,
             )?;
-            check_call_may_consume(input, &mutable_roots, argument_location, fallback_effect)?;
+            check_call_may_consume(
+                input,
+                argument,
+                &mutable_roots,
+                argument_location,
+                fallback_effect,
+            )?;
             input.value_fact_buffer.record(
                 argument.id,
                 if matches!(fallback_effect, ArgEffect::SharedBorrow) {
@@ -606,7 +615,7 @@ fn effective_call_argument_effect(
 ) -> ArgEffect {
     let optional_transfer = matches!(
         effect,
-        ArgEffect::MayConsume | ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
+        ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
     );
     if !optional_transfer {
         return effect;
@@ -639,7 +648,7 @@ fn effective_call_argument_effect(
 fn fallback_call_argument_effect(effect: ArgEffect) -> ArgEffect {
     match effect {
         ArgEffect::MayConsumeShared => ArgEffect::SharedBorrow,
-        ArgEffect::MayConsumeMutable | ArgEffect::MayConsume => ArgEffect::MutableBorrow,
+        ArgEffect::MayConsumeMutable => ArgEffect::MutableBorrow,
         _ => effect,
     }
 }
@@ -683,6 +692,7 @@ fn check_call_mutable_borrow(
 
 fn check_call_may_consume(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    argument: &HirExpression,
     mutable_roots: &RootSet,
     location: SourceLocation,
     fallback_effect: ArgEffect,
@@ -703,13 +713,19 @@ fn check_call_may_consume(
         return check_call_borrow_fallback(input, mutable_roots, location, fallback_effect);
     }
 
-    match classify_move_decision(
+    let move_decision = classify_move_decision(
         input.layout,
         input.block_id,
         mutable_roots,
         input.current_order,
-    ) {
-        MoveDecision::Borrow | MoveDecision::Inconsistent(_) => {
+    );
+    match move_decision {
+        MoveDecision::Borrow => {
+            input.value_fact_buffer.record_optional_transfer(
+                argument.id,
+                OptionalTransferStatus::Borrow,
+                mutable_roots,
+            );
             check_call_borrow_fallback(input, mutable_roots, location, fallback_effect)
         }
         MoveDecision::Move => {
@@ -719,24 +735,32 @@ fn check_call_may_consume(
                 state: input.state,
                 block_id: input.block_id,
                 tracker: input.tracker,
-                location,
+                location: location.clone(),
                 stats: input.stats,
                 actor_index_hint: None,
                 current_order: input.current_order,
             };
-            check_mutable_access(
-                &mut check,
-                mutable_roots,
-                MutableAccessPolicy {
-                    allow_prior_shared: false,
-                    require_root_mutable: false,
-                    strict_move_exclusivity: true,
-                },
-            )?;
-
-            for root_index in mutable_roots.iter_ones() {
-                input.state.invalidate_root(root_index);
+            let transfer_policy = MutableAccessPolicy {
+                allow_prior_shared: false,
+                require_root_mutable: false,
+                strict_move_exclusivity: true,
+            };
+            if !probe_mutable_access(&check, mutable_roots, transfer_policy)? {
+                input.value_fact_buffer.record_optional_transfer(
+                    argument.id,
+                    OptionalTransferStatus::Borrow,
+                    mutable_roots,
+                );
+                return check_call_borrow_fallback(input, mutable_roots, location, fallback_effect);
             }
+
+            input.value_fact_buffer.record_optional_transfer(
+                argument.id,
+                OptionalTransferStatus::Transfer,
+                mutable_roots,
+            );
+            check_mutable_access(&mut check, mutable_roots, transfer_policy)?;
+
             Ok(())
         }
     }
@@ -843,7 +867,7 @@ fn numeric_op_arguments(operands: &HirNumericOperands) -> Vec<&HirExpression> {
 
 fn map_argument_effect(op: HirMapOp, arg_index: usize) -> ArgEffect {
     if matches!(op, HirMapOp::Set) && matches!(arg_index, 0 | 1) {
-        ArgEffect::MayConsume
+        ArgEffect::MayConsumeShared
     } else {
         ArgEffect::SharedBorrow
     }

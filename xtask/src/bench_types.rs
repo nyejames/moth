@@ -4,6 +4,105 @@
 //! and comparisons. It replaces tuple-heavy APIs with explicit types that
 //! document the meaning of each field.
 
+use crate::benchmark_manifest::BenchmarkRunner;
+use std::fmt::{Display, Formatter};
+use std::num::NonZeroUsize;
+
+/// Identity of the benchmark measurement and workload-comparison protocol.
+///
+/// Increment this only when measurement methodology or workload fingerprint
+/// semantics change enough to make direct comparisons invalid.
+pub const BENCHMARK_PROTOCOL_VERSION: u32 = 1;
+
+/// Selects which manifest cases proceed to measured benchmark iterations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BenchmarkSelection {
+    Full,
+    Quick,
+}
+
+/// Controls whether a successful benchmark run may enter persistence paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BenchmarkRecording {
+    Record,
+    ReadOnly,
+}
+
+/// Typed policy for the measured part of one mandatory-preflight benchmark run.
+///
+/// Preflight deliberately does not appear here. Every normal benchmark
+/// orchestrator runs it exactly once before applying this measured-run policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BenchmarkRunPolicy {
+    measured_iterations: NonZeroUsize,
+    selection: BenchmarkSelection,
+    recording: BenchmarkRecording,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BenchmarkRunPolicyError {
+    ZeroMeasuredIterations,
+    RecordingRequiresFullSelection,
+}
+
+impl Display for BenchmarkRunPolicyError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroMeasuredIterations => {
+                write!(formatter, "measured benchmark iterations must be nonzero")
+            }
+            Self::RecordingRequiresFullSelection => {
+                write!(
+                    formatter,
+                    "recording benchmark runs require full case selection"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for BenchmarkRunPolicyError {}
+
+impl BenchmarkRunPolicy {
+    pub(crate) fn new(
+        measured_iterations: usize,
+        selection: BenchmarkSelection,
+        recording: BenchmarkRecording,
+    ) -> Result<Self, BenchmarkRunPolicyError> {
+        let measured_iterations = NonZeroUsize::new(measured_iterations)
+            .ok_or(BenchmarkRunPolicyError::ZeroMeasuredIterations)?;
+
+        if recording == BenchmarkRecording::Record && selection != BenchmarkSelection::Full {
+            return Err(BenchmarkRunPolicyError::RecordingRequiresFullSelection);
+        }
+
+        Ok(Self {
+            measured_iterations,
+            selection,
+            recording,
+        })
+    }
+
+    pub(crate) fn measured_iterations(self) -> NonZeroUsize {
+        self.measured_iterations
+    }
+
+    pub(crate) fn selection(self) -> BenchmarkSelection {
+        self.selection
+    }
+
+    pub(crate) fn recording(self) -> BenchmarkRecording {
+        self.recording
+    }
+
+    pub(crate) fn selects_case(self, quick: bool) -> bool {
+        match self.selection {
+            BenchmarkSelection::Full => true,
+            BenchmarkSelection::Quick => quick,
+        }
+    }
+}
+
 /// Distinguishes the two benchmark suite kinds so local history and summaries
 /// do not accidentally compare incompatible metrics.
 ///
@@ -54,16 +153,18 @@ impl BenchmarkSuiteKind {
 }
 
 /// A single benchmark case result after measured iterations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BenchmarkCaseResult {
-    /// Name of the benchmark case.
-    pub case_name: String,
+    /// Authored stable benchmark case identity.
+    pub case_id: String,
+    /// Authored workload identity, absent only for adapted legacy history.
+    pub workload_id: Option<String>,
+    /// Deterministic workload fingerprint, absent only for adapted legacy history.
+    pub workload_fingerprint: Option<String>,
     /// Public grouping used by summaries to give absolute context.
     pub group_name: String,
-    /// The command executed (e.g., "check", "build").
-    pub command: String,
-    /// Arguments passed to the command.
-    pub args: Vec<String>,
+    /// Typed runner declaration, including CLI command/profile and authored args.
+    pub runner: BenchmarkRunner,
     /// Mean duration in milliseconds across measured iterations.
     pub mean_ms: f64,
     /// Median duration in milliseconds across measured iterations.
@@ -198,7 +299,7 @@ impl BenchmarkThresholds {
 /// Comparison between one current case and its previous counterpart.
 #[derive(Debug, Clone)]
 pub struct BenchmarkCaseComparison {
-    pub case_name: String,
+    pub case_id: String,
     pub group_name: String,
     pub previous_mean_ms: f64,
     pub current_mean_ms: f64,
@@ -263,7 +364,7 @@ pub struct BenchmarkComparison {
     pub overall_mean_delta_ms: Option<f64>,
     /// Named classification of the change.
     pub change_kind: BenchmarkChangeKind,
-    /// Number of current cases that had a previous case with the same name.
+    /// Number of current cases with matching stable IDs and workload fingerprints.
     pub compared_case_count: usize,
     /// Number of current cases.
     pub current_case_count: usize,
@@ -277,6 +378,10 @@ pub struct BenchmarkComparison {
     pub unchanged_case_count: usize,
     /// True when cases were added or removed between the two runs.
     pub case_set_changed: bool,
+    /// Number of matching stable IDs whose workloads changed.
+    pub workload_changed_case_count: usize,
+    /// Workload-changed stable IDs in current manifest order.
+    pub workload_changed_case_ids: Vec<String>,
     /// Per-case comparisons for overlapping cases.
     pub cases: Vec<BenchmarkCaseComparison>,
     /// Per-current-group comparison counts and average movement.
@@ -291,8 +396,8 @@ pub struct BenchmarkComparison {
 impl BenchmarkComparison {
     /// Compare current case results against an optional previous set.
     ///
-    /// WHAT: Finds overlapping cases by name, classifies each case against its
-    /// own measured-variation threshold, then derives run and group summaries.
+    /// WHAT: Finds overlapping cases by stable ID, excludes changed workloads,
+    /// classifies comparable cases, then derives run and group summaries.
     /// WHY: Per-case classification catches mixed movement and single-case
     /// regressions that a suite-level average can hide.
     ///
@@ -314,22 +419,27 @@ impl BenchmarkComparison {
         thresholds: &BenchmarkThresholds,
     ) -> Self {
         let Some(previous_cases) = previous else {
-            return Self::baseline(current.len(), 0, false, current, None);
+            return Self::baseline(current.len(), 0, false, Vec::new(), current, None);
         };
 
-        let cases = compare_cases(current, previous_cases, thresholds);
+        let matched_cases = match_cases(current, previous_cases, thresholds);
+        let cases = matched_cases.comparable;
+        let workload_changed_case_ids = matched_cases.workload_changed_case_ids;
+        let workload_changed_case_count = workload_changed_case_ids.len();
+        let case_set_changed = case_ids_changed(current, previous_cases);
+
         if cases.is_empty() {
-            let case_set_changed = !current.is_empty() || !previous_cases.is_empty();
             return Self::baseline(
                 current.len(),
                 previous_cases.len(),
                 case_set_changed,
+                workload_changed_case_ids,
                 current,
                 Some(previous_cases),
             );
         }
         debug_assert!(cases.iter().all(|case| {
-            !case.case_name.is_empty()
+            !case.case_id.is_empty()
                 && case.previous_mean_ms.is_finite()
                 && case.current_mean_ms.is_finite()
         }));
@@ -353,8 +463,6 @@ impl BenchmarkComparison {
         let compared_case_count = cases.len();
         let current_case_count = current.len();
         let previous_case_count = previous_cases.len();
-        let case_set_changed =
-            compared_case_count != current_case_count || compared_case_count != previous_case_count;
         let groups = compare_groups(current, previous_cases, &cases);
 
         let comparison = Self {
@@ -368,6 +476,8 @@ impl BenchmarkComparison {
             slower_case_count,
             unchanged_case_count,
             case_set_changed,
+            workload_changed_case_count,
+            workload_changed_case_ids,
             cases,
             groups,
         };
@@ -380,6 +490,7 @@ impl BenchmarkComparison {
         current_case_count: usize,
         previous_case_count: usize,
         case_set_changed: bool,
+        workload_changed_case_ids: Vec<String>,
         current: &[BenchmarkCaseResult],
         previous: Option<&[BenchmarkCaseResult]>,
     ) -> Self {
@@ -397,6 +508,8 @@ impl BenchmarkComparison {
             slower_case_count: 0,
             unchanged_case_count: 0,
             case_set_changed,
+            workload_changed_case_count: workload_changed_case_ids.len(),
+            workload_changed_case_ids,
             cases: Vec::new(),
             groups,
             current_suite_average_ms: Self::mean_of_case_means(current),
@@ -434,7 +547,7 @@ impl BenchmarkComparison {
         debug_assert_eq!(classified_case_count, self.compared_case_count);
 
         for case in &self.cases {
-            debug_assert!(!case.case_name.trim().is_empty());
+            debug_assert!(!case.case_id.trim().is_empty());
             debug_assert!(!case.group_name.trim().is_empty());
             debug_assert!(case.previous_mean_ms.is_finite());
             debug_assert!(case.current_mean_ms.is_finite());
@@ -469,6 +582,10 @@ impl BenchmarkComparison {
             .sum();
 
         debug_assert_eq!(grouped_case_count, self.compared_case_count);
+        debug_assert_eq!(
+            self.workload_changed_case_ids.len(),
+            self.workload_changed_case_count
+        );
     }
 
     /// Format the run-entry summary line for display in monthly summaries.
@@ -483,44 +600,54 @@ impl BenchmarkComparison {
     ///   stayed within their thresholds.
     /// - terse faster/slower/mixed/case-set-changed lines otherwise.
     pub fn format_run_change_line(&self) -> String {
-        if self.case_set_changed {
-            return self.format_case_set_changed_line();
-        }
-
-        match self.change_kind {
-            BenchmarkChangeKind::Baseline => {
-                format!(
-                    "**baseline**; {} cases, avg ~{}ms",
-                    self.current_case_count,
-                    self.current_suite_average_ms.round() as i64
-                )
-            }
-            BenchmarkChangeKind::NoMeasurableChange => {
-                format!(
-                    "no measurable change: avg {}; {}/{} cases",
-                    format_signed_ms(self.overall_mean_delta_ms.unwrap_or(0.0)),
-                    self.compared_case_count,
-                    self.current_case_count
-                )
-            }
-            BenchmarkChangeKind::Faster | BenchmarkChangeKind::Slower => {
-                format!(
-                    "**{} avg**; {} faster, {} slower; {}/{} cases",
+        let timing_line = if self.case_set_changed {
+            self.format_case_set_changed_line()
+        } else {
+            match self.change_kind {
+                BenchmarkChangeKind::Baseline => {
+                    if self.workload_changed_case_count > 0 {
+                        "no comparable unchanged workloads".to_string()
+                    } else {
+                        format!(
+                            "**baseline**; {} cases, avg ~{}ms",
+                            self.current_case_count,
+                            self.current_suite_average_ms.round() as i64
+                        )
+                    }
+                }
+                BenchmarkChangeKind::NoMeasurableChange => {
+                    format!(
+                        "no measurable change: avg {}; {}/{} cases",
+                        format_signed_ms(self.overall_mean_delta_ms.unwrap_or(0.0)),
+                        self.compared_case_count,
+                        self.current_case_count
+                    )
+                }
+                BenchmarkChangeKind::Faster | BenchmarkChangeKind::Slower => {
+                    format!(
+                        "**{} avg**; {} faster, {} slower; {}/{} cases",
+                        format_signed_ms(self.overall_mean_delta_ms.unwrap_or(0.0)),
+                        self.faster_case_count,
+                        self.slower_case_count,
+                        self.compared_case_count,
+                        self.current_case_count
+                    )
+                }
+                BenchmarkChangeKind::Mixed => format!(
+                    "mixed: avg {}; {} faster, {} slower; {}/{} cases",
                     format_signed_ms(self.overall_mean_delta_ms.unwrap_or(0.0)),
                     self.faster_case_count,
                     self.slower_case_count,
                     self.compared_case_count,
                     self.current_case_count
-                )
+                ),
             }
-            BenchmarkChangeKind::Mixed => format!(
-                "mixed: avg {}; {} faster, {} slower; {}/{} cases",
-                format_signed_ms(self.overall_mean_delta_ms.unwrap_or(0.0)),
-                self.faster_case_count,
-                self.slower_case_count,
-                self.compared_case_count,
-                self.current_case_count
-            ),
+        };
+
+        if self.workload_changed_case_count == 0 {
+            timing_line
+        } else {
+            format!("{timing_line}; {}", self.format_workload_changed_segment())
         }
     }
 
@@ -537,28 +664,89 @@ impl BenchmarkComparison {
                 self.faster_case_count
             )
         } else {
+            let comparison_state = if self.workload_changed_case_count > 0 {
+                "no comparable unchanged workloads"
+            } else {
+                "no shared cases"
+            };
+
             format!(
-                "case set changed: no shared cases; {} current, {} previous",
+                "case set changed: {comparison_state}; {} current, {} previous",
                 self.current_case_count, self.previous_case_count
             )
         }
     }
+
+    fn format_workload_changed_segment(&self) -> String {
+        let case_label = if self.workload_changed_case_count == 1 {
+            "case"
+        } else {
+            "cases"
+        };
+
+        format!(
+            "workload changed: {} {} ({})",
+            self.workload_changed_case_count,
+            case_label,
+            self.workload_changed_case_ids.join(", ")
+        )
+    }
+
+    /// Compare a quick current subset against only the same previous IDs.
+    ///
+    /// Intentional selection differences do not become removals, while a
+    /// newly added quick case still remains a case-set change.
+    pub fn for_quick_subset(
+        current: &[BenchmarkCaseResult],
+        previous: Option<&[BenchmarkCaseResult]>,
+    ) -> Self {
+        let Some(previous) = previous else {
+            return Self::new(current, None);
+        };
+        let current_ids: std::collections::HashSet<&str> =
+            current.iter().map(|case| case.case_id.as_str()).collect();
+        let filtered_previous: Vec<BenchmarkCaseResult> = previous
+            .iter()
+            .filter(|case| current_ids.contains(case.case_id.as_str()))
+            .cloned()
+            .collect();
+
+        Self::new(current, Some(&filtered_previous))
+    }
 }
 
-fn compare_cases(
+struct MatchedCases {
+    comparable: Vec<BenchmarkCaseComparison>,
+    workload_changed_case_ids: Vec<String>,
+}
+
+fn match_cases(
     current: &[BenchmarkCaseResult],
     previous: &[BenchmarkCaseResult],
     thresholds: &BenchmarkThresholds,
-) -> Vec<BenchmarkCaseComparison> {
+) -> MatchedCases {
     let mut cases = Vec::new();
+    let mut workload_changed_case_ids = Vec::new();
 
     for current_case in current {
         let Some(previous_case) = previous
             .iter()
-            .find(|case| case.case_name == current_case.case_name)
+            .find(|case| case.case_id == current_case.case_id)
         else {
             continue;
         };
+
+        let workloads_match = matches!(
+            (
+                &current_case.workload_fingerprint,
+                &previous_case.workload_fingerprint
+            ),
+            (Some(current), Some(previous)) if current == previous
+        );
+        if !workloads_match {
+            workload_changed_case_ids.push(current_case.case_id.clone());
+            continue;
+        }
 
         let delta_ms = current_case.mean_ms - previous_case.mean_ms;
         let threshold_ms = case_threshold_ms(current_case, previous_case, thresholds);
@@ -570,7 +758,7 @@ fn compare_cases(
         );
 
         cases.push(BenchmarkCaseComparison {
-            case_name: current_case.case_name.clone(),
+            case_id: current_case.case_id.clone(),
             group_name: current_case.group_name.clone(),
             previous_mean_ms: previous_case.mean_ms,
             current_mean_ms: current_case.mean_ms,
@@ -581,7 +769,22 @@ fn compare_cases(
         });
     }
 
-    cases
+    MatchedCases {
+        comparable: cases,
+        workload_changed_case_ids,
+    }
+}
+
+fn case_ids_changed(current: &[BenchmarkCaseResult], previous: &[BenchmarkCaseResult]) -> bool {
+    current.iter().any(|current_case| {
+        !previous
+            .iter()
+            .any(|previous_case| previous_case.case_id == current_case.case_id)
+    }) || previous.iter().any(|previous_case| {
+        !current
+            .iter()
+            .any(|current_case| current_case.case_id == previous_case.case_id)
+    })
 }
 
 fn case_threshold_ms(
@@ -635,21 +838,27 @@ fn baseline_groups(current: &[BenchmarkCaseResult]) -> Vec<BenchmarkGroupCompari
 
 fn compare_groups(
     current: &[BenchmarkCaseResult],
-    previous: &[BenchmarkCaseResult],
+    _previous: &[BenchmarkCaseResult],
     compared_cases: &[BenchmarkCaseComparison],
 ) -> Vec<BenchmarkGroupComparison> {
     let current_groups = calculate_group_stats(current);
-    let previous_groups = calculate_group_stats(previous);
 
     current_groups
         .into_iter()
         .map(|current_group| {
-            let previous_average_ms = previous_groups
+            let comparable_in_group: Vec<&BenchmarkCaseComparison> = compared_cases
                 .iter()
-                .find(|group| group.group_name == current_group.group_name)
-                .map(|group| group.average_ms);
+                .filter(|case| case.group_name == current_group.group_name)
+                .collect();
+            let previous_average_ms =
+                average_comparison_values(&comparable_in_group, |case| case.previous_mean_ms);
+            let comparable_current_average_ms =
+                average_comparison_values(&comparable_in_group, |case| case.current_mean_ms);
+            let current_average_ms =
+                comparable_current_average_ms.unwrap_or(current_group.average_ms);
             let delta_ms = previous_average_ms
-                .map(|previous_average| current_group.average_ms - previous_average);
+                .zip(comparable_current_average_ms)
+                .map(|(previous_average, current_average)| current_average - previous_average);
             let faster_count = count_group_cases(
                 compared_cases,
                 &current_group.group_name,
@@ -669,7 +878,7 @@ fn compare_groups(
             BenchmarkGroupComparison {
                 group_name: current_group.group_name,
                 previous_average_ms,
-                current_average_ms: current_group.average_ms,
+                current_average_ms,
                 delta_ms,
                 faster_count,
                 slower_count,
@@ -677,6 +886,17 @@ fn compare_groups(
             }
         })
         .collect()
+}
+
+fn average_comparison_values(
+    cases: &[&BenchmarkCaseComparison],
+    value: impl Fn(&BenchmarkCaseComparison) -> f64,
+) -> Option<f64> {
+    if cases.is_empty() {
+        None
+    } else {
+        Some(cases.iter().map(|case| value(case)).sum::<f64>() / cases.len() as f64)
+    }
 }
 
 fn count_group_cases(
@@ -721,8 +941,10 @@ pub struct BenchmarkSystem {
 pub struct BenchmarkRun {
     /// Timestamp when the run started
     pub timestamp: crate::bench_time::BenchmarkTimestamp,
-    /// Short git commit hash, if available
-    pub commit: Option<String>,
+    /// Benchmark measurement/workload protocol persisted with this run.
+    pub benchmark_protocol_version: u32,
+    /// Git commit and dirty state, when each fact is available.
+    pub git_revision: GitRevision,
     /// System that performed the run
     pub system: BenchmarkSystem,
     /// Which benchmark suite kind this run belongs to
@@ -739,6 +961,13 @@ pub struct BenchmarkRun {
     pub measured_iterations: usize,
     /// Effective RAYON_NUM_THREADS setting: None for default threads, Some(n) for a fixed count.
     pub thread_count: Option<u32>,
+}
+
+/// Best-effort source revision metadata for one benchmark run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitRevision {
+    pub commit: Option<String>,
+    pub dirty: Option<bool>,
 }
 
 /// Calculate mean of a slice of values

@@ -63,11 +63,8 @@ fn rejects_canonical_fixture_without_expectation_before_execution() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(
-        input_root.join("#page.moth"),
-        "not valid Moth source\n",
-    )
-    .expect("should write fixture source");
+    fs::write(input_root.join("#page.moth"), "not valid Moth source\n")
+        .expect("should write fixture source");
 
     let expected_path = case_root.join(EXPECT_FILE_NAME);
     let Err(error) = load_canonical_case_specs(&case_root, None) else {

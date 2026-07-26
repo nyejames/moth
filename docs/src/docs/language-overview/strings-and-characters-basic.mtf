@@ -14,7 +14,7 @@ with escapes when the text contains backslashes:
 Use single quotes for one character:
 
 [codeblock, $code("moth"):
-    seedling = 'ʚĭɞ'
+    seedling = '🦋'
 ]
 
 Use a template when text needs values or a larger structure:

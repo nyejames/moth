@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
+use crate::compiler_frontend::ast::statements::match_exhaustiveness::MatchArmCoverageTracker;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp,
 };
@@ -20,10 +21,11 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
+use crate::compiler_frontend::tests::ast_fixture_support::{start_function_body, test_location};
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
 fn parses_if_else_statements() {
@@ -363,6 +365,66 @@ fn parses_match_arm_with_boolean_guard() {
         "guarded literal match should still preserve explicit else body"
     );
     assert_eq!(*exhaustiveness, MatchExhaustiveness::HasDefault);
+}
+
+#[test]
+fn parses_negative_match_arm_with_multiline_boolean_guard() {
+    let (ast, string_table) = parse_single_file_ast(
+        "value = 42\nif value is:\n    42 => io.line([: [\"forty-two\"]])\n    -42 if\n        true => io.line([: [\"negative\"]])\n    else => io.line([: [\"other\"]])\n;\n",
+    );
+
+    let body = start_function_body(&ast, &string_table);
+
+    let NodeKind::Match { arms, .. } = &body[1].kind else {
+        panic!("expected match statement in start body");
+    };
+
+    assert_eq!(arms.len(), 2);
+    assert!(matches!(
+        arms[1].pattern,
+        MatchPattern::Literal(Expression {
+            kind: ExpressionKind::Int(-42),
+            ..
+        })
+    ));
+    assert!(matches!(
+        arms[1].guard.as_ref().map(|guard| &guard.kind),
+        Some(&ExpressionKind::Bool(true))
+    ));
+}
+
+#[test]
+fn guarded_literal_coverage_only_tracks_unguarded_duplicates() {
+    let literal = MatchPattern::Literal(Expression::int(
+        2,
+        test_location(1),
+        ValueMode::ImmutableOwned,
+    ));
+    let guard = Expression::bool(true, test_location(2), ValueMode::ImmutableOwned);
+
+    let mut guarded_then_unguarded = MatchArmCoverageTracker::default();
+    assert!(
+        !guarded_then_unguarded
+            .record_arm(&literal, Some(&guard), None)
+            .unreachable
+    );
+    assert!(
+        !guarded_then_unguarded
+            .record_arm(&literal, None, None)
+            .unreachable
+    );
+
+    let mut unguarded_then_duplicate = MatchArmCoverageTracker::default();
+    assert!(
+        !unguarded_then_duplicate
+            .record_arm(&literal, None, None)
+            .unreachable
+    );
+    assert!(
+        unguarded_then_duplicate
+            .record_arm(&literal, Some(&guard), None)
+            .unreachable
+    );
 }
 
 #[test]

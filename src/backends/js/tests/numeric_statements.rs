@@ -325,7 +325,9 @@ fn trap_mode_int_add_lowers_to_trapped_helper() {
     );
 
     assert!(
-        output.contains("__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_add(1, 2)));"),
+        output.contains(
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_add(1, 2)));"
+        ),
         "trap-mode IntAdd must assign the scalar trap result"
     );
 }
@@ -372,7 +374,9 @@ fn int_neg_lowers_to_unary_helper() {
     );
 
     assert!(
-        output.contains("__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_neg(1)));"),
+        output.contains(
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_neg(1)));"
+        ),
         "trap-mode IntNeg must lower to the unary helper"
     );
 }
@@ -394,8 +398,9 @@ fn float_div_lowers_to_helper() {
     );
 
     assert!(
-        output
-            .contains("__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_float_div(1, 2)));"),
+        output.contains(
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_float_div(1, 2)));"
+        ),
         "trap-mode FloatDiv must lower to the checked float helper"
     );
 }

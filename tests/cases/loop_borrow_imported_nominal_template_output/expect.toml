@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "loop_borrow_imported_nominal_template_output",
+    "<section>",
+    "one",
+    "</section>",
+]

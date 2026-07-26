@@ -126,7 +126,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [validation](src/compiler_frontend/hir/validation/): executable-HIR internal invariant checks only; non-HIR module metadata is validated by [module_metadata.rs](src/compiler_frontend/module_metadata.rs).
     - [reachability.rs](src/compiler_frontend/hir/reachability.rs): function/block/external/map/runtime-cast feature facts.
     - [reactivity.rs](src/compiler_frontend/hir/reactivity.rs): HIR reactive metadata.
-- [borrow_checker](src/compiler_frontend/analysis/borrow_checker/): HIR side-table borrow facts. kw — exclusivity, moves, aliases.
+- [borrow_checker](src/compiler_frontend/analysis/borrow_checker/): HIR side-table access and advisory optional-transfer facts. kw — exclusivity, optional transfer, aliases.
     - [engine.rs](src/compiler_frontend/analysis/borrow_checker/engine.rs): fixed-point flow.
     - [transfer.rs](src/compiler_frontend/analysis/borrow_checker/transfer.rs), [transfer/](src/compiler_frontend/analysis/borrow_checker/transfer/): access policy.
     - [state.rs](src/compiler_frontend/analysis/borrow_checker/state.rs): lattice.

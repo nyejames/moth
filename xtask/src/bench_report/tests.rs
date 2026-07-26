@@ -1,6 +1,9 @@
 use super::*;
 use crate::bench_history::{LocalCaseRecord, LocalMetricRecord, LocalRunRecord};
-use crate::bench_types::{BenchmarkChangeKind, BenchmarkMetric, BenchmarkSystem};
+use crate::bench_types::{
+    BENCHMARK_PROTOCOL_VERSION, BenchmarkChangeKind, BenchmarkMetric, BenchmarkSystem,
+};
+use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
 use crate::profile::history::{HistoryCaseRecord, HistoryHotFunction, ProfileHistoryRecord};
 
 #[test]
@@ -94,9 +97,11 @@ fn report_handles_missing_counters_from_old_records() {
     let suite = &report.suites[0];
 
     assert_eq!(suite.stage_movements[0].stage_name, "ast_ms");
-    assert!(suite.ratios.iter().any(|ratio| {
-        ratio.name == "frontend.ast/ast_header_count" && ratio.case_name == "docs"
-    }));
+    assert!(
+        suite.ratios.iter().any(|ratio| {
+            ratio.name == "frontend.ast/ast_header_count" && ratio.case_id == "docs"
+        })
+    );
 }
 
 #[test]
@@ -117,7 +122,7 @@ fn report_calculates_ratios_from_dotted_stage_metrics() {
     let report = calculate_benchmark_report(&runs, Some(&system));
 
     assert!(report.suites[0].ratios.iter().any(|ratio| {
-        ratio.name == "frontend.file_prepare/source_file_count" && ratio.case_name == "docs"
+        ratio.name == "frontend.file_prepare/source_file_count" && ratio.case_id == "docs"
     }));
 }
 
@@ -303,10 +308,12 @@ fn run_record(
     cases: Vec<LocalCaseRecord>,
 ) -> LocalRunRecord {
     LocalRunRecord {
-        format_version: 5,
+        format_version: 6,
+        benchmark_protocol_version: BENCHMARK_PROTOCOL_VERSION,
         timestamp: timestamp.to_string(),
         month_key: "2026-05".to_string(),
         commit: Some("abc1234".to_string()),
+        git_dirty: Some(false),
         system_uuid: system_uuid.to_string(),
         public_system_id: "ABC123".to_string(),
         display_name: "Test System".to_string(),
@@ -329,10 +336,14 @@ fn case_record(
     counters: Vec<LocalMetricRecord>,
 ) -> LocalCaseRecord {
     LocalCaseRecord {
-        name: name.to_string(),
+        case_id: name.to_string(),
+        workload_id: Some(format!("{name}_workload")),
+        workload_fingerprint: Some(format!("{name}_fingerprint")),
         group_name: "test".to_string(),
-        command: "check".to_string(),
-        args: vec![name.to_string()],
+        runner: BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Check,
+            args: vec![name.to_string()],
+        },
         mean_ms,
         median_ms: mean_ms,
         stddev_ms: 0.0,
@@ -364,7 +375,7 @@ fn test_profile_record(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord 
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
-            case_name: "check_foo_bst".to_string(),
+            case_id: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -405,7 +416,7 @@ fn test_profile_record_shifted(run_id: &str, system_uuid: &str) -> ProfileHistor
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
-            case_name: "check_foo_bst".to_string(),
+            case_id: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -486,7 +497,7 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
 
     // Debug: verify compute_drift finds the function drift.
     let drift_cases = vec![crate::profile::drift::DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {

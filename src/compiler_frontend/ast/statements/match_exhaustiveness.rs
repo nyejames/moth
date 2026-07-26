@@ -63,7 +63,7 @@ impl MatchExhaustivenessFacts {
 #[derive(Default)]
 pub(crate) struct MatchArmCoverageTracker {
     facts: MatchExhaustivenessFacts,
-    matched_literal_patterns: FxHashSet<LiteralPatternKey>,
+    matched_unguarded_literal_patterns: FxHashSet<LiteralPatternKey>,
     seen_unconditional_capture: bool,
     seen_unguarded_none: bool,
     seen_unguarded_present_capture: bool,
@@ -118,9 +118,12 @@ impl MatchArmCoverageTracker {
 
             if let MatchPattern::Literal(expression) = pattern
                 && let Some(key) = extract_literal_key(expression)
-                && !self.matched_literal_patterns.insert(key)
             {
-                unreachable = true;
+                if self.matched_unguarded_literal_patterns.contains(&key) {
+                    unreachable = true;
+                } else if guard.is_none() {
+                    self.matched_unguarded_literal_patterns.insert(key);
+                }
             }
 
             match pattern {

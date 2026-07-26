@@ -78,7 +78,7 @@ pub(crate) struct RootProfileHotspots {
 /// Per-case data within the root hotspots JSON.
 #[derive(Debug)]
 pub(crate) struct RootCaseHotspots {
-    pub(crate) case_name: String,
+    pub(crate) case_id: String,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
     pub(crate) observation_wall_ms: f64,
@@ -119,7 +119,7 @@ pub(crate) struct BucketSummaryEntry {
 // ---------------------------------------------------------------------------
 
 /// Current format version for summary artifacts.
-const SUMMARY_FORMAT_VERSION: u32 = 1;
+const SUMMARY_FORMAT_VERSION: u32 = 2;
 
 /// Maximum number of stage timings to show in root summary case entries.
 const ROOT_TOP_STAGES: usize = 3;
@@ -149,7 +149,7 @@ pub(crate) fn generate_case_summary(
 ) -> Result<(), String> {
     let md = format_enriched_case_summary(data, run_paths);
 
-    let case_paths = run_paths.case_paths(&data.observation.case_name);
+    let case_paths = run_paths.case_paths(&data.observation.case_id);
     fs::write(&case_paths.summary_md, md).map_err(|e| {
         format!(
             "Failed to write enriched summary.md '{}': {}",
@@ -309,7 +309,7 @@ fn build_root_case_hotspots(data: &CaseSummaryData<'_>) -> RootCaseHotspots {
     let bucket_summary = build_bucket_summary(&hotspots.functions);
 
     RootCaseHotspots {
-        case_name: obs.case_name.clone(),
+        case_id: obs.case_id.clone(),
         command: obs.command.clone(),
         args: obs.command_args.clone(),
         observation_wall_ms: round_2dp(obs.wall_ms),
@@ -322,7 +322,7 @@ fn build_root_case_hotspots(data: &CaseSummaryData<'_>) -> RootCaseHotspots {
         raw_address_function_count: hotspots.symbolication.raw_address_function_count,
         hot_function_count: hotspots.symbolication.hot_function_count,
         profile_path: data.profile_relative_path.clone(),
-        summary_path: format!("cases/{}/summary.md", obs.case_name),
+        summary_path: format!("cases/{}/summary.md", obs.case_id),
     }
 }
 
@@ -404,7 +404,7 @@ fn format_root_hotspots_json(root: &RootProfileHotspots) -> String {
                 .collect();
 
             serde_json::json!({
-                "case_name": case.case_name,
+                "case_id": case.case_id,
                 "command": case.command,
                 "args": args_json,
                 "observation_wall_ms": case.observation_wall_ms,
@@ -500,7 +500,7 @@ fn append_agent_case_entry(lines: &mut Vec<String>, data: &CaseSummaryData<'_>, 
     let hotspots = data.hotspots;
 
     // Case heading
-    lines.push(format!("### {}", obs.case_name));
+    lines.push(format!("### {}", obs.case_id));
     lines.push(String::new());
 
     // Command
@@ -576,7 +576,7 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
     let mut lines = Vec::new();
 
     // Header
-    lines.push(format!("# {}", obs.case_name));
+    lines.push(format!("# {}", obs.case_id));
     lines.push(String::new());
     lines.push(format!(
         "Command: `{} {}`",
@@ -625,7 +625,7 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
         );
         lines.push(format!(
             "Profile shape dump: `cases/{}/profile-shape.txt`",
-            obs.case_name
+            obs.case_id
         ));
         lines.push(String::new());
     } else if !hotspots.functions.is_empty() {

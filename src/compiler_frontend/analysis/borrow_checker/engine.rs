@@ -19,7 +19,6 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -255,16 +254,6 @@ impl<'a> BorrowChecker<'a> {
                 // branch-local aliases from leaking into outer regions.
                 if let Some(mask) = visible_locals_by_block.get(&successor) {
                     successor_input.kill_invisible(mask);
-                }
-
-                if let Some(existing) = in_states.get(&successor) {
-                    self.check_inconsistent_move_join(
-                        function.id,
-                        successor,
-                        &layout,
-                        existing,
-                        &successor_input,
-                    )?;
                 }
 
                 let next_state = match in_states.get(&successor) {
@@ -587,51 +576,6 @@ impl<'a> BorrowChecker<'a> {
                 LocalState::slot(local_count)
             };
             successor_input.update_local_state(destination_index, next_state);
-        }
-
-        Ok(())
-    }
-
-    fn check_inconsistent_move_join(
-        &self,
-        function_id: FunctionId,
-        successor: BlockId,
-        layout: &FunctionLayout,
-        existing: &BorrowState,
-        incoming: &BorrowState,
-    ) -> Result<(), BorrowCheckError> {
-        for local_index in 0..layout.local_count() {
-            let existing_uninit = existing
-                .local_state(local_index)
-                .mode
-                .is_definitely_uninit();
-            let incoming_uninit = incoming
-                .local_state(local_index)
-                .mode
-                .is_definitely_uninit();
-
-            if existing_uninit == incoming_uninit {
-                continue;
-            }
-
-            let location = self
-                .module
-                .side_table
-                .hir_source_location_for_hir(HirLocation::Block(successor))
-                .or_else(|| {
-                    self.module
-                        .side_table
-                        .ast_location_for_hir(HirLocation::Block(successor))
-                })
-                .cloned()
-                .unwrap_or_else(|| self.diagnostics.function_error_location(function_id));
-
-            return Err(self
-                .diagnostics
-                .invalid_access_after_possible_ownership_transfer(
-                    self.diagnostics.local_place(layout.local_ids[local_index]),
-                    location.clone(),
-                ));
         }
 
         Ok(())

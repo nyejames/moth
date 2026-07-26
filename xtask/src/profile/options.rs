@@ -108,7 +108,7 @@ impl ProfileFilterMode {
 pub struct ProfileOptions {
     /// Filter mode controlling hotspot summary thresholds.
     pub filter: ProfileFilterMode,
-    /// Optional case name filter; `None` profiles all cases.
+    /// Optional authored case ID filter; `None` profiles all cases.
     pub case_filter: Option<String>,
     /// Optional Samply sampling rate in Hz; `None` uses Samply's default.
     pub samply_rate_hz: Option<f64>,
@@ -152,7 +152,7 @@ pub enum ProfileParseResult {
 /// - `bench-profile` (default: terse, all cases)
 /// - `bench-profile terse|normal|deep|raw-index` (positional filter)
 /// - `bench-profile --filter <mode>`
-/// - `bench-profile --case <case-name>`
+/// - `bench-profile --case <case-id>`
 /// - `bench-profile --rate <positive-number>`
 /// - `bench-profile --presymbolicate`
 /// - `bench-profile --help`
@@ -214,9 +214,7 @@ pub fn parse_profile_args(args: &[&str]) -> ProfileParseResult {
                 let value = match args.get(index + 1) {
                     Some(v) => *v,
                     None => {
-                        return ProfileParseResult::Error(
-                            "--case requires a case name".to_string(),
-                        );
+                        return ProfileParseResult::Error("--case requires a case ID".to_string());
                     }
                 };
 

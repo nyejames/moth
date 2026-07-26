@@ -17,7 +17,7 @@ fn test_previous_record() -> ProfileHistoryRecord {
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
-            case_name: "check_foo_bst".to_string(),
+            case_id: "check_foo_bst".to_string(),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -66,7 +66,7 @@ fn test_previous_record() -> ProfileHistoryRecord {
 /// Build a current case input with increased function percentages.
 fn test_current_increased() -> DriftCaseInput {
     DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![
@@ -103,7 +103,7 @@ fn test_current_increased() -> DriftCaseInput {
 /// Build a current case input with decreased function percentages.
 fn test_current_decreased() -> DriftCaseInput {
     DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![
@@ -140,7 +140,7 @@ fn test_current_decreased() -> DriftCaseInput {
 /// Build a current case input with tiny (noise) function changes.
 fn test_current_noise() -> DriftCaseInput {
     DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
@@ -227,7 +227,7 @@ fn low_sample_count_function_is_ignored() {
     previous.cases[0].hot_functions[0].inclusive_samples = 200.0;
     // Create current with very low sample count.
     let current = vec![DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
@@ -256,7 +256,7 @@ fn share_only_drift_when_wall_moves_opposite() {
     let previous = test_previous_record();
     // Function pct increases but wall time decreases significantly.
     let current = vec![DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
@@ -373,7 +373,7 @@ fn counter_below_threshold_is_noise() {
 fn significant_counter_increase_detected() {
     let previous = test_previous_record();
     let current = vec![DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
@@ -401,7 +401,7 @@ fn tiny_absolute_counter_is_noise_even_if_percentage_large() {
         value: 0.1,
     }];
     let current = vec![DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
@@ -689,7 +689,7 @@ fn drift_summary_section_with_items() {
 fn no_comparable_case_produces_empty_report() {
     let previous = test_previous_record();
     let current = vec![DriftCaseInput {
-        case_name: "nonexistent_case".to_string(),
+        case_id: "nonexistent_case".to_string(),
         command: "check".to_string(),
         args: vec!["missing.moth".to_string()],
         stage_timings: vec![],
@@ -714,7 +714,7 @@ fn no_comparable_case_produces_empty_report() {
 fn function_only_in_current_is_ignored() {
     let previous = test_previous_record();
     let current = vec![DriftCaseInput {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],

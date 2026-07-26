@@ -1,0 +1,801 @@
+schema = 1
+
+[[workload]]
+id = "root_single_file"
+entry = "benchmark-root-single-file.moth"
+fingerprint_roots = ["benchmark-root-single-file.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "speed_test"
+entry = "benchmarks/speed-test.moth"
+fingerprint_roots = ["benchmarks/speed-test.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "docs"
+entry = "docs"
+fingerprint_roots = ["docs/config.moth", "docs/src"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "template_stress"
+entry = "benchmarks/template-stress.moth"
+fingerprint_roots = ["benchmarks/template-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "type_stress"
+entry = "benchmarks/type-stress.moth"
+fingerprint_roots = ["benchmarks/type-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "fold_stress"
+entry = "benchmarks/fold-stress.moth"
+fingerprint_roots = ["benchmarks/fold-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "pattern_stress"
+entry = "benchmarks/pattern-stress.moth"
+fingerprint_roots = ["benchmarks/pattern-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "collection_stress"
+entry = "benchmarks/collection-stress.moth"
+fingerprint_roots = ["benchmarks/collection-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "environment_stress"
+entry = "benchmarks/environment-stress.moth"
+fingerprint_roots = ["benchmarks/environment-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "one_module_kitchen_sink"
+entry = "benchmarks/adversarial/one-module-kitchen-sink.moth"
+fingerprint_roots = ["benchmarks/adversarial/one-module-kitchen-sink.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "deep_scope_churn"
+entry = "benchmarks/adversarial/deep-scope-churn.moth"
+fingerprint_roots = ["benchmarks/adversarial/deep-scope-churn.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "template_render_plan_churn"
+entry = "benchmarks/adversarial/template-render-plan-churn.moth"
+fingerprint_roots = ["benchmarks/adversarial/template-render-plan-churn.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "constant_dag_churn"
+entry = "benchmarks/adversarial/constant-dag-churn.moth"
+fingerprint_roots = ["benchmarks/adversarial/constant-dag-churn.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "expression_rpn_churn"
+entry = "benchmarks/adversarial/expression-rpn-churn.moth"
+fingerprint_roots = ["benchmarks/adversarial/expression-rpn-churn.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "generic_trait_churn"
+entry = "benchmarks/adversarial/generic-trait-churn.moth"
+fingerprint_roots = ["benchmarks/adversarial/generic-trait-churn.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "collection_map_borrow_churn"
+entry = "benchmarks/adversarial/collection-map-borrow-churn.moth"
+fingerprint_roots = ["benchmarks/adversarial/collection-map-borrow-churn.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "module_graph"
+entry = "benchmarks/module-graph"
+fingerprint_roots = ["benchmarks/module-graph"]
+fingerprint_excludes = ["benchmarks/module-graph/dev", "benchmarks/module-graph/release"]
+
+[[workload]]
+id = "import_fanout"
+entry = "benchmarks/import-fanout"
+fingerprint_roots = ["benchmarks/import-fanout"]
+fingerprint_excludes = ["benchmarks/import-fanout/dev", "benchmarks/import-fanout/release"]
+
+[[workload]]
+id = "external_js_imports"
+entry = "benchmarks/external-js-imports"
+fingerprint_roots = ["benchmarks/external-js-imports"]
+fingerprint_excludes = ["benchmarks/external-js-imports/dev", "benchmarks/external-js-imports/release"]
+
+[[workload]]
+id = "module_root_stress"
+entry = "benchmarks/module-root-stress"
+fingerprint_roots = ["benchmarks/module-root-stress"]
+fingerprint_excludes = ["benchmarks/module-root-stress/dev", "benchmarks/module-root-stress/release"]
+
+[[workload]]
+id = "import_external_churn"
+entry = "benchmarks/adversarial/import-external-churn"
+fingerprint_roots = ["benchmarks/adversarial/import-external-churn"]
+fingerprint_excludes = ["benchmarks/adversarial/import-external-churn/dev", "benchmarks/adversarial/import-external-churn/release"]
+
+[[workload]]
+id = "borrow_stress"
+entry = "benchmarks/borrow-stress.moth"
+fingerprint_roots = ["benchmarks/borrow-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "module_root_role_mix"
+entry = "benchmarks/module-root-role-mix"
+fingerprint_roots = ["benchmarks/module-root-role-mix"]
+fingerprint_excludes = ["benchmarks/module-root-role-mix/scratch", "benchmarks/module-root-role-mix/generated"]
+
+[[workload]]
+id = "tiny_one_file"
+entry = "benchmarks/parallelism/tiny-one-file"
+fingerprint_roots = ["benchmarks/parallelism/tiny-one-file"]
+fingerprint_excludes = ["benchmarks/parallelism/tiny-one-file/dev", "benchmarks/parallelism/tiny-one-file/release"]
+
+[[workload]]
+id = "tiny_two_files"
+entry = "benchmarks/parallelism/tiny-two-files"
+fingerprint_roots = ["benchmarks/parallelism/tiny-two-files"]
+fingerprint_excludes = ["benchmarks/parallelism/tiny-two-files/dev", "benchmarks/parallelism/tiny-two-files/release"]
+
+[[workload]]
+id = "tiny_seven_files"
+entry = "benchmarks/parallelism/tiny-seven-files"
+fingerprint_roots = ["benchmarks/parallelism/tiny-seven-files"]
+fingerprint_excludes = ["benchmarks/parallelism/tiny-seven-files/dev", "benchmarks/parallelism/tiny-seven-files/release"]
+
+[[workload]]
+id = "tiny_eight_files"
+entry = "benchmarks/parallelism/tiny-eight-files"
+fingerprint_roots = ["benchmarks/parallelism/tiny-eight-files"]
+fingerprint_excludes = ["benchmarks/parallelism/tiny-eight-files/dev", "benchmarks/parallelism/tiny-eight-files/release"]
+
+[[workload]]
+id = "many_tiny_files"
+entry = "benchmarks/parallelism/many-tiny-files"
+fingerprint_roots = ["benchmarks/parallelism/many-tiny-files"]
+fingerprint_excludes = ["benchmarks/parallelism/many-tiny-files/dev", "benchmarks/parallelism/many-tiny-files/release"]
+
+[[workload]]
+id = "many_medium_files"
+entry = "benchmarks/parallelism/many-medium-files"
+fingerprint_roots = ["benchmarks/parallelism/many-medium-files"]
+fingerprint_excludes = ["benchmarks/parallelism/many-medium-files/dev", "benchmarks/parallelism/many-medium-files/release"]
+
+[[workload]]
+id = "many_markdown_assets"
+entry = "benchmarks/parallelism/many-markdown-assets"
+fingerprint_roots = ["benchmarks/parallelism/many-markdown-assets"]
+fingerprint_excludes = ["benchmarks/parallelism/many-markdown-assets/dev", "benchmarks/parallelism/many-markdown-assets/release"]
+
+[[workload]]
+id = "many_modules_one_file_each"
+entry = "benchmarks/parallelism/many-modules-one-file-each"
+fingerprint_roots = ["benchmarks/parallelism/many-modules-one-file-each"]
+fingerprint_excludes = ["benchmarks/parallelism/many-modules-one-file-each/dev", "benchmarks/parallelism/many-modules-one-file-each/release"]
+
+[[workload]]
+id = "few_modules_many_files_each"
+entry = "benchmarks/parallelism/few-modules-many-files-each"
+fingerprint_roots = ["benchmarks/parallelism/few-modules-many-files-each"]
+fingerprint_excludes = ["benchmarks/parallelism/few-modules-many-files-each/dev", "benchmarks/parallelism/few-modules-many-files-each/release"]
+
+[[case]]
+id = "root_single_file_check"
+workload = "root_single_file"
+group = "core"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "speed_test_check"
+workload = "speed_test"
+group = "core"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "speed_test_build"
+workload = "speed_test"
+group = "core"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "build"
+args = []
+
+[[case]]
+id = "docs_check"
+workload = "docs"
+group = "docs"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "template_stress_check"
+workload = "template_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "type_stress_check"
+workload = "type_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "fold_stress_check"
+workload = "fold_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "pattern_stress_check"
+workload = "pattern_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "collection_stress_check"
+workload = "collection_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "environment_stress_check"
+workload = "environment_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "one_module_kitchen_sink_check"
+workload = "one_module_kitchen_sink"
+group = "stress"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "deep_scope_churn_check"
+workload = "deep_scope_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "template_render_plan_churn_check"
+workload = "template_render_plan_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "constant_dag_churn_check"
+workload = "constant_dag_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "expression_rpn_churn_check"
+workload = "expression_rpn_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "generic_trait_churn_check"
+workload = "generic_trait_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "collection_map_borrow_churn_check"
+workload = "collection_map_borrow_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "module_graph_check"
+workload = "module_graph"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "module_graph_build"
+workload = "module_graph"
+group = "module"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "build"
+args = []
+
+[[case]]
+id = "import_fanout_check"
+workload = "import_fanout"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "import_fanout_build"
+workload = "import_fanout"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "build"
+args = []
+
+[[case]]
+id = "external_js_imports_check"
+workload = "external_js_imports"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "external_js_imports_build"
+workload = "external_js_imports"
+group = "module"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "build"
+args = []
+
+[[case]]
+id = "module_root_stress_check"
+workload = "module_root_stress"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "module_root_stress_build"
+workload = "module_root_stress"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "build"
+args = []
+
+[[case]]
+id = "import_external_churn_check"
+workload = "import_external_churn"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "import_external_churn_build"
+workload = "import_external_churn"
+group = "module"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "build"
+args = []
+
+[[case]]
+id = "borrow_stress_check"
+workload = "borrow_stress"
+group = "borrow"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "type_stress_frontend"
+workload = "type_stress"
+group = "core"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "docs_frontend"
+workload = "docs"
+group = "docs"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "template_stress_frontend"
+workload = "template_stress"
+group = "stress"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "fold_stress_frontend"
+workload = "fold_stress"
+group = "stress"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "pattern_stress_frontend"
+workload = "pattern_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "collection_stress_frontend"
+workload = "collection_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "environment_stress_frontend"
+workload = "environment_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "one_module_kitchen_sink_frontend"
+workload = "one_module_kitchen_sink"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "deep_scope_churn_frontend"
+workload = "deep_scope_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "template_render_plan_churn_frontend"
+workload = "template_render_plan_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "constant_dag_churn_frontend"
+workload = "constant_dag_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "expression_rpn_churn_frontend"
+workload = "expression_rpn_churn"
+group = "stress"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "generic_trait_churn_frontend"
+workload = "generic_trait_churn"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "collection_map_borrow_churn_frontend"
+workload = "collection_map_borrow_churn"
+group = "stress"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "module_graph_frontend"
+workload = "module_graph"
+group = "module"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "import_fanout_frontend"
+workload = "import_fanout"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "module_root_stress_frontend"
+workload = "module_root_stress"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "external_js_imports_frontend"
+workload = "external_js_imports"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "import_external_churn_frontend"
+workload = "import_external_churn"
+group = "module"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "module_root_role_mix_frontend"
+workload = "module_root_role_mix"
+group = "module"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "tiny_one_file_frontend"
+workload = "tiny_one_file"
+group = "parallelism"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "tiny_two_files_frontend"
+workload = "tiny_two_files"
+group = "parallelism"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "tiny_seven_files_frontend"
+workload = "tiny_seven_files"
+group = "parallelism"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "tiny_eight_files_frontend"
+workload = "tiny_eight_files"
+group = "parallelism"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "many_tiny_files_frontend"
+workload = "many_tiny_files"
+group = "parallelism"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "many_medium_files_frontend"
+workload = "many_medium_files"
+group = "parallelism"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "many_markdown_assets_frontend"
+workload = "many_markdown_assets"
+group = "parallelism"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "many_modules_one_file_each_frontend"
+workload = "many_modules_one_file_each"
+group = "parallelism"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "few_modules_many_files_each_frontend"
+workload = "few_modules_many_files_each"
+group = "parallelism"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "borrow_stress_frontend"
+workload = "borrow_stress"
+group = "borrow"
+quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"

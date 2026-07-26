@@ -427,13 +427,18 @@ pub(super) fn dispatch_expression_token(
             // A grouped expression is no longer the immediate receiving boundary.
             // This keeps `(cast value)` from acting as an operator operand while
             // still allowing `cast (left + right)` to narrow the cast operand.
+            // Keep the parse-time literal context available to the group, but do not let the
+            // group's natural result type become the outer expression's expected type. The
+            // grouped expression remains an operand in the surrounding RPN stream, whose
+            // operator policy owns the final result type.
+            let mut grouped_expected_type = *state.expected_type;
             let mut grouped_cast_target_context = CastTargetContext::None;
             let grouped_input =
                 ExpressionParseInput::grouped_without_cast_target(ExpressionParseResources {
                     token_stream,
                     scope_context: context,
                     type_interner,
-                    expected_type: state.expected_type,
+                    expected_type: &mut grouped_expected_type,
                     cast_target_context: &mut grouped_cast_target_context,
                     value_mode: state.value_mode,
                     string_table,

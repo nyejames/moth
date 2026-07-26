@@ -38,7 +38,9 @@ fn bootstrap_script_calls_start_once_and_hydrates_slots() {
     let start_frag_pos = script
         .find("moth_frags = start_entry()")
         .expect("start call must be present");
-    let slot_list_pos = script.find("moth_slots").expect("slot list must be present");
+    let slot_list_pos = script
+        .find("moth_slots")
+        .expect("slot list must be present");
     assert!(
         start_frag_pos < slot_list_pos,
         "start() must be called before the slot ID list is set up"

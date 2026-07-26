@@ -6,6 +6,7 @@
 use super::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use std::ffi::OsStr;
 use std::io::Write;
 
 /// Helper: write a gzip-compressed file with the given content.
@@ -19,6 +20,14 @@ fn write_gzip_file(path: &Path, content: &[u8]) {
 /// Helper: write a plain (non-gzip) file.
 fn write_plain_file(path: &Path, content: &[u8]) {
     std::fs::write(path, content).expect("write plain test file");
+}
+
+fn command_environment<'a>(command: &'a Command, name: &str) -> Option<&'a OsStr> {
+    command.get_envs().find_map(
+        |(key, value)| {
+            if key == OsStr::new(name) { value } else { None }
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +91,7 @@ Options:
 fn build_samply_command_has_required_flags() {
     let input = SamplyRunInput {
         moth_path: PathBuf::from("/usr/bin/moth"),
+        current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
         args: vec!["test.moth".to_string()],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -93,6 +103,20 @@ fn build_samply_command_has_required_flags() {
 
     let cmd = build_samply_command(&input);
     let args: Vec<_> = cmd.get_args().collect();
+
+    assert_eq!(cmd.get_current_dir(), Some(Path::new("/tmp/repository")));
+    assert_eq!(
+        command_environment(&cmd, "MOTH_TIMERS"),
+        Some(OsStr::new("bench"))
+    );
+    assert_eq!(
+        command_environment(&cmd, "MOTH_COUNTERS"),
+        Some(OsStr::new("off"))
+    );
+    assert_eq!(
+        command_environment(&cmd, "MOTH_BENCH_STATUS"),
+        Some(OsStr::new("1"))
+    );
 
     // Must start with `record --save-only -o <path>`.
     assert_eq!(args[0].to_str().unwrap(), "record");
@@ -111,6 +135,7 @@ fn build_samply_command_has_required_flags() {
 fn build_samply_command_with_rate() {
     let input = SamplyRunInput {
         moth_path: PathBuf::from("/usr/bin/moth"),
+        current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -141,6 +166,7 @@ fn build_samply_command_with_rate() {
 fn build_samply_command_with_presymbolicate() {
     let input = SamplyRunInput {
         moth_path: PathBuf::from("/usr/bin/moth"),
+        current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -160,6 +186,7 @@ fn build_samply_command_with_presymbolicate() {
 fn build_samply_command_with_unstable_presymbolicate() {
     let input = SamplyRunInput {
         moth_path: PathBuf::from("/usr/bin/moth"),
+        current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -182,6 +209,7 @@ fn build_samply_command_with_unstable_presymbolicate() {
 fn build_samply_command_with_rate_and_presymbolicate() {
     let input = SamplyRunInput {
         moth_path: PathBuf::from("/usr/bin/moth"),
+        current_directory: PathBuf::from("/tmp/repository"),
         command: "build".to_string(),
         args: vec!["foo.moth".to_string(), "bar.moth".to_string()],
         output_path: PathBuf::from("/tmp/out/profile.json.gz"),
@@ -213,6 +241,7 @@ fn build_samply_command_with_rate_and_presymbolicate() {
 fn build_samply_command_with_symbol_dirs() {
     let input = SamplyRunInput {
         moth_path: PathBuf::from("/usr/bin/moth"),
+        current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
@@ -256,6 +285,7 @@ fn build_samply_command_rate_appears_before_separator() {
     // Verify flag ordering: --save-only, -o, [--rate], [--unstable-presymbolicate], --, moth, ...
     let input = SamplyRunInput {
         moth_path: PathBuf::from("/usr/bin/moth"),
+        current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
         args: vec![],
         output_path: PathBuf::from("/tmp/p.json.gz"),
@@ -452,6 +482,7 @@ fn profile_process_run_struct_fields() {
 fn samply_run_input_struct_fields() {
     let input = SamplyRunInput {
         moth_path: PathBuf::from("/usr/bin/moth"),
+        current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         output_path: PathBuf::from("/tmp/profile.json.gz"),

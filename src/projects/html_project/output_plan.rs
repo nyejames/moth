@@ -143,7 +143,8 @@ fn derive_single_file_logical_html_path(
     if file_stem.is_empty() {
         return Err(CompilerError::file_error(
             entry_point,
-            "HTML single-file entry has an empty stem; Moth routes require a non-empty UTF-8 stem.".to_string(),
+            "HTML single-file entry has an empty stem; Moth routes require a non-empty UTF-8 stem."
+                .to_string(),
             string_table,
         ));
     }

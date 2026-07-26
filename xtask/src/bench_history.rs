@@ -1,19 +1,17 @@
-//! Local raw benchmark history
+//! Local raw benchmark history.
 //!
-//! This module provides read/write access to benchmarks/local-data/runs.jsonl,
-//! a local-only line-delimited JSON file that stores enough history to compare
-//! future runs from the same system. Public monthly summaries are lossy by design;
-//! this file preserves per-case detail without committing raw data.
-//!
-//! WHAT: Appends one JSON object per successful bench run; reads back for
-//!       previous-run comparison and monthly summary generation.
-//! WHY:  Keeps detailed history local-only while still enabling per-system
-//!       delta calculation and long-term trend inspection.
+//! This module owns the one JSONL persistence path for completed benchmark
+//! runs. Current records use serde directly. Explicit legacy adapters keep
+//! formats 1 through 5 readable without making their path-derived identities
+//! part of the current benchmark domain.
 
 use crate::bench_types::{
-    BenchmarkCaseObservations, BenchmarkCaseResult, BenchmarkGroupStats, BenchmarkMetric,
-    BenchmarkRun, BenchmarkSuiteKind,
+    BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
+    BenchmarkGroupStats, BenchmarkMetric, BenchmarkRun, BenchmarkSuiteKind, GitRevision,
 };
+use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand, FrontendBenchmarkProfile};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -21,16 +19,19 @@ use std::process::Command;
 /// Path to the local raw benchmark history file, relative to repo root.
 pub const RUNS_JSONL_PATH: &str = "benchmarks/local-data/runs.jsonl";
 
-/// Current on-disk format version. Bumped when the JSONL schema changes.
-const FORMAT_VERSION: u32 = 5;
+/// Current on-disk format version.
+const FORMAT_VERSION: u32 = 6;
 
-/// A single benchmark run as stored in runs.jsonl.
-#[derive(Debug, Clone, PartialEq)]
+/// One benchmark run in the current in-memory history shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalRunRecord {
     pub format_version: u32,
+    pub benchmark_protocol_version: u32,
     pub timestamp: String,
     pub month_key: String,
     pub commit: Option<String>,
+    pub git_dirty: Option<bool>,
     pub system_uuid: String,
     pub public_system_id: String,
     pub display_name: String,
@@ -40,30 +41,29 @@ pub struct LocalRunRecord {
     pub primary_metric_name: String,
     pub suite_average_ms: f64,
     pub suite_case_spread_ms: f64,
-    /// Effective RAYON_NUM_THREADS: None for default threads, Some(n) for a fixed count.
-    ///
-    /// Old records (format version <= 4) do not carry this field and are
-    /// treated as None (default-thread identity) during parsing.
     pub thread_count: Option<u32>,
     pub groups: Vec<LocalGroupRecord>,
     pub cases: Vec<LocalCaseRecord>,
 }
 
-/// Aggregated group stats within a stored run.
-#[derive(Debug, Clone, PartialEq)]
+/// Aggregated group statistics within a stored run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalGroupRecord {
     pub name: String,
     pub case_count: usize,
     pub average_ms: f64,
 }
 
-/// A single case result within a stored run.
-#[derive(Debug, Clone, PartialEq)]
+/// One case result within a stored run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalCaseRecord {
-    pub name: String,
+    pub case_id: String,
+    pub workload_id: Option<String>,
+    pub workload_fingerprint: Option<String>,
     pub group_name: String,
-    pub command: String,
-    pub args: Vec<String>,
+    pub runner: BenchmarkRunner,
     pub mean_ms: f64,
     pub median_ms: f64,
     pub stddev_ms: f64,
@@ -72,44 +72,37 @@ pub struct LocalCaseRecord {
 }
 
 /// A local-only named detailed timer or counter value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalMetricRecord {
     pub name: String,
     pub value: f64,
 }
 
-/// Read all runs from runs.jsonl.
+/// Read all compatible runs from a local JSONL file.
 ///
-/// Returns an empty vector if the file does not exist.
-/// Skips lines that fail to parse or have an unknown format_version.
+/// Malformed lines and unknown future versions remain isolated to their line
+/// so one bad local record cannot make the complete history unreadable.
 pub fn read_local_runs(path: &Path) -> Result<Vec<LocalRunRecord>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
 
     let contents =
-        fs::read_to_string(path).map_err(|e| format!("Failed to read runs.jsonl: {}", e))?;
-
+        fs::read_to_string(path).map_err(|error| format!("Failed to read runs.jsonl: {error}"))?;
     let mut runs = Vec::new();
+
     for line in contents.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let Some(format_version) = extract_u32_field(trimmed, "format_version") else {
-            eprintln!("Warning: skipping malformed runs.jsonl line: missing format_version");
-            continue;
-        };
 
-        if format_version > FORMAT_VERSION {
-            continue;
-        }
-
-        match parse_jsonl_line(trimmed) {
-            Ok(record) => runs.push(record),
-            Err(e) => {
-                // Skip malformed lines rather than failing the entire file
-                eprintln!("Warning: skipping malformed runs.jsonl line: {}", e);
+        match parse_history_line(trimmed) {
+            Ok(Some(record)) => runs.push(record),
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("Warning: skipping malformed runs.jsonl line: {error}");
             }
         }
     }
@@ -117,12 +110,82 @@ pub fn read_local_runs(path: &Path) -> Result<Vec<LocalRunRecord>, String> {
     Ok(runs)
 }
 
-/// Find the most recent run matching the system, suite kind, and thread identity.
-///
-/// Scans from the end so the latest appended record wins. Filtering by
-/// `thread_count` ensures default-thread and fixed-thread runs never compare
-/// against each other, and different fixed counts never match. Old records
-/// without `thread_count` are treated as `None` (default).
+fn parse_history_line(line: &str) -> Result<Option<LocalRunRecord>, String> {
+    let value: Value =
+        serde_json::from_str(line).map_err(|error| format!("invalid JSON: {error}"))?;
+    let format_version = value
+        .get("format_version")
+        .and_then(Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or("missing or invalid format_version")?;
+
+    if format_version > FORMAT_VERSION {
+        eprintln!("Warning: skipping future runs.jsonl format version {format_version}");
+        return Ok(None);
+    }
+
+    let record = match format_version {
+        1 => adapt_v1(deserialize_legacy(value, 1)?)?,
+        2 => adapt_v2(deserialize_legacy(value, 2)?)?,
+        3 => adapt_v3(deserialize_legacy(value, 3)?)?,
+        4 => adapt_v4(deserialize_legacy(value, 4)?)?,
+        5 => adapt_v5(deserialize_legacy(value, 5)?)?,
+        6 => {
+            let record: LocalRunRecord = serde_json::from_value(value)
+                .map_err(|error| format!("invalid v6 record: {error}"))?;
+            validate_v6_record(&record)?;
+            record
+        }
+        _ => return Err(format!("unsupported format_version {format_version}")),
+    };
+
+    Ok(Some(record))
+}
+
+fn deserialize_legacy<T>(value: Value, version: u32) -> Result<T, String>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    serde_json::from_value(value).map_err(|error| format!("invalid v{version} record: {error}"))
+}
+
+fn validate_v6_record(record: &LocalRunRecord) -> Result<(), String> {
+    if record.format_version != FORMAT_VERSION {
+        return Err(format!(
+            "v6 record declared format version {}",
+            record.format_version
+        ));
+    }
+    if record.benchmark_protocol_version == 0 {
+        return Err("v6 record has legacy protocol version 0".to_string());
+    }
+
+    for case in &record.cases {
+        if case.case_id.is_empty() {
+            return Err("v6 case has empty case_id".to_string());
+        }
+        if case.workload_id.as_deref().is_none_or(str::is_empty) {
+            return Err(format!(
+                "v6 case '{}' has missing or empty workload_id",
+                case.case_id
+            ));
+        }
+        if case
+            .workload_fingerprint
+            .as_deref()
+            .is_none_or(str::is_empty)
+        {
+            return Err(format!(
+                "v6 case '{}' has missing or empty workload_fingerprint",
+                case.case_id
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Find the latest directly comparable run.
 pub fn find_latest_matching_run<'a>(
     runs: &'a [LocalRunRecord],
     system_uuid: &str,
@@ -131,69 +194,78 @@ pub fn find_latest_matching_run<'a>(
 ) -> Option<&'a LocalRunRecord> {
     let persisted_suite_kind = suite_kind.persisted_name();
 
-    runs.iter().rfind(|r| {
-        r.system_uuid == system_uuid
-            && r.suite_kind == persisted_suite_kind
-            && r.thread_count == thread_count
+    runs.iter().rfind(|run| {
+        run.system_uuid == system_uuid
+            && run.suite_kind == persisted_suite_kind
+            && run.thread_count == thread_count
+            && run.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
     })
 }
 
-/// Append a single run record to runs.jsonl.
-///
-/// Creates the file (and parent directory) if missing.
+/// Append one completed current-format run.
 pub fn append_local_run(path: &Path, record: &LocalRunRecord) -> Result<(), String> {
+    validate_v6_record(record)?;
+
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
+        fs::create_dir_all(parent).map_err(|error| {
             format!(
-                "Failed to create local-data directory '{}': {}",
-                parent.display(),
-                e
+                "Failed to create local-data directory '{}': {error}",
+                parent.display()
             )
         })?;
     }
 
-    let line = format_record_as_jsonl(record);
+    let line = serde_json::to_string(record)
+        .map_err(|error| format!("Failed to serialize runs.jsonl record: {error}"))?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .map_err(|e| format!("Failed to open runs.jsonl: {}", e))?;
+        .map_err(|error| format!("Failed to open runs.jsonl: {error}"))?;
 
     use std::io::Write;
-    writeln!(file, "{}", line).map_err(|e| format!("Failed to append to runs.jsonl: {}", e))
+    writeln!(file, "{line}").map_err(|error| format!("Failed to append to runs.jsonl: {error}"))
 }
 
-/// Get the short commit hash of the current HEAD.
-///
-/// Returns None if git is unavailable or the repo has no commits.
-pub fn get_commit_hash() -> Option<String> {
+/// Capture best-effort commit and dirty-state metadata.
+pub fn get_git_revision() -> GitRevision {
+    GitRevision {
+        commit: git_commit(),
+        dirty: git_dirty(),
+    }
+}
+
+fn git_commit() -> Option<String> {
     let output = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
         .ok()?;
-
     if !output.status.success() {
         return None;
     }
 
-    let hash = String::from_utf8_lossy(&output.stdout);
-    let trimmed = hash.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
+    non_empty_stdout(&output.stdout)
 }
 
-/// Capture the effective `RAYON_NUM_THREADS` setting as a normalized
-/// thread identity.
-///
-/// Returns `Ok(Some(n))` for a valid positive integer, `Ok(None)` when the
-/// variable is unset (Rayon default threads), or `Err` when the variable is
-/// set to an empty string, zero, a non-numeric value, or a non-Unicode value.
-///
-/// Only an unset variable means default. A non-Unicode value must surface as a
-/// clear tooling error instead of silently collapsing into default identity.
+fn git_dirty() -> Option<bool> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(!output.stdout.is_empty())
+}
+
+fn non_empty_stdout(bytes: &[u8]) -> Option<String> {
+    let value = String::from_utf8_lossy(bytes);
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+/// Capture the effective `RAYON_NUM_THREADS` setting as a normalized identity.
 pub fn effective_thread_count() -> Result<Option<u32>, String> {
     use std::env::VarError;
 
@@ -207,10 +279,6 @@ pub fn effective_thread_count() -> Result<Option<u32>, String> {
     }
 }
 
-/// Format a thread identity for display.
-///
-/// Returns "default" for `None` and "fixed: N" for `Some(n)`. A fixed-thread
-/// run must never look like a default run in any output surface.
 pub fn thread_identity_label(thread_count: Option<u32>) -> String {
     match thread_count {
         None => "default".to_string(),
@@ -218,11 +286,6 @@ pub fn thread_identity_label(thread_count: Option<u32>) -> String {
     }
 }
 
-/// Format the inline thread-identity suffix for a benchmark result line.
-///
-/// Returns an empty string for default threads and ` [threads: fixed: N]` for
-/// a fixed thread count. A fixed run must always be visibly distinct from
-/// default in any stdout surface.
 pub fn thread_identity_suffix(thread_count: Option<u32>) -> String {
     match thread_count {
         None => String::new(),
@@ -230,11 +293,6 @@ pub fn thread_identity_suffix(thread_count: Option<u32>) -> String {
     }
 }
 
-/// Parse a `RAYON_NUM_THREADS` value into a normalized thread identity.
-///
-/// Accepts a positive integer as `Some(n)`. Rejects empty, zero, or
-/// non-numeric values with a clear error message so invalid values never
-/// silently become default.
 fn parse_thread_count(value: &str) -> Result<Option<u32>, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -254,11 +312,12 @@ fn parse_thread_count(value: &str) -> Result<Option<u32>, String> {
                 .to_string(),
         );
     }
+
     Ok(Some(count))
 }
 
-/// Convert a BenchmarkRun into a LocalRunRecord for persistence.
-pub fn to_local_record(run: &BenchmarkRun, commit: Option<String>) -> LocalRunRecord {
+/// Convert a completed run into the current persisted shape.
+pub fn to_local_record(run: &BenchmarkRun) -> LocalRunRecord {
     debug_assert_eq!(
         run.groups
             .iter()
@@ -267,43 +326,9 @@ pub fn to_local_record(run: &BenchmarkRun, commit: Option<String>) -> LocalRunRe
         run.cases.len()
     );
 
-    let cases = run
-        .cases
-        .iter()
-        .map(|c| LocalCaseRecord {
-            name: c.case_name.clone(),
-            group_name: c.group_name.clone(),
-            command: c.command.clone(),
-            args: c.args.clone(),
-            mean_ms: c.mean_ms,
-            median_ms: c.median_ms,
-            stddev_ms: c.stddev_ms,
-            stage_timings: c
-                .observations
-                .stage_timings
-                .iter()
-                .map(local_metric_from_benchmark_metric)
-                .collect(),
-            counters: c
-                .observations
-                .counters
-                .iter()
-                .map(local_metric_from_benchmark_metric)
-                .collect(),
-        })
-        .collect();
-    let groups = run
-        .groups
-        .iter()
-        .map(|group| LocalGroupRecord {
-            name: group.group_name.clone(),
-            case_count: group.case_count,
-            average_ms: group.average_ms,
-        })
-        .collect();
-
     LocalRunRecord {
         format_version: FORMAT_VERSION,
+        benchmark_protocol_version: run.benchmark_protocol_version,
         timestamp: format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}",
             run.timestamp.year,
@@ -313,7 +338,8 @@ pub fn to_local_record(run: &BenchmarkRun, commit: Option<String>) -> LocalRunRe
             run.timestamp.minute
         ),
         month_key: run.timestamp.month_key(),
-        commit,
+        commit: run.git_revision.commit.clone(),
+        git_dirty: run.git_revision.dirty,
         system_uuid: run.system.system_uuid.clone(),
         public_system_id: run.system.public_system_id.clone(),
         display_name: run.system.display_name.clone(),
@@ -324,31 +350,65 @@ pub fn to_local_record(run: &BenchmarkRun, commit: Option<String>) -> LocalRunRe
         suite_average_ms: run.suite.average_ms,
         suite_case_spread_ms: run.suite.case_spread_ms,
         thread_count: run.thread_count,
-        groups,
-        cases,
+        groups: run
+            .groups
+            .iter()
+            .map(|group| LocalGroupRecord {
+                name: group.group_name.clone(),
+                case_count: group.case_count,
+                average_ms: group.average_ms,
+            })
+            .collect(),
+        cases: run.cases.iter().map(local_case_from_result).collect(),
     }
 }
 
-/// Convert a LocalRunRecord into case results for comparison.
+fn local_case_from_result(case: &BenchmarkCaseResult) -> LocalCaseRecord {
+    LocalCaseRecord {
+        case_id: case.case_id.clone(),
+        workload_id: case.workload_id.clone(),
+        workload_fingerprint: case.workload_fingerprint.clone(),
+        group_name: case.group_name.clone(),
+        runner: case.runner.clone(),
+        mean_ms: case.mean_ms,
+        median_ms: case.median_ms,
+        stddev_ms: case.stddev_ms,
+        stage_timings: case
+            .observations
+            .stage_timings
+            .iter()
+            .map(local_metric_from_benchmark_metric)
+            .collect(),
+        counters: case
+            .observations
+            .counters
+            .iter()
+            .map(local_metric_from_benchmark_metric)
+            .collect(),
+    }
+}
+
+/// Convert a persisted record into comparison/report case results.
 pub fn to_case_results(record: &LocalRunRecord) -> Vec<BenchmarkCaseResult> {
     record
         .cases
         .iter()
-        .map(|c| BenchmarkCaseResult {
-            case_name: c.name.clone(),
-            group_name: c.group_name.clone(),
-            command: c.command.clone(),
-            args: c.args.clone(),
-            mean_ms: c.mean_ms,
-            median_ms: c.median_ms,
-            stddev_ms: c.stddev_ms,
+        .map(|case| BenchmarkCaseResult {
+            case_id: case.case_id.clone(),
+            workload_id: case.workload_id.clone(),
+            workload_fingerprint: case.workload_fingerprint.clone(),
+            group_name: case.group_name.clone(),
+            runner: case.runner.clone(),
+            mean_ms: case.mean_ms,
+            median_ms: case.median_ms,
+            stddev_ms: case.stddev_ms,
             observations: BenchmarkCaseObservations {
-                stage_timings: c
+                stage_timings: case
                     .stage_timings
                     .iter()
                     .map(benchmark_metric_from_local_metric)
                     .collect(),
-                counters: c
+                counters: case
                     .counters
                     .iter()
                     .map(benchmark_metric_from_local_metric)
@@ -358,7 +418,6 @@ pub fn to_case_results(record: &LocalRunRecord) -> Vec<BenchmarkCaseResult> {
         .collect()
 }
 
-/// Convert a LocalRunRecord into group stats for summary rendering.
 pub fn to_group_stats(record: &LocalRunRecord) -> Vec<BenchmarkGroupStats> {
     record
         .groups
@@ -369,133 +428,6 @@ pub fn to_group_stats(record: &LocalRunRecord) -> Vec<BenchmarkGroupStats> {
             average_ms: group.average_ms,
         })
         .collect()
-}
-
-// ---------------------------------------------------------------------------
-// Manual JSON formatting (std-only)
-// ---------------------------------------------------------------------------
-
-/// Serialize a LocalRunRecord to a single JSONL line.
-///
-/// Produces compact, valid JSON without external dependencies; xtask is kept
-/// std-only and the schema is small enough for manual formatting.
-pub fn format_record_as_jsonl(record: &LocalRunRecord) -> String {
-    let mut parts = Vec::new();
-
-    parts.push(format!(r#""format_version":{}"#, record.format_version));
-    parts.push(format!(
-        r#""timestamp":"{}""#,
-        json_escape(&record.timestamp)
-    ));
-    parts.push(format!(
-        r#""month_key":"{}""#,
-        json_escape(&record.month_key)
-    ));
-
-    match &record.commit {
-        Some(c) => parts.push(format!(r#""commit":"{}""#, json_escape(c))),
-        None => parts.push(r#""commit":null"#.to_string()),
-    }
-
-    parts.push(format!(
-        r#""system_uuid":"{}""#,
-        json_escape(&record.system_uuid)
-    ));
-    parts.push(format!(
-        r#""public_system_id":"{}""#,
-        json_escape(&record.public_system_id)
-    ));
-    parts.push(format!(
-        r#""display_name":"{}""#,
-        json_escape(&record.display_name)
-    ));
-    parts.push(format!(r#""warmup_runs":{}"#, record.warmup_runs));
-    parts.push(format!(
-        r#""measured_iterations":{}"#,
-        record.measured_iterations
-    ));
-    parts.push(format!(
-        r#""suite_kind":"{}""#,
-        json_escape(&record.suite_kind)
-    ));
-    parts.push(format!(
-        r#""primary_metric_name":"{}""#,
-        json_escape(&record.primary_metric_name)
-    ));
-    parts.push(format!(r#""suite_average_ms":{}"#, record.suite_average_ms));
-    parts.push(format!(
-        r#""suite_case_spread_ms":{}"#,
-        record.suite_case_spread_ms
-    ));
-    match record.thread_count {
-        Some(count) => parts.push(format!(r#""thread_count":{}"#, count)),
-        None => parts.push(r#""thread_count":null"#.to_string()),
-    }
-
-    let group_parts: Vec<String> = record
-        .groups
-        .iter()
-        .map(|group| {
-            format!(
-                r#"{{"name":"{}","case_count":{},"average_ms":{}}}"#,
-                json_escape(&group.name),
-                group.case_count,
-                group.average_ms
-            )
-        })
-        .collect();
-
-    parts.push(format!(r#""groups":[{}]"#, group_parts.join(",")));
-
-    let case_parts: Vec<String> = record
-        .cases
-        .iter()
-        .map(|c| {
-            let arg_list = c
-                .args
-                .iter()
-                .map(|a| format!(r#""{}""#, json_escape(a)))
-                .collect::<Vec<_>>()
-                .join(",");
-            format!(
-                r#"{{"name":"{}","group_name":"{}","command":"{}","args":[{}],"mean_ms":{},"median_ms":{},"stddev_ms":{},"stage_timings":[{}],"counters":[{}]}}"#,
-                json_escape(&c.name),
-                json_escape(&c.group_name),
-                json_escape(&c.command),
-                arg_list,
-                c.mean_ms,
-                c.median_ms,
-                c.stddev_ms,
-                format_metric_array(&c.stage_timings),
-                format_metric_array(&c.counters)
-            )
-        })
-        .collect();
-
-    parts.push(format!(r#""cases":[{}]"#, case_parts.join(",")));
-
-    format!("{{{}}}", parts.join(","))
-}
-
-/// Escape a string for JSON output.
-///
-/// WHAT: Escapes backslash, double-quote, and common control characters.
-/// WHY:  Prevents malformed JSON when benchmark names or paths contain
-///       special characters.
-pub fn json_escape(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '"' => result.push_str("\\\""),
-            '\\' => result.push_str("\\\\"),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            c if c.is_control() => result.push_str(&format!("\\u{:04x}", c as u32)),
-            c => result.push(c),
-        }
-    }
-    result
 }
 
 fn local_metric_from_benchmark_metric(metric: &BenchmarkMetric) -> LocalMetricRecord {
@@ -512,409 +444,375 @@ fn benchmark_metric_from_local_metric(metric: &LocalMetricRecord) -> BenchmarkMe
     }
 }
 
-fn format_metric_array(metrics: &[LocalMetricRecord]) -> String {
-    metrics
-        .iter()
-        .map(|metric| {
-            format!(
-                r#"{{"name":"{}","value":{}}}"#,
-                json_escape(&metric.name),
-                metric.value
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",")
-}
+// ------------------------
+//  Legacy format adapters
+// ------------------------
 
-// ---------------------------------------------------------------------------
-// Manual JSON parsing (std-only)
-// ---------------------------------------------------------------------------
-
-/// Parse a single JSONL line into a LocalRunRecord.
-///
-/// WHAT: Minimal field-extraction parser for the known benchmark JSONL schema.
-/// WHY:  Keeps xtask std-only; the schema is small and fully controlled.
-fn parse_jsonl_line(line: &str) -> Result<LocalRunRecord, String> {
-    let format_version =
-        extract_u32_field(line, "format_version").ok_or("missing format_version")?;
-
-    match format_version {
-        1 => parse_v1_record(line),
-        2..=5 => parse_grouped_record(line),
-        _ => Err(format!("unsupported format_version {format_version}")),
-    }
-}
-
-fn parse_common_record_fields(line: &str) -> Result<LocalRecordFields, String> {
-    let timestamp = extract_string_field(line, "timestamp").ok_or("missing timestamp")?;
-    let month_key = extract_string_field(line, "month_key").ok_or("missing month_key")?;
-    let system_uuid = extract_string_field(line, "system_uuid").ok_or("missing system_uuid")?;
-    let public_system_id =
-        extract_string_field(line, "public_system_id").ok_or("missing public_system_id")?;
-    let display_name = extract_string_field(line, "display_name").ok_or("missing display_name")?;
-
-    let commit = extract_string_field(line, "commit");
-
-    let warmup_runs = extract_usize_field(line, "warmup_runs").unwrap_or(1);
-    let measured_iterations = extract_usize_field(line, "measured_iterations").unwrap_or(10);
-
-    Ok(LocalRecordFields {
-        timestamp,
-        month_key,
-        commit,
-        system_uuid,
-        public_system_id,
-        display_name,
-        warmup_runs,
-        measured_iterations,
-    })
-}
-
-fn parse_v1_record(line: &str) -> Result<LocalRunRecord, String> {
-    let fields = parse_common_record_fields(line)?;
-    let suite_mean_ms = extract_f64_field(line, "suite_mean_ms").unwrap_or(0.0);
-    let suite_stddev_ms = extract_f64_field(line, "suite_stddev_ms").unwrap_or(0.0);
-    let cases = extract_cases_array(line)?;
-    let groups = local_group_records_from_cases(&cases);
-
-    Ok(LocalRunRecord {
-        format_version: 1,
-        timestamp: fields.timestamp,
-        month_key: fields.month_key,
-        commit: fields.commit,
-        system_uuid: fields.system_uuid,
-        public_system_id: fields.public_system_id,
-        display_name: fields.display_name,
-        warmup_runs: fields.warmup_runs,
-        measured_iterations: fields.measured_iterations,
-        suite_kind: "end_to_end_cli".to_string(),
-        primary_metric_name: "wall_time_ms".to_string(),
-        suite_average_ms: suite_mean_ms,
-        suite_case_spread_ms: suite_stddev_ms,
-        thread_count: None,
-        groups,
-        cases,
-    })
-}
-
-fn parse_grouped_record(line: &str) -> Result<LocalRunRecord, String> {
-    let fields = parse_common_record_fields(line)?;
-    let suite_average_ms = extract_f64_field(line, "suite_average_ms").unwrap_or(0.0);
-    let suite_case_spread_ms = extract_f64_field(line, "suite_case_spread_ms").unwrap_or(0.0);
-    let cases = extract_cases_array(line)?;
-    let groups = extract_groups_array(line)?;
-
-    let suite_kind =
-        extract_string_field(line, "suite_kind").unwrap_or_else(|| "end_to_end_cli".to_string());
-    let default_primary_metric_name = BenchmarkSuiteKind::from_persisted_name(&suite_kind)
-        .map_or("wall_time_ms", |suite_kind| {
-            suite_kind.primary_metric_name()
-        });
-    let primary_metric_name = extract_string_field(line, "primary_metric_name")
-        .unwrap_or_else(|| default_primary_metric_name.to_string());
-
-    // Old records (format version <= 4) do not carry thread_count; treat
-    // absent or null as None (default-thread identity).
-    let thread_count = extract_u32_field(line, "thread_count");
-
-    Ok(LocalRunRecord {
-        format_version: extract_u32_field(line, "format_version").unwrap_or(2),
-        timestamp: fields.timestamp,
-        month_key: fields.month_key,
-        commit: fields.commit,
-        system_uuid: fields.system_uuid,
-        public_system_id: fields.public_system_id,
-        display_name: fields.display_name,
-        warmup_runs: fields.warmup_runs,
-        measured_iterations: fields.measured_iterations,
-        suite_kind,
-        primary_metric_name,
-        suite_average_ms,
-        suite_case_spread_ms,
-        thread_count,
-        groups,
-        cases,
-    })
-}
-
-struct LocalRecordFields {
+#[derive(Debug, Deserialize)]
+struct LegacyCommonRun {
     timestamp: String,
     month_key: String,
     commit: Option<String>,
     system_uuid: String,
     public_system_id: String,
     display_name: String,
+    #[serde(default = "default_warmup_runs")]
     warmup_runs: usize,
+    #[serde(default = "default_measured_iterations")]
     measured_iterations: usize,
 }
 
-/// Extract a quoted string field value from a JSON object line.
-fn extract_string_field(line: &str, field: &str) -> Option<String> {
-    let key = format!(r#""{}":"#, field);
-    let start = line.find(&key)? + key.len();
-    let rest = &line[start..];
-
-    // Skip whitespace
-    let mut idx = 0;
-    while idx < rest.len() && rest.as_bytes()[idx].is_ascii_whitespace() {
-        idx += 1;
-    }
-
-    if rest.as_bytes().get(idx) != Some(&b'"') {
-        // Could be null
-        if rest[idx..].starts_with("null") {
-            return None;
-        }
-        return None;
-    }
-    idx += 1; // skip opening quote
-
-    let mut result = String::new();
-    let mut escaped = false;
-
-    while idx < rest.len() {
-        let ch = rest.as_bytes()[idx] as char;
-        if escaped {
-            match ch {
-                '"' => result.push('"'),
-                '\\' => result.push('\\'),
-                'n' => result.push('\n'),
-                'r' => result.push('\r'),
-                't' => result.push('\t'),
-                'u' => {
-                    // \uXXXX
-                    let hex_start = idx + 1;
-                    let hex_end = (hex_start + 4).min(rest.len());
-                    let hex = &rest[hex_start..hex_end];
-                    if let Ok(code) = u32::from_str_radix(hex, 16)
-                        && let Some(c) = char::from_u32(code)
-                    {
-                        result.push(c);
-                    }
-                    idx = hex_end - 1;
-                }
-                c => result.push(c),
-            }
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == '"' {
-            break;
-        } else {
-            result.push(ch);
-        }
-        idx += 1;
-    }
-
-    Some(result)
+#[derive(Debug, Deserialize)]
+struct LegacyV1Run {
+    format_version: u32,
+    #[serde(flatten)]
+    common: LegacyCommonRun,
+    #[serde(default)]
+    suite_mean_ms: f64,
+    #[serde(default)]
+    suite_stddev_ms: f64,
+    cases: Vec<LegacyV1Case>,
 }
 
-/// Extract an unsigned integer field value from a JSON object line.
-fn extract_usize_field(line: &str, field: &str) -> Option<usize> {
-    let key = format!(r#""{}":"#, field);
-    let start = line.find(&key)? + key.len();
-    let rest = &line[start..];
-
-    // Skip whitespace
-    let mut idx = 0;
-    while idx < rest.len() && rest.as_bytes()[idx].is_ascii_whitespace() {
-        idx += 1;
-    }
-
-    let end = rest[idx..]
-        .find([',', '}', ']'])
-        .unwrap_or(rest.len() - idx);
-
-    let num_str = rest[idx..idx + end].trim();
-    num_str.parse().ok()
+#[derive(Debug, Deserialize)]
+struct LegacyV1Case {
+    name: String,
+    command: String,
+    args: Vec<String>,
+    #[serde(default)]
+    mean_ms: f64,
+    #[serde(default)]
+    stddev_ms: f64,
 }
 
-/// Extract a u32 field value from a JSON object line.
-fn extract_u32_field(line: &str, field: &str) -> Option<u32> {
-    extract_usize_field(line, field).map(|v| v as u32)
+#[derive(Debug, Deserialize)]
+struct LegacyV2Run {
+    format_version: u32,
+    #[serde(flatten)]
+    common: LegacyCommonRun,
+    #[serde(default)]
+    suite_average_ms: f64,
+    #[serde(default)]
+    suite_case_spread_ms: f64,
+    groups: Vec<LocalGroupRecord>,
+    cases: Vec<LegacyGroupedCase>,
 }
 
-/// Extract an f64 field value from a JSON object line.
-fn extract_f64_field(line: &str, field: &str) -> Option<f64> {
-    let key = format!(r#""{}":"#, field);
-    let start = line.find(&key)? + key.len();
-    let rest = &line[start..];
-
-    // Skip whitespace
-    let mut idx = 0;
-    while idx < rest.len() && rest.as_bytes()[idx].is_ascii_whitespace() {
-        idx += 1;
-    }
-
-    let end = rest[idx..]
-        .find([',', '}', ']'])
-        .unwrap_or(rest.len() - idx);
-
-    let num_str = rest[idx..idx + end].trim();
-    num_str.parse().ok()
+#[derive(Debug, Deserialize)]
+struct LegacyV3Run {
+    format_version: u32,
+    #[serde(flatten)]
+    common: LegacyCommonRun,
+    #[serde(default)]
+    suite_average_ms: f64,
+    #[serde(default)]
+    suite_case_spread_ms: f64,
+    groups: Vec<LocalGroupRecord>,
+    cases: Vec<LegacyGroupedCase>,
 }
 
-/// Extract the "groups" array from a JSON object line.
-fn extract_groups_array(line: &str) -> Result<Vec<LocalGroupRecord>, String> {
-    let key = r#""groups":"#;
-    let start = line
-        .find(key)
-        .ok_or("missing groups field")?
-        .checked_add(key.len())
-        .ok_or("invalid groups position")?;
-    let rest = &line[start..];
+#[derive(Debug, Deserialize)]
+struct LegacyV4Run {
+    format_version: u32,
+    #[serde(flatten)]
+    common: LegacyCommonRun,
+    #[serde(default = "default_suite_kind")]
+    suite_kind: String,
+    primary_metric_name: Option<String>,
+    #[serde(default)]
+    suite_average_ms: f64,
+    #[serde(default)]
+    suite_case_spread_ms: f64,
+    groups: Vec<LocalGroupRecord>,
+    cases: Vec<LegacyGroupedCase>,
+}
 
-    let group_objects = extract_object_array_items(rest, "groups")?;
-    group_objects
+#[derive(Debug, Deserialize)]
+struct LegacyV5Run {
+    format_version: u32,
+    #[serde(flatten)]
+    common: LegacyCommonRun,
+    #[serde(default = "default_suite_kind")]
+    suite_kind: String,
+    primary_metric_name: Option<String>,
+    #[serde(default)]
+    suite_average_ms: f64,
+    #[serde(default)]
+    suite_case_spread_ms: f64,
+    thread_count: Option<u32>,
+    groups: Vec<LocalGroupRecord>,
+    cases: Vec<LegacyGroupedCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyGroupedCase {
+    name: String,
+    group_name: Option<String>,
+    command: String,
+    args: Vec<String>,
+    #[serde(default)]
+    mean_ms: f64,
+    median_ms: Option<f64>,
+    #[serde(default)]
+    stddev_ms: f64,
+    #[serde(default)]
+    stage_timings: Vec<LocalMetricRecord>,
+    #[serde(default)]
+    counters: Vec<LocalMetricRecord>,
+}
+
+fn adapt_v1(legacy: LegacyV1Run) -> Result<LocalRunRecord, String> {
+    let cases: Vec<LocalCaseRecord> = legacy
+        .cases
         .into_iter()
-        .map(|object| parse_group_object(&object))
-        .collect()
+        .map(|case| {
+            let group_name = infer_legacy_group_name(&case.name, &case.command, &case.args);
+            legacy_case(LegacyCaseData {
+                case_id: case.name,
+                group_name,
+                command: case.command,
+                args: case.args,
+                mean_ms: case.mean_ms,
+                median_ms: case.mean_ms,
+                stddev_ms: case.stddev_ms,
+                stage_timings: Vec::new(),
+                counters: Vec::new(),
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let groups = local_group_records_from_cases(&cases);
+
+    Ok(legacy_record(LegacyRecordData {
+        format_version: legacy.format_version,
+        common: legacy.common,
+        suite_kind: "end_to_end_cli".to_string(),
+        primary_metric_name: "wall_time_ms".to_string(),
+        suite_average_ms: legacy.suite_mean_ms,
+        suite_case_spread_ms: legacy.suite_stddev_ms,
+        thread_count: None,
+        groups,
+        cases,
+    }))
 }
 
-fn parse_group_object(obj: &str) -> Result<LocalGroupRecord, String> {
-    let name = extract_string_field(obj, "name").ok_or("group missing name")?;
-    let case_count = extract_usize_field(obj, "case_count").unwrap_or(0);
-    let average_ms = extract_f64_field(obj, "average_ms").unwrap_or(0.0);
-
-    Ok(LocalGroupRecord {
-        name,
-        case_count,
-        average_ms,
+fn adapt_v2(legacy: LegacyV2Run) -> Result<LocalRunRecord, String> {
+    adapt_grouped_legacy(LegacyGroupedRunData {
+        format_version: legacy.format_version,
+        common: legacy.common,
+        suite_kind: "end_to_end_cli".to_string(),
+        primary_metric_name: None,
+        suite_average_ms: legacy.suite_average_ms,
+        suite_case_spread_ms: legacy.suite_case_spread_ms,
+        thread_count: None,
+        groups: legacy.groups,
+        cases: legacy.cases,
     })
 }
 
-/// Extract the "cases" array from a JSON object line.
-fn extract_cases_array(line: &str) -> Result<Vec<LocalCaseRecord>, String> {
-    let key = r#""cases":"#;
-    let start = line
-        .find(key)
-        .ok_or("missing cases field")?
-        .checked_add(key.len())
-        .ok_or("invalid cases position")?;
-    let rest = &line[start..];
+fn adapt_v3(legacy: LegacyV3Run) -> Result<LocalRunRecord, String> {
+    adapt_grouped_legacy(LegacyGroupedRunData {
+        format_version: legacy.format_version,
+        common: legacy.common,
+        suite_kind: "end_to_end_cli".to_string(),
+        primary_metric_name: None,
+        suite_average_ms: legacy.suite_average_ms,
+        suite_case_spread_ms: legacy.suite_case_spread_ms,
+        thread_count: None,
+        groups: legacy.groups,
+        cases: legacy.cases,
+    })
+}
 
-    let case_objects = extract_object_array_items(rest, "cases")?;
-    case_objects
+fn adapt_v4(legacy: LegacyV4Run) -> Result<LocalRunRecord, String> {
+    adapt_grouped_legacy(LegacyGroupedRunData {
+        format_version: legacy.format_version,
+        common: legacy.common,
+        suite_kind: legacy.suite_kind,
+        primary_metric_name: legacy.primary_metric_name,
+        suite_average_ms: legacy.suite_average_ms,
+        suite_case_spread_ms: legacy.suite_case_spread_ms,
+        thread_count: None,
+        groups: legacy.groups,
+        cases: legacy.cases,
+    })
+}
+
+fn adapt_v5(legacy: LegacyV5Run) -> Result<LocalRunRecord, String> {
+    adapt_grouped_legacy(LegacyGroupedRunData {
+        format_version: legacy.format_version,
+        common: legacy.common,
+        suite_kind: legacy.suite_kind,
+        primary_metric_name: legacy.primary_metric_name,
+        suite_average_ms: legacy.suite_average_ms,
+        suite_case_spread_ms: legacy.suite_case_spread_ms,
+        thread_count: legacy.thread_count,
+        groups: legacy.groups,
+        cases: legacy.cases,
+    })
+}
+
+struct LegacyGroupedRunData {
+    format_version: u32,
+    common: LegacyCommonRun,
+    suite_kind: String,
+    primary_metric_name: Option<String>,
+    suite_average_ms: f64,
+    suite_case_spread_ms: f64,
+    thread_count: Option<u32>,
+    groups: Vec<LocalGroupRecord>,
+    cases: Vec<LegacyGroupedCase>,
+}
+
+fn adapt_grouped_legacy(data: LegacyGroupedRunData) -> Result<LocalRunRecord, String> {
+    let cases = data
+        .cases
         .into_iter()
-        .map(|object| parse_case_object(&object))
-        .collect()
+        .map(|case| {
+            let group_name = case
+                .group_name
+                .unwrap_or_else(|| infer_legacy_group_name(&case.name, &case.command, &case.args));
+            let median_ms = case.median_ms.unwrap_or(case.mean_ms);
+
+            legacy_case(LegacyCaseData {
+                case_id: case.name,
+                group_name,
+                command: case.command,
+                args: case.args,
+                mean_ms: case.mean_ms,
+                median_ms,
+                stddev_ms: case.stddev_ms,
+                stage_timings: case.stage_timings,
+                counters: case.counters,
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let primary_metric_name = data
+        .primary_metric_name
+        .unwrap_or_else(|| default_primary_metric_name(&data.suite_kind));
+
+    Ok(legacy_record(LegacyRecordData {
+        format_version: data.format_version,
+        common: data.common,
+        suite_kind: data.suite_kind,
+        primary_metric_name,
+        suite_average_ms: data.suite_average_ms,
+        suite_case_spread_ms: data.suite_case_spread_ms,
+        thread_count: data.thread_count,
+        groups: data.groups,
+        cases,
+    }))
 }
 
-fn extract_object_array_items(rest: &str, field: &str) -> Result<Vec<String>, String> {
-    let mut idx = 0;
-    while idx < rest.len() && rest.as_bytes()[idx].is_ascii_whitespace() {
-        idx += 1;
+struct LegacyRecordData {
+    format_version: u32,
+    common: LegacyCommonRun,
+    suite_kind: String,
+    primary_metric_name: String,
+    suite_average_ms: f64,
+    suite_case_spread_ms: f64,
+    thread_count: Option<u32>,
+    groups: Vec<LocalGroupRecord>,
+    cases: Vec<LocalCaseRecord>,
+}
+
+fn legacy_record(data: LegacyRecordData) -> LocalRunRecord {
+    LocalRunRecord {
+        format_version: data.format_version,
+        benchmark_protocol_version: 0,
+        timestamp: data.common.timestamp,
+        month_key: data.common.month_key,
+        commit: data.common.commit,
+        git_dirty: None,
+        system_uuid: data.common.system_uuid,
+        public_system_id: data.common.public_system_id,
+        display_name: data.common.display_name,
+        warmup_runs: data.common.warmup_runs,
+        measured_iterations: data.common.measured_iterations,
+        suite_kind: data.suite_kind,
+        primary_metric_name: data.primary_metric_name,
+        suite_average_ms: data.suite_average_ms,
+        suite_case_spread_ms: data.suite_case_spread_ms,
+        thread_count: data.thread_count,
+        groups: data.groups,
+        cases: data.cases,
     }
+}
 
-    if rest.as_bytes().get(idx) != Some(&b'[') {
-        return Err(format!("{field} field is not an array"));
-    }
-    idx += 1;
+struct LegacyCaseData {
+    case_id: String,
+    group_name: String,
+    command: String,
+    args: Vec<String>,
+    mean_ms: f64,
+    median_ms: f64,
+    stddev_ms: f64,
+    stage_timings: Vec<LocalMetricRecord>,
+    counters: Vec<LocalMetricRecord>,
+}
 
-    let mut objects = Vec::new();
-    let mut brace_depth = 0;
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut obj_start: Option<usize> = None;
-
-    while idx < rest.len() {
-        let ch = rest.as_bytes()[idx] as char;
-
-        if escaped {
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == '"' {
-            in_string = !in_string;
-        } else if !in_string {
-            match ch {
-                '{' => {
-                    if brace_depth == 0 {
-                        obj_start = Some(idx);
-                    }
-                    brace_depth += 1;
-                }
-                '}' => {
-                    brace_depth -= 1;
-                    if brace_depth == 0 {
-                        if let Some(start) = obj_start {
-                            objects.push(rest[start..=idx].to_string());
-                        }
-                        obj_start = None;
-                    }
-                }
-                ']' if brace_depth == 0 => {
-                    break;
-                }
-                _ => {}
-            }
+fn legacy_case(data: LegacyCaseData) -> Result<LocalCaseRecord, String> {
+    let runner = match data.command.as_str() {
+        "check" => BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Check,
+            args: data.args,
+        },
+        "build" => BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Build,
+            args: data.args,
+        },
+        "frontend" => BenchmarkRunner::Frontend {
+            profile: FrontendBenchmarkProfile::Dev,
+        },
+        _ => {
+            return Err(format!(
+                "legacy case '{}' has unknown command '{}'",
+                data.case_id, data.command
+            ));
         }
-        idx += 1;
-    }
-
-    Ok(objects)
-}
-
-/// Parse a single case object string into a LocalCaseRecord.
-fn parse_case_object(obj: &str) -> Result<LocalCaseRecord, String> {
-    let name = extract_string_field(obj, "name").ok_or("case missing name")?;
-    let command = extract_string_field(obj, "command").ok_or("case missing command")?;
-    let mean_ms = extract_f64_field(obj, "mean_ms").unwrap_or(0.0);
-    let median_ms = extract_f64_field(obj, "median_ms").unwrap_or(mean_ms);
-    let stddev_ms = extract_f64_field(obj, "stddev_ms").unwrap_or(0.0);
-
-    let args = extract_string_array(obj, "args")?;
-    let group_name = extract_string_field(obj, "group_name")
-        .unwrap_or_else(|| infer_legacy_group_name(&name, &command, &args));
+    };
 
     Ok(LocalCaseRecord {
-        name,
-        group_name,
-        command,
-        args,
-        mean_ms,
-        median_ms,
-        stddev_ms,
-        stage_timings: extract_metric_array(obj, "stage_timings")?,
-        counters: extract_metric_array(obj, "counters")?,
+        case_id: data.case_id,
+        workload_id: None,
+        workload_fingerprint: None,
+        group_name: data.group_name,
+        runner,
+        mean_ms: data.mean_ms,
+        median_ms: data.median_ms,
+        stddev_ms: data.stddev_ms,
+        stage_timings: data.stage_timings,
+        counters: data.counters,
     })
 }
 
-fn extract_metric_array(obj: &str, field: &str) -> Result<Vec<LocalMetricRecord>, String> {
-    let key = format!(r#""{}":"#, field);
-    let Some(start) = obj
-        .find(&key)
-        .and_then(|index| index.checked_add(key.len()))
-    else {
-        return Ok(Vec::new());
-    };
-    let rest = &obj[start..];
+fn default_warmup_runs() -> usize {
+    1
+}
 
-    extract_object_array_items(rest, field)?
-        .into_iter()
-        .map(|object| {
-            let name = extract_string_field(&object, "name")
-                .ok_or_else(|| format!("{field} metric missing name"))?;
-            let value = extract_f64_field(&object, "value").unwrap_or(0.0);
+fn default_measured_iterations() -> usize {
+    10
+}
 
-            Ok(LocalMetricRecord { name, value })
-        })
-        .collect()
+fn default_suite_kind() -> String {
+    "end_to_end_cli".to_string()
+}
+
+fn default_primary_metric_name(suite_kind: &str) -> String {
+    BenchmarkSuiteKind::from_persisted_name(suite_kind)
+        .map_or("wall_time_ms", |kind| kind.primary_metric_name())
+        .to_string()
 }
 
 fn infer_legacy_group_name(name: &str, command: &str, args: &[String]) -> String {
-    let mut text = String::new();
-    text.push_str(name);
-    text.push(' ');
-    text.push_str(command);
-    for arg in args {
+    let mut text = format!("{name} {command}");
+    for argument in args {
         text.push(' ');
-        text.push_str(arg);
+        text.push_str(argument);
     }
 
-    if text.contains("speed-test.moth") {
+    if text.contains("speed-test.moth") || text.contains("speed-test.bst") {
         "core".to_string()
-    } else if args.iter().any(|arg| arg == "docs") {
+    } else if args.iter().any(|argument| argument == "docs") {
         "docs".to_string()
     } else if text.contains("template-stress")
         || text.contains("type-stress")
@@ -936,10 +834,11 @@ fn local_group_records_from_cases(cases: &[LocalCaseRecord]) -> Vec<LocalGroupRe
     let benchmark_cases: Vec<BenchmarkCaseResult> = cases
         .iter()
         .map(|case| BenchmarkCaseResult {
-            case_name: case.name.clone(),
+            case_id: case.case_id.clone(),
+            workload_id: None,
+            workload_fingerprint: None,
             group_name: case.group_name.clone(),
-            command: case.command.clone(),
-            args: case.args.clone(),
+            runner: case.runner.clone(),
             mean_ms: case.mean_ms,
             median_ms: case.median_ms,
             stddev_ms: case.stddev_ms,
@@ -955,65 +854,6 @@ fn local_group_records_from_cases(cases: &[LocalCaseRecord]) -> Vec<LocalGroupRe
             average_ms: group.average_ms,
         })
         .collect()
-}
-
-/// Extract an array of strings from a JSON object.
-fn extract_string_array(obj: &str, field: &str) -> Result<Vec<String>, String> {
-    let key = format!(r#""{}":"#, field);
-    let start = obj
-        .find(&key)
-        .ok_or(format!("missing {} field", field))?
-        .checked_add(key.len())
-        .ok_or("invalid array position")?;
-    let rest = &obj[start..];
-
-    let mut idx = 0;
-    while idx < rest.len() && rest.as_bytes()[idx].is_ascii_whitespace() {
-        idx += 1;
-    }
-
-    if rest.as_bytes().get(idx) != Some(&b'[') {
-        return Err(format!("{} field is not an array", field));
-    }
-    idx += 1;
-
-    let mut items = Vec::new();
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut current = String::new();
-
-    while idx < rest.len() {
-        let ch = rest.as_bytes()[idx] as char;
-
-        if escaped {
-            match ch {
-                '"' => current.push('"'),
-                '\\' => current.push('\\'),
-                'n' => current.push('\n'),
-                'r' => current.push('\r'),
-                't' => current.push('\t'),
-                _ => current.push(ch),
-            }
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == '"' {
-            if in_string {
-                items.push(current.clone());
-                current.clear();
-                in_string = false;
-            } else {
-                in_string = true;
-            }
-        } else if ch == ']' && !in_string {
-            break;
-        } else if in_string {
-            current.push(ch);
-        }
-        idx += 1;
-    }
-
-    Ok(items)
 }
 
 #[cfg(test)]

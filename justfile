@@ -5,7 +5,7 @@ validate:
     just ci-clippy
     
     @echo "unit tests"
-    cargo test --quiet -- --format terse
+    cargo test --workspace --quiet -- --format terse
 
     @echo "integration tests"
     cargo run --quiet -- tests
@@ -13,14 +13,8 @@ validate:
     @echo "docs build"
     cargo run --quiet -- check docs --terse
 
-    @echo "benchmark check"
-    cargo run --package xtask --bin xtask -- bench-check
-
-    @echo "benchmark compilation validate"
-    cargo run --package xtask --bin xtask -- bench-validate
-
-    @echo "frontend benchmark check"
-    cargo run --package xtask --bin xtask -- bench-frontend-check
+    @echo "benchmark sanity"
+    cargo run --package xtask --bin xtask -- bench-ci
 
 ship:
     cargo fmt
@@ -40,6 +34,9 @@ bench-frontend:
 
 bench-check:
     cargo run --package xtask --bin xtask -- bench-check
+
+bench-ci:
+    cargo run --package xtask --bin xtask -- bench-ci
 
 bench-report:
     cargo run --package xtask --bin xtask -- bench-report
@@ -70,10 +67,10 @@ ci-clippy:
     cargo +1.95.0 clippy -V
 
     @echo "clippy: native host"
-    CARGO_TARGET_DIR=target/ci-clippy-native cargo +1.95.0 clippy --all-targets --all-features -- -D warnings
+    CARGO_TARGET_DIR=target/ci-clippy-native cargo +1.95.0 clippy --workspace --all-targets --all-features -- -D warnings
 
     @echo "clippy: linux x64"
-    CARGO_TARGET_DIR=target/ci-clippy-linux cargo +1.95.0 clippy --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings
+    CARGO_TARGET_DIR=target/ci-clippy-linux cargo +1.95.0 clippy --workspace --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings
 
     @echo "clippy: windows x64"
-    CARGO_TARGET_DIR=target/ci-clippy-windows cargo +1.95.0 clippy --target x86_64-pc-windows-msvc --all-targets --all-features -- -D warnings
+    CARGO_TARGET_DIR=target/ci-clippy-windows cargo +1.95.0 clippy --workspace --target x86_64-pc-windows-msvc --all-targets --all-features -- -D warnings

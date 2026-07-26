@@ -26,12 +26,11 @@ pub(super) struct CallSemantics {
 ///
 /// Why this exists:
 /// `~` call parameters are not always plain mutable borrows. They can either
-/// remain a mutable borrow or become a consuming move based on last-use facts.
+/// remain a borrow or receive optional transfer responsibility based on last-use facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ArgEffect {
     SharedBorrow,
     MutableBorrow,
-    MayConsume,
     MayConsumeShared,
     MayConsumeMutable,
 }

@@ -229,10 +229,7 @@ categorize_string |text String| -> String:
 ;
 
 -- Nested match expressions
-outer = 10
-inner = 5
-
-nested_match || -> String:
+nested_match |outer Int, inner Int| -> String:
     if outer is:
         < 5 =>
             if inner is:
@@ -282,27 +279,40 @@ large_match |value Int| -> String:
     ;
 ;
 
--- Payload capture with guards
+-- Payload capture with nested scalar classification
 guarded_payload |opt Optional| -> String:
     if opt is:
         NoneVariant => return "no value"
-        Some(value) if value < 0 => return "negative value"
-        Some(value) if value is 0 => return "zero value"
-        Some(value) if value < 100 => return "small positive"
-        Some(value) => return "large positive"
+        Some(value) =>
+            if value is:
+                < 0 => return "negative value"
+                0 => return "zero value"
+                < 100 => return "small positive"
+                else => return "large positive"
+            ;
     ;
 ;
 
 guarded_http |response HttpResponse| -> String:
     if response is:
-        Success(code, body) if code < 200 => return "info"
-        Success(code, body) if code < 300 => return "success"
+        Success(code, body) =>
+            if code is:
+                < 200 => return "info"
+                < 300 => return "success"
+                else => return "success"
+            ;
         Redirect(url) => return "redirect"
-        ClientError(code, message) if code is 400 => return "bad request"
-        ClientError(code, message) if code is 404 => return "not found"
-        ClientError(code, message) => return "client error"
-        ServerError(code, message) if code is 500 => return "internal error"
-        ServerError(code, message) => return "server error"
+        ClientError(code, message) =>
+            if code is:
+                400 => return "bad request"
+                404 => return "not found"
+                else => return "client error"
+            ;
+        ServerError(code, message) =>
+            if code is:
+                500 => return "internal error"
+                else => return "server error"
+            ;
     ;
 ;
 
@@ -314,12 +324,12 @@ process_all |status Status, priority Priority, result Result| -> String:
     return [: Status: [status_str] / Priority: [priority_num] / Result: [result_str]]
 ;
 
--- Capture pattern for whole value
-capture_whole |value Int| -> String:
+-- Option present-value capture
+capture_whole |value Int?| -> String:
     if value is:
-        captured if captured < 0 => return [: Negative: [captured]]
-        captured => return [: Non-negative: [captured]]
-        else => return "unreachable"
+        |captured| if captured < 0 => return [: Negative: [captured]]
+        |captured| => return [: Non-negative: [captured]]
+        none => return "None"
     ;
 ;
 
@@ -379,7 +389,7 @@ run_pattern_stress ||:
     io.line([: [categorize_string("hello")]])
 
     -- Nested match
-    io.line([: [nested_match()]])
+    io.line([: [nested_match(10, 5)]])
 
     -- Large match
     io.line([: [large_match(15)]])

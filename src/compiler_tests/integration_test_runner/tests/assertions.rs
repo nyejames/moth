@@ -809,7 +809,8 @@ fn normalization_replaces_frag_counters() {
 
 #[test]
 fn normalization_preserves_runtime_library_names() {
-    let input = "__moth_read __moth_write __moth_binding __moth_assign_value __moth_result_fallback";
+    let input =
+        "__moth_read __moth_write __moth_binding __moth_assign_value __moth_result_fallback";
     assert_eq!(normalize_text_for_comparison(input), input);
 }
 

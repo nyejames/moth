@@ -877,8 +877,10 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "moth",
+ "serde",
  "serde_json",
  "tempfile",
+ "toml",
 ]
 
 [[package]]

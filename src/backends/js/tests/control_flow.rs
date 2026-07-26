@@ -1568,7 +1568,9 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
     assert!(
         output
             .source
-            .matches(&format!("__moth_assign_value({loop_value_name}, __jump_arg_"))
+            .matches(&format!(
+                "__moth_assign_value({loop_value_name}, __jump_arg_"
+            ))
             .count()
             >= 2,
         "dispatcher jump edges should assign carried loop values into block parameters"

@@ -87,8 +87,8 @@ pub struct DriftReport {
 /// A significant function drift between current and previous runs.
 #[derive(Debug, Clone)]
 pub struct FunctionDrift {
-    /// Case name where the drift occurred.
-    pub case_name: String,
+    /// Authored case ID where the drift occurred.
+    pub case_id: String,
     /// Function name that drifted.
     pub function_name: String,
     /// Current inclusive percentage.
@@ -109,8 +109,8 @@ pub struct FunctionDrift {
 /// A significant stage timing drift between current and previous runs.
 #[derive(Debug, Clone)]
 pub struct StageDrift {
-    /// Case name where the drift occurred.
-    pub case_name: String,
+    /// Authored case ID where the drift occurred.
+    pub case_id: String,
     /// Stage name that drifted.
     pub stage_name: String,
     /// Current stage timing in milliseconds.
@@ -124,8 +124,8 @@ pub struct StageDrift {
 /// A significant counter drift between current and previous runs.
 #[derive(Debug, Clone)]
 pub struct CounterDrift {
-    /// Case name where the drift occurred.
-    pub case_name: String,
+    /// Authored case ID where the drift occurred.
+    pub case_id: String,
     /// Counter name that drifted.
     pub counter_name: String,
     /// Current counter value.
@@ -166,7 +166,7 @@ pub fn find_comparable_previous<'a>(
 /// Compute drift between the current profiling data and a previous record.
 ///
 /// WHAT: Compares each current case against its matching previous case
-/// (matched by case name, command, and args). Applies function, stage,
+/// (matched by case ID, command, and args). Applies function, stage,
 /// and counter drift thresholds to identify significant movements.
 ///
 /// WHY: Conservative thresholds avoid surfacing sampling noise. The
@@ -187,9 +187,9 @@ pub fn compute_drift(
     let mut ignored_counter_count = 0usize;
 
     for current in current_cases {
-        // Find the matching previous case by case_name, command, and args.
+        // Match stable authored identity plus the runner facts used by profiling.
         let Some(previous_case) = previous.cases.iter().find(|prev| {
-            prev.case_name == current.case_name
+            prev.case_id == current.case_id
                 && prev.command == current.command
                 && prev.args == current.args
         }) else {
@@ -197,7 +197,7 @@ pub fn compute_drift(
         };
 
         let current_wall = current_wall_times
-            .get(&current.case_name)
+            .get(&current.case_id)
             .copied()
             .unwrap_or(0.0);
         let previous_wall = previous_case.observation_wall_ms;
@@ -226,7 +226,7 @@ pub fn compute_drift(
             ) {
                 FunctionDriftResult::Significant { share_only } => {
                     let drift = FunctionDrift {
-                        case_name: current.case_name.clone(),
+                        case_id: current.case_id.clone(),
                         function_name: current_func.name.clone(),
                         current_inclusive_pct: current_func.inclusive_pct,
                         previous_inclusive_pct: previous_func.inclusive_pct,
@@ -261,7 +261,7 @@ pub fn compute_drift(
             let delta_ms = current_stage.value - previous_stage.value;
             if is_significant_stage_drift(current_stage.value, previous_stage.value, delta_ms) {
                 stage_movements.push(StageDrift {
-                    case_name: current.case_name.clone(),
+                    case_id: current.case_id.clone(),
                     stage_name: current_stage.name.clone(),
                     current_ms: current_stage.value,
                     previous_ms: previous_stage.value,
@@ -290,7 +290,7 @@ pub fn compute_drift(
                     0.0
                 };
                 counter_movements.push(CounterDrift {
-                    case_name: current.case_name.clone(),
+                    case_id: current.case_id.clone(),
                     counter_name: current_counter.name.clone(),
                     current_value: current_counter.value,
                     previous_value: previous_counter.value,
@@ -348,8 +348,8 @@ pub fn no_previous_drift_report() -> DriftReport {
 /// to build a full history record first.
 #[derive(Debug)]
 pub struct DriftCaseInput {
-    /// Case name from the benchmark cases file.
-    pub case_name: String,
+    /// Authored case ID from the typed benchmark manifest.
+    pub case_id: String,
     /// The command executed.
     pub command: String,
     /// Arguments passed to the command.
@@ -660,7 +660,7 @@ pub fn format_drift_summary_section(report: &DriftReport) -> String {
             lines.push(format!(
                 "- `{}` in {}: {:.1}% → {:.1}% (+{:.1}pp, ~{:.0}ms){}",
                 truncate_name(&drift.function_name, 60),
-                drift.case_name,
+                drift.case_id,
                 drift.previous_inclusive_pct,
                 drift.current_inclusive_pct,
                 drift.delta_pct,
@@ -685,7 +685,7 @@ pub fn format_drift_summary_section(report: &DriftReport) -> String {
             lines.push(format!(
                 "- `{}` in {}: {:.1}% → {:.1}% ({:.1}pp, ~{:.0}ms){}",
                 truncate_name(&drift.function_name, 60),
-                drift.case_name,
+                drift.case_id,
                 drift.previous_inclusive_pct,
                 drift.current_inclusive_pct,
                 drift.delta_pct,
@@ -705,7 +705,7 @@ pub fn format_drift_summary_section(report: &DriftReport) -> String {
             lines.push(format!(
                 "- `{}` in {}: {:.0}ms → {:.0}ms ({:+.0}ms)",
                 drift.stage_name,
-                drift.case_name,
+                drift.case_id,
                 drift.previous_ms,
                 drift.current_ms,
                 drift.delta_ms,
@@ -734,7 +734,7 @@ fn format_function_drift_row(drift: &FunctionDrift) -> String {
     let share_marker = if drift.share_only { " (share)" } else { "" };
     format!(
         "| {} | `{}` | {:.1}% | {:.1}% | {:+.1}pp | ~{:+.0}ms | {}{} |",
-        drift.case_name,
+        drift.case_id,
         truncate_name(&drift.function_name, 48),
         drift.current_inclusive_pct,
         drift.previous_inclusive_pct,
@@ -749,7 +749,7 @@ fn format_function_drift_row(drift: &FunctionDrift) -> String {
 fn format_stage_drift_row(drift: &StageDrift) -> String {
     format!(
         "| {} | {} | {:.0}ms | {:.0}ms | {:+.0}ms |",
-        drift.case_name, drift.stage_name, drift.current_ms, drift.previous_ms, drift.delta_ms,
+        drift.case_id, drift.stage_name, drift.current_ms, drift.previous_ms, drift.delta_ms,
     )
 }
 
@@ -757,7 +757,7 @@ fn format_stage_drift_row(drift: &StageDrift) -> String {
 fn format_counter_drift_row(drift: &CounterDrift) -> String {
     format!(
         "| {} | {} | {:.0} | {:.0} | {:+.1}% |",
-        drift.case_name,
+        drift.case_id,
         drift.counter_name,
         drift.current_value,
         drift.previous_value,

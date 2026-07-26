@@ -1,0 +1,15 @@
+Entry = |
+    name String,
+    count Int,
+|
+
+render_multiline_collection || -> String:
+    entries = {
+        Entry("alpha", 1),
+        Entry("beta", 2),
+    }
+
+    return [:collection_multiline_inferred_constructor count=[entries.length()]]
+;
+
+[:[render_multiline_collection()]]

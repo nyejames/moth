@@ -24,8 +24,10 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use rustc_hash::FxHashMap;
 
-use access::transfer_aggregate_expression_ownership;
-use access::{transfer_statement, transfer_terminator};
+use access::{
+    AggregateTransferContext, transfer_aggregate_expression_ownership, transfer_statement,
+    transfer_terminator,
+};
 use facts::ValueFactBuffer;
 
 pub(super) struct BorrowTransferContext<'a> {
@@ -37,7 +39,7 @@ pub(super) struct BorrowTransferContext<'a> {
 }
 
 /// Accumulated statistics and emitted facts for one block transfer.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(super) struct BlockTransferStats {
     // Counters.
     pub statements_analyzed: usize,
@@ -95,7 +97,12 @@ pub(super) fn transfer_block(
     )?;
     stats.terminators_analyzed += 1;
 
-    // Aggregate literal children in return terminators must be moved.
+    // Aggregate literal children in return terminators receive optional transfer analysis.
+    let mut aggregate_context = AggregateTransferContext {
+        diagnostics: &context.diagnostics,
+        value_fact_buffer: &mut value_fact_buffer,
+    };
+
     match &block.terminator {
         HirTerminator::Return(value)
         | HirTerminator::ReturnSuccess(value)
@@ -111,7 +118,7 @@ pub(super) fn transfer_block(
                 block.id,
                 terminator_order,
                 location,
-                &context.diagnostics,
+                &mut aggregate_context,
             )?;
         }
         HirTerminator::FallibleBranch { result, .. } => {
@@ -126,7 +133,7 @@ pub(super) fn transfer_block(
                 block.id,
                 terminator_order,
                 location,
-                &context.diagnostics,
+                &mut aggregate_context,
             )?;
         }
         _ => {}

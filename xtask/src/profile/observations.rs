@@ -1,9 +1,8 @@
 //! Profile observation logging
 //!
-//! WHAT: Runs warmup and observation passes for each benchmark case,
-//! parses stable `MOTH_BENCH` stdout into `BenchmarkCaseObservations`,
-//! and writes per-case artifacts (stdout/stderr logs, observations JSON,
-//! summary markdown).
+//! WHAT: Runs the non-profiled observation pass for each benchmark case
+//! through the shared benchmark executor and retains its validated timing
+//! observations plus raw process channels.
 //!
 //! WHY: The observation pass gives timer data, plus counters when explicitly
 //! enabled by the profiling build and environment, without profiler
@@ -13,9 +12,7 @@
 //!
 //! # What this module owns
 //! - `ProfileObservation` struct wrapping per-case run data
-//! - Warmup execution via `run_moth_command`
-//! - Observation execution via `run_moth_command`
-//! - Parsing observation stdout with `bench_observations::parse_stdout_observations`
+//! - Adapting shared execution results into profiling observation data
 //!
 //! # What this module does NOT own
 //! - Artifact directory layout (see `artifacts.rs`)
@@ -23,11 +20,9 @@
 //! - Profile JSON parsing or hotspot extraction (see `parse.rs`, `hotspots.rs`)
 //! - Agent summaries and enriched per-case summaries (see `summary.rs`)
 
-use crate::bench_observations::parse_stdout_observations;
 use crate::bench_types::BenchmarkCaseObservations;
-use crate::case_parser::BenchmarkCase;
-use crate::process_runner::run_moth_command;
-use std::path::Path;
+use crate::benchmark_execution::{BenchmarkCaseExecution, BenchmarkExecutionContext, execute_case};
+use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest};
 
 /// Observation data collected from one benchmark case run.
 ///
@@ -36,9 +31,9 @@ use std::path::Path;
 /// WHY: A named struct avoids tuple-heavy returns and makes the
 /// data flow from observation to artifact writing explicit.
 pub(crate) struct ProfileObservation {
-    /// Case name from `BenchmarkCase.name`.
-    pub(crate) case_name: String,
-    /// Group name from `BenchmarkCase.group_name`.
+    /// Authored case ID from the typed benchmark manifest.
+    pub(crate) case_id: String,
+    /// Group name from the typed benchmark manifest.
     pub(crate) group_name: String,
     /// The command executed (e.g., "check", "build").
     pub(crate) command: String,
@@ -54,52 +49,47 @@ pub(crate) struct ProfileObservation {
     pub(crate) stderr: String,
 }
 
-/// Run one warmup pass for a case to prime caches and stabilize timing.
+/// Run one observation pass for a case and collect its validated artifacts.
 ///
-/// WHAT: Executes `run_moth_command` once and checks for success.
-/// WHY: The first run often has cold-cache effects; warming up gives
-/// the observation pass more stable measurements.
-pub(crate) fn run_warmup(moth_path: &Path, case: &BenchmarkCase) -> Result<(), String> {
-    let run = run_moth_command(moth_path, &case.command, &case.args)?;
-    if !run.success {
-        return Err(format!(
-            "Warmup failed for case '{}': {}",
-            case.name, run.stderr
-        ));
-    }
-    Ok(())
-}
-
-/// Run one observation pass for a case, parse stdout, and collect artifacts.
-///
-/// WHAT: Executes `run_moth_command`, parses `MOTH_BENCH timing` and
-/// `MOTH_BENCH counter` lines from stdout, and returns a `ProfileObservation`.
+/// WHAT: Executes one already-preflighted case through the shared validation
+/// authority and returns a `ProfileObservation`.
 /// WHY: This is the measured pass that provides the timer/counter data
 /// written beside Samply profiles. The wall time here is used for
 /// hotspot estimation in later phases.
 pub(crate) fn run_observation(
-    moth_path: &Path,
+    context: &BenchmarkExecutionContext<'_>,
+    manifest: &BenchmarkManifest,
     case: &BenchmarkCase,
 ) -> Result<ProfileObservation, String> {
-    let run = run_moth_command(moth_path, &case.command, &case.args)?;
-    if !run.success {
-        return Err(format!(
-            "Observation pass failed for case '{}': {}",
-            case.name, run.stderr
-        ));
-    }
-
-    let observations = parse_stdout_observations(&run.stdout);
+    let invocation = manifest
+        .cli_invocation(case)
+        .map_err(|error| error.to_string())?;
+    let execution = execute_case(context, case)
+        .map_err(|failure| format!("Observation pass failed:\n{failure}"))?;
+    let BenchmarkCaseExecution {
+        total_duration_ms,
+        observations,
+        stdout,
+        stderr,
+        ..
+    } = execution;
+    let stdout = stdout.ok_or_else(|| {
+        format!(
+            "Observation pass for CLI case '{}' returned no process stdout.",
+            case.id
+        )
+    })?;
+    let stderr = stderr.unwrap_or_default();
 
     Ok(ProfileObservation {
-        case_name: case.name.clone(),
+        case_id: case.id.clone(),
         group_name: case.group_name.clone(),
-        command: case.command.clone(),
-        command_args: case.args.clone(),
-        wall_ms: run.duration_ms,
+        command: invocation.command.as_str().to_owned(),
+        command_args: invocation.args,
+        wall_ms: total_duration_ms,
         observations,
-        stdout: run.stdout,
-        stderr: run.stderr,
+        stdout,
+        stderr,
     })
 }
 

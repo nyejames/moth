@@ -6,7 +6,7 @@ use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric};
 #[test]
 fn profile_observation_struct_fields() {
     let observation = ProfileObservation {
-        case_name: "test_case".to_string(),
+        case_id: "test_case".to_string(),
         group_name: "core".to_string(),
         command: "check".to_string(),
         command_args: vec!["foo.moth".to_string()],
@@ -22,7 +22,7 @@ fn profile_observation_struct_fields() {
         stderr: "stderr content".to_string(),
     };
 
-    assert_eq!(observation.case_name, "test_case");
+    assert_eq!(observation.case_id, "test_case");
     assert_eq!(observation.group_name, "core");
     assert_eq!(observation.command, "check");
     assert_eq!(observation.command_args, vec!["foo.moth"]);

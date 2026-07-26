@@ -15,6 +15,9 @@ use crate::compiler_frontend::display_messages::{
     print_compiler_messages, print_terse_compiler_messages,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::command_status::{
+    CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
+};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use saying::say;
 use std::time::{Duration, Instant};
@@ -29,12 +32,13 @@ struct CheckOutcome {
     duration: Duration,
 }
 
-pub fn run_check(path: &str, options: CheckOptions) {
+pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     crate::timing::start_command_timing();
     let command_start = crate::timing::start_pipeline_timing();
     let outcome = execute_check(path);
     let error_count = outcome.messages.error_count();
     let warning_count = outcome.messages.warning_count();
+    let benchmark_counts = benchmark_diagnostic_counts(&outcome.messages);
 
     let rendering_start = crate::timing::start_pipeline_timing();
     if options.terse {
@@ -54,6 +58,15 @@ pub fn run_check(path: &str, options: CheckOptions) {
     log_check_timing("command.check.total", command_start);
 
     crate::timing::print_command_timing_summary();
+    if let Some((error_count, warning_count)) = benchmark_counts {
+        emit_benchmark_status(error_count, warning_count);
+    }
+
+    if error_count > 0 {
+        CommandStatus::Failure
+    } else {
+        CommandStatus::Success
+    }
 }
 
 fn execute_check(path: &str) -> CheckOutcome {

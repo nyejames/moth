@@ -53,7 +53,9 @@ pub struct ProfilingSymbolDiagnostics {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DsymUuidMatch {
+    #[cfg(any(target_os = "macos", test))]
     Yes,
+    #[cfg(any(target_os = "macos", test))]
     No,
     Unknown,
 }
@@ -61,7 +63,9 @@ pub enum DsymUuidMatch {
 impl DsymUuidMatch {
     pub fn as_str(self) -> &'static str {
         match self {
+            #[cfg(any(target_os = "macos", test))]
             Self::Yes => "yes",
+            #[cfg(any(target_os = "macos", test))]
             Self::No => "no",
             Self::Unknown => "unknown",
         }
@@ -89,8 +93,11 @@ impl CompilerBinary {
 /// # Returns
 ///
 /// A `CompilerBinary` pointing to the built artifact, or an error message.
-pub fn build_release_compiler_with_timers() -> Result<CompilerBinary, String> {
+pub fn build_release_compiler_with_timers(
+    repository_root: &Path,
+) -> Result<CompilerBinary, String> {
     let status = Command::new("cargo")
+        .current_dir(repository_root)
         .args(["build", "--release", "--features", "timers"])
         .status()
         .map_err(|e| format!("Failed to execute cargo build: {}", e))?;
@@ -99,7 +106,7 @@ pub fn build_release_compiler_with_timers() -> Result<CompilerBinary, String> {
         return Err("Compiler build failed".to_string());
     }
 
-    let moth_path = release_compiler_path(env::consts::EXE_SUFFIX);
+    let moth_path = repository_root.join(release_compiler_path(env::consts::EXE_SUFFIX));
 
     if !moth_path.exists() {
         return Err(format!(
@@ -130,8 +137,11 @@ pub fn build_release_compiler_with_timers() -> Result<CompilerBinary, String> {
 ///
 /// A `CompilerBinary` pointing to `target/profiling/moth`, or an error message.
 ///
-pub fn build_profiling_compiler_with_timers() -> Result<CompilerBinary, String> {
+pub fn build_profiling_compiler_with_timers(
+    repository_root: &Path,
+) -> Result<CompilerBinary, String> {
     let status = Command::new("cargo")
+        .current_dir(repository_root)
         .args([
             "build",
             "--profile",
@@ -149,7 +159,7 @@ pub fn build_profiling_compiler_with_timers() -> Result<CompilerBinary, String> 
         return Err("Profiling compiler build failed".to_string());
     }
 
-    let moth_path = profiling_compiler_path(env::consts::EXE_SUFFIX);
+    let moth_path = repository_root.join(profiling_compiler_path(env::consts::EXE_SUFFIX));
 
     if !moth_path.exists() {
         return Err(format!(
@@ -309,6 +319,7 @@ fn dwarfdump_uuid(path: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn parse_dwarfdump_uuids(output: &str) -> Vec<String> {
     output
         .lines()

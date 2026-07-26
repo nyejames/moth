@@ -1,0 +1,8 @@
+inspect |value String|:
+;
+
+source = "optional_transfer_unused_alias_shared_call"
+alias = source
+inspect(source)
+
+[:optional_transfer_unused_alias_shared_call accepted]

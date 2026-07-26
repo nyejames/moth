@@ -150,16 +150,6 @@ pub(crate) fn invalid_mutable_access_message(
     }
 }
 
-pub(crate) fn invalid_access_after_possible_ownership_transfer_message(
-    place: &DiagnosticPlace,
-    string_table: &StringTable,
-) -> String {
-    format!(
-        "Inconsistent ownership outcome for {} across control-flow paths.",
-        diagnostic_place_name(place, string_table)
-    )
-}
-
 pub(crate) fn use_of_uninitialized_local_message(
     place: &DiagnosticPlace,
     string_table: &StringTable,

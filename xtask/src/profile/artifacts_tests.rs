@@ -10,7 +10,7 @@ use std::path::Path;
 /// Build a test observation with sample data.
 fn test_observation() -> ProfileObservation {
     ProfileObservation {
-        case_name: "test_case_bst".to_string(),
+        case_id: "test_case_bst".to_string(),
         group_name: "stress".to_string(),
         command: "check".to_string(),
         command_args: vec!["test.moth".to_string()],
@@ -37,19 +37,14 @@ fn test_observation() -> ProfileObservation {
 }
 
 #[test]
-fn profile_case_paths_has_expected_fields() {
+fn profile_case_paths_use_authored_case_id_verbatim() {
     let run = ProfileRunPaths {
         run_id: "2026-06-18T10-30-abc1234".to_string(),
         root: Path::new("/tmp/test-run").into(),
     };
 
-    let case = run.case_paths("my_case_bst");
-    assert!(
-        case.case_dir
-            .to_str()
-            .unwrap()
-            .contains("cases/my_case_bst")
-    );
+    let case = run.case_paths("authored_case_7");
+    assert!(case.case_dir.ends_with("cases/authored_case_7"));
     assert!(case.stdout_log.to_str().unwrap().ends_with("stdout.log"));
     assert!(case.stderr_log.to_str().unwrap().ends_with("stderr.log"));
     assert!(
@@ -120,7 +115,7 @@ fn format_run_manifest_json_with_empty_cases() {
         &[],
     );
 
-    assert!(json.contains(r#""format_version": 1"#));
+    assert!(json.contains(r#""format_version": 2"#));
     assert!(json.contains(r#""run_id": "2026-06-18T10-30-abc1234""#));
     assert!(json.contains(r#""commit": "abc1234""#));
     assert!(json.contains(r#""filter": "normal""#));
@@ -139,7 +134,7 @@ fn format_run_manifest_json_with_null_commit() {
 #[test]
 fn format_run_manifest_json_with_cases() {
     let cases = vec![ProfileCaseManifest {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         group_name: "core".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
@@ -158,7 +153,8 @@ fn format_run_manifest_json_with_cases() {
         &cases,
     );
 
-    assert!(json.contains(r#""case_name": "check_foo_bst""#));
+    assert!(json.contains(r#""case_id": "check_foo_bst""#));
+    assert!(!json.contains(r#""case_name""#));
     assert!(json.contains(r#""group_name": "core""#));
     assert!(json.contains(r#""observation_wall_ms": 500"#));
     assert!(json.contains(r#""filter": "deep""#));
@@ -170,8 +166,9 @@ fn format_observations_json_matches_plan_schema() {
     let json = format_observations_json(&observation);
 
     // Must contain the expected top-level keys.
-    assert!(json.contains(r#""format_version": 1"#));
-    assert!(json.contains(r#""case": "test_case_bst""#));
+    assert!(json.contains(r#""format_version": 2"#));
+    assert!(json.contains(r#""case_id": "test_case_bst""#));
+    assert!(!json.contains(r#""case_name""#));
     assert!(json.contains(r#""group": "stress""#));
     assert!(json.contains(r#""wall_ms": 1234.5"#));
     // Command array uses no space after comma in manual JSON.
@@ -187,7 +184,7 @@ fn format_observations_json_matches_plan_schema() {
 #[test]
 fn format_index_md_lists_cases() {
     let cases = vec![ProfileCaseManifest {
-        case_name: "check_foo_bst".to_string(),
+        case_id: "check_foo_bst".to_string(),
         group_name: "core".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
@@ -323,8 +320,8 @@ fn write_observations_json_creates_valid_file() {
 
     let content =
         std::fs::read_to_string(&case_paths.observations_json).expect("read observations");
-    assert!(content.contains(r#""format_version": 1"#));
-    assert!(content.contains(r#""case": "test_case_bst""#));
+    assert!(content.contains(r#""format_version": 2"#));
+    assert!(content.contains(r#""case_id": "test_case_bst""#));
 }
 
 #[test]
@@ -366,7 +363,7 @@ fn write_run_manifest_creates_valid_file() {
         ProfileRunPaths::create(&profiles_root, Some("abc1234")).expect("create run paths");
 
     let cases = vec![ProfileCaseManifest {
-        case_name: "test_case".to_string(),
+        case_id: "test_case".to_string(),
         group_name: "core".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
@@ -388,8 +385,8 @@ fn write_run_manifest_creates_valid_file() {
     .expect("write manifest");
 
     let content = std::fs::read_to_string(run_paths.manifest_path()).expect("read manifest");
-    assert!(content.contains(r#""format_version": 1"#));
-    assert!(content.contains(r#""case_name": "test_case""#));
+    assert!(content.contains(r#""format_version": 2"#));
+    assert!(content.contains(r#""case_id": "test_case""#));
 }
 
 #[test]

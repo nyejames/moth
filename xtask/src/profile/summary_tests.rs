@@ -15,13 +15,13 @@ use crate::profile::options::ProfileFilterMode;
 // ---------------------------------------------------------------------------
 
 fn make_observation(
-    case_name: &str,
+    case_id: &str,
     wall_ms: f64,
     stage_timings: Vec<BenchmarkMetric>,
     counters: Vec<BenchmarkMetric>,
 ) -> ProfileObservation {
     ProfileObservation {
-        case_name: case_name.to_string(),
+        case_id: case_id.to_string(),
         group_name: "test".to_string(),
         command: "check".to_string(),
         command_args: vec!["test.moth".to_string()],
@@ -399,7 +399,8 @@ fn root_hotspots_json_is_valid() {
     // Check case data.
     let cases = parsed["cases"].as_array().expect("cases should be array");
     assert_eq!(cases.len(), 1);
-    assert_eq!(cases[0]["case_name"], "test_case");
+    assert_eq!(cases[0]["case_id"], "test_case");
+    assert!(cases[0].get("case_name").is_none());
     assert_eq!(cases[0]["observation_wall_ms"], 1200.0);
     assert!(!cases[0]["hot_functions"].as_array().unwrap().is_empty());
 }
@@ -409,7 +410,7 @@ fn root_hotspots_json_is_valid() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn agent_summary_contains_case_name() {
+fn agent_summary_contains_case_id() {
     let obs = make_observation(
         "check_benchmarks_test_bst",
         500.0,
@@ -454,7 +455,7 @@ fn agent_summary_respects_case_limit() {
         .map(|(obs, hotspots)| CaseSummaryData {
             observation: obs,
             hotspots,
-            profile_relative_path: format!("cases/{}/profile.json.gz", obs.case_name),
+            profile_relative_path: format!("cases/{}/profile.json.gz", obs.case_id),
             filter: ProfileFilterMode::Terse,
         })
         .collect();

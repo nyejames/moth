@@ -156,7 +156,6 @@ fn render_payload_message(
         | DiagnosticPayload::MoveWhileBorrowed { .. }
         | DiagnosticPayload::WholeObjectBorrowConflict { .. }
         | DiagnosticPayload::InvalidMutableAccess { .. }
-        | DiagnosticPayload::InvalidAccessAfterPossibleOwnershipTransfer { .. }
         | DiagnosticPayload::UseOfUninitializedLocal { .. } => {
             borrow_payload_message(payload, string_table)
         }
@@ -915,9 +914,6 @@ fn borrow_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
             ..
         } => {
             invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), string_table)
-        }
-        DiagnosticPayload::InvalidAccessAfterPossibleOwnershipTransfer { place } => {
-            invalid_access_after_possible_ownership_transfer_message(place, string_table)
         }
         DiagnosticPayload::UseOfUninitializedLocal { place } => {
             use_of_uninitialized_local_message(place, string_table)

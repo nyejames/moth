@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "short_circuit_mutable_rhs_skipped_no_later_use value=false calls=0"

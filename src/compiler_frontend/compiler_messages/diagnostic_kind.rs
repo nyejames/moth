@@ -410,7 +410,6 @@ pub enum BorrowDiagnosticKind {
     MoveWhileBorrowed,
     WholeObjectBorrowConflict,
     InvalidMutableAccess,
-    InvalidAccessAfterPossibleOwnershipTransfer,
     UseOfUninitializedLocal,
 }
 
@@ -425,7 +424,6 @@ impl BorrowDiagnosticKind {
             Self::MoveWhileBorrowed,
             Self::WholeObjectBorrowConflict,
             Self::InvalidMutableAccess,
-            Self::InvalidAccessAfterPossibleOwnershipTransfer,
             Self::UseOfUninitializedLocal,
         ]
         .into_iter()

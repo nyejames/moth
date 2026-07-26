@@ -23,19 +23,25 @@
 //! - Agent summaries, enriched per-case summaries, and hint generation
 //!   (see `summary.rs`)
 
-use crate::bench_history::json_escape;
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::BenchmarkMetric;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::hotspots::HotspotExtractionResult;
+use super::json::escape;
 use super::observations::ProfileObservation;
 use super::options::ProfileFilterMode;
 use super::parse::ProfileShapeDump;
 
-/// Current on-disk format version for profiling artifacts.
-const FORMAT_VERSION: u32 = 1;
+/// Current on-disk format version for detailed observations.
+const OBSERVATIONS_FORMAT_VERSION: u32 = 2;
+
+/// Current on-disk format version for the root run manifest.
+const RUN_MANIFEST_FORMAT_VERSION: u32 = 2;
+
+/// Current on-disk format version for per-case hotspot data.
+const HOTSPOTS_FORMAT_VERSION: u32 = 1;
 
 /// All paths for one profiling run.
 ///
@@ -57,7 +63,7 @@ pub(crate) struct ProfileRunPaths {
 /// WHY: Per-case path construction is repeated for every case; a struct
 /// keeps the layout deterministic and testable.
 pub(crate) struct ProfileCasePaths {
-    /// Case subdirectory: `<run-root>/cases/<case-name>/`.
+    /// Case subdirectory: `<run-root>/cases/<case-id>/`.
     pub(crate) case_dir: PathBuf,
     /// Path to stdout.log within the case directory.
     pub(crate) stdout_log: PathBuf,
@@ -90,7 +96,7 @@ pub(crate) struct ProfileCasePaths {
 /// WHY: The manifest is a machine-readable index of the run so later
 /// phases can discover cases without scanning directories.
 pub(crate) struct ProfileCaseManifest {
-    pub(crate) case_name: String,
+    pub(crate) case_id: String,
     pub(crate) group_name: String,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
@@ -145,9 +151,9 @@ impl ProfileRunPaths {
         self.root.join("index.md")
     }
 
-    /// Build case paths for a given case name.
-    pub(crate) fn case_paths(&self, case_name: &str) -> ProfileCasePaths {
-        let case_dir = self.root.join("cases").join(case_name);
+    /// Build case paths for an authored case ID.
+    pub(crate) fn case_paths(&self, case_id: &str) -> ProfileCasePaths {
+        let case_dir = self.root.join("cases").join(case_id);
         ProfileCasePaths {
             case_dir: case_dir.clone(),
             stdout_log: case_dir.join("stdout.log"),
@@ -289,24 +295,23 @@ pub(crate) fn write_index_md(
 
 /// Format detailed-observations.json for a single case.
 ///
-/// Uses the manual JSON approach matching `bench_history.rs` so xtask
-/// remains std-only until Phase 4 adds `serde_json`.
+/// Profile-owned manual writers use the narrow escaping helper in `json.rs`.
 fn format_observations_json(observation: &ProfileObservation) -> String {
     let stage_timings_json = format_metric_array_json(&observation.observations.stage_timings);
     let counters_json = format_metric_array_json(&observation.observations.counters);
 
     // The command array includes the command as the first element, followed by args.
-    let mut command_parts = vec![format!("\"{}\"", json_escape(&observation.command))];
+    let mut command_parts = vec![format!("\"{}\"", escape(&observation.command))];
     for arg in &observation.command_args {
-        command_parts.push(format!("\"{}\"", json_escape(arg)));
+        command_parts.push(format!("\"{}\"", escape(arg)));
     }
     let command_json = command_parts.join(",");
 
     format!(
-        "{{\n  \"format_version\": {},\n  \"case\": \"{}\",\n  \"group\": \"{}\",\n  \"command\": [{}],\n  \"wall_ms\": {},\n  \"stage_timings\": {},\n  \"counters\": {}\n}}",
-        FORMAT_VERSION,
-        json_escape(&observation.case_name),
-        json_escape(&observation.group_name),
+        "{{\n  \"format_version\": {},\n  \"case_id\": \"{}\",\n  \"group\": \"{}\",\n  \"command\": [{}],\n  \"wall_ms\": {},\n  \"stage_timings\": {},\n  \"counters\": {}\n}}",
+        OBSERVATIONS_FORMAT_VERSION,
+        escape(&observation.case_id),
+        escape(&observation.group_name),
         command_json,
         observation.wall_ms,
         stage_timings_json,
@@ -325,7 +330,7 @@ fn format_metric_array_json(metrics: &[BenchmarkMetric]) -> String {
         .map(|metric| {
             format!(
                 "    {{\"name\": \"{}\", \"value\": {}}}",
-                json_escape(&metric.name),
+                escape(&metric.name),
                 metric.value
             )
         })
@@ -399,7 +404,7 @@ fn format_run_manifest_json(
     cases: &[ProfileCaseManifest],
 ) -> String {
     let commit_json = match commit {
-        Some(c) => format!("\"{}\"", json_escape(c)),
+        Some(c) => format!("\"{}\"", escape(c)),
         None => "null".to_string(),
     };
 
@@ -414,30 +419,30 @@ fn format_run_manifest_json(
             let args_json = case
                 .args
                 .iter()
-                .map(|a| format!("\"{}\"", json_escape(a)))
+                .map(|a| format!("\"{}\"", escape(a)))
                 .collect::<Vec<_>>()
                 .join(",");
 
             format!(
-                "    {{\n      \"case_name\": \"{}\",\n      \"group_name\": \"{}\",\n      \"command\": \"{}\",\n      \"args\": [{}],\n      \"observation_wall_ms\": {},\n      \"profile_path\": \"{}\",\n      \"stdout_path\": \"{}\",\n      \"stderr_path\": \"{}\",\n      \"summary_path\": \"{}\"\n    }}",
-                json_escape(&case.case_name),
-                json_escape(&case.group_name),
-                json_escape(&case.command),
+                "    {{\n      \"case_id\": \"{}\",\n      \"group_name\": \"{}\",\n      \"command\": \"{}\",\n      \"args\": [{}],\n      \"observation_wall_ms\": {},\n      \"profile_path\": \"{}\",\n      \"stdout_path\": \"{}\",\n      \"stderr_path\": \"{}\",\n      \"summary_path\": \"{}\"\n    }}",
+                escape(&case.case_id),
+                escape(&case.group_name),
+                escape(&case.command),
                 args_json,
                 case.observation_wall_ms,
-                json_escape(&case.profile_path),
-                json_escape(&case.stdout_path),
-                json_escape(&case.stderr_path),
-                json_escape(&case.summary_path),
+                escape(&case.profile_path),
+                escape(&case.stdout_path),
+                escape(&case.stderr_path),
+                escape(&case.summary_path),
             )
         })
         .collect();
 
     format!(
         "{{\n  \"format_version\": {},\n  \"run_id\": \"{}\",\n  \"timestamp\": \"{}\",\n  \"commit\": {},\n  \"filter\": \"{}\",\n  \"samply_rate_hz\": {},\n  \"cases\": [\n{}\n  ]\n}}",
-        FORMAT_VERSION,
-        json_escape(run_id),
-        json_escape(&BenchmarkTimestamp::now().format_run_header()),
+        RUN_MANIFEST_FORMAT_VERSION,
+        escape(run_id),
+        escape(&BenchmarkTimestamp::now().format_run_header()),
         commit_json,
         filter.display_label(),
         samply_json,
@@ -481,7 +486,7 @@ fn format_hotspots_json(result: &HotspotExtractionResult) -> String {
         .collect();
 
     let output = serde_json::json!({
-        "format_version": FORMAT_VERSION,
+        "format_version": HOTSPOTS_FORMAT_VERSION,
         "total_sample_count": result.total_sample_count,
         "total_sample_weight": round_2dp(result.total_sample_weight),
         "wall_time_ms": round_2dp(result.wall_time_ms),
@@ -542,7 +547,7 @@ fn format_index_md(
         for case in cases {
             lines.push(format!(
                 "- **{}** — `{}` (~{:.0}ms)",
-                case.case_name,
+                case.case_id,
                 format_command(&case.command, &case.args),
                 case.observation_wall_ms,
             ));

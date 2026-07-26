@@ -102,7 +102,7 @@ value = 2 -- reassigns the existing mutable binding
 count ~= 0
 ratio Float = 1.5
 text_slice = "text"
-letter = 'ʚĭɞ'
+letter = '🦋'
 
 message = [:
     Templates create owned strings.

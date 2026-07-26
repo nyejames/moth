@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use saying::say;
 use std::collections::BTreeMap;
 
-use super::{FAILURE_TRIAGE_REPORT_PATH, SEPARATOR_LINE_LENGTH, execution, fixture, reporting};
+use super::{SEPARATOR_LINE_LENGTH, execution, fixture, reporting};
 
 /// Normalises a relative path string to forward slashes for cross-platform comparison.
 pub(crate) fn normalize_relative_path_text(path: &str) -> String {
@@ -34,6 +34,7 @@ pub(crate) fn run_all_test_cases(
         options,
         execution::execute_test_case,
         super::SUITE_INVENTORY_REPORT_PATH,
+        super::FAILURE_TRIAGE_REPORT_PATH,
     )
 }
 
@@ -42,6 +43,7 @@ pub(crate) fn run_loaded_suite<F>(
     options: TestRunnerOptions,
     execute_case: F,
     inventory_report_path: &str,
+    triage_report_path: &str,
 ) -> Result<super::IntegrationRunSummary, String>
 where
     F: Fn(&TestCaseSpec) -> CaseExecutionResult + Send + Sync,
@@ -218,15 +220,11 @@ where
         );
     }
 
-    if let Err(error) = reporting::write_failure_triage_report(
-        FAILURE_TRIAGE_REPORT_PATH,
+    reporting::write_failure_triage_report(
+        triage_report_path,
         total_summary,
         &failure_triage_entries,
-    ) {
-        say!(Yellow format!(
-            "Failed to write machine-readable triage report: {error}"
-        ));
-    }
+    )?;
 
     say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
     Ok(total_summary.into())

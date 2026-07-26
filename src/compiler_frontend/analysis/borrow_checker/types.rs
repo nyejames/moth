@@ -125,6 +125,32 @@ pub(crate) struct TerminatorBorrowFact {
 pub(crate) struct ValueBorrowFact {
     pub classification: ValueAccessClassification,
     pub roots: Vec<LocalId>,
+    /// Advisory ownership optimisation outcome for this value access.
+    ///
+    /// This fact never changes the mandatory borrow state. A `Borrow` outcome means that the
+    /// checker could not prove a transfer on every relevant path, while `Transfer` records a
+    /// proven optional destruction-responsibility handoff for a later lowering stage.
+    pub optional_transfer: OptionalTransferStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum OptionalTransferStatus {
+    #[default]
+    NotAttempted,
+    Borrow,
+    Transfer,
+}
+
+impl OptionalTransferStatus {
+    pub(crate) fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::NotAttempted, status) | (status, Self::NotAttempted) => status,
+            (Self::Borrow, Self::Borrow) => Self::Borrow,
+            (Self::Transfer, Self::Transfer) => Self::Transfer,
+            // A conservative fallback wins if one traversal cannot prove the transfer.
+            (Self::Borrow, Self::Transfer) | (Self::Transfer, Self::Borrow) => Self::Borrow,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,0 +1,5 @@
+ratio #= ((10 * 10) + (20 * 20) + (30 * 30)) / 10
+typed Float = ratio
+runtime = ((10 * 10) + (20 * 20) + (30 * 30)) / 10
+
+[: const=[typed], runtime=[runtime] ]

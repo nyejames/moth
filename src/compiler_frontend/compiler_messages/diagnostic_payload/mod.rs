@@ -209,10 +209,6 @@ pub enum DiagnosticPayload {
         conflicting_location: Option<SourceLocation>,
     },
 
-    InvalidAccessAfterPossibleOwnershipTransfer {
-        place: DiagnosticPlace,
-    },
-
     UseOfUninitializedLocal {
         place: DiagnosticPlace,
     },

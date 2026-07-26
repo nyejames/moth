@@ -15,8 +15,9 @@ use crate::bench_history::{
     LocalRunRecord, RUNS_JSONL_PATH, read_local_runs, to_case_results, to_group_stats,
 };
 use crate::bench_types::{
-    BenchmarkChangeKind, BenchmarkComparison, BenchmarkGroupStats, BenchmarkRun,
-    BenchmarkThresholds, SuiteStats, calculate_stage_movement, format_stage_movement_line,
+    BENCHMARK_PROTOCOL_VERSION, BenchmarkChangeKind, BenchmarkComparison, BenchmarkGroupStats,
+    BenchmarkRun, BenchmarkThresholds, SuiteStats, calculate_stage_movement,
+    format_stage_movement_line,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -110,6 +111,7 @@ pub fn update_monthly_summary(
             r.public_system_id == run.system.public_system_id
                 && r.suite_kind == persisted_suite_kind
                 && r.thread_count.is_none()
+                && r.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
         })
         .collect();
 
@@ -170,7 +172,9 @@ fn load_month_runs(month_key: &str) -> Result<Vec<LocalRunRecord>, String> {
     let runs = read_local_runs(Path::new(RUNS_JSONL_PATH))?;
     Ok(runs
         .into_iter()
-        .filter(|r| r.month_key == month_key)
+        .filter(|r| {
+            r.month_key == month_key && r.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
+        })
         .collect())
 }
 
@@ -249,8 +253,8 @@ fn format_initial_to_latest_change(
 
 /// Render a plain, non-bold comparison line for the monthly top block.
 fn format_month_change_line(comparison: &BenchmarkComparison) -> String {
-    if comparison.case_set_changed {
-        return comparison.format_run_change_line();
+    if comparison.case_set_changed || comparison.workload_changed_case_count > 0 {
+        return comparison.format_run_change_line().replace("**", "");
     }
 
     match comparison.change_kind {

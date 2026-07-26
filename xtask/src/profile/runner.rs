@@ -79,6 +79,8 @@ impl PresymbolicationFlag {
 pub(crate) struct SamplyRunInput {
     /// Path to the built moth binary to profile.
     pub(crate) moth_path: PathBuf,
+    /// Canonical repository root used to resolve benchmark arguments.
+    pub(crate) current_directory: PathBuf,
     /// The moth subcommand (e.g., "check", "build").
     pub(crate) command: String,
     /// Arguments to the subcommand.
@@ -181,7 +183,11 @@ pub(crate) fn check_samply_available() -> Result<SamplyRecordCapabilities, Strin
 /// Samply to be installed on the test machine.
 pub(crate) fn build_samply_command(input: &SamplyRunInput) -> Command {
     let mut cmd = Command::new("samply");
-    cmd.arg("record")
+    cmd.current_dir(&input.current_directory)
+        .env("MOTH_TIMERS", "bench")
+        .env("MOTH_COUNTERS", "off")
+        .env("MOTH_BENCH_STATUS", "1")
+        .arg("record")
         .arg("--save-only")
         .arg("-o")
         .arg(&input.output_path);

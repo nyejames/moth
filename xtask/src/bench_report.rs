@@ -10,9 +10,11 @@ use crate::bench_history::{
 };
 use crate::bench_system::{SystemIdentityMode, load_or_create_system};
 use crate::bench_types::{
-    BenchmarkCaseResult, BenchmarkComparison, BenchmarkMetric, BenchmarkStageMovement,
-    BenchmarkSuiteKind, BenchmarkSystem, BenchmarkThresholds, calculate_stage_movement,
+    BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseResult, BenchmarkComparison, BenchmarkMetric,
+    BenchmarkStageMovement, BenchmarkSuiteKind, BenchmarkSystem, BenchmarkThresholds,
+    calculate_stage_movement,
 };
+use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
 use crate::profile::drift::{
     DriftCaseInput, DriftHotFunction, compute_drift, find_comparable_previous,
 };
@@ -267,7 +269,7 @@ pub(crate) struct CounterMovement {
 #[derive(Debug, Clone)]
 pub(crate) struct RatioReport {
     pub(crate) name: &'static str,
-    pub(crate) case_name: String,
+    pub(crate) case_id: String,
     pub(crate) value: f64,
     pub(crate) unit: &'static str,
     pub(crate) hint: Option<&'static str>,
@@ -275,7 +277,7 @@ pub(crate) struct RatioReport {
 
 #[derive(Debug, Clone)]
 pub(crate) struct InvestigationHint {
-    pub(crate) case_name: String,
+    pub(crate) case_id: String,
     pub(crate) message: String,
 }
 
@@ -342,6 +344,9 @@ fn select_latest_run<'a>(
         if run.suite_kind != persisted_suite_kind {
             return None;
         }
+        if run.benchmark_protocol_version != BENCHMARK_PROTOCOL_VERSION {
+            return None;
+        }
 
         if let Some(system) = current_system
             && run.system_uuid != system.system_uuid
@@ -359,6 +364,7 @@ fn select_latest_run<'a>(
         run.suite_kind == persisted_suite_kind
             && run.system_uuid == latest.system_uuid
             && run.thread_count == latest.thread_count
+            && run.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
     });
 
     Some(SelectedRun { latest, previous })
@@ -420,7 +426,7 @@ fn calculate_slowest_cases(cases: &[BenchmarkCaseResult]) -> Vec<SlowCaseReport>
             stages.truncate(SLOW_CASE_STAGE_LIMIT);
 
             SlowCaseReport {
-                name: case.case_name.clone(),
+                name: case.case_id.clone(),
                 mean_ms: case.mean_ms,
                 stages,
             }
@@ -456,7 +462,7 @@ fn calculate_unattributed_cases(
         }
 
         reports.push(UnattributedCaseReport {
-            name: case.case_name.clone(),
+            name: case.case_id.clone(),
             unattributed_ms,
             unattributed_ratio,
         });
@@ -474,15 +480,21 @@ fn attributed_wall_time_ms(case: &BenchmarkCaseResult) -> Option<f64> {
     // wrapper metrics (e.g. command.check.total, build_project.total,
     // output.write_total) because they nest the sub-phases listed here and
     // would double-count if summed alongside them.
-    let command_phase_names = match case.command.as_str() {
-        "check" => &[
+    let command_phase_names = match &case.runner {
+        BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Check,
+            ..
+        } => &[
             "command.check.path_validation",
             "command.check.builder_construction",
             "command.check.bootstrap",
             "command.check.compile_project_frontend",
             "command.check.message_rendering",
         ][..],
-        "build" => &[
+        BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Build,
+            ..
+        } => &[
             "build_project.path_validation",
             "build_project.bootstrap",
             "build_project.compile_project_frontend",
@@ -626,7 +638,7 @@ fn calculate_ratios(cases: &[BenchmarkCaseResult]) -> Vec<RatioReport> {
 
             ratios.push(RatioReport {
                 name: spec.name,
-                case_name: case.case_name.clone(),
+                case_id: case.case_id.clone(),
                 value: numerator / denominator,
                 unit: spec.unit,
                 hint: spec.hint,
@@ -685,7 +697,7 @@ fn calculate_investigation_hints(
         push_hint(
             &mut hints,
             &mut seen,
-            ratio.case_name.clone(),
+            ratio.case_id.clone(),
             format!("high {}; {}", ratio.name, message),
         );
 
@@ -704,7 +716,7 @@ fn calculate_investigation_hints(
                 push_hint(
                     &mut hints,
                     &mut seen,
-                    case.case_name.clone(),
+                    case.case_id.clone(),
                     "timing grew while counters stayed near previous values; run CPU profiling before refactoring"
                         .to_string(),
                 );
@@ -722,12 +734,12 @@ fn calculate_investigation_hints(
 fn push_hint(
     hints: &mut Vec<InvestigationHint>,
     seen: &mut BTreeSet<String>,
-    case_name: String,
+    case_id: String,
     message: String,
 ) {
-    let key = format!("{case_name}\n{message}");
+    let key = format!("{case_id}\n{message}");
     if seen.insert(key) {
-        hints.push(InvestigationHint { case_name, message });
+        hints.push(InvestigationHint { case_id, message });
     }
 }
 
@@ -739,13 +751,13 @@ fn case_counters_are_stable(
 ) -> bool {
     let Some(previous_case) = previous_cases
         .iter()
-        .find(|previous| previous.case_name == case.case_name)
+        .find(|previous| previous.case_id == case.case_id)
     else {
         return false;
     };
     let Some(current_case) = current_cases
         .iter()
-        .find(|current| current.case_name == case.case_name)
+        .find(|current| current.case_id == case.case_id)
     else {
         return false;
     };
@@ -928,7 +940,7 @@ fn append_ratios(output: &mut String, suite: &SuiteReport) {
         output.push_str(&format!(
             "  {:<40} {:<24} {}{}\n",
             ratio.name,
-            ratio.case_name,
+            ratio.case_id,
             format_ratio_value(ratio.value),
             ratio.unit
         ));
@@ -943,7 +955,7 @@ fn append_investigation_hints(output: &mut String, suite: &SuiteReport) {
     }
 
     for hint in &suite.investigation_hints {
-        output.push_str(&format!("  {}: {}\n", hint.case_name, hint.message));
+        output.push_str(&format!("  {}: {}\n", hint.case_id, hint.message));
     }
 }
 
@@ -1103,7 +1115,7 @@ fn format_top_drift_item(
                 .collect();
 
             DriftCaseInput {
-                case_name: case.case_name.clone(),
+                case_id: case.case_id.clone(),
                 command: case.command.clone(),
                 args: case.args.clone(),
                 stage_timings: case.stage_timings.clone(),
@@ -1116,7 +1128,7 @@ fn format_top_drift_item(
     let wall_times: std::collections::HashMap<String, f64> = latest
         .cases
         .iter()
-        .map(|case| (case.case_name.clone(), case.observation_wall_ms))
+        .map(|case| (case.case_id.clone(), case.observation_wall_ms))
         .collect();
 
     let drift_report = compute_drift(&drift_cases, prev, &wall_times);

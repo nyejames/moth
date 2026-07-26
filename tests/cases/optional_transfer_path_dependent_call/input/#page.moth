@@ -1,0 +1,12 @@
+consume |value ~String|:
+;
+
+data ~= "hello"
+flag = false
+
+if flag:
+    consume(~data)
+else
+    consume(~data)
+    io.line([: optional_transfer_path_dependent_call data=[data]])
+;

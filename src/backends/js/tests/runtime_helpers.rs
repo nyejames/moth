@@ -222,7 +222,8 @@ fn collection_get_returns_err_for_invalid_collection() {
     let get = helper_source(&source, "__moth_collection_get");
 
     assert!(
-        get.contains("__moth_collection_is_valid(collection)") && get.contains("__moth_error_result"),
+        get.contains("__moth_collection_is_valid(collection)")
+            && get.contains("__moth_error_result"),
         "__moth_collection_get must return a Result-typed err for invalid collection inputs"
     );
 }

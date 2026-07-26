@@ -1,0 +1,10 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "loop_borrow_template_call_independent_output",
+    "<section>",
+    "one",
+    "two",
+    "</section>",
+]

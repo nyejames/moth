@@ -1,0 +1,20 @@
+Listing = |
+    cards {String},
+|
+
+render_card |card String| -> String:
+    return [: [card]]
+;
+
+render_listing |listing Listing| -> String:
+    output ~= [: <section>]
+    loop listing.cards |card|:
+        output = [: [output][render_card(card)]]
+    ;
+    return [: [output]</section>]
+;
+
+listing = Listing({"one", "two"})
+rendered = render_listing(listing)
+
+[:loop_borrow_projected_field_template_output [rendered]]

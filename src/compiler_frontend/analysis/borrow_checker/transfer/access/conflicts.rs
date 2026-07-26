@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::BlockId;
 
-use super::{AccessCheckContext, BorrowTransferContext, MutableAccessPolicy};
+use super::{AccessCheckContext, BlockTransferStats, BorrowTransferContext, MutableAccessPolicy};
 
 // WHAT: Validates shared-root reads against statement-local and active mutable conflicts.
 // WHY: Shared reads must be blocked when the same root is mutably active.
@@ -222,6 +222,35 @@ pub(super) fn check_mutable_access(
     }
 
     Ok(())
+}
+
+// WHAT: Probes whether optional transfer has the same exclusivity proof as mutable access.
+// WHY: A failed optimisation proof must fall back to ordinary borrowing without publishing a
+//      transfer-only source diagnostic or mutating the statement access tracker.
+pub(super) fn probe_mutable_access(
+    check: &AccessCheckContext<'_, '_>,
+    roots: &RootSet,
+    policy: MutableAccessPolicy,
+) -> Result<bool, BorrowCheckError> {
+    let mut tracker = check.tracker.clone();
+    let mut stats = BlockTransferStats::default();
+    let mut probe = AccessCheckContext {
+        context: check.context,
+        layout: check.layout,
+        state: check.state,
+        block_id: check.block_id,
+        tracker: &mut tracker,
+        location: check.location.clone(),
+        stats: &mut stats,
+        actor_index_hint: check.actor_index_hint,
+        current_order: check.current_order,
+    };
+
+    match check_mutable_access(&mut probe, roots, policy) {
+        Ok(()) => Ok(true),
+        Err(BorrowCheckError::Diagnostic(_)) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn borrow_access_kind(access: AccessKind) -> BorrowAccessKind {

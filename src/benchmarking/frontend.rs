@@ -10,7 +10,9 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
+use crate::build_system::build::{
+    BuildBootstrap, ProjectBuilder, bootstrap_project_build, collect_frontend_warnings,
+};
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::Flag;
@@ -40,6 +42,8 @@ pub struct FrontendBenchmarkOptions {
 #[derive(Debug, Clone)]
 pub struct FrontendBenchmarkReport {
     pub total_ms: f64,
+    pub warning_count: usize,
+    pub warning_codes: Vec<String>,
     pub stages: Vec<FrontendBenchmarkStage>,
     pub counters: Vec<FrontendBenchmarkCounter>,
 }
@@ -149,7 +153,10 @@ pub fn run_frontend_benchmark(
         &mut frontend_surface,
         &mut string_table,
     ) {
-        Ok(_modules) => CompilerMessages::empty(string_table),
+        Ok(modules) => {
+            let warnings = collect_frontend_warnings(&modules);
+            CompilerMessages::from_diagnostics(warnings, string_table)
+        }
         Err(messages) => messages,
     };
 
@@ -170,6 +177,12 @@ pub fn run_frontend_benchmark(
             message: format_compiler_messages(&messages),
         });
     }
+
+    let warning_count = messages.warning_count();
+    let warning_codes = messages
+        .warnings()
+        .map(|warning| warning.kind.code().to_owned())
+        .collect();
 
     #[cfg(feature = "timers")]
     let stages = raw_observations
@@ -193,6 +206,8 @@ pub fn run_frontend_benchmark(
 
     Ok(FrontendBenchmarkReport {
         total_ms,
+        warning_count,
+        warning_codes,
         stages,
         counters,
     })

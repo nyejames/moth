@@ -4,7 +4,7 @@ Moth can usually work out a value's type from the value itself.
     enabled = true
     count = 42
     ratio = 0.5
-    letter = 'ʚĭɞ'
+    letter = '🦋'
     name = "Moth"
 ]
 

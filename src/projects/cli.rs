@@ -12,10 +12,14 @@ use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
 };
 use crate::projects::check::{self, CheckOptions};
+use crate::projects::command_status::{
+    CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
+};
 use crate::projects::dev_server::{self, DevServerOptions};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use saying::say;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{env, process};
 
@@ -50,146 +54,204 @@ enum Command {
     }, // Runs or lists compiler integration tests with composable selection filters
 }
 
-pub fn start_cli() {
+pub fn start_cli() -> process::ExitCode {
     let compiler_args: Vec<String> = env::args().collect();
     let cli_args = &compiler_args[1..];
 
-    if cli_args.is_empty() {
+    let status = if cli_args.is_empty() {
         print_help();
-        return;
-    }
-
-    if cli_args[0].starts_with("--") || cli_args[0].starts_with('-') {
+        CommandStatus::Success
+    } else if cli_args[0].starts_with("--") || cli_args[0].starts_with('-') {
         if is_standalone_version_request(cli_args) {
             println!("moth {}", env!("CARGO_PKG_VERSION"));
-            return;
-        }
-
-        say!(
-            "Invalid standalone flag input: '{}'. Only --version, -v, and -V can be used without a command.",
-            cli_args.join(" ")
-        );
-        print_help();
-        return;
-    }
-
-    let command = match get_command(cli_args) {
-        Ok(command) => command,
-        Err(e) => {
-            say!(e);
+            CommandStatus::Success
+        } else {
+            say!(
+                "Invalid standalone flag input: '{}'. Only --version, -v, and -V can be used without a command.",
+                cli_args.join(" ")
+            );
             print_help();
-            return;
+            CommandStatus::Failure
         }
-    };
-
-    match command {
-        Command::Help => {
-            print_help();
-        }
-
-        Command::NewHTMLProject(options) => {
-            match crate::projects::html_project::new_html_project::create_html_project_template(
-                options,
-            ) {
-                Ok(_) => {}
-                Err(e) if e == "Cancelled project creation." => {
-                    println!("{e}");
+    } else {
+        match get_command(cli_args) {
+            Ok(command) => match command {
+                Command::Help => {
+                    print_help();
+                    CommandStatus::Success
                 }
-                Err(e) => {
-                    println!("{e}");
-                }
-            }
-        }
 
-        Command::Build { path, flags } => {
-            crate::timing::start_command_timing();
-            let start = Instant::now();
-            let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-            match build::build_project(&project_builder, &path, &flags) {
-                Ok(build_result) => {
-                    let output_root = if build_result.config.entry_dir.is_dir() {
-                        build::resolve_project_output_root(&build_result.config, &flags)
-                    } else {
-                        match env::current_dir() {
-                            Ok(path) => path,
-                            Err(error) => {
-                                log_cli_total("command.build.total", start);
-                                print_formatted_error(
-                                    CompilerError::compiler_error(format!(
-                                        "Could not resolve current directory for build outputs: {error}"
-                                    )),
-                                    &build_result.string_table,
-                                );
-                                crate::timing::print_command_timing_summary();
-                                return;
-                            }
+                Command::NewHTMLProject(options) => {
+                    match crate::projects::html_project::new_html_project::create_html_project_template(
+                        options,
+                    ) {
+                        Ok(_) => CommandStatus::Success,
+                        Err(e) if e == "Cancelled project creation." => {
+                            println!("{e}");
+                            CommandStatus::Success
                         }
-                    };
-
-                    let output_write_start = crate::timing::start_pipeline_timing();
-                    let write_result = build::write_project_outputs(
-                        &build_result.project,
-                        &build::WriteOptions {
-                            output_root,
-                            project_entry_dir: Some(build_result.config.entry_dir.clone()),
-                            write_mode: build::WriteMode::AlwaysWrite,
-                        },
-                        &build_result.string_table,
-                    );
-                    log_cli_timing("command.build.output_write", output_write_start);
-
-                    match write_result {
-                        Ok(()) => {
-                            let duration = start.elapsed();
-                            log_cli_total("command.build.total", start);
-                            print_build_message(build_result, duration);
-                        }
-                        Err(mut messages) => {
-                            log_cli_total("command.build.total", start);
-                            messages.extend_diagnostics(build_result.warnings);
-                            print_compiler_messages(messages);
+                        Err(e) => {
+                            println!("{e}");
+                            CommandStatus::Failure
                         }
                     }
                 }
-                Err(messages) => {
+
+                Command::Build { path, flags } => run_build_command(&path, &flags),
+
+                Command::Check { path, terse } => {
+                    check::run_check(&path, CheckOptions { terse })
+                }
+
+                Command::Dev {
+                    path,
+                    options,
+                    flags,
+                } => {
+                    say!("\nStarting dev server...");
+                    let project_builder =
+                        build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+                    match dev_server::run_dev_server(project_builder, &path, &flags, options) {
+                        Ok(_) => CommandStatus::Success,
+                        Err(messages) => {
+                            print_compiler_messages(messages);
+                            CommandStatus::Failure
+                        }
+                    }
+                }
+
+                Command::CompilerTests { options } => match run_all_test_cases(options) {
+                    Ok(summary) => integration_run_status(summary),
+                    Err(error) => {
+                        say!(Red "Failed to run integration tests:");
+                        println!("  {error}");
+                        CommandStatus::Failure
+                    }
+                },
+            },
+            Err(e) => {
+                say!(e);
+                print_help();
+                CommandStatus::Failure
+            }
+        }
+    };
+
+    status.into()
+}
+
+fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
+    crate::timing::start_command_timing();
+    let start = Instant::now();
+    let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
+        Ok(build_result) => {
+            let (output_root, project_entry_dir) = if build_result.config.entry_dir.is_dir() {
+                (
+                    build::resolve_project_output_root(&build_result.config, flags),
+                    Some(build_result.config.entry_dir.clone()),
+                )
+            } else {
+                let output_root = match env::current_dir() {
+                    Ok(path) => path,
+                    Err(error) => {
+                        log_cli_total("command.build.total", start);
+                        print_formatted_error(
+                            CompilerError::compiler_error(format!(
+                                "Could not resolve current directory for build outputs: {error}"
+                            )),
+                            &build_result.string_table,
+                        );
+                        crate::timing::print_command_timing_summary();
+                        return CommandStatus::Failure;
+                    }
+                };
+                let project_entry_dir =
+                    match single_file_project_entry_dir(&build_result.config.entry_dir) {
+                        Ok(path) => path,
+                        Err(error) => {
+                            log_cli_total("command.build.total", start);
+                            print_formatted_error(error, &build_result.string_table);
+                            crate::timing::print_command_timing_summary();
+                            return CommandStatus::Failure;
+                        }
+                    };
+
+                (output_root, Some(project_entry_dir))
+            };
+
+            let output_write_start = crate::timing::start_pipeline_timing();
+            let write_result = build::write_project_outputs(
+                &build_result.project,
+                &build::WriteOptions {
+                    output_root,
+                    project_entry_dir,
+                    write_mode: build::WriteMode::AlwaysWrite,
+                },
+                &build_result.string_table,
+            );
+            log_cli_timing("command.build.output_write", output_write_start);
+
+            match write_result {
+                Ok(()) => {
+                    let duration = start.elapsed();
+                    let warning_count = build_result.warnings.len();
                     log_cli_total("command.build.total", start);
+                    print_build_message(build_result, duration);
+                    (CommandStatus::Success, Some((0, warning_count)))
+                }
+                Err(mut messages) => {
+                    log_cli_total("command.build.total", start);
+                    messages.extend_diagnostics(build_result.warnings);
                     print_compiler_messages(messages);
+                    (CommandStatus::Failure, None)
                 }
             }
-            crate::timing::print_command_timing_summary();
         }
-
-        Command::Check { path, terse } => {
-            check::run_check(&path, CheckOptions { terse });
+        Err(messages) => {
+            let diagnostic_counts = benchmark_diagnostic_counts(&messages);
+            log_cli_total("command.build.total", start);
+            print_compiler_messages(messages);
+            (CommandStatus::Failure, diagnostic_counts)
         }
-
-        Command::Dev {
-            path,
-            options,
-            flags,
-        } => {
-            say!("\nStarting dev server...");
-            let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-            match dev_server::run_dev_server(project_builder, &path, &flags, options) {
-                Ok(_) => {}
-                Err(messages) => print_compiler_messages(messages),
-            }
-        }
-
-        Command::CompilerTests { options } => match run_all_test_cases(options) {
-            Ok(summary) => {
-                let exit_code = integration_tests_exit_code(summary);
-                if exit_code != 0 {
-                    process::exit(exit_code);
-                }
-            }
-            Err(error) => {
-                say!(Red "Failed to run integration tests:");
-                println!("  {error}");
-                process::exit(1);
-            }
-        },
+    };
+    crate::timing::print_command_timing_summary();
+    if let Some((error_count, warning_count)) = diagnostic_counts {
+        emit_benchmark_status(error_count, warning_count);
     }
+    status
+}
+
+/// Resolve the containing directory used by single-file output cleanup safety checks.
+///
+/// WHAT: maps a synthetic single-file entry to the directory that owns it.
+/// WHY: output-root validation compares against a directory context, not the source file path.
+fn single_file_project_entry_dir(entry_path: &Path) -> Result<PathBuf, CompilerError> {
+    let Some(parent) = entry_path.parent() else {
+        return Err(CompilerError::compiler_error(format!(
+            "Could not resolve containing directory for single-file build entry '{}'",
+            entry_path.display()
+        )));
+    };
+
+    if parent.as_os_str().is_empty() {
+        return env::current_dir().map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "Could not resolve containing directory for single-file build entry '{}': {error}",
+                entry_path.display()
+            ))
+        });
+    }
+
+    if parent.is_dir() {
+        return Ok(parent.to_path_buf());
+    }
+
+    Err(CompilerError::compiler_error(format!(
+        "Could not resolve containing directory for single-file build entry '{}': '{}' is not a directory",
+        entry_path.display(),
+        parent.display()
+    )))
 }
 
 /// Record a CLI command stage timing through the central `timers` substrate.
@@ -216,11 +278,11 @@ fn log_cli_total(_metric: &str, _start: Instant) {
     let _ = (_metric, _start);
 }
 
-fn integration_tests_exit_code(summary: IntegrationRunSummary) -> i32 {
-    if summary.incorrect_results() > 0 {
-        1
+fn integration_run_status(summary: IntegrationRunSummary) -> CommandStatus {
+    if summary.incorrect_results() == 0 {
+        CommandStatus::Success
     } else {
-        0
+        CommandStatus::Failure
     }
 }
 

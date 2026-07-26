@@ -12,7 +12,7 @@ Use an up-to-date release build of the compiler when one is available. The
 `moth` command in PATH is the usual direct form:
 
 [codeblock, $code("bash"):
-    moth check docs
+    moth check docs --terse
     moth build docs --release
 ]
 
@@ -20,7 +20,7 @@ If a suitable release build is not available, run the same operations through
 Cargo from the repository root:
 
 [codeblock, $code("bash"):
-    cargo run --quiet -- check docs
+    cargo run --quiet -- check docs --terse
     cargo run --quiet -- build docs --release
 ]
 
@@ -74,8 +74,8 @@ Before declaring a non-trivial code-bearing slice complete, run:
 
     [td:
         [: Rust unit tests]
-        [: `cargo test --quiet -- --format terse`]
-        [: Rust unit and subsystem tests]
+        [: `cargo test --workspace --quiet -- --format terse`]
+        [: Rust unit and subsystem tests across the complete workspace]
     ]
 
     [td:
@@ -86,21 +86,24 @@ Before declaring a non-trivial code-bearing slice complete, run:
 
     [td:
         [: Documentation check]
-        [: `cargo run --quiet -- check docs`]
+        [: `cargo run --quiet -- check docs --terse`]
         [: Moth docs-source checking inside the full gate]
     ]
 
     [td:
         [: Benchmark sanity check]
-        [: `cargo run --package xtask --bin xtask -- bench-check`]
-        [: Non-recording performance sanity check]
+        [: `cargo run --package xtask --bin xtask -- bench-ci`]
+        [: Complete benchmark preflight followed by bounded non-recording measurements]
     ]
 ]
 
 - `ci-clippy` uses the pinned Rust toolchain configured in the `justfile`.
 - Warnings are denied.
-- It checks the native host, Linux x64 and Windows x64 targets.
-- Benchmark checking must not update tracked benchmark history.
+- It checks the complete workspace on the native host, Linux x64 and Windows x64 targets.
+- The workspace test command includes the compiler, CLI and `xtask` packages.
+- `bench-ci` preflights every benchmark manifest case once, then measures only the quick CLI and
+  frontend subsets with three iterations.
+- `bench-ci` does not update local history or tracked benchmark summaries.
 
 The integration command loads the complete canonical suite and applies the shared hard-policy
 evaluator before selection or compilation. This makes missing ownership, duplicate primaries and
@@ -165,7 +168,7 @@ not apply. Use the full code-bearing gate.
 
     [td:
         [: Unit-test iteration]
-        [: `cargo test --quiet -- --format terse`]
+        [: `cargo test --workspace --quiet -- --format terse`]
     ]
 
     [td:
@@ -180,12 +183,27 @@ not apply. Use the full code-bearing gate.
 
     [td:
         [: Docs-source iteration]
-        [: `moth check docs`]
+        [: `moth check docs --terse`]
     ]
 
     [td:
-        [: Benchmark sanity]
+        [: Bounded benchmark sanity]
+        [: `just bench-ci`]
+    ]
+
+    [td:
+        [: Benchmark-only preflight]
+        [: `just bench-validate`]
+    ]
+
+    [td:
+        [: Full CLI benchmark check]
         [: `just bench-check`]
+    ]
+
+    [td:
+        [: Full frontend benchmark check]
+        [: `just bench-frontend-check`]
     ]
 
     [td:
@@ -247,7 +265,7 @@ change.
 
 ### Progress-matrix review
 
-Review the progress matrix whenever behavior, support, rejection, backend
+Review the progress matrix whenever behaviour, support, rejection, backend
 coverage or test coverage changes.
 
 Update it when current status changed. Do not make a meaningless edit for a
@@ -255,7 +273,11 @@ pure refactor or prose-only correction.
 
 ### Benchmark safety
 
-- `just validate` uses non-recording `bench-check`.
+- `just validate` uses non-recording `bench-ci`.
+- `bench-ci` validates every benchmark case before it measures the quick subset. It replaces the
+  full ten-iteration CLI and frontend checks inside the normal validation gate.
+- Use `just bench-check` and `just bench-frontend-check` for deliberate full-suite performance
+  evidence. Both commands remain non-recording.
 - Do not run or commit recording benchmark output unless performance history is
   intentionally being updated.
 - A benchmark fluctuation does not replace correctness evidence.

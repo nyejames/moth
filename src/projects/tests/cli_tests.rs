@@ -1,8 +1,8 @@
 //! Tests for CLI command parsing and validation.
 
 use super::{
-    Command, build_warnings_messages, get_command, help_build_flag_entries,
-    integration_tests_exit_code, is_standalone_version_request,
+    Command, build_warnings_messages, get_command, help_build_flag_entries, integration_run_status,
+    is_standalone_version_request,
 };
 use crate::build_system::build::{BuildResult, CleanupPolicy, FileKind, OutputFile, Project};
 use crate::compiler_frontend::Flag;
@@ -14,6 +14,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions,
 };
+use crate::projects::command_status::CommandStatus;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use crate::projects::settings::Config;
@@ -591,7 +592,7 @@ fn help_advertises_accepted_flags_but_not_removed_spelling() {
 }
 
 #[test]
-fn integration_tests_exit_code_reflects_suite_correctness() {
+fn integration_run_status_reflects_suite_correctness() {
     let correct = IntegrationRunSummary {
         total_tests: 5,
         passed_tests: 3,
@@ -599,7 +600,7 @@ fn integration_tests_exit_code_reflects_suite_correctness() {
         expected_failures: 2,
         unexpected_successes: 0,
     };
-    assert_eq!(integration_tests_exit_code(correct), 0);
+    assert_eq!(integration_run_status(correct), CommandStatus::Success);
 
     let incorrect = IntegrationRunSummary {
         total_tests: 5,
@@ -608,7 +609,7 @@ fn integration_tests_exit_code_reflects_suite_correctness() {
         expected_failures: 1,
         unexpected_successes: 1,
     };
-    assert_eq!(integration_tests_exit_code(incorrect), 1);
+    assert_eq!(integration_run_status(incorrect), CommandStatus::Failure);
 }
 
 fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult {

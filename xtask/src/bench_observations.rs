@@ -1,15 +1,17 @@
-//! Benchmark observation parsing.
+//! Checked benchmark observation parsing and aggregation.
 //!
-//! WHAT: extracts stage timings and local performance counters from stable
-//! `MOTH_BENCH` lines, while still accepting legacy human timer prose from
-//! older local benchmark records.
-//! WHY: raw benchmark history should preserve local diagnostic evidence without
-//! making public monthly summaries noisy.
+//! WHAT: validates stable live timing and counter records, retains an explicit
+//! legacy-history parser, and checks measured metric sets before averaging.
+//! WHY: malformed or incomplete timing evidence must stop a benchmark before
+//! its result can reach local history or tracked summaries.
+
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fmt::{Display, Formatter};
 
 use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric};
-use std::collections::{BTreeMap, HashSet};
+use crate::benchmark_manifest::CliBenchmarkCommand;
 
-const STAGE_PREFIXES: [(&str, &str); 10] = [
+const LEGACY_STAGE_PREFIXES: [(&str, &str); 10] = [
     ("Tokenized in:", "tokenize_ms"),
     ("Headers Parsed in:", "headers_ms"),
     ("Files Prepared in:", "file_prepare_ms"),
@@ -25,149 +27,478 @@ const STAGE_PREFIXES: [(&str, &str); 10] = [
     ("AST/finalize completed in:", "ast_finalize_ms"),
 ];
 
-const STABLE_BENCH_PREFIX: &str = "MOTH_BENCH timing";
+const STABLE_TIMING_PREFIX: &str = "MOTH_BENCH timing";
+const STABLE_TIMING_FIELDS_PREFIX: &str = "MOTH_BENCH timing ";
 const STABLE_COUNTER_PREFIX: &str = "MOTH_BENCH counter";
+const STABLE_COUNTER_FIELDS_PREFIX: &str = "MOTH_BENCH counter ";
 
-pub(crate) fn parse_stdout_observations(stdout: &str) -> BenchmarkCaseObservations {
+/// Selects whether observations come from a live command or old captured output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BenchmarkObservationSource {
+    LiveCli(CliBenchmarkCommand),
+    LegacyHistory,
+}
+
+/// A malformed or internally inconsistent benchmark observation set.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum BenchmarkObservationError {
+    MalformedTimingLine {
+        line: String,
+    },
+    MalformedCounterLine {
+        line: String,
+    },
+    InvalidMetricName {
+        metric_kind: &'static str,
+        metric_name: String,
+    },
+    InvalidMetricValue {
+        metric_kind: &'static str,
+        metric_name: String,
+        value: String,
+    },
+    MissingRequiredTiming {
+        metric_name: &'static str,
+    },
+    MissingFrontendStages,
+    NoMeasuredIterations,
+    TimingMetricSetMismatch {
+        iteration: usize,
+        missing: Vec<String>,
+        additional: Vec<String>,
+    },
+    MetricSumNotFinite {
+        metric_kind: &'static str,
+        metric_name: String,
+    },
+}
+
+impl Display for BenchmarkObservationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MalformedTimingLine { line } => {
+                write!(formatter, "malformed MOTH_BENCH timing record: {line}")
+            }
+            Self::MalformedCounterLine { line } => {
+                write!(formatter, "malformed MOTH_BENCH counter record: {line}")
+            }
+            Self::InvalidMetricName {
+                metric_kind,
+                metric_name,
+            } => {
+                write!(
+                    formatter,
+                    "{metric_kind} metric name must be non-empty and contain no whitespace or control characters, got '{metric_name}'"
+                )
+            }
+            Self::InvalidMetricValue {
+                metric_kind,
+                metric_name,
+                value,
+            } => {
+                write!(
+                    formatter,
+                    "{metric_kind} metric '{metric_name}' must be finite and non-negative, got {value}"
+                )
+            }
+            Self::MissingRequiredTiming { metric_name } => {
+                write!(formatter, "missing required timing metric '{metric_name}'")
+            }
+            Self::MissingFrontendStages => {
+                write!(
+                    formatter,
+                    "frontend observation must contain at least one stage"
+                )
+            }
+            Self::NoMeasuredIterations => {
+                write!(formatter, "cannot average zero measured observations")
+            }
+            Self::TimingMetricSetMismatch {
+                iteration,
+                missing,
+                additional,
+            } => {
+                write!(
+                    formatter,
+                    "timing metric set changed in measured iteration {iteration}"
+                )?;
+                if !missing.is_empty() {
+                    write!(formatter, "; missing: {}", missing.join(", "))?;
+                }
+                if !additional.is_empty() {
+                    write!(formatter, "; additional: {}", additional.join(", "))?;
+                }
+                Ok(())
+            }
+            Self::MetricSumNotFinite {
+                metric_kind,
+                metric_name,
+            } => {
+                write!(
+                    formatter,
+                    "summed {metric_kind} metric '{metric_name}' is not finite"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for BenchmarkObservationError {}
+
+/// Parse checked stdout observations for one explicit source.
+///
+/// Live CLI output accepts stable records only and requires the command's
+/// top-level timing. Legacy history may additionally recover known human
+/// timing prose, with stable records taking precedence for matching names.
+pub(crate) fn parse_stdout_observations(
+    stdout: &str,
+    source: BenchmarkObservationSource,
+) -> Result<BenchmarkCaseObservations, BenchmarkObservationError> {
     let mut stable_timings = Vec::new();
     let mut legacy_timings = Vec::new();
     let mut counters = Vec::new();
 
     for raw_line in stdout.lines() {
         let line = strip_ansi_codes(raw_line);
-        let trimmed = line.trim();
 
-        if let Some(stable) = parse_stable_benchmark_line(trimmed) {
-            stable_timings.push(stable);
+        if line.starts_with(STABLE_TIMING_PREFIX) {
+            stable_timings.push(parse_stable_timing_line(&line)?);
             continue;
         }
 
-        if let Some(counter) = parse_stable_counter_line(trimmed) {
-            counters.push(counter);
+        if line.starts_with(STABLE_COUNTER_PREFIX) {
+            counters.push(parse_stable_counter_line(&line)?);
             continue;
         }
 
-        if let Some(legacy) = parse_legacy_stage_timing(trimmed) {
+        if source == BenchmarkObservationSource::LegacyHistory
+            && let Some(legacy) = parse_legacy_stage_timing(line.trim())?
+        {
             legacy_timings.push(legacy);
         }
     }
 
-    // Stable lines take precedence: skip legacy human lines for metrics that
-    // already have a stable entry so new compiler output is not double-counted.
-    let stable_names: HashSet<String> = stable_timings.iter().map(|m| m.name.clone()).collect();
-    let mut stage_timings = stable_timings;
-    for legacy in legacy_timings {
-        if !stable_names.contains(&legacy.name) {
-            stage_timings.push(legacy);
-        }
+    let mut stage_timings = sum_metrics_by_name(stable_timings, "timing")?;
+
+    if source == BenchmarkObservationSource::LegacyHistory {
+        let stable_names: HashSet<&str> = stage_timings
+            .iter()
+            .map(|metric| metric.name.as_str())
+            .collect();
+        legacy_timings.retain(|metric| !stable_names.contains(metric.name.as_str()));
+        stage_timings.extend(sum_metrics_by_name(legacy_timings, "timing")?);
+        stage_timings.sort_by(|left, right| left.name.cmp(&right.name));
     }
 
-    BenchmarkCaseObservations {
-        stage_timings: sum_metrics_by_name(&stage_timings),
-        counters: sum_metrics_by_name(&counters),
+    let observations = BenchmarkCaseObservations {
+        stage_timings,
+        counters: sum_metrics_by_name(counters, "counter")?,
+    };
+
+    if let BenchmarkObservationSource::LiveCli(command) = source {
+        require_cli_total(&observations, command)?;
     }
+
+    Ok(observations)
 }
 
+/// Validate and normalize one in-process frontend observation report.
+pub(crate) fn validate_frontend_observations(
+    observations: BenchmarkCaseObservations,
+) -> Result<BenchmarkCaseObservations, BenchmarkObservationError> {
+    if observations.stage_timings.is_empty() {
+        return Err(BenchmarkObservationError::MissingFrontendStages);
+    }
+
+    normalize_observations(observations)
+}
+
+/// Average measured observations only after their timing metric sets agree.
 pub(crate) fn average_observations(
     observations: &[BenchmarkCaseObservations],
-) -> BenchmarkCaseObservations {
-    BenchmarkCaseObservations {
-        stage_timings: average_metrics(observations.iter().map(|item| &item.stage_timings)),
-        counters: average_metrics(observations.iter().map(|item| &item.counters)),
+) -> Result<BenchmarkCaseObservations, BenchmarkObservationError> {
+    if observations.is_empty() {
+        return Err(BenchmarkObservationError::NoMeasuredIterations);
+    }
+
+    let mut normalized = Vec::with_capacity(observations.len());
+    for observation in observations {
+        normalized.push(normalize_observations(observation.clone())?);
+    }
+
+    let expected_timing_names = metric_name_set(&normalized[0].stage_timings);
+    for (index, observation) in normalized.iter().enumerate().skip(1) {
+        let timing_names = metric_name_set(&observation.stage_timings);
+        if timing_names == expected_timing_names {
+            continue;
+        }
+
+        let missing = expected_timing_names
+            .difference(&timing_names)
+            .cloned()
+            .collect();
+        let additional = timing_names
+            .difference(&expected_timing_names)
+            .cloned()
+            .collect();
+
+        return Err(BenchmarkObservationError::TimingMetricSetMismatch {
+            iteration: index + 1,
+            missing,
+            additional,
+        });
+    }
+
+    let iteration_count = normalized.len();
+
+    Ok(BenchmarkCaseObservations {
+        stage_timings: average_metrics(
+            normalized.iter().map(|item| &item.stage_timings),
+            iteration_count,
+            "timing",
+        )?,
+        // Optional counters behave as zero when an iteration did not emit them.
+        counters: average_metrics(
+            normalized.iter().map(|item| &item.counters),
+            iteration_count,
+            "counter",
+        )?,
+    })
+}
+
+fn require_cli_total(
+    observations: &BenchmarkCaseObservations,
+    command: CliBenchmarkCommand,
+) -> Result<(), BenchmarkObservationError> {
+    let required_name = match command {
+        CliBenchmarkCommand::Check => "command.check.total",
+        CliBenchmarkCommand::Build => "command.build.total",
+    };
+
+    if observations
+        .stage_timings
+        .iter()
+        .any(|metric| metric.name == required_name)
+    {
+        Ok(())
+    } else {
+        Err(BenchmarkObservationError::MissingRequiredTiming {
+            metric_name: required_name,
+        })
     }
 }
 
-fn parse_legacy_stage_timing(line: &str) -> Option<BenchmarkMetric> {
-    for (prefix, name) in STAGE_PREFIXES {
+fn normalize_observations(
+    observations: BenchmarkCaseObservations,
+) -> Result<BenchmarkCaseObservations, BenchmarkObservationError> {
+    Ok(BenchmarkCaseObservations {
+        stage_timings: sum_metrics_by_name(observations.stage_timings, "timing")?,
+        counters: sum_metrics_by_name(observations.counters, "counter")?,
+    })
+}
+
+fn parse_legacy_stage_timing(
+    line: &str,
+) -> Result<Option<BenchmarkMetric>, BenchmarkObservationError> {
+    for (prefix, name) in LEGACY_STAGE_PREFIXES {
         let Some(rest) = line.strip_prefix(prefix) else {
             continue;
         };
 
-        let value = parse_duration_to_ms(rest.trim())?;
-        return Some(BenchmarkMetric {
-            name: name.to_string(),
+        let value = parse_legacy_duration_to_ms(rest.trim()).ok_or_else(|| {
+            BenchmarkObservationError::InvalidMetricValue {
+                metric_kind: "timing",
+                metric_name: name.to_owned(),
+                value: rest.trim().to_owned(),
+            }
+        })?;
+        validate_metric_value("timing", name, value, rest.trim())?;
+
+        return Ok(Some(BenchmarkMetric {
+            name: name.to_owned(),
             value,
+        }));
+    }
+
+    Ok(None)
+}
+
+fn parse_stable_timing_line(line: &str) -> Result<BenchmarkMetric, BenchmarkObservationError> {
+    let fields = line
+        .strip_prefix(STABLE_TIMING_FIELDS_PREFIX)
+        .ok_or_else(|| BenchmarkObservationError::MalformedTimingLine {
+            line: line.to_owned(),
+        })?;
+    let (name, value_with_unit) = split_exact_metric_fields(fields).ok_or_else(|| {
+        BenchmarkObservationError::MalformedTimingLine {
+            line: line.to_owned(),
+        }
+    })?;
+
+    validate_metric_name("timing", name)?;
+
+    let value_text = value_with_unit.strip_suffix("ms").ok_or_else(|| {
+        BenchmarkObservationError::MalformedTimingLine {
+            line: line.to_owned(),
+        }
+    })?;
+    if value_text.is_empty() || value_text.trim() != value_text {
+        return Err(BenchmarkObservationError::MalformedTimingLine {
+            line: line.to_owned(),
         });
     }
 
-    None
-}
+    let value =
+        value_text
+            .parse::<f64>()
+            .map_err(|_| BenchmarkObservationError::InvalidMetricValue {
+                metric_kind: "timing",
+                metric_name: name.to_owned(),
+                value: value_text.to_owned(),
+            })?;
+    validate_metric_value("timing", name, value, value_text)?;
 
-fn parse_stable_benchmark_line(line: &str) -> Option<BenchmarkMetric> {
-    let rest = line.strip_prefix(STABLE_BENCH_PREFIX)?.trim();
-
-    // Expected shape: <name>=<value>ms
-    let (name, value_with_unit) = rest.split_once('=')?;
-    let name = name.trim();
-    if name.is_empty() {
-        return None;
-    }
-
-    let value = parse_duration_to_ms(value_with_unit.trim())?;
-
-    Some(BenchmarkMetric {
-        name: name.to_string(),
+    Ok(BenchmarkMetric {
+        name: name.to_owned(),
         value,
     })
 }
 
-fn parse_stable_counter_line(line: &str) -> Option<BenchmarkMetric> {
-    let rest = line.strip_prefix(STABLE_COUNTER_PREFIX)?.trim();
+fn parse_stable_counter_line(line: &str) -> Result<BenchmarkMetric, BenchmarkObservationError> {
+    let fields = line
+        .strip_prefix(STABLE_COUNTER_FIELDS_PREFIX)
+        .ok_or_else(|| BenchmarkObservationError::MalformedCounterLine {
+            line: line.to_owned(),
+        })?;
+    let (name, value_text) = split_exact_metric_fields(fields).ok_or_else(|| {
+        BenchmarkObservationError::MalformedCounterLine {
+            line: line.to_owned(),
+        }
+    })?;
 
-    // Expected shape: <name>=<number>
-    let (name, value_text) = rest.split_once('=')?;
-    let name = name.trim();
-    if name.is_empty() {
-        return None;
-    }
+    validate_metric_name("counter", name)?;
 
-    let value: f64 = value_text.trim().parse().ok()?;
-    if !value.is_finite() {
-        return None;
-    }
+    let value =
+        value_text
+            .parse::<f64>()
+            .map_err(|_| BenchmarkObservationError::InvalidMetricValue {
+                metric_kind: "counter",
+                metric_name: name.to_owned(),
+                value: value_text.to_owned(),
+            })?;
+    validate_metric_value("counter", name, value, value_text)?;
 
-    Some(BenchmarkMetric {
-        name: name.to_string(),
+    Ok(BenchmarkMetric {
+        name: name.to_owned(),
         value,
     })
+}
+
+fn split_exact_metric_fields(fields: &str) -> Option<(&str, &str)> {
+    let (name, value) = fields.split_once('=')?;
+    if name.trim() != name || value.trim() != value || value.contains('=') || value.is_empty() {
+        return None;
+    }
+
+    Some((name, value))
+}
+
+fn validate_metric_name(
+    metric_kind: &'static str,
+    name: &str,
+) -> Result<(), BenchmarkObservationError> {
+    if name.is_empty() || name.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
+        Err(BenchmarkObservationError::InvalidMetricName {
+            metric_kind,
+            metric_name: name.to_owned(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_metric_value(
+    metric_kind: &'static str,
+    metric_name: &str,
+    value: f64,
+    rendered_value: &str,
+) -> Result<(), BenchmarkObservationError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(BenchmarkObservationError::InvalidMetricValue {
+            metric_kind,
+            metric_name: metric_name.to_owned(),
+            value: rendered_value.to_owned(),
+        })
+    }
 }
 
 fn average_metrics<'a>(
     metrics_by_iteration: impl Iterator<Item = &'a Vec<BenchmarkMetric>>,
-) -> Vec<BenchmarkMetric> {
-    let mut sums_by_name: BTreeMap<String, (f64, usize)> = BTreeMap::new();
+    iteration_count: usize,
+    metric_kind: &'static str,
+) -> Result<Vec<BenchmarkMetric>, BenchmarkObservationError> {
+    let mut sums_by_name: BTreeMap<String, f64> = BTreeMap::new();
 
     for metrics in metrics_by_iteration {
         for metric in metrics {
-            let entry = sums_by_name.entry(metric.name.clone()).or_insert((0.0, 0));
-            entry.0 += metric.value;
-            entry.1 += 1;
+            let sum = sums_by_name.entry(metric.name.clone()).or_default();
+            *sum += metric.value;
+            if !sum.is_finite() {
+                return Err(BenchmarkObservationError::MetricSumNotFinite {
+                    metric_kind,
+                    metric_name: metric.name.clone(),
+                });
+            }
         }
     }
 
-    sums_by_name
+    Ok(sums_by_name
         .into_iter()
-        .map(|(name, (sum, count))| BenchmarkMetric {
+        .map(|(name, sum)| BenchmarkMetric {
             name,
-            value: if count == 0 { 0.0 } else { sum / count as f64 },
+            value: sum / iteration_count as f64,
         })
-        .collect()
+        .collect())
 }
 
-fn sum_metrics_by_name(metrics: &[BenchmarkMetric]) -> Vec<BenchmarkMetric> {
+fn sum_metrics_by_name(
+    metrics: Vec<BenchmarkMetric>,
+    metric_kind: &'static str,
+) -> Result<Vec<BenchmarkMetric>, BenchmarkObservationError> {
     let mut sums_by_name: BTreeMap<String, f64> = BTreeMap::new();
 
     for metric in metrics {
-        *sums_by_name.entry(metric.name.clone()).or_insert(0.0) += metric.value;
+        validate_metric_name(metric_kind, &metric.name)?;
+        validate_metric_value(
+            metric_kind,
+            &metric.name,
+            metric.value,
+            &metric.value.to_string(),
+        )?;
+
+        let sum = sums_by_name.entry(metric.name.clone()).or_default();
+        *sum += metric.value;
+        if !sum.is_finite() {
+            return Err(BenchmarkObservationError::MetricSumNotFinite {
+                metric_kind,
+                metric_name: metric.name,
+            });
+        }
     }
 
-    sums_by_name
+    Ok(sums_by_name
         .into_iter()
         .map(|(name, value)| BenchmarkMetric { name, value })
-        .collect()
+        .collect())
 }
 
-fn parse_duration_to_ms(text: &str) -> Option<f64> {
+fn metric_name_set(metrics: &[BenchmarkMetric]) -> BTreeSet<String> {
+    metrics.iter().map(|metric| metric.name.clone()).collect()
+}
+
+fn parse_legacy_duration_to_ms(text: &str) -> Option<f64> {
     let trimmed = text.trim();
     let value = parse_leading_number(trimmed)?;
     let unit = trimmed

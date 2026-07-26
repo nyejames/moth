@@ -269,11 +269,11 @@ contract = "language.bindings.mutable_alias_blocks_later_source_access"
 role = "primary"
 
 [[case]]
-id = "branch_inconsistent_ownership_merge"
-path = "branch_inconsistent_ownership_merge"
-tags = ["integration","borrows", "diagnostics"]
-contract = "language.bindings.branch_inconsistent_ownership_merge_rejected"
-role = "primary"
+id = "optional_transfer_path_dependent_call"
+path = "optional_transfer_path_dependent_call"
+tags = ["integration", "borrows", "control-flow"]
+contract = "language.bindings.consistent_ownership_outcomes_across_paths"
+role = "boundary"
 
 [[case]]
 id = "branch_reborrow_after_last_use"
@@ -315,6 +315,13 @@ id = "choice_basic_declaration_and_use"
 path = "choice_basic_declaration_and_use"
 tags = ["integration", "language", "choices"]
 role = "smoke"
+
+[[case]]
+id = "choice_qualified_unit_variant_function_template_call"
+path = "choice_qualified_unit_variant_function_template_call"
+tags = ["integration", "language", "choices", "templates", "functions"]
+contract = "language.choices.qualified_unit_variant_in_function_template_call"
+role = "primary"
 
 [[case]]
 id = "choice_payload_record_declaration_success"
@@ -2073,6 +2080,13 @@ contract = "backend.html.collection_mutable_access_lowering"
 role = "backend"
 
 [[case]]
+id = "collection_multiline_inferred_constructor"
+path = "collection_multiline_inferred_constructor"
+tags = ["integration", "collections", "structs", "regression"]
+contract = "language.collections.ordered_runtime_operations"
+role = "boundary"
+
+[[case]]
 id = "fixed_collection_js_runtime_capacity"
 path = "fixed_collection_js_runtime_capacity"
 tags = ["integration", "collections", "js-backend", "fixed-collections"]
@@ -3491,6 +3505,13 @@ contract = "language.bindings.implicit_shared_borrowing_acceptance"
 role = "primary"
 
 [[case]]
+id = "optional_transfer_unused_alias_shared_call"
+path = "optional_transfer_unused_alias_shared_call"
+tags = ["integration", "borrows", "calls"]
+contract = "language.bindings.implicit_shared_borrowing_acceptance"
+role = "boundary"
+
+[[case]]
 id = "implicit_main_call"
 path = "implicit_main_call"
 tags = ["integration", "language", "entry-start"]
@@ -3981,24 +4002,24 @@ contract = "language.maps.remove_returns_owned_value_outlives_mutation"
 role = "primary"
 
 [[case]]
-id = "map_set_immutable_non_copy_value_later_use_rejected"
-path = "map_set_immutable_non_copy_value_later_use_rejected"
-tags = ["integration", "borrows", "diagnostics", "hashmaps"]
-contract = "language.maps.set_rejects_later_use_of_immutable_non_copy_value"
+id = "map_set_immutable_non_copy_value_later_use"
+path = "map_set_immutable_non_copy_value_later_use"
+tags = ["integration", "borrows", "hashmaps"]
+contract = "language.maps.set_stores_immutable_non_copy_value_shared"
 role = "primary"
 
 [[case]]
-id = "map_literal_consumes_inserted_non_copy_value"
-path = "map_literal_consumes_inserted_non_copy_value"
-tags = ["integration", "borrows", "diagnostics", "hashmaps"]
-contract = "language.maps.literal_consumes_inserted_non_copy_value"
+id = "map_literal_stored_non_copy_value_later_use"
+path = "map_literal_stored_non_copy_value_later_use"
+tags = ["integration", "borrows", "hashmaps"]
+contract = "language.maps.literal_stores_non_copy_value_shared"
 role = "primary"
 
 [[case]]
-id = "map_literal_consumes_inserted_non_copy_key"
-path = "map_literal_consumes_inserted_non_copy_key"
-tags = ["integration", "borrows", "diagnostics", "hashmaps"]
-contract = "language.maps.literal_consumes_inserted_non_copy_key"
+id = "map_literal_stored_non_copy_key_later_use"
+path = "map_literal_stored_non_copy_key_later_use"
+tags = ["integration", "borrows", "hashmaps"]
+contract = "language.maps.literal_stores_non_copy_key_shared"
 role = "primary"
 
 [[case]]
@@ -4028,6 +4049,13 @@ path = "literal_match_with_else_success"
 tags = ["integration", "control-flow"]
 contract = "language.patterns.literal_match_with_else_acceptance"
 role = "primary"
+
+[[case]]
+id = "literal_match_negative_literal_arm_boundary"
+path = "literal_match_negative_literal_arm_boundary"
+tags = ["integration", "control-flow", "numeric-literals"]
+contract = "language.patterns.literal_match_with_else_acceptance"
+role = "boundary"
 
 [[case]]
 id = "loop_bare_iteration_bindings"
@@ -4062,6 +4090,27 @@ id = "loop_borrow_independent_roots"
 path = "loop_borrow_independent_roots"
 tags = ["integration","control-flow","borrows","collections"]
 contract = "language.loops.iterable_mutation_exclusivity"
+role = "boundary"
+
+[[case]]
+id = "loop_borrow_template_call_independent_output"
+path = "loop_borrow_template_call_independent_output"
+tags = ["integration", "control-flow", "borrows", "collections", "templates"]
+contract = "language.loops.independent_output_accumulator_with_item_call"
+role = "primary"
+
+[[case]]
+id = "loop_borrow_imported_nominal_template_output"
+path = "loop_borrow_imported_nominal_template_output"
+tags = ["integration", "control-flow", "borrows", "collections", "templates", "imports"]
+contract = "language.loops.independent_output_accumulator_with_item_call"
+role = "boundary"
+
+[[case]]
+id = "loop_borrow_projected_field_template_output"
+path = "loop_borrow_projected_field_template_output"
+tags = ["integration", "control-flow", "borrows", "collections", "templates"]
+contract = "language.loops.independent_output_accumulator_with_item_call"
 role = "boundary"
 
 [[case]]
@@ -6806,6 +6855,13 @@ contract = "language.arithmetic.integer_and_real_division_output_acceptance"
 role = "primary"
 
 [[case]]
+id = "inferred_constant_real_division"
+path = "inferred_constant_real_division"
+tags = ["integration", "language", "constants", "numeric"]
+contract = "language.arithmetic.integer_and_real_division_output_acceptance"
+role = "boundary"
+
+[[case]]
 id = "int_declaration_regular_division_rejected"
 path = "int_declaration_regular_division_rejected"
 tags = ["integration", "diagnostics", "type-coercion"]
@@ -7415,10 +7471,10 @@ contract = "language.bindings.short_circuit_mutable_rhs_runtime_capture_dual_acc
 role = "primary"
 
 [[case]]
-id = "short_circuit_mutable_rhs_no_later_use_inconsistent"
-path = "short_circuit_mutable_rhs_no_later_use_inconsistent"
-tags = ["integration", "control-flow", "borrows", "diagnostics"]
-contract = "language.bindings.short_circuit_mutable_rhs_no_later_use_rejected"
+id = "short_circuit_mutable_rhs_skipped_no_later_use"
+path = "short_circuit_mutable_rhs_skipped_no_later_use"
+tags = ["integration", "control-flow", "borrows"]
+contract = "language.bindings.short_circuit_mutable_rhs_skipped_no_later_use_acceptance"
 role = "primary"
 
 [[case]]

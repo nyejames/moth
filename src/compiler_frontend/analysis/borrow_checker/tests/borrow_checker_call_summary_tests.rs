@@ -3,6 +3,7 @@
 //! WHAT: verifies how call return aliases and host-call access summaries affect borrow facts.
 //! WHY: call boundaries are where alias metadata is easiest to get wrong and hardest to debug.
 
+use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, CallPassingMode,
@@ -33,6 +34,8 @@ use crate::compiler_frontend::external_packages::{
     ExternalFunctionLowerings, ExternalReturnSlot, ExternalSignatureType,
 };
 use crate::compiler_frontend::hir::ids::LocalId;
+use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -615,6 +618,139 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
     );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("optional transfer of an immutable shared parameter should fall back to borrowing");
+}
+
+#[test]
+fn path_dependent_optional_call_records_transfer_or_borrow_without_invalidating_source() {
+    let source = r#"inspect |value String|:
+;
+
+optional_transfer |flag Bool, op_name String|:
+    if flag:
+        inspect(op_name)
+    else
+        inspect(op_name)
+        retained = op_name
+    ;
+    sentinel = 0
+;
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("path-dependent optional transfer should fall back to borrowing");
+
+    let op_name_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.locals.iter())
+        .find(|local| hir.side_table.resolve_local_name(local.id, &string_table) == Some("op_name"))
+        .map(|local| local.id)
+        .expect("should locate the path-dependent parameter");
+
+    assert!(
+        report.analysis.value_facts.values().any(|fact| {
+            fact.optional_transfer == OptionalTransferStatus::Transfer
+                && fact.roots.contains(&op_name_local)
+        }),
+        "the final-use branch should record advisory transfer"
+    );
+    assert!(
+        report.analysis.value_facts.values().any(|fact| {
+            fact.optional_transfer == OptionalTransferStatus::Borrow
+                && fact.roots.contains(&op_name_local)
+        }),
+        "the retaining branch should record a borrow fallback"
+    );
+
+    let sentinel_statement = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(local),
+                    ..
+                } if hir.side_table.resolve_local_name(*local, &string_table) == Some("sentinel")
+            )
+        })
+        .expect("should locate the post-join sentinel assignment");
+    let op_name_snapshot = report
+        .analysis
+        .statement_entry_states
+        .get(&sentinel_statement.id)
+        .and_then(|state| {
+            state
+                .locals
+                .iter()
+                .find(|local| local.local == op_name_local)
+        })
+        .expect("post-join state should include the parameter");
+    assert!(
+        !op_name_snapshot.mode.is_definitely_uninit(),
+        "optional transfer must not make the parameter unavailable at the join"
+    );
+    assert!(
+        op_name_snapshot.mode.contains(LocalMode::SLOT),
+        "post-join source state should retain its initialized slot"
+    );
+}
+
+#[test]
+fn unused_alias_before_final_shared_call_falls_back_to_borrow() {
+    let source = r#"
+inspect |value String|:
+;
+
+check |source String|:
+    alias = source
+    inspect(source)
+;
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("an unused alias must not make a final shared call invalid");
+
+    let source_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.locals.iter())
+        .find(|local| hir.side_table.resolve_local_name(local.id, &string_table) == Some("source"))
+        .map(|local| local.id)
+        .expect("should locate the source parameter");
+    let call_argument = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| {
+            let HirStatementKind::Call { args, .. } = &statement.kind else {
+                return None;
+            };
+            let argument = args.first()?;
+            matches!(
+                &argument.kind,
+                crate::compiler_frontend::hir::expressions::HirExpressionKind::Load(
+                    HirPlace::Local(local)
+                ) if *local == source_local
+            )
+            .then_some(argument.id)
+        })
+        .expect("should locate the final shared call argument");
+
+    assert_eq!(
+        report
+            .analysis
+            .value_fact(call_argument)
+            .expect("the call argument should have a borrow fact")
+            .optional_transfer,
+        OptionalTransferStatus::Borrow,
+        "failed transfer exclusivity must fall back to an ordinary shared borrow"
+    );
 }
 
 #[test]

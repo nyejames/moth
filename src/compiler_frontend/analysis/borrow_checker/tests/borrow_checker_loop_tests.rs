@@ -4,10 +4,15 @@
 //! WHY: linear last-use order must defer to CFG future use for source locals without extending
 //! compiler-temporary aliases beyond their intended expiry.
 
+use crate::compiler_frontend::analysis::borrow_checker::OptionalTransferStatus;
 use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
+use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, run_borrow_checker,
@@ -149,6 +154,124 @@ loop items |item|:
     ;
 ;
 "#,
+    );
+}
+
+#[test]
+fn collection_loop_item_call_borrows_source_while_iterable_carrier_is_live() {
+    let source = r#"
+render_card |card String| -> String:
+    return [: [card]]
+;
+
+render_listing |cards {String}| -> String:
+    output ~= [: <section>]
+    loop cards |card|:
+        output = [: [output][render_card(card)]]
+    ;
+    return [: [output]</section>]
+;
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("an independent output accumulator should not conflict with the iterable");
+
+    let item_argument = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| {
+            let HirStatementKind::Call {
+                target: CallTarget::UserFunction(_),
+                args,
+                ..
+            } = &statement.kind
+            else {
+                return None;
+            };
+            if args.len() != 1 {
+                return None;
+            }
+
+            let HirExpressionKind::Load(HirPlace::Local(local)) = &args[0].kind else {
+                return None;
+            };
+            (hir.side_table.resolve_local_name(*local, &string_table) == Some("card"))
+                .then_some(args[0].id)
+        })
+        .expect("should locate the collection item passed to the user call");
+
+    assert_eq!(
+        report
+            .analysis
+            .value_fact(item_argument)
+            .expect("collection item call argument should have a borrow fact")
+            .optional_transfer,
+        OptionalTransferStatus::Borrow,
+        "the source item must remain borrowed while the hidden iterable carrier has future uses"
+    );
+}
+
+#[test]
+fn projected_collection_loop_item_call_borrows_source_while_carrier_is_live() {
+    let source = r#"
+Listing = |
+    cards {String},
+|
+
+render_card |card String| -> String:
+    return [: [card]]
+;
+
+render_listing |listing Listing| -> String:
+    output ~= [: <section>]
+    loop listing.cards |card|:
+        output = [: [output][render_card(card)]]
+    ;
+    return [: [output]</section>]
+;
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("a projected collection source should keep its carrier root live");
+
+    let item_argument = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| {
+            let HirStatementKind::Call {
+                target: CallTarget::UserFunction(_),
+                args,
+                ..
+            } = &statement.kind
+            else {
+                return None;
+            };
+            if args.len() != 1 {
+                return None;
+            }
+
+            let HirExpressionKind::Load(HirPlace::Local(local)) = &args[0].kind else {
+                return None;
+            };
+            (hir.side_table.resolve_local_name(*local, &string_table) == Some("card"))
+                .then_some(args[0].id)
+        })
+        .expect("should locate the projected collection item passed to the user call");
+
+    assert_eq!(
+        report
+            .analysis
+            .value_fact(item_argument)
+            .expect("projected collection item call should have a borrow fact")
+            .optional_transfer,
+        OptionalTransferStatus::Borrow,
+        "the projected source must remain borrowed while the hidden carrier has future uses"
     );
 }
 

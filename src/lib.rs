@@ -31,6 +31,7 @@ mod backends {
 pub mod projects {
     pub mod check;
     pub mod cli;
+    pub(crate) mod command_status;
     pub mod dev_server;
     pub(crate) mod html_project;
     // Kept intentionally in pre-alpha as the future CLI entrypoint for interactive

@@ -93,7 +93,6 @@ impl DiagnosticPayload {
             }
 
             DiagnosticPayload::BorrowConflict { place, .. }
-            | DiagnosticPayload::InvalidAccessAfterPossibleOwnershipTransfer { place }
             | DiagnosticPayload::UseOfUninitializedLocal { place } => {
                 remap_single_place_borrow_payload(place, remap);
             }

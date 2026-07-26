@@ -1,0 +1,16 @@
+render_card |card String| -> String:
+    return [: [card]]
+;
+
+render_listing |cards {String}| -> String:
+    output ~= [: <section>]
+    loop cards |card|:
+        output = [: [output][render_card(card)]]
+    ;
+    return [: [output]</section>]
+;
+
+cards = {"one", "two"}
+rendered = render_listing(cards)
+
+[:loop_borrow_template_call_independent_output [rendered]]

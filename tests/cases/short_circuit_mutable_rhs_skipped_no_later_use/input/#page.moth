@@ -1,0 +1,11 @@
+-- A skipped mutable RHS with no later use remains a legal positive path.
+
+rhs_skipped |calls ~Int| -> Bool:
+    calls = calls + 1
+    return true
+;
+
+lhs = false
+calls ~= 0
+value = lhs and rhs_skipped(~calls)
+[:short_circuit_mutable_rhs_skipped_no_later_use value=[value] calls=[calls]]

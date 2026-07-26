@@ -412,7 +412,9 @@ impl<'hir> JsEmitter<'hir> {
         for (destination_local, captured_name) in destination_locals.iter().zip(captured_values) {
             let destination_name = self.local_name(*destination_local)?.to_owned();
             if self.local_is_alias_only_at_block_entry(target, *destination_local) {
-                self.emit_line(&format!("__moth_write({destination_name}, {captured_name});"));
+                self.emit_line(&format!(
+                    "__moth_write({destination_name}, {captured_name});"
+                ));
             } else {
                 self.emit_line(&format!(
                     "__moth_assign_value({destination_name}, {captured_name});"

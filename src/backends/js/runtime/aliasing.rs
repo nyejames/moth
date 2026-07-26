@@ -20,7 +20,8 @@ impl<'hir> JsEmitter<'hir> {
             // If the binding is already an alias, write through to the existing target rather
             // than rebinding — this preserves the observable aliasing contract.
             emitter.emit_line("if (binding.__moth_mode === \"alias\") {");
-            emitter.with_indent(|em| em.emit_line("return __moth_write(binding, __moth_read(ref));"));
+            emitter
+                .with_indent(|em| em.emit_line("return __moth_write(binding, __moth_read(ref));"));
             emitter.emit_line("}");
             emitter.emit_line("binding.__moth_mode = \"alias\";");
             emitter.emit_line("binding.__moth_target = ref;");

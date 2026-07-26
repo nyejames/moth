@@ -13,6 +13,7 @@ use crate::compiler_frontend::keywords::{
     attached_bang_keyword_token_kind, is_identifier_continue, is_valid_identifier,
     keyword_token_kind,
 };
+use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::paths::const_paths::parse_file_path;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -32,6 +33,8 @@ use crate::compiler_frontend::tokenizer::tokens::{
 use crate::compiler_frontend::utilities::basic::CharacterParsing;
 use crate::projects::settings;
 use crate::token_log;
+use std::iter::Peekable;
+use std::str::Chars;
 
 pub const END_SCOPE_CHAR: char = ';';
 
@@ -84,6 +87,267 @@ fn next_char_is_whitespace_or_end(stream: &mut TokenStream<'_>) -> bool {
 
 fn next_char_is_missing_rhs_boundary(stream: &mut TokenStream<'_>) -> bool {
     character_is_missing_rhs_boundary(stream.peek().copied())
+}
+
+/// Returns whether the current position begins a line-initial match-arm header.
+///
+/// WHAT: identifies the one lexical boundary where a leading `-` must not inherit
+///       expression-ending context from the preceding line.
+/// WHY: the AST match parser owns arm recognition after tokenization, but signed
+///      numeric tokenization must decide before that parser can see the `=>`.
+fn line_initial_match_arm_header(
+    stream: &mut TokenStream<'_>,
+    context: LexerTokenContext<'_>,
+) -> bool {
+    if !matches!(context.previous_token_kind, Some(TokenKind::Newline)) {
+        return false;
+    }
+
+    let mut remaining_line = stream.chars.clone();
+    let Some(numeric_text) = consume_match_arm_numeric_candidate(&mut remaining_line) else {
+        return false;
+    };
+
+    if parse_numeric_literal(&numeric_text).is_err() {
+        return false;
+    }
+
+    let had_whitespace_after_literal = consume_line_horizontal_whitespace(&mut remaining_line);
+    if consume_fat_arrow(&mut remaining_line) {
+        return true;
+    }
+
+    if !had_whitespace_after_literal || !consume_match_guard_keyword(&mut remaining_line) {
+        return false;
+    }
+
+    consume_line_horizontal_whitespace(&mut remaining_line);
+    consume_match_guard_newlines(&mut remaining_line);
+    line_contains_match_arm_arrow(&mut remaining_line)
+}
+
+/// Consume the narrow numeric candidate that can follow a signed match-pattern `-`.
+///
+/// WHAT: collects only characters that can belong to a numeric literal, then lets the shared
+///       numeric grammar validate the complete candidate.
+/// WHY: the arm-boundary lookahead must not duplicate numeric separator or exponent rules.
+fn consume_match_arm_numeric_candidate(chars: &mut Peekable<Chars<'_>>) -> Option<String> {
+    let mut numeric_text = String::new();
+
+    while let Some(&character) = chars.peek() {
+        if !matches!(character, '0'..='9' | '_' | '.' | 'e' | 'E' | '+' | '-') {
+            break;
+        }
+
+        numeric_text.push(chars.next()?);
+    }
+
+    numeric_text
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_digit())
+        .then_some(numeric_text)
+}
+
+fn consume_line_horizontal_whitespace(chars: &mut Peekable<Chars<'_>>) -> bool {
+    let mut consumed = false;
+
+    while let Some(&character) = chars.peek() {
+        if matches!(character, '\n' | '\r') || !character.is_whitespace() {
+            break;
+        }
+
+        chars.next();
+        consumed = true;
+    }
+
+    consumed
+}
+
+fn consume_fat_arrow(chars: &mut Peekable<Chars<'_>>) -> bool {
+    if chars.peek() != Some(&'=') {
+        return false;
+    }
+
+    chars.next();
+    if chars.peek() != Some(&'>') {
+        return false;
+    }
+
+    chars.next();
+    true
+}
+
+fn consume_match_guard_keyword(chars: &mut Peekable<Chars<'_>>) -> bool {
+    let mut candidate = chars.clone();
+    for expected in "if".chars() {
+        if candidate.next() != Some(expected) {
+            return false;
+        }
+    }
+
+    if candidate
+        .peek()
+        .is_some_and(|character| is_identifier_continue(*character))
+    {
+        return false;
+    }
+
+    *chars = candidate;
+    true
+}
+
+fn consume_match_guard_newlines(chars: &mut Peekable<Chars<'_>>) {
+    loop {
+        consume_line_horizontal_whitespace(chars);
+
+        if consume_match_guard_comment(chars) {
+            if !consume_line_break(chars) {
+                break;
+            }
+            continue;
+        }
+
+        if !consume_line_break(chars) {
+            break;
+        }
+    }
+}
+
+fn consume_match_guard_comment(chars: &mut Peekable<Chars<'_>>) -> bool {
+    let mut comment_start = chars.clone();
+    if comment_start.next() != Some('-') || comment_start.next() != Some('-') {
+        return false;
+    }
+
+    chars.next();
+    chars.next();
+    while chars
+        .peek()
+        .is_some_and(|character| !matches!(character, '\n' | '\r'))
+    {
+        chars.next();
+    }
+    true
+}
+
+fn consume_line_break(chars: &mut Peekable<Chars<'_>>) -> bool {
+    match chars.peek().copied() {
+        Some('\n') => {
+            chars.next();
+            true
+        }
+        Some('\r') => {
+            chars.next();
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+#[derive(Default)]
+struct MatchGuardNesting {
+    parentheses: usize,
+    curly: usize,
+    square: usize,
+}
+
+impl MatchGuardNesting {
+    fn is_top_level(&self) -> bool {
+        self.parentheses == 0 && self.curly == 0 && self.square == 0
+    }
+
+    fn step(&mut self, character: char) {
+        match character {
+            '(' => self.parentheses += 1,
+            ')' => self.parentheses = self.parentheses.saturating_sub(1),
+            '{' => self.curly += 1,
+            '}' => self.curly = self.curly.saturating_sub(1),
+            '[' => self.square += 1,
+            ']' => self.square = self.square.saturating_sub(1),
+            _ => {}
+        }
+    }
+}
+
+fn line_contains_match_arm_arrow(chars: &mut Peekable<Chars<'_>>) -> bool {
+    let mut guard_has_content = false;
+    let mut nesting = MatchGuardNesting::default();
+
+    while let Some(&character) = chars.peek() {
+        if matches!(character, '\n' | '\r') {
+            return false;
+        }
+
+        if character == ';' {
+            return false;
+        }
+
+        if character == '-' {
+            let mut comment_start = chars.clone();
+            comment_start.next();
+            if comment_start.peek() == Some(&'-') {
+                return false;
+            }
+        }
+
+        if matches!(character, '"' | '`') {
+            guard_has_content = true;
+            if !consume_match_guard_string(chars, character) {
+                return false;
+            }
+            continue;
+        }
+
+        if character == '=' {
+            let mut possible_arrow = chars.clone();
+            if nesting.is_top_level() && consume_fat_arrow(&mut possible_arrow) {
+                return guard_has_content;
+            }
+
+            guard_has_content = true;
+            chars.next();
+            continue;
+        }
+
+        if !character.is_whitespace() {
+            guard_has_content = true;
+        }
+        nesting.step(character);
+        chars.next();
+    }
+
+    false
+}
+
+fn consume_match_guard_string(chars: &mut Peekable<Chars<'_>>, delimiter: char) -> bool {
+    chars.next();
+    let mut escaped = false;
+
+    for character in chars.by_ref() {
+        if matches!(character, '\n' | '\r') {
+            return false;
+        }
+
+        if delimiter == '"' && escaped {
+            escaped = false;
+            continue;
+        }
+
+        if delimiter == '"' && character == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if character == delimiter {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn character_is_missing_rhs_boundary(character: Option<char>) -> bool {
@@ -468,16 +732,16 @@ fn get_token_kind(
 
         // Colon handling: StartTemplateBody (:) vs DoubleColon (::) vs Colon (:)
         if current_char == ':' {
-            if stream.mode == TokenizeMode::TemplateHead {
-                stream.set_current_template_mode(TokenizeMode::TemplateBody);
-                return_token!(TokenKind::StartTemplateBody, stream);
-            }
-
             if let Some(&next_char) = stream.peek()
                 && next_char == ':'
             {
                 stream.next();
                 return_token!(TokenKind::DoubleColon, stream);
+            }
+
+            if stream.mode == TokenizeMode::TemplateHead {
+                stream.set_current_template_mode(TokenizeMode::TemplateBody);
+                return_token!(TokenKind::StartTemplateBody, stream);
             }
 
             return_token!(TokenKind::Colon, stream);
@@ -652,7 +916,9 @@ fn get_token_kind(
             }
 
             if next_char.is_numeric() {
-                if context.previous_can_end_expression() {
+                if context.previous_can_end_expression()
+                    && !line_initial_match_arm_header(stream, context)
+                {
                     require_symbolic_spacing(
                         stream,
                         context,

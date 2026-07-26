@@ -13,7 +13,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::hir_side_table::HirLocation;
+use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
@@ -1281,6 +1281,18 @@ impl<'a> BorrowChecker<'a> {
             local_index_by_id.insert(*local_id, index);
         }
 
+        // HIR loop lowering materialises an iterable into a compiler temporary so the loop can
+        // reuse one stable place across its header and backedge. Future-use analysis works on
+        // local IDs, so carry uses of those direct alias carriers back to their source roots.
+        // Without this bridge, an item read can look like the final use of the source collection
+        // even though the hidden iterable carrier still reads it on the next iteration.
+        let compiler_alias_source_roots_by_local = self.compiler_alias_source_roots(
+            function,
+            reachable_blocks,
+            &local_index_by_id,
+            local_ids.len(),
+        )?;
+
         let reachable_block_set = reachable_blocks.iter().copied().collect::<FxHashSet<_>>();
         let mut local_first_write_order = vec![-1; local_ids.len()];
         let mut local_last_use_order = vec![-1; local_ids.len()];
@@ -1318,6 +1330,21 @@ impl<'a> BorrowChecker<'a> {
                         max_use_order[index] = max_use_order[index].max(order_key);
                     }
                 });
+            }
+
+            for (target_index, source_roots) in
+                compiler_alias_source_roots_by_local.iter().enumerate()
+            {
+                let target_use_order = max_use_order[target_index];
+                if target_use_order < 0 {
+                    continue;
+                }
+
+                for source_index in source_roots.iter_ones() {
+                    local_last_use_order[source_index] =
+                        local_last_use_order[source_index].max(target_use_order);
+                    max_use_order[source_index] = max_use_order[source_index].max(target_use_order);
+                }
             }
 
             // WHAT: terminators also participate in future-use classification.
@@ -1363,6 +1390,75 @@ impl<'a> BorrowChecker<'a> {
             may_use_from_block,
             must_use_from_block,
         }))
+    }
+
+    fn compiler_alias_source_roots(
+        &self,
+        function: &HirFunction,
+        reachable_blocks: &[BlockId],
+        local_index_by_id: &FxHashMap<LocalId, usize>,
+        local_count: usize,
+    ) -> Result<Vec<RootSet>, BorrowCheckError> {
+        let mut source_roots_by_local = (0..local_count)
+            .map(|_| RootSet::empty(local_count))
+            .collect::<Vec<_>>();
+
+        for block_id in reachable_blocks {
+            let block = self.block_by_id_or_error(*block_id, function.id)?;
+            for statement in &block.statements {
+                let HirStatementKind::Assign {
+                    target: HirPlace::Local(target_local),
+                    value,
+                } = &statement.kind
+                else {
+                    continue;
+                };
+
+                if self.module.side_table.local_origin_kind(*target_local)
+                    != Some(HirLocalOriginKind::CompilerTemp)
+                {
+                    continue;
+                }
+
+                let HirExpressionKind::Load(place) = &value.kind else {
+                    continue;
+                };
+                let Some(source_local) = root_local_for_place(place) else {
+                    continue;
+                };
+
+                let Some(target_index) = local_index_by_id.get(target_local).copied() else {
+                    continue;
+                };
+                let Some(source_index) = local_index_by_id.get(&source_local).copied() else {
+                    continue;
+                };
+                source_roots_by_local[target_index].insert(source_index);
+            }
+        }
+
+        // Compiler temporaries can be assigned from another direct alias carrier. Close that tiny
+        // relation once so future-use propagation reaches the original source root without adding a
+        // second runtime alias-analysis path.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for target_index in 0..local_count {
+                let direct_sources = source_roots_by_local[target_index].clone();
+                let mut closed_sources = direct_sources.clone();
+
+                for source_index in direct_sources.iter_ones() {
+                    closed_sources.union_with(&source_roots_by_local[source_index]);
+                }
+
+                if closed_sources != source_roots_by_local[target_index] {
+                    source_roots_by_local[target_index] = closed_sources;
+                    changed = true;
+                }
+            }
+        }
+
+        Ok(source_roots_by_local)
     }
 
     pub(super) fn build_visibility_masks(
