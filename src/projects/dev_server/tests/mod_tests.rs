@@ -98,7 +98,7 @@ fn entry_path_validation_accepts_moth_files() {
         file.to_str()
             .expect("temp path should be valid utf-8 for this test"),
     )
-    .expect("valid bst path should pass validation");
+    .expect("valid moth path should pass validation");
 
     assert!(validated.ends_with("main.moth"));
     fs::remove_dir_all(&root).expect("should clean up temp dir");

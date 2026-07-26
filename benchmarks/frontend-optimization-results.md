@@ -237,7 +237,7 @@ the committed `.moth`/`.js` files are the canonical benchmark inputs.
 - `just bench-check`: passed at `2026-06-18T18:16`, expanding the end-to-end suite to `25` cases.
   The expected case-set change showed `avg +2ms` on the `16/25` shared cases, with stage movement
   `ast -23ms`, `ast env -10ms`, and `file prep +10ms`.
-- `just profile-case check_benchmarks_adversarial_one-module-kitchen-sink_bst terse`: the first
+- `just profile-case check_benchmarks_adversarial_one-module-kitchen-sink_moth terse`: the first
   sandboxed run reached Samply but failed with `Unknown(1100)`. Rerunning the same command with
   approved escalation passed and wrote local-only artifacts under
   `benchmarks/local-data/profiles/2026-06-18T18-22-55-d82ffd27/`.
@@ -432,11 +432,11 @@ fixtures, so Phase 5 should tune formulas before using them as arena capacity se
 
 Targeted profile artifacts are local-only:
 
-- `just profile-case check_benchmarks_environment-stress_bst terse`:
+- `just profile-case check_benchmarks_environment-stress_moth terse`:
   `benchmarks/local-data/profiles/2026-06-18T20-12-00-d0b0e10e/`.
-- `just profile-case check_benchmarks_adversarial_deep-scope-churn_bst terse`:
+- `just profile-case check_benchmarks_adversarial_deep-scope-churn_moth terse`:
   `benchmarks/local-data/profiles/2026-06-18T20-12-08-d0b0e10e/`.
-- `just profile-case check_benchmarks_adversarial_one-module-kitchen-sink_bst terse`:
+- `just profile-case check_benchmarks_adversarial_one-module-kitchen-sink_moth terse`:
   `benchmarks/local-data/profiles/2026-06-18T20-12-15-d0b0e10e/`.
 
 The profiles captured low sample counts and still reported raw addresses rather than useful
@@ -531,9 +531,9 @@ appears isolated to the nested worker environment rather than the benchmark fixt
 
 Targeted profile artifacts are local-only:
 
-- `just profile-case check_benchmarks_adversarial_expression-rpn-churn_bst terse`:
+- `just profile-case check_benchmarks_adversarial_expression-rpn-churn_moth terse`:
   `benchmarks/local-data/profiles/2026-06-18T22-00-34-67a55dd5/`.
-- `just profile-case check_benchmarks_adversarial_template-render-plan-churn_bst terse`:
+- `just profile-case check_benchmarks_adversarial_template-render-plan-churn_moth terse`:
   `benchmarks/local-data/profiles/2026-06-18T22-00-43-67a55dd5/`.
 - `just profile-case check_docs terse`:
   `benchmarks/local-data/profiles/2026-06-18T22-00-52-67a55dd5/`.

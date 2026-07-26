@@ -215,7 +215,7 @@ pub enum InvalidConfigReason {
         candidates: Vec<StringId>,
     },
     ConfigImportRootViolation,
-    BstFileFolderCollision {
+    MothFileFolderCollision {
         file_name: StringId,
         folder_name: StringId,
         directory: StringId,
@@ -335,7 +335,7 @@ impl InvalidConfigReason {
                 }
             }
 
-            Self::BstFileFolderCollision {
+            Self::MothFileFolderCollision {
                 file_name,
                 folder_name,
                 directory,

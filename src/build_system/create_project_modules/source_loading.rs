@@ -98,7 +98,7 @@ pub(crate) fn source_read_error(
     CompilerError::new_file_error(
         file_path,
         format!(
-            "Error reading file when adding new bst files to parse: {:?}",
+            "Error reading file when adding new moth files to parse: {:?}",
             error
         ),
         {

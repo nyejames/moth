@@ -482,7 +482,7 @@ pub(crate) fn resolve_namespace_target(
 /// True when any component of the import path ends with `.moth`.
 ///
 /// WHAT: Moth imports must not include the `.moth` extension. This helper detects
-/// explicit `.moth` usage so callers can emit `ExplicitBstExtension`.
+/// explicit `.moth` usage so callers can emit `ExplicitMothExtension`.
 pub(crate) fn has_explicit_moth_extension(path: &InternedPath, string_table: &StringTable) -> bool {
     path.as_components()
         .iter()

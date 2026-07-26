@@ -85,7 +85,7 @@ Moth template `.mtf` and Markdown `.md` files do not invent forever-parallel com
 
 Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: `#page.moth` remains the star, and document kinds prove the "one semantic pipeline" bet.
 
-**Diagram placeholder:** bst, mtf and md reach one ordinary semantic path
+**Diagram placeholder:** moth, mtf and md reach one ordinary semantic path
 
 *Caption: simplified source-kind map.*
 *Question: how does document content enter the compiler without a second IR forever?*

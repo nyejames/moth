@@ -120,7 +120,7 @@ Publish Moth standard library interfaces (and later stdlib components) under a s
 Treat Warg as a future-facing registry protocol option rather than a dependency today. Warg is explicitly described as “in development” and “component model oriented”, aiming to provide canonical names/versions with a transparency-style security model. citeturn10search7
 
 For composition, bring in build-time composition tooling (so a Moth application can be assembled from component libraries). The `wac` CLI is positioned as a “composition tool” that can plug components together, and it can even reference packages from registries in simple operations. citeturn2search12  
-This allows Moth to avoid reinventing a component linker while still offering a cohesive `bst build` experience.
+This allows Moth to avoid reinventing a component linker while still offering a cohesive `moth build` experience.
 
 ## Long-term: full utilisation as the component model and WASI mature
 

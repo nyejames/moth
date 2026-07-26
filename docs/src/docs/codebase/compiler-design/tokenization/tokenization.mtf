@@ -86,7 +86,7 @@ Those paths converge. Moth template preparation synthesises an ordinary private 
 
 The greeting project uses `.moth` files. Document kinds still matter because the same compiler owners serve docs sites and content imports without a second semantic pipeline.
 
-**Diagram placeholder:** bst, mtf and md use different entry preparation then converge
+**Diagram placeholder:** moth, mtf and md use different entry preparation then converge
 
 *Caption: teaching simplification.*
 *Question: why avoid duplicate pipelines for documents and code?*

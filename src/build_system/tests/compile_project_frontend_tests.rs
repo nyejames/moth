@@ -1499,12 +1499,12 @@ fn single_file_rejects_source_package_moth_folder_collision() {
             matches!(
                 &diagnostic.payload,
                 DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::BstFileFolderCollision { .. },
+                    reason: InvalidConfigReason::MothFileFolderCollision { .. },
                     ..
                 }
             )
         }),
-        "expected BstFileFolderCollision diagnostic, got {messages:?}"
+        "expected MothFileFolderCollision diagnostic, got {messages:?}"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");

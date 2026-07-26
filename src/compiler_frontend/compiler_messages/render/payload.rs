@@ -139,7 +139,7 @@ fn render_payload_message(
         | DiagnosticPayload::DirectSymbolPathImport { .. }
         | DiagnosticPayload::InvalidNamespaceDefaultName { .. }
         | DiagnosticPayload::DuplicateImportSurfaceMember { .. }
-        | DiagnosticPayload::ExplicitBstExtension { .. }
+        | DiagnosticPayload::ExplicitMothExtension { .. }
         | DiagnosticPayload::ExplicitSourceExtension { .. }
         | DiagnosticPayload::UnsupportedSourceFileKind { .. }
         | DiagnosticPayload::InvalidSourceFileEntry { .. }
@@ -180,7 +180,7 @@ fn render_payload_message(
             format!("Unused name '{}'", string_table.resolve(*name))
         }
         DiagnosticPayload::UnreachableMatchArm => "Unreachable match arm".to_owned(),
-        DiagnosticPayload::BstFilePathInTemplateOutput { path } => format!(
+        DiagnosticPayload::MothFilePathInTemplateOutput { path } => format!(
             "Moth source path '{}' is being inserted into template output",
             string_table.resolve(*path)
         ),
@@ -841,7 +841,7 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
             surface_path,
             member_name,
         } => duplicate_import_surface_member_message(surface_path, *member_name, string_table),
-        DiagnosticPayload::ExplicitBstExtension { path } => {
+        DiagnosticPayload::ExplicitMothExtension { path } => {
             explicit_moth_extension_message(path, string_table)
         }
         DiagnosticPayload::ExplicitSourceExtension { path, extension } => {

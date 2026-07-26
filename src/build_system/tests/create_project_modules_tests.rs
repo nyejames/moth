@@ -499,7 +499,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
 
     assert!(matches!(
         first_invalid_config_reason(&messages),
-        InvalidConfigReason::BstFileFolderCollision { .. }
+        InvalidConfigReason::MothFileFolderCollision { .. }
     ));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -569,7 +569,7 @@ fn bounded_module_roots_for_single_file_rejects_import_name_collisions() {
 
     assert!(matches!(
         first_invalid_config_reason(&messages),
-        InvalidConfigReason::BstFileFolderCollision { .. }
+        InvalidConfigReason::MothFileFolderCollision { .. }
     ));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -2824,7 +2824,7 @@ fn rejects_moth_file_and_folder_collision_in_same_directory() {
     assert_has_config_error(&messages);
     assert!(matches!(
         first_invalid_config_reason(&messages),
-        InvalidConfigReason::BstFileFolderCollision { .. }
+        InvalidConfigReason::MothFileFolderCollision { .. }
     ));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -2894,7 +2894,7 @@ fn rejects_collision_with_empty_folder() {
     assert_has_config_error(&messages);
     assert!(matches!(
         first_invalid_config_reason(&messages),
-        InvalidConfigReason::BstFileFolderCollision { .. }
+        InvalidConfigReason::MothFileFolderCollision { .. }
     ));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -2969,7 +2969,7 @@ fn rejects_moth_file_and_folder_collision_in_source_package() {
     assert_has_config_error(&messages);
     assert!(matches!(
         first_invalid_config_reason(&messages),
-        InvalidConfigReason::BstFileFolderCollision { .. }
+        InvalidConfigReason::MothFileFolderCollision { .. }
     ));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -3081,7 +3081,7 @@ fn explicit_moth_extension_still_reports_moth_import_0020() {
     assert!(
         matches!(
             &diagnostic.payload,
-            DiagnosticPayload::ExplicitBstExtension { .. }
+            DiagnosticPayload::ExplicitMothExtension { .. }
         ),
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
@@ -3879,7 +3879,7 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
         .first_infrastructure_error_for_tests()
         .expect("expected infrastructure file error");
     assert!(
-        message.contains("Error reading file when adding new bst files to parse"),
+        message.contains("Error reading file when adding new moth files to parse"),
         "unexpected infrastructure message: {message}"
     );
     assert!(

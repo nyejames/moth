@@ -281,7 +281,7 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Unused function parameter default value",
             DiagnosticSeverity::Warning,
         ),
-        RuleDiagnosticKind::BstFilePathInTemplateOutput => DiagnosticDescriptor::new(
+        RuleDiagnosticKind::MothFilePathInTemplateOutput => DiagnosticDescriptor::new(
             "MOTH-RULE-0019",
             "Moth source path in template output",
             DiagnosticSeverity::Warning,
@@ -671,7 +671,7 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
             "Duplicate import surface member",
             DiagnosticSeverity::Error,
         ),
-        ImportDiagnosticKind::ExplicitBstExtension => DiagnosticDescriptor::new(
+        ImportDiagnosticKind::ExplicitMothExtension => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0020",
             "Explicit .moth extension in import",
             DiagnosticSeverity::Error,

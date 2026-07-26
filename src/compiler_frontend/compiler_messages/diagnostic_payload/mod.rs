@@ -124,7 +124,7 @@ pub enum DiagnosticPayload {
         member_name: StringId,
     },
 
-    ExplicitBstExtension {
+    ExplicitMothExtension {
         path: InternedPath,
     },
 
@@ -244,7 +244,7 @@ pub enum DiagnosticPayload {
 
     UnreachableMatchArm,
 
-    BstFilePathInTemplateOutput {
+    MothFilePathInTemplateOutput {
         path: StringId,
     },
 

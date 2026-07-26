@@ -30,7 +30,7 @@ impl DiagnosticPayload {
 
             DiagnosticPayload::UnknownName { name, .. }
             | DiagnosticPayload::UnusedName { name }
-            | DiagnosticPayload::BstFilePathInTemplateOutput { path: name }
+            | DiagnosticPayload::MothFilePathInTemplateOutput { path: name }
             | DiagnosticPayload::LargeTrackedAsset { path: name, .. }
             | DiagnosticPayload::IdentifierNamingConvention { name, .. }
             | DiagnosticPayload::MalformedTemplate { message: name } => {
@@ -556,7 +556,7 @@ impl DiagnosticPayload {
 
             DiagnosticPayload::DirectSymbolPathImport { path }
             | DiagnosticPayload::InvalidNamespaceDefaultName { path }
-            | DiagnosticPayload::ExplicitBstExtension { path } => {
+            | DiagnosticPayload::ExplicitMothExtension { path } => {
                 path.remap_string_ids(remap);
             }
 

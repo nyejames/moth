@@ -295,9 +295,9 @@ impl CompilerDiagnostic {
 
     pub(crate) fn explicit_moth_extension(path: InternedPath, location: SourceLocation) -> Self {
         Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::ExplicitBstExtension),
+            DiagnosticKind::Import(ImportDiagnosticKind::ExplicitMothExtension),
             location,
-            DiagnosticPayload::ExplicitBstExtension { path },
+            DiagnosticPayload::ExplicitMothExtension { path },
         )
     }
 
@@ -729,10 +729,10 @@ impl CompilerDiagnostic {
         location: SourceLocation,
     ) -> Self {
         Self::with_severity(
-            DiagnosticKind::Rule(RuleDiagnosticKind::BstFilePathInTemplateOutput),
+            DiagnosticKind::Rule(RuleDiagnosticKind::MothFilePathInTemplateOutput),
             DiagnosticSeverity::Warning,
             location,
-            DiagnosticPayload::BstFilePathInTemplateOutput { path },
+            DiagnosticPayload::MothFilePathInTemplateOutput { path },
         )
     }
 

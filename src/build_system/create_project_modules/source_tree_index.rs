@@ -406,7 +406,7 @@ impl SourceTreeIndex {
                 if importable_folder_names.contains(stem) {
                     return Err(project_structure_messages(
                         &directory,
-                        InvalidConfigReason::BstFileFolderCollision {
+                        InvalidConfigReason::MothFileFolderCollision {
                             file_name: string_table.intern(&format!("{stem}.moth")),
                             folder_name: string_table.intern(stem),
                             directory: path_id(&directory, string_table),

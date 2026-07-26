@@ -116,7 +116,7 @@ fn validate_directory_tree_collisions(
 
                 return Err(project_structure_messages(
                     &directory,
-                    InvalidConfigReason::BstFileFolderCollision {
+                    InvalidConfigReason::MothFileFolderCollision {
                         file_name: file_name_id,
                         folder_name: folder_name_id,
                         directory: path_id(&directory, string_table),

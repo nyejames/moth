@@ -205,7 +205,7 @@ pub(crate) fn invalid_config_message(
                 candidates,
             )
         }
-        InvalidConfigReason::BstFileFolderCollision {
+        InvalidConfigReason::MothFileFolderCollision {
             file_name,
             folder_name,
             directory,
