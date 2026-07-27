@@ -1,7 +1,9 @@
-import @./impl { Label, make_label_impl }
+import @impl { Label, make_label_impl }
 
 export:
-    import @./impl { Label }
+    import @impl { Label }
+
+    import @traits { DISPLAY_TEXT }
 
     PublicLabel as Label
 

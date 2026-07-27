@@ -64,7 +64,7 @@ impl<'a> HirBuilder<'a> {
         let call_statement = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(id),
+                target: CallTarget::External(id),
                 args: lowered_args,
                 result: Some(result_local),
             },
@@ -97,7 +97,7 @@ impl<'a> HirBuilder<'a> {
         full_args.extend(args.iter().cloned());
 
         self.lower_call_expression(
-            CallTarget::UserFunction(function_id),
+            CallTarget::Local(function_id),
             &full_args,
             result_type_ids,
             location,
@@ -130,7 +130,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.lower_call_expression(
-            CallTarget::ExternalFunction(id),
+            CallTarget::External(id),
             &full_args,
             result_type_ids,
             location,
@@ -231,7 +231,7 @@ impl<'a> HirBuilder<'a> {
         let mut lowered_args = Vec::with_capacity(args.len());
 
         let result_carrying_user_call = match &target {
-            CallTarget::UserFunction(function_id) => {
+            CallTarget::Local(function_id) => {
                 // Some unit tests lower isolated call expressions without registering a full
                 // function table in the module; in that mode we treat calls as plain values.
                 self.function_index_by_id
@@ -249,7 +249,7 @@ impl<'a> HirBuilder<'a> {
                         }
                     })
             }
-            CallTarget::ExternalFunction(_) => None,
+            CallTarget::CrossModule(_) | CallTarget::External(_) => None,
         };
 
         if result_carrying_user_call.is_some() {

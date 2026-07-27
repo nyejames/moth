@@ -90,6 +90,7 @@ fn compile_one_source(
         prepared_syntax,
         compiler.external_package_registry.as_ref(),
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         compiler.project_path_resolver.as_ref(),
         &mut compiler.string_table,
     )
@@ -98,12 +99,17 @@ fn compile_one_source(
     })?;
 
     let sorted = sort_headers(&mut compiler, headers)?;
-    let ast = compiler.headers_to_ast(
-        sorted,
-        &source.source_path,
-        FrontendBuildProfile::Dev,
-        Default::default(),
-    )?;
+    // Direct Moth-template compilation stops at folded AST data, so the projection side
+    // results are discarded by selecting only the executable `Ast`.
+    let ast = compiler
+        .headers_to_ast(
+            sorted,
+            &source.source_path,
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+            FrontendBuildProfile::Dev,
+            Default::default(),
+        )?
+        .ast;
     warnings.extend(ast.warnings.clone());
 
     let content = extract_content_string(&ast.module_constants, &compiler.string_table)?;
@@ -163,6 +169,7 @@ fn prepare_source_file(
             .get_by_canonical_path(&source.source_path)
             .map(|identity| identity.file_id),
         project_path_resolver: compiler.project_path_resolver.clone(),
+        active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
     let context = FrontendFilePrepareContext {
         source_files: &compiler.source_files,

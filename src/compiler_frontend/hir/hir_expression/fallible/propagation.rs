@@ -154,9 +154,9 @@ impl<'a> HirBuilder<'a> {
                 result_type_ids,
                 handling: FallibleExpressionHandling::Propagate,
             } => {
-                let function_id = self.resolve_function_id_or_error(name, location)?;
+                let target = self.resolve_call_target_or_error(name, location)?;
                 let carrier = self.emit_result_call_carrier_to_current_block(
-                    CallTarget::UserFunction(function_id),
+                    target,
                     args,
                     result_type_ids,
                     location,

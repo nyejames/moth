@@ -74,7 +74,10 @@ fn scoped_block_lowers_through_child_region_and_rejoins_parent() {
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
     assert_no_placeholder_terminators(&module);
 
-    let start_function = &module.functions[module.start_function.0 as usize];
+    let start_function = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let parent_region = module.blocks[start_function.entry.0 as usize].region;
     let inner_local = local_by_name(&module, &string_table, "inner");
     let after_local = local_by_name(&module, &string_table, "after");

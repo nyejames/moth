@@ -32,9 +32,15 @@ pub(crate) struct FunctionOriginSeed {
 }
 
 /// Provider-independent stable-origin lookup retained only during one HIR lowering.
+///
+/// WHAT: maps exact declaration paths to stable origins and tracks which seeds a lowered
+/// function consumed. The lookup is dropped before the completed HIR artefact boundary.
+/// WHY: the HIR lowering owner must reject unused concrete origin seeds at the lowering
+/// boundary instead of deferring a silently unmatched seed to public-interface finalization.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HirFunctionOriginLookup {
     by_path: FxHashMap<InternedPath, OriginFunctionId>,
+    consumed_paths: FxHashSet<InternedPath>,
 }
 
 impl HirFunctionOriginLookup {
@@ -59,11 +65,44 @@ impl HirFunctionOriginLookup {
             by_path.insert(seed.path, seed.origin);
         }
 
-        Ok(Self { by_path })
+        Ok(Self {
+            by_path,
+            consumed_paths: FxHashSet::default(),
+        })
     }
 
-    pub(crate) fn origin_for(&self, path: &InternedPath) -> Option<&OriginFunctionId> {
-        self.by_path.get(path)
+    /// Consume the stable origin seed for one declaration path, marking it matched.
+    ///
+    /// WHAT: returns the stable origin for `path` and records that a lowered function consumed
+    /// the seed. Returns `None` when no seed exists for the path (private functions and the
+    /// implicit start).
+    /// WHY: tracking consumption lets the lowering boundary detect unused seeds without keeping a
+    /// second parallel origin set.
+    pub(crate) fn consume_origin_for(&mut self, path: &InternedPath) -> Option<OriginFunctionId> {
+        let origin = self.by_path.get(path)?;
+        self.consumed_paths.insert(path.clone());
+        Some(origin.clone())
+    }
+
+    /// Reject any concrete origin seed that no lowered function consumed.
+    ///
+    /// WHAT: errors when a seed path never matched a lowered function. Call this after every
+    /// function has been classified.
+    /// WHY: an unmatched seed means a public callable declaration did not lower to local HIR,
+    /// which is an internal compiler invariant failure rather than a silent finalization deferral.
+    pub(crate) fn validate_all_seeds_consumed(&self) -> Result<(), CompilerError> {
+        let unused_seed_count = self
+            .by_path
+            .keys()
+            .filter(|path| !self.consumed_paths.contains(*path))
+            .count();
+        if unused_seed_count > 0 {
+            return Err(CompilerError::compiler_error(format!(
+                "HIR function-origin lowering received {unused_seed_count} unused concrete origin seed(s)"
+            )));
+        }
+
+        Ok(())
     }
 }
 

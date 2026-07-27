@@ -13,8 +13,10 @@ use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::constants::HirConstValue;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::module_metadata::ModuleDocFragmentKind;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_node, make_test_variable, node, test_location,
@@ -68,10 +70,50 @@ fn registers_declarations_and_resolves_start_function() {
     assert_eq!(
         module
             .side_table
-            .function_name_path(module.start_function)
+            .function_name_path(
+                module
+                    .start_function
+                    .expect("normal test module should have start"),
+            )
             .cloned(),
         Some(start_name)
     );
+}
+
+#[test]
+fn api_only_root_roles_lower_without_implicit_start() {
+    for root_role in [
+        ModuleRootRole::Support,
+        ModuleRootRole::ProjectPackageFacade,
+    ] {
+        let mut string_table = StringTable::new();
+        let entry_path = super::symbol("api.moth", &mut string_table);
+        let declaration_path = super::symbol("exported_value", &mut string_table);
+        let declaration = function_node(
+            declaration_path,
+            FunctionSignature {
+                parameters: vec![],
+                returns: vec![],
+            },
+            vec![],
+            test_location(1),
+        );
+        let mut ast = build_ast(vec![declaration], entry_path);
+        ast.root_role = root_role;
+
+        let (module, _type_environment) =
+            lower_ast(ast, &mut string_table).expect("API-only HIR lowering should succeed");
+
+        assert_eq!(module.start_function, None);
+        assert_eq!(module.functions.len(), 1);
+        assert!(
+            module
+                .function_origins
+                .values()
+                .all(|origin| !matches!(origin, HirFunctionOrigin::EntryStart)),
+            "API-only roots must not contain an EntryStart origin"
+        );
+    }
 }
 
 #[test]
@@ -145,7 +187,10 @@ fn start_function_can_reference_module_constant() {
     let (module, _type_environment) = lower_ast(ast, &mut string_table)
         .expect("start function should lower when referencing a module constant");
 
-    let start_fn = &module.functions[module.start_function.0 as usize];
+    let start_fn = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
 
     assert!(

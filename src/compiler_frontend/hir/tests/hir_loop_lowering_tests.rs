@@ -50,7 +50,10 @@ fn lowers_while_to_header_body_exit_shape() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
 
     let header_block = match entry_block.terminator {
@@ -105,7 +108,10 @@ fn break_in_while_targets_loop_exit_block() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let header_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,

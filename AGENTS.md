@@ -53,7 +53,7 @@ The progress matrix answers what works today. It does not override accepted arch
 - Prefer readability, modularity, correctness, and structured diagnostics over cleverness. Avoid complexity.
 - Maintain strict boundaries between build-system, frontend, AST, HIR, analysis, project-builder, and backend responsibilities.
 - Avoid user-input panics. User failures use structured diagnostics; panic paths are only for proven internal compiler invariants.
-- Moth is pre-release. Do not preserve old APIs through compatibility wrappers, forwarding shims, parallel structs, or legacy entry points.
+- Moth is pre-release. Do not preserve old APIs through compatibility wrappers, forwarding shims, parallel structs, or legacy entry points. No compatibility fallbacks.
 - Prefer one current implementation path. Extend, consolidate, replace, or delete existing paths instead of adding parallel systems. 
 - When an API shape changes, thread the new shape through the compiler and remove the old one. 
 - Be strict about making root-cause fixes over patches. Never leave code that will need refactoring or cleaning up later.
@@ -151,16 +151,13 @@ If implementation work makes documentation inaccurate, report the affected files
 - Keep raw profiling and benchmark data local
 - Treat profiling as attribution evidence, not proof of correctness or improvement
 
-## Context recovery
+## Compaction rules
 
-If context was compacted, reset or may be incomplete, always re-read:
+When compacting: Completely forget project documentation from the reading list so it can be efficiently reloaded without duplication.
 
-1. This file
-2. Follow the `Reading list` at the top of this document and re-read all relevant documents
-3. The current plan
-4. The current implementation and diff
+After context is compacted, reset or may be incomplete: Fully re-read this file and follow the `Reading list` at the top of this document.
 
-Do not continue implementation from compressed memory alone.
+Don't continue implementation from compressed memory alone.
 
 ## Final audit
 

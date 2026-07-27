@@ -137,6 +137,9 @@ fn successful_borrow_report_can_be_stored_on_module() {
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
     let borrow_analysis = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("borrow checking should pass");
+    let function_link_facts =
+        crate::compiler_frontend::hir::reachability::collect_module_function_link_facts(&hir)
+            .expect("validated test HIR should produce function link facts");
 
     let module = Module {
         executable: ModuleExecutable {
@@ -147,7 +150,8 @@ fn successful_borrow_report_can_be_stored_on_module() {
         },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::clone(&external_package_registry),
-            module_external_imports: Vec::new(),
+            external_import_candidates: Vec::new(),
+            functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
             entry_point: std::path::PathBuf::from("main.moth"),

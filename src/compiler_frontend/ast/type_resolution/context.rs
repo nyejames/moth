@@ -21,7 +21,9 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
-use crate::compiler_frontend::headers::import_environment::NamespaceRecord;
+use crate::compiler_frontend::headers::import_environment::{
+    NamespaceRecord, SourceDeclarationTarget,
+};
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -40,8 +42,8 @@ pub(crate) struct TypeResolutionContext<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
     pub visible_declaration_ids: Option<&'a FxHashSet<InternedPath>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
-    pub visible_source_bindings: Option<&'a FxHashMap<StringId, InternedPath>>,
-    pub visible_type_aliases: Option<&'a FxHashMap<StringId, InternedPath>>,
+    pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
+    pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     /// Resolved type alias metadata: parsed source ref, diagnostic spelling, and canonical
     /// `TypeId` when available. This is the single owner of alias metadata; callers should use
     /// `annotation.type_id` for semantic checks and `annotation.diagnostic_type` for diagnostics
@@ -62,7 +64,7 @@ pub(crate) struct TypeResolutionContext<'a> {
     pub visible_namespace_records: Option<&'a FxHashMap<StringId, NamespaceRecord>>,
     pub trait_environment: Option<&'a TraitEnvironment>,
     pub trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
-    pub visible_trait_names: Option<&'a FxHashMap<StringId, InternedPath>>,
+    pub visible_trait_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
 }
 
 /// Input bundle for constructing a [`TypeResolutionContext`].
@@ -73,8 +75,8 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
     pub visible_declaration_ids: Option<&'a FxHashSet<InternedPath>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
-    pub visible_source_bindings: Option<&'a FxHashMap<StringId, InternedPath>>,
-    pub visible_type_aliases: Option<&'a FxHashMap<StringId, InternedPath>>,
+    pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
+    pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
     pub generic_declarations_by_path:
         Option<&'a FxHashMap<InternedPath, GenericDeclarationMetadata>>,
@@ -84,7 +86,7 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
     pub visible_namespace_records: Option<&'a FxHashMap<StringId, NamespaceRecord>>,
     pub trait_environment: Option<&'a TraitEnvironment>,
     pub trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
-    pub visible_trait_names: Option<&'a FxHashMap<StringId, InternedPath>>,
+    pub visible_trait_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
 }
 
 impl<'a> TypeResolutionContext<'a> {

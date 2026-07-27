@@ -108,7 +108,10 @@ fn statement_terminator_and_value_facts_are_populated() {
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("borrow checking should succeed");
 
-    let start = &hir.functions[hir.start_function.0 as usize];
+    let start = &hir.functions[hir
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let reachable = collect_reachable_blocks(&hir, start.entry);
 
     for block_id in &reachable {
@@ -179,7 +182,10 @@ fn drop_statement_produces_statement_fact() {
     );
 
     let mut hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
-    let start = &hir.functions[hir.start_function.0 as usize];
+    let start = &hir.functions[hir
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &mut hir.blocks[start.entry.0 as usize];
     let drop_local = entry_block
         .locals
@@ -851,7 +857,7 @@ compute || -> User, Error!:
         .find_map(|block| {
             block.statements.iter().find_map(|statement| {
                 let HirStatementKind::Call {
-                    target: CallTarget::UserFunction(target),
+                    target: CallTarget::Local(target),
                     args,
                     result: Some(result),
                 } = &statement.kind

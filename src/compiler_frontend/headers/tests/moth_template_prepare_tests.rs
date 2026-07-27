@@ -31,6 +31,7 @@ use crate::compiler_frontend::pipeline::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -109,6 +110,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     let options = HeaderParseOptions {
         entry_file_id: None,
         project_path_resolver: Some(project_path_resolver.clone()),
+        active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
     let context = FrontendFilePrepareContext {
         source_files: &source_files,
@@ -136,6 +138,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         Some(&project_path_resolver),
         &mut string_table,
     )
@@ -152,6 +155,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             top_level_const_fragments: sorted_headers.top_level_const_fragments,
         },
         AstBuildContext {
+            root_role: ModuleRootRole::Normal,
             external_package_registry: Arc::clone(&external_package_registry),
             style_directives: &style_directives,
             string_table: &mut string_table,
@@ -163,7 +167,8 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             capacity_estimate: Default::default(),
         },
     )
-    .expect("Moth template content constant should build through AST");
+    .expect("Moth template content constant should build through AST")
+    .ast;
 
     (ast, string_table)
 }
@@ -232,8 +237,15 @@ impl MothTemplateScopeFixture {
             project_root.clone(),
             entry_root.clone(),
             crate::build_system::create_project_modules::source_package_discovery::
-                prepare_source_package_roots(&source_packages, &mut prep_string_table)
-                .expect("test source package roots should prepare"),
+                build_source_package_boundary_indexes(
+                    &source_packages,
+                    &source_file_kinds,
+                    &crate::builder_surface::external_import_providers::registry::
+                        ExternalImportProviderRegistry::default(),
+                    &mut prep_string_table,
+                )
+                .expect("test source package boundary indexes should build")
+                .prepared_source_package_roots(),
             &source_file_kinds,
             module_roots,
         )
@@ -298,6 +310,7 @@ impl MothTemplateScopeFixture {
                 top_level_const_fragments: sorted_headers.top_level_const_fragments,
             },
             AstBuildContext {
+                root_role: ModuleRootRole::Normal,
                 external_package_registry: Arc::clone(&external_package_registry),
                 style_directives: &style_directives,
                 string_table: &mut string_table,
@@ -316,7 +329,7 @@ impl MothTemplateScopeFixture {
                 .map(Box::new)
                 .unwrap_or_else(|| panic!("AST failed without a diagnostic"))
         })
-        .map(|ast| (ast, string_table))
+        .map(|build_result| (build_result.ast, string_table))
     }
 
     fn assert_ast_contains_moth_template_content(
@@ -356,6 +369,7 @@ impl MothTemplateScopeFixture {
         let options = HeaderParseOptions {
             entry_file_id: None,
             project_path_resolver: Some(self.project_path_resolver.clone()),
+            active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };
         let context = FrontendFilePrepareContext {
             source_files: &self.source_files,
@@ -431,6 +445,7 @@ impl MothTemplateScopeFixture {
             prepared_syntax,
             &external_package_registry,
             &ExternalImportResolutionTable::default(),
+            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
             Some(&self.project_path_resolver),
             &mut string_table,
         )
@@ -1393,6 +1408,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         Some(&project_path_resolver),
         &mut string_table,
     )
@@ -1409,6 +1425,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             top_level_const_fragments: sorted_headers.top_level_const_fragments,
         },
         AstBuildContext {
+            root_role: ModuleRootRole::Normal,
             external_package_registry,
             style_directives: &StyleDirectiveRegistry::built_ins(),
             string_table: &mut string_table,
@@ -1420,7 +1437,8 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             capacity_estimate: Default::default(),
         },
     )
-    .expect("authored md template constant should build through AST");
+    .expect("authored md template constant should build through AST")
+    .ast;
 
     let authored_folded = folded_constant_value(&authored_ast, &string_table, "content");
 

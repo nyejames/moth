@@ -34,7 +34,7 @@ fn host_io_reads_the_underlying_value_before_logging() {
     let call_statement = statement(
         2,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(io_id),
+            target: CallTarget::External(io_id),
             args: vec![expression(
                 2,
                 HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
@@ -82,6 +82,7 @@ fn host_io_reads_the_underlying_value_before_logging() {
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_module_export_glue_enabled: false,
+            source_function_names: Arc::new(Default::default()),
         },
         &type_environment,
     )
@@ -138,6 +139,7 @@ fn auto_invokes_start_function_when_enabled() {
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_module_export_glue_enabled: false,
+            source_function_names: Arc::new(Default::default()),
         },
         &type_environment,
     )

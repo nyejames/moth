@@ -43,17 +43,20 @@ pub(crate) struct PublicFoldedField {
 /// A finite `f64` folded value with an equivalence relation consistent with Moth
 /// semantics.
 ///
-/// WHAT: a narrow validated wrapper that rejects non-finite input (`NaN`, `+inf`, `-inf`) and
-/// normalizes negative zero to positive zero at construction. Finiteness makes `PartialEq` a
-/// total equivalence relation, so the draft hierarchy can derive `Eq`.
-/// WHY: `f64` itself does not implement `Eq` because `NaN != NaN`. Moth formatting renders
-/// negative zero as ordinary zero, so `-0.0` is unobservable as text; normalizing it keeps the
-/// folded value canonical and equality consistent with the accepted formatting contract.
-#[derive(Clone, Debug, PartialEq)]
+/// WHAT: a narrow validated wrapper that rejects non-finite input (`NaN`, `+inf`, `-inf`) at
+/// construction and preserves the input value's exact IEEE-754 bits, including the sign of
+/// zero. Finiteness makes the manual `PartialEq` a total equivalence relation, so `Eq` is sound.
+/// WHY: the language authority defines `Float` as finite `f64`, supports ordinary `Float`
+/// equality and ordering, and normalizes `-0.0` to `0` only at the `Float -> String` formatting
+/// boundary. It does not declare both IEEE zero signs globally identical. Constant arithmetic,
+/// `String -> Float` parsing and `@core/math` helpers such as `atan2` can observe signed zero,
+/// so folded public values must retain exact finite bits. The numeric formatter remains the sole
+/// normalizer; this wrapper never normalizes.
+#[derive(Clone, Debug)]
 pub(crate) struct FiniteFloat(f64);
 
 impl FiniteFloat {
-    /// Construct a finite float, rejecting non-finite input and normalizing negative zero.
+    /// Construct a finite float, rejecting non-finite input and preserving exact bits.
     pub(crate) fn new(value: f64) -> Result<Self, CompilerError> {
         if !value.is_finite() {
             return Err(CompilerError::compiler_error(format!(
@@ -63,19 +66,19 @@ impl FiniteFloat {
                 value
             )));
         }
-        // `-0.0 == 0.0` under ordinary float equality, so this branch normalizes both signs to
-        // positive zero. The accepted formatting contract renders negative zero as zero.
-        let normalized = if value == 0.0 { 0.0 } else { value };
-        Ok(Self(normalized))
+        Ok(Self(value))
     }
 
-    /// Return the exact normalized IEEE-754 bits used by the canonical interface encoder.
-    ///
-    /// The encoder consumes this read-only value rather than formatting a float, so distinct
-    /// finite semantic values remain distinct while `-0.0` and `0.0` share one canonical form.
-    #[allow(dead_code)]
-    pub(crate) fn normalized_bits(&self) -> u64 {
-        self.0.to_bits()
+    pub(crate) fn value(&self) -> f64 {
+        self.0
+    }
+}
+
+impl PartialEq for FiniteFloat {
+    /// Exact-bit equality: two finite floats are equal only when their IEEE-754 bit patterns
+    /// match, so `-0.0` and `0.0` are distinct.
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
     }
 }
 

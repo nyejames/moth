@@ -26,7 +26,7 @@ pub(crate) fn register_required_host_imports(
 
         for statement in &block.statements {
             if let HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(id),
+                target: CallTarget::External(id),
                 ..
             } = &statement.kind
             {
@@ -46,7 +46,7 @@ pub(crate) fn resolve_host_call_import(
     // WHAT: resolve a host call target to its pre-registered import id.
     // WHY: each distinct host function maps to exactly one import; unsupported targets
     // must fail with a structured diagnostic instead of silently mapping to the wrong import.
-    let CallTarget::ExternalFunction(id) = target else {
+    let CallTarget::External(id) = target else {
         return Err(lir_transformation_error(
             "Wasm lowering expected a HostFunction call target in resolve_host_call_import",
         ));

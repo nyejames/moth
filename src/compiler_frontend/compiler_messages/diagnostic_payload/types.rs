@@ -106,6 +106,7 @@ pub enum UnsupportedBackendFeatureReason {
     FloatBoundaryValidation,
     GenericRuntimeValues,
     ReactiveExternalCallSink,
+    CrossModuleCalls,
 }
 
 impl UnsupportedBackendFeatureReason {
@@ -120,6 +121,7 @@ impl UnsupportedBackendFeatureReason {
             Self::FloatBoundaryValidation => "Float boundary validation",
             Self::GenericRuntimeValues => "generic runtime values",
             Self::ReactiveExternalCallSink => "reactive external-call sink",
+            Self::CrossModuleCalls => "cross-module calls",
         }
     }
 }
@@ -215,7 +217,7 @@ pub enum InvalidConfigReason {
         candidates: Vec<StringId>,
     },
     ConfigImportRootViolation,
-    MothFileFolderCollision {
+    SourceFileFolderCollision {
         file_name: StringId,
         folder_name: StringId,
         directory: StringId,
@@ -335,7 +337,7 @@ impl InvalidConfigReason {
                 }
             }
 
-            Self::MothFileFolderCollision {
+            Self::SourceFileFolderCollision {
                 file_name,
                 folder_name,
                 directory,

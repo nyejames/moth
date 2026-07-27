@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::hir::reachability::HirBackendSelection;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
@@ -32,17 +33,17 @@ pub(crate) struct WasmBackendRequest {
     pub function_emission_policy: WasmFunctionEmissionPolicy,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum WasmFunctionEmissionPolicy {
     /// Lower every HIR function. This preserves the generic Wasm backend test/default contract.
     #[default]
     AllFunctions,
 
-    /// Lower functions syntactically reachable from the requested export roots.
+    /// Lower the exact function and block sets selected by build-owned entry planning.
     ///
     /// WHY: HTML-Wasm page modules are entered through `moth_start`; unused source-backed package
     /// wrappers must not request host imports or unsupported backend lowering.
-    ReachableFromExports,
+    Selected(HirBackendSelection),
 }
 
 #[derive(Debug, Clone, Default)]

@@ -1,4 +1,4 @@
-import @./internal {empty_values}
+import @internal {empty_values}
 
 export:
     exported_empty_values type T || -> {T}:

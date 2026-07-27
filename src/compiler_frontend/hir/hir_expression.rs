@@ -287,13 +287,8 @@ impl<'a> HirBuilder<'a> {
                 args,
                 result_type_ids,
             } => {
-                let function_id = self.resolve_function_id_or_error(name, &expr.location)?;
-                self.lower_call_expression(
-                    CallTarget::UserFunction(function_id),
-                    args,
-                    result_type_ids,
-                    &expr.location,
-                )
+                let target = self.resolve_call_target_or_error(name, &expr.location)?;
+                self.lower_call_expression(target, args, result_type_ids, &expr.location)
             }
 
             ExpressionKind::HandledFallibleFunctionCall {
@@ -302,9 +297,9 @@ impl<'a> HirBuilder<'a> {
                 result_type_ids,
                 handling,
             } => {
-                let function_id = self.resolve_function_id_or_error(name, &expr.location)?;
+                let target = self.resolve_call_target_or_error(name, &expr.location)?;
                 self.lower_handled_fallible_call_expression(
-                    CallTarget::UserFunction(function_id),
+                    target,
                     args,
                     result_type_ids,
                     handling,
@@ -382,7 +377,7 @@ impl<'a> HirBuilder<'a> {
                     )
                 } else {
                     self.lower_call_expression(
-                        CallTarget::ExternalFunction(*host_id),
+                        CallTarget::External(*host_id),
                         args,
                         result_type_ids,
                         &expr.location,
@@ -832,9 +827,9 @@ impl<'a> HirBuilder<'a> {
                 result_type_ids: call_result_type_ids,
                 ..
             } => {
-                let function_id = self.resolve_function_id_or_error(name, location)?;
-                let (carrier_type, ok_type, err_type) = self
-                    .result_call_carrier_slots(&CallTarget::UserFunction(function_id), location)?;
+                let target = self.resolve_call_target_or_error(name, location)?;
+                let (carrier_type, ok_type, err_type) =
+                    self.result_call_carrier_slots(&target, location)?;
                 let requested_ok_type =
                     self.lower_call_result_type(call_result_type_ids, location)?;
                 if requested_ok_type != ok_type {
@@ -845,7 +840,7 @@ impl<'a> HirBuilder<'a> {
                 }
 
                 self.lower_handled_fallible_call_with_branching(
-                    CallTarget::UserFunction(function_id),
+                    target,
                     args,
                     FallibleBranchingContext {
                         result_type_ids,
@@ -873,7 +868,7 @@ impl<'a> HirBuilder<'a> {
                     location,
                 )?;
                 self.lower_handled_fallible_call_with_branching(
-                    CallTarget::ExternalFunction(*id),
+                    CallTarget::External(*id),
                     args,
                     FallibleBranchingContext {
                         result_type_ids,
@@ -1091,7 +1086,7 @@ impl<'a> HirBuilder<'a> {
             CastHandling::Infallible => {
                 let result_type_ids = vec![cast.target_type_id];
                 let lowered = self.lower_call_expression(
-                    CallTarget::UserFunction(function_id),
+                    CallTarget::Local(function_id),
                     &[source_argument],
                     &result_type_ids,
                     location,
@@ -1255,7 +1250,7 @@ impl<'a> HirBuilder<'a> {
         source_argument: &CallArgument,
         location: &SourceLocation,
     ) -> Result<EmittedFallibleCarrier, CompilerError> {
-        let target = CallTarget::UserFunction(function_id);
+        let target = CallTarget::Local(function_id);
         let (carrier_type, ok_type, err_type) =
             self.result_call_carrier_slots(&target, location)?;
 

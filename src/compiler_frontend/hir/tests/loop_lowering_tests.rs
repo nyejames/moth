@@ -63,7 +63,10 @@ use crate::compiler_frontend::hir::hir_builder::{
 };
 
 fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId, BlockId, BlockId) {
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let step_zero_check_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,
@@ -538,7 +541,10 @@ fn lowers_collection_loop_to_explicit_cfg() {
         lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
             .expect("collection loop lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let header_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,
@@ -601,7 +607,10 @@ fn lowers_collection_loop_without_user_bindings() {
         lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
             .expect("collection loop lowering without user bindings should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let header_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,
@@ -654,7 +663,10 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
         lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
             .expect("collection loop lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let header_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,
@@ -728,7 +740,10 @@ fn lowers_collection_loop_optional_index_binding() {
         lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
             .expect("collection loop lowering with index should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let header_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,
@@ -867,7 +882,10 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
         lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
             .expect("collection loop lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let header_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,
@@ -928,7 +946,10 @@ fn break_targets_exit_block_in_collection_loop() {
         lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
             .expect("collection loop lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let header_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,
@@ -1076,7 +1097,10 @@ fn continue_targets_step_block_in_collection_loop() {
         lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
             .expect("collection loop lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     let header_block = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,

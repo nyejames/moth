@@ -22,9 +22,6 @@ use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_exp
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionReturn, ReturnChannel, ReturnSlot,
 };
-use crate::compiler_frontend::ast::{
-    AstPublicInterfaceProjectionInput, ResolvedPublicTypeRootTable,
-};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -39,8 +36,6 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::traits::environment::TraitEnvironment;
-use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 // ---------------------------------------------------------------------------
@@ -689,6 +684,7 @@ pub(crate) fn build_ast_with_choices(
     register_collection_types_from_nodes(&mut nodes, &mut type_environment);
 
     Ast {
+        root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         nodes,
         module_constants: vec![],
         doc_fragments: vec![],
@@ -706,14 +702,8 @@ pub(crate) fn build_ast_with_choices(
             .collect(),
         type_environment,
         const_facts: AstConstFacts::default(),
-        public_interface_projection_input: AstPublicInterfaceProjectionInput {
-            root_table: ResolvedPublicTypeRootTable::default(),
-            trait_roots: vec![],
-            receiver_catalog: None,
-            trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
-            trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        },
-        generic_function_templates: std::rc::Rc::new(rustc_hash::FxHashMap::default()),
+        imported_functions_by_local_path: Default::default(),
+        imported_struct_definitions: vec![],
     }
 }
 

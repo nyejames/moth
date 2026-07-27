@@ -194,7 +194,7 @@ struct InvalidOutputWarningBuilder;
 impl BackendBuilder for InvalidOutputWarningBuilder {
     fn build_backend(
         &self,
-        _modules: Vec<crate::build_system::build::Module>,
+        _project_compilation: crate::build_system::build::ProjectCompilation,
         config: &Config,
         _flags: &[crate::compiler_frontend::Flag],
         string_table: &mut StringTable,

@@ -292,7 +292,7 @@ impl<'a> HirBuilder<'a> {
         location: &SourceLocation,
     ) -> Result<(TypeId, TypeId, TypeId), CompilerError> {
         match target {
-            CallTarget::UserFunction(function_id) => {
+            CallTarget::Local(function_id) => {
                 let Some(function_index) = self.function_index_by_id.get(function_id).copied()
                 else {
                     return_hir_transformation_error!(
@@ -316,7 +316,33 @@ impl<'a> HirBuilder<'a> {
                 }
             }
 
-            CallTarget::ExternalFunction(_) => {
+            CallTarget::CrossModule(origin) => {
+                let carrier_type_id = self
+                    .imported_fallible_carriers_by_origin
+                    .get(origin)
+                    .copied()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "Fallible imported call target {origin:?} has no projected carrier type"
+                        ))
+                    })?;
+                match self
+                    .type_environment
+                    .fallible_carrier_slots(carrier_type_id)
+                {
+                    Some((success, error)) => Ok((carrier_type_id, success, error)),
+                    None => {
+                        return_hir_transformation_error!(
+                            format!(
+                                "Fallible imported call target {origin:?} has an invalid projected carrier type"
+                            ),
+                            self.hir_error_location(location)
+                        );
+                    }
+                }
+            }
+
+            CallTarget::External(_) => {
                 return_hir_transformation_error!(
                     "Fallible-handled call targeted a host function",
                     self.hir_error_location(location)

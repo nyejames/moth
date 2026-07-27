@@ -9,12 +9,14 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::reachability::HirReachability;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use std::sync::Arc;
 
 /// Module-level inputs shared by all HTML builder compilation paths.
 pub(crate) struct HtmlModuleCompileInput<'a> {
     pub hir_module: &'a HirModule,
+    pub reachability: &'a HirReachability,
     pub type_environment: &'a TypeEnvironment,
     pub const_fragments: &'a [ResolvedConstFragment],
     pub borrow_analysis: &'a BorrowCheckReport,

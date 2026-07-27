@@ -1,4 +1,4 @@
-import @./impl { helper }
+import @impl { helper }
 
 greet || -> String:
     return helper()

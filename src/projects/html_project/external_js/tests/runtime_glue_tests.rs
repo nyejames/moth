@@ -63,6 +63,7 @@ fn generate_module_glue_returns_empty_when_no_external_exports() {
 
     let result = generate_module_glue(
         &module,
+        &module.link_facts.external_import_candidates,
         &referenced,
         &registry,
         &PathBuf::from("index.html"),
@@ -79,7 +80,7 @@ fn generate_module_glue_returns_empty_when_no_external_exports() {
 fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports.push(
+    module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
@@ -93,13 +94,14 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
     );
 
     let (registry, _function_id, package_id) = create_registry_with_export("get_value", "getValue");
-    module.link_facts.module_external_imports[0].package_id = package_id;
+    module.link_facts.external_import_candidates[0].package_id = package_id;
 
     // Export is registered but not referenced by emitted JS.
     let referenced = HashSet::new();
 
     let result = generate_module_glue(
         &module,
+        &module.link_facts.external_import_candidates,
         &referenced,
         &registry,
         &PathBuf::from("index.html"),
@@ -116,7 +118,7 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
 fn generate_module_glue_emits_glue_file_for_referenced_export() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports.push(
+    module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
@@ -130,11 +132,12 @@ fn generate_module_glue_emits_glue_file_for_referenced_export() {
     );
 
     let (registry, function_id, package_id) = create_registry_with_export("get_value", "getValue");
-    module.link_facts.module_external_imports[0].package_id = package_id;
+    module.link_facts.external_import_candidates[0].package_id = package_id;
     let referenced = HashSet::from([function_id]);
 
     let result = generate_module_glue(
         &module,
+        &module.link_facts.external_import_candidates,
         &referenced,
         &registry,
         &PathBuf::from("index.html"),
@@ -171,7 +174,7 @@ fn generate_module_glue_emits_glue_file_for_referenced_export() {
 fn generate_module_glue_nested_html_output_path() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports.push(
+    module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
@@ -185,11 +188,12 @@ fn generate_module_glue_nested_html_output_path() {
     );
 
     let (registry, function_id, package_id) = create_registry_with_export("get_value", "getValue");
-    module.link_facts.module_external_imports[0].package_id = package_id;
+    module.link_facts.external_import_candidates[0].package_id = package_id;
     let referenced = HashSet::from([function_id]);
 
     let result = generate_module_glue(
         &module,
+        &module.link_facts.external_import_candidates,
         &referenced,
         &registry,
         &PathBuf::from("a/b/index.html"),
@@ -209,7 +213,7 @@ fn generate_module_glue_nested_html_output_path() {
 fn generate_module_glue_asset_import_relative_to_glue_module() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports.push(
+    module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
@@ -223,11 +227,12 @@ fn generate_module_glue_asset_import_relative_to_glue_module() {
     );
 
     let (registry, function_id, package_id) = create_registry_with_export("get_value", "getValue");
-    module.link_facts.module_external_imports[0].package_id = package_id;
+    module.link_facts.external_import_candidates[0].package_id = package_id;
     let referenced = HashSet::from([function_id]);
 
     let result = generate_module_glue(
         &module,
+        &module.link_facts.external_import_candidates,
         &referenced,
         &registry,
         &PathBuf::from("index.html"),
@@ -250,7 +255,7 @@ fn generate_module_glue_asset_import_relative_to_glue_module() {
 fn generate_module_glue_fallible_wrapper_validates_result_shape() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports.push(
+    module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
@@ -265,11 +270,12 @@ fn generate_module_glue_fallible_wrapper_validates_result_shape() {
 
     let (registry, function_id, package_id) =
         create_registry_with_fallible_export("risky", "riskyOp");
-    module.link_facts.module_external_imports[0].package_id = package_id;
+    module.link_facts.external_import_candidates[0].package_id = package_id;
     let referenced = HashSet::from([function_id]);
 
     let result = generate_module_glue(
         &module,
+        &module.link_facts.external_import_candidates,
         &referenced,
         &registry,
         &PathBuf::from("index.html"),
@@ -295,9 +301,10 @@ fn fallible_wrapper_handles_invalid_shape_differently_for_debug_and_release() {
     let release_source = generate_fallible_wrapper("__moth_glue_fn1", "__moth_external_fn1", true);
     assert!(!release_source.contains("throw new Error("));
     assert!(
-        release_source.contains("return { tag: \"err\", value: { b_fld0: \"Invalid result wrapper")
+        release_source
+            .contains("return { tag: \"err\", value: { f_6d657373616765: \"Invalid result wrapper")
     );
-    assert!(release_source.contains("b_fld1: 0"));
+    assert!(release_source.contains("f_636f6465: 0"));
 }
 
 #[test]
@@ -305,14 +312,14 @@ fn fallible_wrapper_converts_external_errors_to_internal_error_fields() {
     let debug_source = generate_fallible_wrapper("__moth_glue_fn1", "__moth_external_fn1", false);
 
     assert!(
-        debug_source.contains("moth_message_fld0: String(e.message || e)")
-            && debug_source.contains("moth_code_fld1: 0"),
+        debug_source.contains("moth_field_6d657373616765: String(e.message || e)")
+            && debug_source.contains("moth_field_636f6465: 0"),
         "caught JS exceptions must become canonical Moth Error values"
     );
     assert!(
-        debug_source.contains("moth_message_fld0: error.message || \"Unknown error\"")
+        debug_source.contains("moth_field_6d657373616765: error.message || \"Unknown error\"")
             && debug_source
-                .contains("moth_code_fld1: typeof error.code === \"number\" ? error.code : 0"),
+                .contains("moth_field_636f6465: typeof error.code === \"number\" ? error.code : 0"),
         "external mothErr values must be translated into canonical Moth Error values"
     );
 }
@@ -329,7 +336,10 @@ fn emit_build_runtime_modules_dedupes_by_specifier() {
     let module_a = create_module_with_runtime_requirement();
     let module_b = create_module_with_runtime_requirement();
 
-    let plan = HtmlExternalRuntimeEmissionPlan::from_modules(&[module_a, module_b]);
+    let plan = HtmlExternalRuntimeEmissionPlan::from_import_sets([
+        module_a.link_facts.external_import_candidates.as_slice(),
+        module_b.link_facts.external_import_candidates.as_slice(),
+    ]);
     let mut occupied = HashSet::new();
     let string_table = StringTable::new();
     let files = emit_build_runtime_modules(&plan, &mut occupied, &string_table)
@@ -343,10 +353,13 @@ fn emit_build_runtime_modules_dedupes_by_specifier() {
 #[test]
 fn emit_build_runtime_modules_rejects_unregistered_specifier() {
     let mut module = create_module_with_runtime_requirement();
-    module.link_facts.module_external_imports[0].required_runtime_imports[0].module_name =
+    module.link_facts.external_import_candidates[0].required_runtime_imports[0].module_name =
         "@moth/missing".to_owned();
 
-    let plan = HtmlExternalRuntimeEmissionPlan::from_modules(&[module]);
+    let plan = HtmlExternalRuntimeEmissionPlan::from_import_sets([module
+        .link_facts
+        .external_import_candidates
+        .as_slice()]);
     let mut occupied = HashSet::new();
     let string_table = StringTable::new();
     let error = match emit_build_runtime_modules(&plan, &mut occupied, &string_table) {
@@ -366,7 +379,10 @@ fn emit_build_runtime_modules_rejects_unregistered_specifier() {
 #[test]
 fn build_import_map_html_includes_moth_runtime() {
     let module = create_module_with_runtime_requirement();
-    let html = build_import_map_html(&module, &PathBuf::from("index.html"));
+    let html = build_import_map_html(
+        &module.link_facts.external_import_candidates,
+        &PathBuf::from("index.html"),
+    );
 
     assert!(html.is_some());
     let map = html.unwrap();
@@ -378,7 +394,7 @@ fn build_import_map_html_includes_moth_runtime() {
 #[test]
 fn build_import_map_html_deduplicates_by_specifier() {
     let mut module = create_module_with_runtime_requirement();
-    module.link_facts.module_external_imports.push(
+    module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(1),
             runtime_asset: None,
@@ -391,7 +407,10 @@ fn build_import_map_html_deduplicates_by_specifier() {
         },
     );
 
-    let html = build_import_map_html(&module, &PathBuf::from("index.html"));
+    let html = build_import_map_html(
+        &module.link_facts.external_import_candidates,
+        &PathBuf::from("index.html"),
+    );
     assert!(html.is_some());
     let map = html.unwrap();
 
@@ -407,7 +426,7 @@ fn build_import_map_html_deduplicates_by_specifier() {
 fn create_module_with_runtime_requirement() -> Module {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports.push(
+    module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: None,

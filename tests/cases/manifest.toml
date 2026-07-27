@@ -9179,6 +9179,13 @@ contract = "language.imports.namespace_import_module_facade_acceptance"
 role = "primary"
 
 [[case]]
+id = "nested_module_root_namespace_child_facade_success"
+path = "nested_module_root_namespace_child_facade_success"
+tags = ["integration", "imports", "namespace-imports", "facade"]
+contract = "language.imports.namespace_import_module_facade_acceptance"
+role = "boundary"
+
+[[case]]
 id = "module_facade_reexport_namespace_success"
 path = "module_facade_reexport_namespace_success"
 tags = ["integration", "imports", "namespace-imports", "facade"]
@@ -9387,13 +9394,6 @@ path = "module_facade_private_path_rejected"
 tags = ["integration", "imports", "module-privacy", "facades", "diagnostics"]
 contract = "language.imports.module_facade_private_path_bypass_rejected"
 role = "primary"
-
-[[case]]
-id = "entry_root_facade_private_path_rejected"
-path = "entry_root_facade_private_path_rejected"
-tags = ["integration", "imports", "module-privacy", "facades", "diagnostics"]
-contract = "language.imports.module_facade_private_path_bypass_rejected"
-role = "boundary"
 
 [[case]]
 id = "module_boundary_no_facade_no_api"

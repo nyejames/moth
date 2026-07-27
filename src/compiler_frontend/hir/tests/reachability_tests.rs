@@ -15,8 +15,8 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::reachability::{
-    HirReachability, HirReachabilityInput, ReachableFloatStatementKind, ReachableMapUseKind,
-    collect_hir_reachability, collect_reachability_from_start,
+    HirReachability, ReachableFloatStatementKind, ReachableMapUseKind,
+    collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -44,7 +44,7 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
                 BlockId(0),
                 vec![call_statement_at(
                     0,
-                    CallTarget::ExternalFunction(reachable_external_function),
+                    CallTarget::External(reachable_external_function),
                     reachable_location.clone(),
                 )],
                 HirTerminator::Return(unit_expression(0)),
@@ -53,7 +53,7 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
                 BlockId(1),
                 vec![call_statement_at(
                     0,
-                    CallTarget::ExternalFunction(unreachable_external_function),
+                    CallTarget::External(unreachable_external_function),
                     unreachable_location,
                 )],
                 HirTerminator::Return(unit_expression(1)),
@@ -61,8 +61,13 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
         ],
     );
 
-    let reachability =
-        collect_reachability_from_start(&module).expect("reachability should collect from start");
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should collect from start");
 
     assert_reachability(&reachability, &[0], &[0], &[reachable_external_function]);
     assert_reachable_external_calls(
@@ -87,7 +92,7 @@ fn user_function_calls_make_transitive_functions_and_external_calls_reachable() 
         vec![
             block(
                 BlockId(0),
-                vec![call_statement(0, CallTarget::UserFunction(FunctionId(1)))],
+                vec![call_statement(0, CallTarget::Local(FunctionId(1)))],
                 HirTerminator::Jump {
                     target: BlockId(1),
                     args: vec![],
@@ -100,19 +105,257 @@ fn user_function_calls_make_transitive_functions_and_external_calls_reachable() 
             ),
             block(
                 BlockId(2),
+                vec![call_statement(1, CallTarget::External(external_function))],
+                HirTerminator::Return(unit_expression(2)),
+            ),
+        ],
+    );
+
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should follow call graph");
+
+    assert_reachability(&reachability, &[0, 1], &[0, 1, 2], &[external_function]);
+}
+
+#[test]
+fn per_function_facts_build_the_exact_reachable_union() {
+    let reachable_external_function = ExternalFunctionId::Synthetic(210);
+    let unreachable_external_function = ExternalFunctionId::Synthetic(211);
+    let module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(2), BlockId(2)),
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![call_statement(0, CallTarget::Local(FunctionId(1)))],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
                 vec![call_statement(
                     1,
-                    CallTarget::ExternalFunction(external_function),
+                    CallTarget::External(reachable_external_function),
+                )],
+                HirTerminator::Return(unit_expression(1)),
+            ),
+            block(
+                BlockId(2),
+                vec![call_statement(
+                    2,
+                    CallTarget::External(unreachable_external_function),
                 )],
                 HirTerminator::Return(unit_expression(2)),
             ),
         ],
     );
 
-    let reachability =
-        collect_reachability_from_start(&module).expect("reachability should follow call graph");
+    let function_facts = collect_module_function_link_facts(&module)
+        .expect("per-function link facts should be collected");
+    let reachability = collect_reachability_from_function_link_facts(
+        &function_facts,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("build-owned reachability should succeed");
 
-    assert_reachability(&reachability, &[0, 1], &[0, 1, 2], &[external_function]);
+    assert_reachability(
+        &reachability,
+        &[0, 1],
+        &[0, 1],
+        &[reachable_external_function],
+    );
+    assert!(
+        !reachability
+            .backend_selection()
+            .contains_function(FunctionId(2))
+    );
+    assert!(
+        !reachability
+            .reachable_external_functions
+            .contains(&unreachable_external_function)
+    );
+}
+
+#[test]
+fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order() {
+    let external_from_first_callee = ExternalFunctionId::Synthetic(220);
+    let external_from_second_callee = ExternalFunctionId::Synthetic(221);
+    let second_callee_location = location_at(30, 2);
+    let first_callee_successor_location = location_at(40, 2);
+    let module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+            function(FunctionId(2), BlockId(2)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![
+                    call_statement(0, CallTarget::Local(FunctionId(1))),
+                    call_statement(1, CallTarget::Local(FunctionId(2))),
+                ],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Jump {
+                    target: BlockId(3),
+                    args: vec![],
+                },
+            ),
+            block(
+                BlockId(2),
+                vec![
+                    call_statement_at(
+                        2,
+                        CallTarget::External(external_from_second_callee),
+                        second_callee_location.clone(),
+                    ),
+                    map_statement_at(4, HirMapOp::Contains, second_callee_location.clone()),
+                ],
+                HirTerminator::Return(unit_expression(2)),
+            ),
+            block(
+                BlockId(3),
+                vec![
+                    call_statement_at(
+                        3,
+                        CallTarget::External(external_from_first_callee),
+                        first_callee_successor_location.clone(),
+                    ),
+                    map_statement_at(5, HirMapOp::Clear, first_callee_successor_location.clone()),
+                ],
+                HirTerminator::Return(unit_expression(3)),
+            ),
+        ],
+    );
+
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("retained facts should preserve breadth-first ordering");
+
+    assert_reachable_external_calls(
+        &reachability,
+        &[
+            (
+                external_from_second_callee,
+                HirNodeId(2),
+                second_callee_location.clone(),
+            ),
+            (
+                external_from_first_callee,
+                HirNodeId(3),
+                first_callee_successor_location.clone(),
+            ),
+        ],
+    );
+    assert_eq!(
+        reachability
+            .reachable_map_uses
+            .iter()
+            .map(|map_use| map_use.location.clone())
+            .collect::<Vec<_>>(),
+        vec![second_callee_location, first_callee_successor_location]
+    );
+}
+
+#[test]
+fn backend_selection_rejects_a_detached_cfg_with_colliding_ids() {
+    let source_module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let source_reachability = collect_test_reachability(&source_module, &[FunctionId(0)])
+        .expect("source selection should be valid");
+    let target_module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Jump {
+                    target: BlockId(1),
+                    args: vec![],
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Return(unit_expression(1)),
+            ),
+        ],
+    );
+
+    let error = source_reachability
+        .backend_selection()
+        .validate_for_hir(&target_module)
+        .expect_err("selection from another CFG must be rejected");
+
+    assert!(error.msg.contains("does not match the CFG"));
+}
+
+#[test]
+fn backend_selection_rejects_a_detached_call_graph_with_colliding_ids() {
+    let source_module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let source_reachability = collect_test_reachability(&source_module, &[FunctionId(0)])
+        .expect("source selection should be valid");
+    let target_module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![call_statement(0, CallTarget::Local(FunctionId(1)))],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Return(unit_expression(1)),
+            ),
+        ],
+    );
+
+    let error = source_reachability
+        .backend_selection()
+        .validate_for_hir(&target_module)
+        .expect_err("selection with an omitted callee must be rejected");
+
+    assert!(error.msg.contains("omits callee"));
 }
 
 #[test]
@@ -192,8 +435,13 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
         ],
     );
 
-    let reachability =
-        collect_reachability_from_start(&module).expect("reachability should follow CFG edges");
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should follow CFG edges");
 
     assert_reachability(&reachability, &[0], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], &[]);
 }
@@ -215,20 +463,14 @@ fn custom_roots_are_supported_without_using_module_start() {
             ),
             block(
                 BlockId(1),
-                vec![call_statement(
-                    0,
-                    CallTarget::ExternalFunction(external_function),
-                )],
+                vec![call_statement(0, CallTarget::External(external_function))],
                 HirTerminator::Return(unit_expression(1)),
             ),
         ],
     );
 
-    let reachability = collect_hir_reachability(HirReachabilityInput {
-        hir: &module,
-        root_functions: vec![FunctionId(1)],
-    })
-    .expect("reachability should collect from explicit roots");
+    let reachability = collect_test_reachability(&module, &[FunctionId(1)])
+        .expect("reachability should collect from explicit roots");
 
     assert_reachability(&reachability, &[1], &[1], &[external_function]);
     assert_reachable_external_calls(
@@ -276,8 +518,13 @@ fn reachability_records_reachable_map_uses_only() {
         ],
     );
 
-    let reachability =
-        collect_reachability_from_start(&module).expect("reachability should collect map uses");
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should collect map uses");
 
     assert_reachability(&reachability, &[0], &[0], &[]);
     assert_eq!(
@@ -294,14 +541,11 @@ fn reachability_records_reachable_map_uses_only() {
 fn missing_function_references_are_internal_hir_errors() {
     let module = hir_module(FunctionId(0), vec![], vec![]);
 
-    let error = collect_hir_reachability(HirReachabilityInput {
-        hir: &module,
-        root_functions: vec![FunctionId(99)],
-    })
-    .expect_err("missing root function should fail");
+    let error = collect_test_reachability(&module, &[FunctionId(99)])
+        .expect_err("missing root function should fail");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unknown HIR function id"));
+    assert!(error.msg.contains("Function link facts are missing"));
 }
 
 #[test]
@@ -319,8 +563,13 @@ fn missing_block_references_are_internal_hir_errors() {
         )],
     );
 
-    let error =
-        collect_reachability_from_start(&module).expect_err("missing target block should fail");
+    let error = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect_err("missing target block should fail");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unknown HIR block id"));
@@ -334,8 +583,13 @@ fn uninitialized_terminators_are_internal_hir_errors() {
         vec![block(BlockId(0), vec![], HirTerminator::Uninitialized)],
     );
 
-    let error =
-        collect_reachability_from_start(&module).expect_err("uninitialized terminator should fail");
+    let error = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect_err("uninitialized terminator should fail");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Uninitialized HIR terminator"));
@@ -347,10 +601,18 @@ fn hir_module(
     blocks: Vec<HirBlock>,
 ) -> HirModule {
     let mut module = HirModule::new();
-    module.start_function = start_function;
+    module.start_function = Some(start_function);
     module.functions = functions;
     module.blocks = blocks;
     module
+}
+
+fn collect_test_reachability(
+    module: &HirModule,
+    roots: &[FunctionId],
+) -> Result<HirReachability, crate::compiler_frontend::compiler_errors::CompilerError> {
+    let function_facts = collect_module_function_link_facts(module)?;
+    collect_reachability_from_function_link_facts(&function_facts, roots)
 }
 
 fn function(id: FunctionId, entry: BlockId) -> HirFunction {
@@ -522,8 +784,13 @@ fn reachability_records_reachable_runtime_casts_only() {
         ],
     );
 
-    let reachability =
-        collect_reachability_from_start(&module).expect("reachability should collect casts");
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should collect casts");
 
     assert_eq!(
         reachability.reachable_runtime_casts.len(),
@@ -578,8 +845,13 @@ fn reachability_records_reachable_float_statements_only() {
         ],
     );
 
-    let reachability = collect_reachability_from_start(&module)
-        .expect("reachability should collect float statements");
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should collect float statements");
 
     assert_eq!(
         reachability.reachable_float_statements.len(),
@@ -710,7 +982,8 @@ fn location_at(line_number: i32, char_column: i32) -> SourceLocation {
 
 fn sorted_function_ids(reachability: &HirReachability) -> Vec<u32> {
     let mut ids = reachability
-        .reachable_functions
+        .backend_selection()
+        .functions()
         .iter()
         .map(|function_id| function_id.0)
         .collect::<Vec<_>>();
@@ -720,7 +993,8 @@ fn sorted_function_ids(reachability: &HirReachability) -> Vec<u32> {
 
 fn sorted_block_ids(reachability: &HirReachability) -> Vec<u32> {
     let mut ids = reachability
-        .reachable_blocks
+        .backend_selection()
+        .blocks()
         .iter()
         .map(|block_id| block_id.0)
         .collect::<Vec<_>>();

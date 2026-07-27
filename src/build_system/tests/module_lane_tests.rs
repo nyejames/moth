@@ -2,22 +2,29 @@
 
 use crate::build_system::build::{
     Module, ModuleCompilerMetadata, ModuleExecutable, ModuleExternalImport, ModuleLinkFacts,
-    ModuleRootActivity,
+    ModuleRootActivity, ProjectCompilation,
 };
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
-use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPackageRegistry};
+use crate::compiler_frontend::external_packages::{
+    CallTarget, ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
+};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::reachability::{
+    collect_module_function_link_facts, collect_reachability_from_function_link_facts,
+};
 use crate::compiler_frontend::hir::regions::HirRegion;
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use crate::compiler_frontend::validated_generic_template_metadata::ValidatedGenericTemplateStore;
 
 use std::path::PathBuf;
@@ -48,7 +55,7 @@ fn minimal_hir_module(start_name_path: InternedPath) -> HirModule {
         return_type: NONE,
         return_aliases: vec![],
     }];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
@@ -59,17 +66,38 @@ fn minimal_hir_module(start_name_path: InternedPath) -> HirModule {
 }
 
 #[test]
-fn remap_string_ids_routes_hir_through_executable_and_leaves_link_facts_untouched() {
-    // WHAT: a module's interned HIR name remaps through the executable lane while the link-facts
-    //       lane (which carries only resolved runtime asset identities and package IDs) is not
-    //       remapped, and the metadata entry path is preserved.
-    // WHY: the lane container must remap HIR and type identity exactly once and must never treat
-    //      link-fact runtime asset paths or the resolved entry path as interned string state.
+fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
+    // WHAT: a module remaps both executable HIR names and diagnostic locations retained by
+    //       per-function link facts, while resolved runtime asset paths remain unchanged.
+    // WHY: module-local link facts feed later target diagnostics after build-table merging, so
+    //      their source scopes must not retain worker-local string IDs.
 
     let mut local_string_table = StringTable::new();
     let start_name_path = InternedPath::from_single_str("start_entry", &mut local_string_table);
 
-    let hir_module = minimal_hir_module(start_name_path);
+    let source_scope = InternedPath::from_single_str("source.moth", &mut local_string_table);
+    let mut hir_module = minimal_hir_module(start_name_path);
+    hir_module.blocks[0].statements.push(HirStatement {
+        id: HirNodeId(1),
+        kind: HirStatementKind::Expr(HirExpression {
+            id: HirValueId(1),
+            kind: HirExpressionKind::MapLiteral(vec![]),
+            ty: NONE,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+        }),
+        location: SourceLocation::new(
+            source_scope,
+            CharPosition {
+                line_number: 3,
+                char_column: 2,
+            },
+            CharPosition {
+                line_number: 3,
+                char_column: 8,
+            },
+        ),
+    });
 
     // Seed the merged table so the local "start_entry" id shifts during merge, proving the remap
     // is actually applied rather than being an identity no-op.
@@ -82,9 +110,11 @@ fn remap_string_ids_routes_hir_through_executable_and_leaves_link_facts_untouche
     );
 
     let asset_path = PathBuf::from("assets/drawing.js");
+    let function_link_facts = collect_module_function_link_facts(&hir_module)
+        .expect("test HIR should produce function link facts");
     let link_facts = ModuleLinkFacts {
         external_package_registry: Arc::new(ExternalPackageRegistry::new()),
-        module_external_imports: vec![ModuleExternalImport {
+        external_import_candidates: vec![ModuleExternalImport {
             package_id: ExternalPackageId(11),
             runtime_asset: Some(RuntimeAssetIdentity {
                 canonical_source_path: asset_path.clone(),
@@ -92,6 +122,7 @@ fn remap_string_ids_routes_hir_through_executable_and_leaves_link_facts_untouche
             }),
             required_runtime_imports: vec![],
         }],
+        functions: function_link_facts,
     };
 
     let entry_point = PathBuf::from("src/#page.moth");
@@ -125,9 +156,20 @@ fn remap_string_ids_routes_hir_through_executable_and_leaves_link_facts_untouche
         .name_str(&merged_string_table);
     assert_eq!(resolved_name, Some("start_entry"));
 
-    // The link-facts lane carries no interned string IDs: the runtime asset path and package ID
-    // are preserved unchanged through remap.
-    let import = &module.link_facts.module_external_imports[0];
+    let reachability = collect_reachability_from_function_link_facts(
+        &module.link_facts.functions,
+        &[FunctionId(0)],
+    )
+    .expect("remapped function facts should remain linkable");
+    let map_location = &reachability.reachable_map_uses[0].location;
+    assert_eq!(
+        map_location.scope.name_str(&merged_string_table),
+        Some("source.moth"),
+        "link-fact location should resolve through the merged string table"
+    );
+
+    // Runtime asset identity remains filesystem-owned rather than string-table-owned.
+    let import = &module.link_facts.external_import_candidates[0];
     assert_eq!(import.package_id, ExternalPackageId(11));
     assert_eq!(
         import.runtime_asset.as_ref().unwrap().canonical_source_path,
@@ -139,7 +181,53 @@ fn remap_string_ids_routes_hir_through_executable_and_leaves_link_facts_untouche
 }
 
 #[test]
-fn legacy_handoff_discards_validated_generic_template_store_before_remap() {
+fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
+    let mut hir_module = minimal_hir_module(InternedPath::new());
+    hir_module.blocks[0].statements.push(HirStatement {
+        id: HirNodeId(99),
+        kind: HirStatementKind::Call {
+            target: CallTarget::External(ExternalFunctionId::Synthetic(99_999)),
+            args: vec![],
+            result: None,
+        },
+        location: SourceLocation::default(),
+    });
+    let function_link_facts = collect_module_function_link_facts(&hir_module)
+        .expect("test HIR should produce function link facts");
+    let module = Module {
+        executable: ModuleExecutable {
+            hir: hir_module,
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+        },
+        link_facts: ModuleLinkFacts {
+            external_package_registry: Arc::new(ExternalPackageRegistry::new()),
+            external_import_candidates: vec![],
+            functions: function_link_facts,
+        },
+        metadata: ModuleCompilerMetadata {
+            entry_point: PathBuf::from("#page.moth"),
+            warnings: vec![],
+            const_top_level_fragments: vec![],
+            root_activity: ModuleRootActivity {
+                has_non_trivial_root_body: true,
+                ..ModuleRootActivity::default()
+            },
+            doc_fragments: vec![],
+            rendered_path_usages: vec![],
+            validated_generic_templates: ValidatedGenericTemplateStore::default(),
+        },
+    };
+
+    let error = match ProjectCompilation::from_successful_modules(vec![module]) {
+        Ok(_) => panic!("missing external package ownership should violate entry assembly"),
+        Err(error) => error,
+    };
+    assert!(error.msg.contains("has no owning package"));
+}
+
+#[test]
+fn pre_provider_handoff_discards_validated_generic_template_store_before_remap() {
     use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
     use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
     use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
@@ -186,7 +274,9 @@ fn legacy_handoff_discards_validated_generic_template_store_before_remap() {
         },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
-            module_external_imports: vec![],
+            external_import_candidates: vec![],
+            functions: collect_module_function_link_facts(&minimal_hir_module(InternedPath::new()))
+                .expect("test HIR should produce function link facts"),
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::from("src/#page.moth"),
@@ -206,13 +296,13 @@ fn legacy_handoff_discards_validated_generic_template_store_before_remap() {
         origin
     );
 
-    // The legacy flat-module handoff discards the unconsumed store before string-table remap
-    // so its donor-local `StringId`s never reach backends. This mirrors the production
-    // boundary in `compile_single_file_frontend` and `compile_directory_frontend`.
+    // The pre-provider project-compilation handoff discards the unconsumed store before
+    // string-table remap so its donor-local `StringId`s never reach backends. This mirrors the
+    // production boundary in `compile_single_file_frontend` and `compile_directory_frontend`.
     module.metadata.discard_validated_generic_templates();
     assert!(
         module.metadata.validated_generic_templates.is_empty(),
-        "the legacy handoff discards the store before backend remap"
+        "the pre-provider handoff discards the store before backend remap"
     );
 
     // Remap runs only after the store is empty, so no unremappable template state remains.

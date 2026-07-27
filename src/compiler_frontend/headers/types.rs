@@ -18,6 +18,7 @@ use crate::compiler_frontend::headers::import_environment::HeaderImportEnvironme
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -118,10 +119,26 @@ pub struct TopLevelConstFragment {
 ///
 /// WHAT: bundles optional entry identity and path-resolution behavior for one parse invocation.
 /// WHY: the parser is called from both production and tests, and grouping these keeps the API concise.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct HeaderParseOptions {
     pub entry_file_id: Option<FileId>,
     pub project_path_resolver: Option<ProjectPathResolver>,
+    /// The graph-owned semantic role of the root currently being compiled.
+    ///
+    /// WHY: entry-path equality identifies which file is active but cannot decide whether that
+    ///      root owns dormant runtime work. Support and project-facade roots are API-only even
+    ///      while they are the active compilation root.
+    pub active_root_role: ModuleRootRole,
+}
+
+impl Default for HeaderParseOptions {
+    fn default() -> Self {
+        Self {
+            entry_file_id: None,
+            project_path_resolver: None,
+            active_root_role: ModuleRootRole::Normal,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -506,8 +523,10 @@ pub struct FileImport {
 ///       when imported without contributing its own top-level runtime body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileRole {
-    /// The root file for the module currently being compiled.
+    /// A normal root file for the module currently being compiled.
     ActiveModuleRoot,
+    /// A support or project-facade root currently being compiled as an API-only module.
+    ActiveApiOnlyModuleRoot,
     /// A foreign root file compiled only to validate its public declaration surface.
     ImportedModuleRoot,
     /// An ordinary source file.
@@ -516,7 +535,15 @@ pub enum FileRole {
 
 impl FileRole {
     pub(crate) fn is_module_root(self) -> bool {
-        matches!(self, Self::ActiveModuleRoot | Self::ImportedModuleRoot)
+        matches!(
+            self,
+            Self::ActiveModuleRoot | Self::ActiveApiOnlyModuleRoot | Self::ImportedModuleRoot
+        )
+    }
+
+    /// Whether this root belongs to the module currently being compiled.
+    pub(crate) fn is_active_module_root(self) -> bool {
+        matches!(self, Self::ActiveModuleRoot | Self::ActiveApiOnlyModuleRoot)
     }
 
     pub(crate) fn is_export_capable(self) -> bool {

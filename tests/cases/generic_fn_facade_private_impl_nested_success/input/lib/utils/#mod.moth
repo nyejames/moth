@@ -1,4 +1,4 @@
-import @./internal {wrap_impl}
+import @internal {wrap_impl}
 
 export:
     wrap type T |value T| -> T:

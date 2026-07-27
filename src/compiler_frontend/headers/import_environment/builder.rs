@@ -14,6 +14,9 @@ use crate::compiler_frontend::headers::module_symbols::{
     ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
 use crate::compiler_frontend::headers::parse_file_headers::FileImport;
+use crate::compiler_frontend::public_interface::{
+    PublicDeclarationSemantics, SourceProviderImportSet,
+};
 use crate::compiler_frontend::source_packages::root_file::{
     import_path_references_config_file, import_path_references_hash_root_file,
 };
@@ -26,7 +29,7 @@ use super::{
     ExternalPackageSymbolLookup, ExternalPackageSymbolResolutionInput, FileVisibility,
     HeaderImportEnvironment, ImportTargetResolutionInput, ModuleBoundaryCheckInput,
     NamespaceRecordSource, NamespaceTargetResolutionInput, PublicExportLookupResult,
-    PublicExportResolutionInput, ResolvedImportTarget, SourceImportAccess,
+    PublicExportResolutionInput, ResolvedImportTarget, SourceDeclarationTarget, SourceImportAccess,
     SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
     check_alias_case_warning, check_module_boundary, check_source_package_boundary,
     has_explicit_moth_extension, resolve_external_package_symbol, resolve_import_target,
@@ -44,6 +47,7 @@ pub(crate) struct ImportEnvironmentBuilder<'a> {
     pub(super) module_symbols: &'a ModuleSymbols,
     pub(super) external_package_registry: &'a ExternalPackageRegistry,
     pub(super) external_import_resolution_table: &'a ExternalImportResolutionTable,
+    pub(super) source_provider_imports: &'a SourceProviderImportSet<'a>,
     pub(super) string_table: &'a mut StringTable,
     pub(super) environment: HeaderImportEnvironment,
     pub(super) warnings: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
@@ -181,15 +185,15 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 if is_type_alias {
                     file_visibility
                         .visible_type_alias_names
-                        .insert(name, path.clone());
+                        .insert(name, SourceDeclarationTarget::Local(path.clone()));
                 } else if is_trait {
                     file_visibility
                         .visible_trait_names
-                        .insert(name, path.clone());
+                        .insert(name, SourceDeclarationTarget::Local(path.clone()));
                 } else {
                     file_visibility
                         .visible_source_names
-                        .insert(name, path.clone());
+                        .insert(name, SourceDeclarationTarget::Local(path.clone()));
                 }
             }
         }
@@ -207,7 +211,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 )?;
                 file_visibility
                     .visible_source_names
-                    .insert(name, path.clone());
+                    .insert(name, SourceDeclarationTarget::Local(path.clone()));
             }
         }
 
@@ -337,8 +341,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         //      across compilations; lexicographic order by function path is stable.
         for paths in file_visibility.visible_receiver_methods.values_mut() {
             paths.sort_by(|a, b| {
-                let a_str = a.function_path.to_string(self.string_table);
-                let b_str = b.function_path.to_string(self.string_table);
+                let a_str = a.target.local_path().to_string(self.string_table);
+                let b_str = b.target.local_path().to_string(self.string_table);
                 a_str.cmp(&b_str)
             });
         }
@@ -346,6 +350,105 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         self.environment
             .file_visibility_by_source
             .insert(source_file.clone(), file_visibility);
+        Ok(())
+    }
+
+    fn register_source_provider_import(
+        &mut self,
+        file_visibility: &mut FileVisibility,
+        registry: &mut VisibleNameRegistry,
+        import: &FileImport,
+        interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
+    ) -> BuilderResult<()> {
+        // Retain the provider's complete stable declaration closure once. AST owns projection
+        // into consumer-local handles and must never reopen donor syntax for nested types.
+        for provider_declaration in &interface.declarations {
+            self.environment
+                .imported_declarations_by_origin
+                .entry(provider_declaration.origin.clone())
+                .or_insert_with(|| provider_declaration.clone());
+        }
+
+        let Some(public_name_id) = import.provider.path.name() else {
+            return Err(Box::new(super::diagnostics::missing_import_target_no_path(
+                import.location.clone(),
+            )));
+        };
+        let public_name = self.string_table.resolve(public_name_id);
+        let Some(origin) = interface.exported_origin(public_name).cloned() else {
+            return Err(Box::new(super::diagnostics::missing_import_target(
+                &import.provider.path,
+                import.location.clone(),
+            )));
+        };
+        let Some(declaration) = interface.declaration(&origin).cloned() else {
+            return Err(Box::new(super::diagnostics::missing_import_target(
+                &import.provider.path,
+                import.location.clone(),
+            )));
+        };
+
+        let local_name = self.derive_import_local_name(import)?;
+        let local_path = import.provider.path.clone();
+        let target = SourceDeclarationTarget::Imported {
+            origin: origin.clone(),
+            local_path: local_path.clone(),
+        };
+        let binding = match declaration.semantics {
+            PublicDeclarationSemantics::TransparentAlias(_) => VisibleNameBinding::TypeAlias {
+                canonical_path: local_path.clone(),
+            },
+            PublicDeclarationSemantics::Trait(_) => VisibleNameBinding::Trait {
+                canonical_path: local_path.clone(),
+            },
+            _ => VisibleNameBinding::SourceImport {
+                canonical_path: local_path.clone(),
+            },
+        };
+
+        registry.register(local_name, binding, Some(import.location.clone()))?;
+        file_visibility
+            .visible_declaration_paths
+            .insert(local_path.clone());
+
+        match declaration.semantics {
+            PublicDeclarationSemantics::TransparentAlias(_) => {
+                file_visibility
+                    .visible_type_alias_names
+                    .insert(local_name, target);
+            }
+            PublicDeclarationSemantics::Trait(_) => {
+                file_visibility
+                    .visible_trait_names
+                    .insert(local_name, target);
+            }
+            _ => {
+                file_visibility
+                    .visible_source_names
+                    .insert(local_name, target);
+            }
+        }
+
+        self.environment
+            .imported_declarations_by_local_path
+            .insert(local_path.clone(), declaration);
+
+        if let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Function(
+            function_origin,
+        ) = origin
+            && let Some(summary) = interface.concrete_call_summary(&function_origin)
+        {
+            self.environment.imported_functions_by_local_path.insert(
+                local_path.clone(),
+                super::ImportedFunctionContract {
+                    target: super::SourceFunctionTarget::Imported {
+                        origin: function_origin,
+                        local_path,
+                    },
+                    summary: summary.clone(),
+                },
+            );
+        }
         Ok(())
     }
 
@@ -373,7 +476,9 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             file_visibility
                 .visible_declaration_paths
                 .insert(path.clone());
-            file_visibility.visible_source_names.insert(name, path);
+            file_visibility
+                .visible_source_names
+                .insert(name, SourceDeclarationTarget::Local(path));
         }
     }
 
@@ -390,12 +495,16 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                     return None;
                 }
 
-                if !self.module_symbols.constant_paths.contains(path) {
+                if !self
+                    .module_symbols
+                    .constant_paths
+                    .contains(path.local_path())
+                {
                     return None;
                 }
 
-                if self.symbol_origin_matches_source(path, source_file) {
-                    Some((*name, path.clone()))
+                if self.symbol_origin_matches_source(path.local_path(), source_file) {
+                    Some((*name, path.local_path().clone()))
                 } else {
                     None
                 }
@@ -407,7 +516,11 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         file_visibility
             .visible_declaration_paths
             .remove(&content_path);
-        if file_visibility.visible_source_names.get(&content_name) == Some(&content_path) {
+        if file_visibility
+            .visible_source_names
+            .get(&content_name)
+            .is_some_and(|target| target.local_path() == &content_path)
+        {
             file_visibility.visible_source_names.remove(&content_name);
         }
     }
@@ -592,6 +705,15 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         source_file: &InternedPath,
         importable_symbol_paths: &FxHashSet<InternedPath>,
     ) -> BuilderResult<()> {
+        if let Some(interface) = self.source_provider_imports.resolve(source_file, import) {
+            return self.register_source_provider_import(
+                file_visibility,
+                registry,
+                import,
+                interface,
+            );
+        }
+
         // Check for provider-backed grouped import first.
         if let Some(resolved) = self.resolve_provider_backed_grouped_import(
             file_visibility,

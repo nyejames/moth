@@ -245,7 +245,10 @@ fn dead_local_access_reports_borrow_error() {
 
     let mut hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
 
-    let start = &hir.functions[hir.start_function.0 as usize];
+    let start = &hir.functions[hir
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry = &hir.blocks[start.entry.0 as usize];
     let (then_block, _) = match &entry.terminator {
         crate::compiler_frontend::hir::terminators::HirTerminator::If {

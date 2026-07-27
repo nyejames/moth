@@ -62,7 +62,7 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
             statement(
                 2,
                 HirStatementKind::Call {
-                    target: CallTarget::UserFunction(FunctionId(0)),
+                    target: CallTarget::Local(FunctionId(0)),
                     args: vec![],
                     result: Some(LocalId(1)),
                 },
@@ -962,7 +962,7 @@ fn rejects_unsupported_host_call_with_diagnostic() {
         statements: vec![statement(
             1,
             HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(unknown_id),
+                target: CallTarget::External(unknown_id),
                 args: vec![],
                 result: None,
             },
@@ -1000,7 +1000,7 @@ fn rejects_unsupported_host_call_with_diagnostic() {
 }
 
 #[test]
-fn export_reachable_policy_ignores_unreachable_host_calls() {
+fn selected_function_policy_ignores_unselected_host_calls() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let start_path = InternedPath::from_single_str("main", &mut string_table);
@@ -1023,7 +1023,7 @@ fn export_reachable_policy_ignores_unreachable_host_calls() {
         statements: vec![statement(
             1,
             HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(unsupported_id),
+                target: CallTarget::External(unsupported_id),
                 args: vec![],
                 result: None,
             },
@@ -1064,7 +1064,19 @@ fn export_reachable_policy_ignores_unreachable_host_calls() {
             export_names,
             helper_exports: Default::default(),
         },
-        function_emission_policy: WasmFunctionEmissionPolicy::ReachableFromExports,
+        function_emission_policy: {
+            let facts =
+                crate::compiler_frontend::hir::reachability::collect_module_function_link_facts(
+                    &module,
+                )
+                .expect("test HIR should produce function link facts");
+            let reachability = crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts(
+                &facts,
+                &[module.start_function.expect("normal test module should have start")],
+            )
+            .expect("test HIR should produce entry reachability");
+            WasmFunctionEmissionPolicy::Selected(reachability.backend_selection().clone())
+        },
         ..Default::default()
     };
 
@@ -1083,6 +1095,29 @@ fn export_reachable_policy_ignores_unreachable_host_calls() {
         2,
         "only the exported start function and its wrapper should be lowered"
     );
+
+    let mut invalid_export_request = request.clone();
+    invalid_export_request
+        .export_policy
+        .exported_functions
+        .push(FunctionId(1));
+    invalid_export_request
+        .export_policy
+        .export_names
+        .insert(FunctionId(1), "unused".to_owned());
+
+    let error = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &invalid_export_request,
+        &string_table,
+        &type_environment,
+    )
+    .expect_err("an unselected function must not become a Wasm export");
+    let (_error_type, message, _location) = error
+        .first_infrastructure_error_for_tests()
+        .expect("Wasm request validation should fail before lowering");
+    assert!(message.contains("absent from the selected function plan"));
 }
 
 #[test]
@@ -1322,7 +1357,7 @@ fn io_console_functions_are_unsupported_in_wasm() {
     let io_call = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(
+            target: CallTarget::External(
                 crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine,
             ),
             args: vec![string_expression(2, "hello", types.string, RegionId(0))],

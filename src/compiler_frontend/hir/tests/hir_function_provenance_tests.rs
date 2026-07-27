@@ -90,7 +90,11 @@ fn retains_direct_provenance_per_function() {
     // The start function has an explicit empty (portable) fact.
     let start_provenance = module
         .function_provenance
-        .get(&module.start_function)
+        .get(
+            &module
+                .start_function
+                .expect("normal test module should have start"),
+        )
         .expect("start function should have a provenance fact");
     assert!(start_provenance.is_empty());
 
@@ -146,7 +150,11 @@ fn empty_function_has_explicit_empty_provenance() {
     assert_eq!(module.function_provenance.len(), module.functions.len());
     let provenance = module
         .function_provenance
-        .get(&module.start_function)
+        .get(
+            &module
+                .start_function
+                .expect("normal test module should have start"),
+        )
         .expect("start function should have a provenance fact");
     assert!(provenance.is_empty());
 }
@@ -250,7 +258,9 @@ fn validation_rejects_replaced_out_of_range_provenance_key() {
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start_function = module.start_function;
+    let start_function = module
+        .start_function
+        .expect("normal test module should have start");
     module.function_provenance.remove(&start_function);
     module
         .function_provenance

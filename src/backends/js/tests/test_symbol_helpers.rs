@@ -29,6 +29,11 @@ pub(crate) fn expected_dev_local_name(leaf: &str, id: u32) -> String {
     format!("moth_{}_l{}", sanitize_hint(leaf), id)
 }
 
-pub(crate) fn expected_dev_field_name(leaf: &str, id: u32) -> String {
-    format!("moth_{}_fld{}", sanitize_hint(leaf), id)
+pub(crate) fn expected_dev_field_name(leaf: &str, _id: u32) -> String {
+    let encoded = leaf
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("moth_field_{encoded}")
 }

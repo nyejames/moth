@@ -15,13 +15,18 @@ use crate::build_system::utils::{file_error_messages, should_skip_unchanged_writ
 
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::reachability::{
+    HirModuleLinkFacts, HirReachability, collect_reachability_from_function_link_facts,
+};
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFragment};
-use crate::compiler_frontend::public_interface_draft::PublicInterfaceDraft;
+use crate::compiler_frontend::public_interface::{LocalPublicInterface, PublicSemanticInterface};
+use crate::compiler_frontend::semantic_identity::OriginFunctionId;
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
@@ -35,7 +40,8 @@ use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPac
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::projects::settings::{Config, ProjectConfigError};
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -76,7 +82,7 @@ pub(crate) struct ModuleExternalImport {
 
 /// Header-derived root activity metadata passed to backend builders.
 ///
-/// WHAT: records the builder-relevant activity of the active module root.
+/// WHAT: records the builder-relevant dormant activity of one compiled module root.
 /// WHY: header parsing already classifies root bodies and page fragments, so builders can apply
 ///      artifact policy without scanning tokens or HIR for the same facts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -122,27 +128,25 @@ impl ModuleExecutable {
 
 /// Backend-neutral link facts for one compiled module.
 ///
-/// WHAT: owns the deduplicated provider-resolved external imports and the effective external
-///       package registry the frontend resolved this module against.
-/// WHY: backends consume one flat list of runtime assets and required imports to emit glue and
-///      copy assets, and validate against the same symbols the frontend resolved. The complete
-///      effective registry is a current dependency carried here until Phase 7 replaces it with
-///      immutable binding interfaces and per-function link facts; it is not itself a per-function
-///      link fact.
+/// WHAT: owns deterministic base-function facts, available external runtime import candidates
+///       and the effective external package registry resolved for this module.
+/// WHY: entry assembly derives exact reachable unions from the function facts while backend
+///      validation and lowering still need the same external symbol definitions the frontend used.
 pub(crate) struct ModuleLinkFacts {
     /// Effective external package registry after provider resolution for this module.
     ///
     /// WHY: provider-backed import discovery mutates the registry during Stage 0; the module
     ///      must carry the effective registry so backends validate and lower against the same
     ///      symbols the frontend resolved, rather than reconstructing a fresh registry that
-    ///      loses provider-created packages. This is a temporary current dependency; Phase 7
-    ///      narrows it to immutable binding interfaces and per-function link facts.
+    ///      loses provider-created packages. R6A replaces this temporary complete registry with
+    ///      stable binding identities after the canonical provider path exists.
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
-    /// Provider-resolved external imports used by this module, deduplicated.
-    ///
-    /// WHY: backends need a flat list of runtime assets and required imports to emit glue
-    ///      and copy assets, without carrying the full per-source-file resolution table.
-    pub(crate) module_external_imports: Vec<ModuleExternalImport>,
+    /// All provider and builder runtime imports available to this module's executable functions.
+    /// Entry assembly filters these candidates through per-function reachability before any
+    /// runtime asset, import-map or glue consumer sees them.
+    pub(crate) external_import_candidates: Vec<ModuleExternalImport>,
+    /// Direct facts for every base HIR function in deterministic function-ID order.
+    pub(crate) functions: HirModuleLinkFacts,
 }
 
 /// Non-HIR compiler and builder-facing metadata for one compiled module.
@@ -170,13 +174,13 @@ pub(crate) struct ModuleCompilerMetadata {
     ///       moves the one existing validated `GenericFunctionTemplate` body payload out of the
     ///       donor-local AST template map. The store is TIR-free and `Send`.
     /// WHY: locked decision 10 retains the declaring module's template body as a compiler
-    ///      metadata checkpoint for the future build-owned generated sidecar worklist (R3). This
-    ///      is a body-artefact checkpoint only, not the complete materialisation context: complete
-    ///      materialisation also needs declaration, file-visibility, generic/type and related
-    ///      frontend context that this slice intentionally does not retain. The legacy flat-module
-    ///      handoff drops this store before string-table remap because the retained
-    ///      `FunctionSignature` carries donor-local `StringId`s whose remap owner is not in scope
-    ///      for the current slice.
+    ///      metadata checkpoint for the future build-owned generated sidecar worklist
+    ///      (R5D-R5G). This is a body-artefact checkpoint only, not the complete materialisation
+    ///      context: complete materialisation also needs declaration, file-visibility,
+    ///      generic/type and related frontend context that this slice intentionally does not
+    ///      retain. The pre-provider project-compilation handoff drops this store before string-table remap
+    ///      because the retained `FunctionSignature` carries donor-local `StringId`s whose remap
+    ///      owner is not in scope for the current slice.
     pub(crate) validated_generic_templates: ValidatedGenericTemplateStore,
 }
 
@@ -204,9 +208,9 @@ impl ModuleCompilerMetadata {
     ///
     /// WHY: the retained `GenericFunctionTemplate` values carry `FunctionSignature` donor-local
     ///      `StringId`s whose remap owner is not in scope for this slice. The store must never
-    ///      remain reachable by a backend after a legacy flat-module handoff, so each handoff
-    ///      path calls this before `remap_string_ids`. R3 will consume the store for the
-    ///      generated sidecar worklist before this discard.
+    ///      remain reachable by a backend after the pre-provider project-compilation handoff, so each handoff
+    ///      path calls this before `remap_string_ids`. The discard is deliberate; R5D-R5G
+    ///      will replace this body-only checkpoint with the complete artefact store and worklist.
     pub(crate) fn discard_validated_generic_templates(&mut self) {
         let _ = std::mem::take(&mut self.validated_generic_templates);
     }
@@ -219,9 +223,10 @@ impl ModuleCompilerMetadata {
     ///
     /// The `validated_generic_templates` store is intentionally not remapped here. Its retained
     /// `GenericFunctionTemplate` values carry `FunctionSignature` donor-local `StringId`s whose
-    /// remap owner is not in scope for the current slice. The legacy flat-module handoff drops
-    /// the store before calling this method so no stale local `StringId` reaches backends. R3
-    /// will add a dedicated remap path when the generated sidecar worklist consumes the store.
+    /// remap owner is not in scope for the current slice. The pre-provider project-compilation handoff drops
+    /// the store before calling this method so no stale local `StringId` reaches backends. R5D-R5G
+    /// will add a dedicated remap path when it replaces this checkpoint with the complete
+    /// artefact store and worklist.
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for warning in &mut self.warnings {
             warning.remap_string_ids(remap);
@@ -243,9 +248,9 @@ impl ModuleCompilerMetadata {
 /// Frontend output for one module root ready for backend lowering.
 ///
 /// WHAT: a lane container with exactly an executable lane (typed HIR, paired type environment
-///       and borrow facts), a link-facts lane (external imports and the effective registry), and
-///       a compiler-metadata lane (entry path, warnings, fragments, root activity, docs and
-///       rendered paths).
+///       and borrow facts), a link-facts lane (per-function runtime facts, external imports and
+///       the effective registry), and a compiler-metadata lane (entry path, warnings, fragments,
+///       root activity, docs and rendered paths).
 /// WHY: backends consume one stable module payload shape regardless of project type, with
 ///      explicit ownership keeping HIR/type/borrow pairing obvious at call sites.
 pub struct Module {
@@ -254,33 +259,298 @@ pub struct Module {
     pub(crate) metadata: ModuleCompilerMetadata,
 }
 
+/// One successful canonical module artefact.
+///
+/// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable semantic
+/// interface published to later graph waves.
+/// WHY: provider publication must point at a complete success value. Keeping both lanes in one
+/// artefact prevents the scheduler from publishing a local draft or dropping the interface while
+/// retaining only backend state.
+pub(crate) struct CompiledModuleArtifact {
+    pub(crate) module: Module,
+    pub(crate) interface: PublicSemanticInterface,
+}
+
+/// Success-only frontend payload consumed by project builders.
+///
+/// WHAT: owns every successfully compiled module and the explicit entry assemblies selected from
+///       their dormant root activity.
+/// WHY: project builders need a coherent project boundary with build-owned entry selection. A
+///      diagnosed frontend never constructs this value, and backends no longer infer entries by
+///      filtering a flat module vector.
+pub struct ProjectCompilation {
+    modules: Vec<Module>,
+    entries: Vec<EntryAssembly>,
+    source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
+}
+
+impl ProjectCompilation {
+    pub(crate) fn from_successful_modules(modules: Vec<Module>) -> Result<Self, CompilerError> {
+        let mut function_owner_by_origin = FxHashMap::default();
+        for (module_index, module) in modules.iter().enumerate() {
+            for (origin, function_id) in &module.executable.hir.function_ids_by_origin {
+                if function_owner_by_origin
+                    .insert(origin.clone(), (module_index, *function_id))
+                    .is_some()
+                {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Project compilation contains duplicate source function origin {origin:?}"
+                    )));
+                }
+            }
+        }
+
+        let mut sorted_origins = function_owner_by_origin.keys().cloned().collect::<Vec<_>>();
+        sorted_origins.sort();
+        let source_function_names = Arc::new(
+            sorted_origins
+                .into_iter()
+                .enumerate()
+                .map(|(index, origin)| (origin, format!("__moth_src_fn_{index}")))
+                .collect(),
+        );
+        let mut entries = Vec::new();
+
+        for (module_index, module) in modules.iter().enumerate() {
+            if !module.metadata.root_activity.has_html_artifact_activity() {
+                continue;
+            }
+
+            let start_function = module
+                .executable
+                .hir
+                .require_start_function("entry assembly")?;
+            let mut roots_by_module = FxHashMap::<usize, FxHashSet<FunctionId>>::default();
+            roots_by_module
+                .entry(module_index)
+                .or_default()
+                .insert(start_function);
+            let mut pending_modules = VecDeque::from([module_index]);
+            let mut reachability_by_module = FxHashMap::default();
+
+            while let Some(reachable_module_index) = pending_modules.pop_front() {
+                let mut roots = roots_by_module[&reachable_module_index]
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>();
+                roots.sort_by_key(|function_id| function_id.0);
+                let reachable_module = &modules[reachable_module_index];
+                let reachability = collect_reachability_from_function_link_facts(
+                    &reachable_module.link_facts.functions,
+                    &roots,
+                )?;
+
+                for origin in &reachability.reachable_cross_module_functions {
+                    let Some((provider_module_index, provider_function_id)) =
+                        function_owner_by_origin.get(origin).copied()
+                    else {
+                        return Err(CompilerError::compiler_error(format!(
+                            "Entry assembly could not resolve cross-module function origin {origin:?}"
+                        )));
+                    };
+                    if roots_by_module
+                        .entry(provider_module_index)
+                        .or_default()
+                        .insert(provider_function_id)
+                    {
+                        pending_modules.push_back(provider_module_index);
+                    }
+                }
+
+                reachability_by_module.insert(reachable_module_index, reachability);
+            }
+
+            let reachability = reachability_by_module
+                .remove(&module_index)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Entry assembly lost its root module reachability",
+                    )
+                })?;
+            let mut linked_modules = reachability_by_module
+                .into_iter()
+                .map(|(module_index, reachability)| LinkedModuleAssembly {
+                    module_index,
+                    reachability,
+                })
+                .collect::<Vec<_>>();
+            linked_modules.sort_by_key(|linked| linked.module_index);
+
+            let mut external_imports = Vec::new();
+            for (reachable_module, module_reachability) in std::iter::once((module, &reachability))
+                .chain(
+                    linked_modules
+                        .iter()
+                        .map(|linked| (&modules[linked.module_index], &linked.reachability)),
+                )
+            {
+                let reachable_package_ids = collect_reachable_external_package_ids(
+                    module_reachability,
+                    reachable_module
+                        .link_facts
+                        .external_package_registry
+                        .as_ref(),
+                )?;
+                external_imports.extend(
+                    reachable_module
+                        .link_facts
+                        .external_import_candidates
+                        .iter()
+                        .filter(|external_import| {
+                            reachable_package_ids.contains(&external_import.package_id)
+                        })
+                        .cloned(),
+                );
+            }
+
+            entries.push(EntryAssembly {
+                module_index,
+                reachability,
+                external_imports,
+                linked_modules,
+            });
+        }
+
+        Ok(Self {
+            modules,
+            entries,
+            source_function_names,
+        })
+    }
+
+    pub(crate) fn modules(&self) -> &[Module] {
+        &self.modules
+    }
+
+    /// Resolve every entry through this compilation's own module store.
+    ///
+    /// Returning an owner-bound view prevents an assembly from one compilation being resolved
+    /// against another compilation's same-index module.
+    pub(crate) fn entries(&self) -> Vec<ProjectEntry<'_>> {
+        let mut entries = Vec::with_capacity(self.entries.len());
+
+        for entry in &self.entries {
+            // Construction validates and owns both vectors together. No detached entry handle is
+            // exposed, so this dense index cannot be resolved against another compilation.
+            let module = &self.modules[entry.module_index];
+            entries.push(ProjectEntry {
+                module,
+                reachability: &entry.reachability,
+                external_imports: &entry.external_imports,
+                linked_modules: entry
+                    .linked_modules
+                    .iter()
+                    .map(|linked| ProjectLinkedModule {
+                        module: &self.modules[linked.module_index],
+                        reachability: &linked.reachability,
+                    })
+                    .collect(),
+                source_function_names: Arc::clone(&self.source_function_names),
+            });
+        }
+
+        entries
+    }
+}
+
+fn collect_reachable_external_package_ids(
+    reachability: &HirReachability,
+    registry: &ExternalPackageRegistry,
+) -> Result<FxHashSet<ExternalPackageId>, CompilerError> {
+    let mut package_ids = FxHashSet::default();
+
+    for function_id in &reachability.reachable_external_functions {
+        let package_id = registry
+            .resolve_function_package_id(*function_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Reachable external function {function_id:?} has no owning package"
+                ))
+            })?;
+        package_ids.insert(package_id);
+    }
+
+    Ok(package_ids)
+}
+
+/// Build-owned activation record for one compiled module's dormant root work.
+///
+/// The dense index is private to the owning `ProjectCompilation`; backends receive only the
+/// owner-bound entry view returned by `ProjectCompilation::entries`.
+pub(crate) struct EntryAssembly {
+    module_index: usize,
+    reachability: HirReachability,
+    external_imports: Vec<ModuleExternalImport>,
+    linked_modules: Vec<LinkedModuleAssembly>,
+}
+
+pub(crate) struct LinkedModuleAssembly {
+    module_index: usize,
+    reachability: HirReachability,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ProjectLinkedModule<'a> {
+    pub(crate) module: &'a Module,
+    pub(crate) reachability: &'a HirReachability,
+}
+
+/// Owner-bound view of one entry assembly and its selected compiled module.
+#[derive(Clone)]
+pub(crate) struct ProjectEntry<'a> {
+    pub(crate) module: &'a Module,
+    pub(crate) reachability: &'a HirReachability,
+    pub(crate) external_imports: &'a [ModuleExternalImport],
+    pub(crate) linked_modules: Vec<ProjectLinkedModule<'a>>,
+    pub(crate) source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
+}
+
 impl Module {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         increment_frontend_counter(FrontendCounter::ModuleRemapStringIdsCalls);
 
         self.executable.remap_string_ids(remap);
+        self.link_facts.functions.remap_string_ids(remap);
         self.metadata.remap_string_ids(remap);
-
-        // Link facts carry no interned StringIds: external import metadata uses resolved
-        // runtime asset identities and package IDs.
     }
 }
 
-/// Per-module frontend compilation result carrying the evolved local string table.
-pub(crate) struct CompiledModuleResult {
+/// Internal semantic draft for one module after local semantic compilation and before provider
+/// publication.
+///
+/// WHAT: carries the semantic lanes produced by one module frontend compilation before the
+/// canonical graph publishes a completed provider artefact. It owns the
+/// validated base HIR, paired local type environment and borrow facts (inside `module`), the
+/// complete base-function link facts (`module.link_facts`), compiler metadata
+/// (`module.metadata`), the completed direct public interface and the module-local string
+/// table that carries every diagnostic render identity for remap.
+/// WHY: naming this internal phase separately from the backend `Module` handoff gives provider
+/// completion and the generated-function worklist one build-owned result to evolve. This draft
+/// is not a completed provider artefact or backend module result.
+/// It implements no provider lookup and must not enter any successful
+/// `GraphCompilationOutcome`. The stable module origin is retained through
+/// `public_interface.draft.module_origin`; no dense `ModuleId` crosses this boundary
+/// because standalone compilation has no graph-assigned identity. The current legacy generic
+/// path still materialises requests inside AST before HIR lowering. R5F replaces that owner and
+/// adds stable unresolved requests to this draft instead of introducing a placeholder field here.
+pub(crate) struct ModuleSemanticDraft {
+    /// Current executable, link-fact and compiler-metadata lanes: validated base HIR, paired type
+    /// environment, borrow facts, complete base-function link facts and compiler metadata.
     pub module: Module,
+    /// The module-local string table carrying every diagnostic render identity produced during
+    /// semantic compilation. Merged into the build table once per module at the compilation
+    /// boundary so downstream consumers see a single remapped table.
     pub string_table: StringTable,
-    /// The one public-interface draft for declarations defined directly in the active module root,
-    /// retained alongside the successful compile result so later graph/interface slices can
-    /// consume it. It internalizes the direct export-origin, canonical type-surface and corrected
-    /// trait-requirement projections behind one builder, with joined local callable summaries and
-    /// explicit pending states for exported generic templates awaiting R3 sidecars.
-    /// It carries only owned stable values: no `TypeId`, `NominalTypeId`,
-    /// `GenericParameterId`, `TraitId`, `InternedPath` or `StringId` crosses this boundary. It
-    /// is not part of the accepted three-lane `Module` and is not the final
-    /// `PublicSemanticInterface`. The legacy flat `Vec<Module>` handoff explicitly drops it
-    /// until the graph consumer lands.
-    pub public_interface_draft: PublicInterfaceDraft,
+    /// The completed direct public interface for declarations defined directly in the active
+    /// module root. This is a draft relative to the future completed provider interface: it
+    /// owns the pre-HIR declaration draft plus the concrete-local summary records produced
+    /// after borrow validation, with explicit callable categories distinguishing concrete-local
+    /// callables from generic-template declarations whose generated summaries remain
+    /// sidecar-owned. It carries the stable module origin through `draft.module_origin` and
+    /// only owned stable values: no `TypeId`, `NominalTypeId`, `GenericParameterId`,
+    /// `TraitId`, `InternedPath` or `StringId` crosses this boundary. The compilation
+    /// graph scheduler publishes it as the completed provider interface for later waves.
+    pub public_interface: LocalPublicInterface,
 }
 
 // -------------------------
@@ -292,9 +562,9 @@ pub trait BackendBuilder {
     /// Build the project with the given configuration
     fn build_backend(
         &self,
-        modules: Vec<Module>, // Each collection of files the frontend has compiled into modules
-        config: &Config,      // Persistent settings across the whole project
-        flags: &[Flag],       // Settings only relevant to this build
+        project_compilation: ProjectCompilation,
+        config: &Config, // Persistent settings across the whole project
+        flags: &[Flag],  // Settings only relevant to this build
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages>;
 
@@ -513,29 +783,32 @@ pub fn build_project(
             return Err(messages);
         }
     };
-    let mut warnings = collect_frontend_warnings(&modules);
+    let project_compilation = ProjectCompilation::from_successful_modules(modules)
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let mut warnings = collect_frontend_warnings(project_compilation.modules());
 
     // --------------------------------------------
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
     // --------------------------------------------
 
     let backend_start = crate::timing::start_pipeline_timing();
-    let project =
-        match project_builder
-            .backend
-            .build_backend(modules, &config, flags, &mut string_table)
-        {
-            Ok(project) => {
-                log_stage_timing("build_project.backend", backend_start);
-                project
-            }
-            Err(mut compiler_messages) => {
-                log_stage_timing("build_project.backend", backend_start);
-                log_stage_timing("build_project.total", total_start);
-                compiler_messages.string_table = string_table;
-                return Err(compiler_messages);
-            }
-        };
+    let project = match project_builder.backend.build_backend(
+        project_compilation,
+        &config,
+        flags,
+        &mut string_table,
+    ) {
+        Ok(project) => {
+            log_stage_timing("build_project.backend", backend_start);
+            project
+        }
+        Err(mut compiler_messages) => {
+            log_stage_timing("build_project.backend", backend_start);
+            log_stage_timing("build_project.total", total_start);
+            compiler_messages.string_table = string_table;
+            return Err(compiler_messages);
+        }
+    };
 
     warnings.extend(project.warnings.iter().cloned());
 

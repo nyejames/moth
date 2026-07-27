@@ -1,4 +1,4 @@
-import @./internal {identity_impl}
+import @internal {identity_impl}
 
 export:
     identity type T |value T| -> T:

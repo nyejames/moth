@@ -22,7 +22,7 @@ fn test_module(string_table: &mut StringTable) -> HirModule {
     .join_str("start", string_table);
     let mut side_table = HirSideTable::default();
     side_table.bind_function_name(FunctionId(0), start_path);
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.side_table = side_table;
     module
 }
@@ -49,8 +49,14 @@ fn extracts_reserved_entry_metadata() {
         string_constant("page_description", "Landing page"),
     ];
 
-    let metadata =
-        extract_html_page_metadata(&module, &mut string_table).expect("metadata should parse");
+    let metadata = extract_html_page_metadata(
+        &module,
+        module
+            .start_function
+            .expect("entry module should have start"),
+        &mut string_table,
+    )
+    .expect("metadata should parse");
     assert_eq!(metadata.title, Some(String::from("Home")));
     assert_eq!(
         metadata.extra_head_html,
@@ -68,8 +74,14 @@ fn ignores_non_entry_constants() {
         string_constant("docs/shared.moth/page_title", "Shared"),
     ];
 
-    let metadata =
-        extract_html_page_metadata(&module, &mut string_table).expect("metadata should parse");
+    let metadata = extract_html_page_metadata(
+        &module,
+        module
+            .start_function
+            .expect("entry module should have start"),
+        &mut string_table,
+    )
+    .expect("metadata should parse");
     assert_eq!(metadata.title, Some(String::from("Home")));
 }
 
@@ -84,8 +96,14 @@ fn rejects_non_string_reserved_values() {
         value: HirConstValue::Bool(true),
     }];
 
-    let error = extract_html_page_metadata(&module, &mut string_table)
-        .expect_err("non-string metadata should fail");
+    let error = extract_html_page_metadata(
+        &module,
+        module
+            .start_function
+            .expect("entry module should have start"),
+        &mut string_table,
+    )
+    .expect_err("non-string metadata should fail");
     assert_eq!(
         error.kind,
         DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata)
@@ -111,8 +129,14 @@ fn rejects_duplicate_reserved_values() {
         string_constant("docs/#page.moth/page_title", "Another"),
     ];
 
-    let error = extract_html_page_metadata(&module, &mut string_table)
-        .expect_err("duplicate metadata should fail");
+    let error = extract_html_page_metadata(
+        &module,
+        module
+            .start_function
+            .expect("entry module should have start"),
+        &mut string_table,
+    )
+    .expect_err("duplicate metadata should fail");
     assert_eq!(
         error.kind,
         DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata)

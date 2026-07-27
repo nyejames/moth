@@ -77,7 +77,7 @@ define_stable_reason_keys! {
         &InvalidConfigReason::NoRootModuleEntries { .. } => "invalid_config.no_root_module_entries",
         &InvalidConfigReason::MultipleModuleRootFiles { .. } => "invalid_config.multiple_module_root_files",
         &InvalidConfigReason::ConfigImportRootViolation => "invalid_config.config_import_root_violation",
-        &InvalidConfigReason::MothFileFolderCollision { .. } => "invalid_config.moth_file_folder_collision",
+        &InvalidConfigReason::SourceFileFolderCollision { .. } => "invalid_config.source_file_folder_collision",
     },
 
     InvalidPackageFolderReason => {
@@ -103,6 +103,7 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::FloatBoundaryValidation => "unsupported_backend_feature.float_boundary_validation",
     &UnsupportedBackendFeatureReason::GenericRuntimeValues => "unsupported_backend_feature.generic_runtime_values",
     &UnsupportedBackendFeatureReason::ReactiveExternalCallSink => "unsupported_backend_feature.reactive_external_call_sink",
+    &UnsupportedBackendFeatureReason::CrossModuleCalls => "unsupported_backend_feature.cross_module_calls",
     },
 
     NumberLiteralErrorReason => {

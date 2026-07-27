@@ -25,9 +25,7 @@ use crate::compiler_frontend::paths::path_normalization::{
     candidate_import_files_for_source_kinds, canonicalize_best_effort, import_contains_dotdot,
     is_relative_import_path, join_and_normalize_path,
 };
-use crate::compiler_frontend::source_packages::root_file::{
-    HashRootFileDiscovery, PreparedSourcePackageRoots,
-};
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
@@ -164,15 +162,7 @@ impl ProjectPathResolver {
     pub(crate) fn source_package_public_surface_files(
         &self,
     ) -> impl Iterator<Item = (&String, &PathBuf)> {
-        self.source_package_roots
-            .root_files()
-            .iter()
-            .filter_map(|(prefix, discovery)| match discovery {
-                HashRootFileDiscovery::Unique(root_file) => Some((prefix, root_file)),
-                HashRootFileDiscovery::Missing
-                | HashRootFileDiscovery::Multiple(_)
-                | HashRootFileDiscovery::Unreadable(_) => None,
-            })
+        self.source_package_roots.root_files().iter()
     }
 
     pub(crate) fn module_root_file_for_directory(&self, directory: &Path) -> Option<PathBuf> {
@@ -323,15 +313,7 @@ impl ProjectPathResolver {
     ) -> Option<PathBuf> {
         let first_component = import_path.as_components().first()?;
         let prefix = string_table.resolve(*first_component);
-        self.source_package_roots
-            .root_files()
-            .get(prefix)
-            .and_then(|discovery| match discovery {
-                HashRootFileDiscovery::Unique(root_file) => Some(root_file.clone()),
-                HashRootFileDiscovery::Missing
-                | HashRootFileDiscovery::Multiple(_)
-                | HashRootFileDiscovery::Unreadable(_) => None,
-            })
+        self.source_package_roots.root_files().get(prefix).cloned()
     }
 
     /// WHAT: checks whether an import path targets a regular module root and returns its prepared

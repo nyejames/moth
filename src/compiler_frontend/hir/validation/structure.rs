@@ -8,7 +8,9 @@ use super::HirValidator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
+use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::utils::terminator_targets;
+use crate::compiler_frontend::semantic_identity::OriginFunctionId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
@@ -63,13 +65,15 @@ impl<'a> HirValidator<'a> {
     }
 
     pub(super) fn validate_start_function(&self) -> Result<(), CompilerError> {
-        if !self.function_ids.contains(&self.module.start_function) {
+        if let Some(start_function) = self.module.start_function
+            && !self.function_ids.contains(&start_function)
+        {
             return Err(self.error_with_hir(
                 format!(
                     "HIR start_function {:?} is not present in module functions",
-                    self.module.start_function
+                    start_function
                 ),
-                Some(HirLocation::Function(self.module.start_function)),
+                Some(HirLocation::Function(start_function)),
             ));
         }
 
@@ -99,23 +103,40 @@ impl<'a> HirValidator<'a> {
             }
         }
 
-        if !matches!(
-            self.module
-                .function_origins
-                .get(&self.module.start_function),
-            Some(HirFunctionOrigin::EntryStart)
-        ) {
+        if let Some(start_function) = self.module.start_function {
+            if !matches!(
+                self.module.function_origins.get(&start_function),
+                Some(HirFunctionOrigin::EntryStart)
+            ) {
+                return Err(self.error_with_hir(
+                    format!(
+                        "HIR start function {:?} must be tagged as EntryStart",
+                        start_function
+                    ),
+                    Some(HirLocation::Function(start_function)),
+                ));
+            }
+        } else if self
+            .module
+            .function_origins
+            .values()
+            .any(|origin| matches!(origin, HirFunctionOrigin::EntryStart))
+        {
             return Err(self.error_with_hir(
-                format!(
-                    "HIR start function {:?} must be tagged as EntryStart",
-                    self.module.start_function
-                ),
-                Some(HirLocation::Function(self.module.start_function)),
+                "HIR module without start_function contains an EntryStart origin".to_owned(),
+                None,
             ));
         }
 
+        // Enforce that the stable origin-to-local-function relation is injective in both
+        // directions. The lowering owner already rejects one origin mapped to two local
+        // functions, so this loop independently catches the reverse direction (two origins
+        // mapped to one local function) against malformed HIR inputs rather than relying only
+        // on construction-time map key uniqueness.
+        let mut origin_for_local_function: FxHashMap<FunctionId, &OriginFunctionId> =
+            FxHashMap::default();
         for (origin, function_id) in &self.module.function_ids_by_origin {
-            if *function_id == self.module.start_function {
+            if Some(*function_id) == self.module.start_function {
                 return Err(self.error_with_hir(
                     format!(
                         "HIR implicit start function {:?} must not carry a public function origin {:?}",
@@ -134,6 +155,18 @@ impl<'a> HirValidator<'a> {
                     Some(HirLocation::Function(*function_id)),
                 ));
             }
+
+            if let Some(existing_origin) = origin_for_local_function.get(function_id) {
+                return Err(self.error_with_hir(
+                    format!(
+                        "HIR public function origins {:?} and {:?} both map to local function {:?}",
+                        existing_origin, origin, function_id
+                    ),
+                    Some(HirLocation::Function(*function_id)),
+                ));
+            }
+
+            origin_for_local_function.insert(*function_id, origin);
         }
 
         Ok(())

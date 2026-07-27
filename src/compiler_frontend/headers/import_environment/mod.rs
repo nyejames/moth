@@ -19,8 +19,9 @@ mod target_resolution;
 mod visible_names;
 
 pub(crate) use bindings::{
-    FileVisibility, HeaderImportEnvironment, NamespaceMemberLookup, NamespaceRecord,
-    NamespaceRecordSource, NamespaceTypeMember, NamespaceValueMember, ReceiverMethodVisibility,
+    FileVisibility, HeaderImportEnvironment, ImportedFunctionContract, NamespaceMemberLookup,
+    NamespaceRecord, NamespaceRecordSource, NamespaceTypeMember, NamespaceValueMember,
+    ReceiverMethodVisibility, SourceDeclarationTarget, SourceFunctionTarget,
     lookup_namespace_member,
 };
 pub(crate) use public_export_resolution::{
@@ -43,6 +44,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
+use crate::compiler_frontend::public_interface::SourceProviderImportSet;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Input bundle for preparing the module-wide import environment.
@@ -52,6 +54,7 @@ pub(crate) struct ImportEnvironmentInput<'a> {
     pub(crate) module_symbols: &'a mut ModuleSymbols,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
     pub(crate) external_import_resolution_table: &'a ExternalImportResolutionTable,
+    pub(crate) source_provider_imports: &'a SourceProviderImportSet<'a>,
     pub(crate) string_table: &'a mut StringTable,
 }
 
@@ -73,6 +76,7 @@ pub(crate) fn prepare_import_environment(
         module_symbols: input.module_symbols,
         external_package_registry: input.external_package_registry,
         external_import_resolution_table: input.external_import_resolution_table,
+        source_provider_imports: input.source_provider_imports,
         string_table: input.string_table,
         environment: HeaderImportEnvironment::default(),
         warnings: Vec::new(),

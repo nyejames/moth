@@ -9,10 +9,11 @@
 //! are represented in header/import visibility.
 //! MUST NOT: register grouped imports or perform AST semantic validation.
 
+use super::public_export_resolution::effective_module_boundary_path;
 use super::{
     FileVisibility, ImportEnvironmentBuilder, NamespaceRecord, NamespaceRecordSource,
-    NamespaceTypeMember, NamespaceValueMember, ResolvedNamespaceTarget, SourceImportAccess,
-    VisibleNameBinding, VisibleNameRegistry,
+    NamespaceTypeMember, NamespaceValueMember, ResolvedNamespaceTarget, SourceDeclarationTarget,
+    SourceImportAccess, VisibleNameBinding, VisibleNameRegistry,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
 use crate::compiler_frontend::external_packages::{ExternalSymbolId, ExternalSymbolPath};
@@ -391,7 +392,12 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         import_path: &InternedPath,
         source_file: &InternedPath,
     ) -> Option<ResolvedNamespaceTarget> {
-        let effective_path = self.effective_module_import_path(import_path, source_file);
+        let effective_path = effective_module_boundary_path(
+            source_file,
+            import_path,
+            &self.module_symbols.file_module_membership,
+            &self.module_symbols.module_root_boundaries,
+        );
 
         for boundary in &self.module_symbols.module_root_boundaries {
             if effective_path != boundary.import_prefix {
@@ -415,29 +421,6 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         }
 
         None
-    }
-
-    fn effective_module_import_path(
-        &self,
-        import_path: &InternedPath,
-        source_file: &InternedPath,
-    ) -> InternedPath {
-        let components = import_path.as_components();
-        let Some(first) = components.first() else {
-            return import_path.clone();
-        };
-
-        if self.string_table.resolve(*first) != "." {
-            return import_path.clone();
-        }
-
-        let Some(importer_directory) = source_file.parent() else {
-            return import_path.clone();
-        };
-
-        let mut combined = importer_directory.as_components().to_vec();
-        combined.extend_from_slice(&components[1..]);
-        InternedPath::from_components(combined)
     }
 
     /// Enforce public export privacy for concrete source-file namespace imports.
@@ -589,11 +572,20 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             let kind = self.classify_symbol_kind(&symbol_path);
             match kind {
                 SymbolKind::Type => {
-                    type_members.insert(name, NamespaceTypeMember::SourceDeclaration(symbol_path));
+                    type_members.insert(
+                        name,
+                        NamespaceTypeMember::SourceDeclaration(SourceDeclarationTarget::Local(
+                            symbol_path,
+                        )),
+                    );
                 }
                 SymbolKind::Value => {
-                    value_members
-                        .insert(name, NamespaceValueMember::SourceDeclaration(symbol_path));
+                    value_members.insert(
+                        name,
+                        NamespaceValueMember::SourceDeclaration(SourceDeclarationTarget::Local(
+                            symbol_path,
+                        )),
+                    );
                 }
             }
         }
@@ -638,13 +630,17 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                         SymbolKind::Type => {
                             type_members.insert(
                                 entry.export_name,
-                                NamespaceTypeMember::SourceDeclaration(symbol_path.clone()),
+                                NamespaceTypeMember::SourceDeclaration(
+                                    SourceDeclarationTarget::Local(symbol_path.clone()),
+                                ),
                             );
                         }
                         SymbolKind::Value => {
                             value_members.insert(
                                 entry.export_name,
-                                NamespaceValueMember::SourceDeclaration(symbol_path.clone()),
+                                NamespaceValueMember::SourceDeclaration(
+                                    SourceDeclarationTarget::Local(symbol_path.clone()),
+                                ),
                             );
                         }
                     }

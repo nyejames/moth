@@ -58,3 +58,7 @@ mod resolved_public_trait_roots_tests;
 #[cfg(test)]
 #[path = "../tests/finalizer_tests.rs"]
 mod finalizer_tests;
+
+#[cfg(test)]
+#[path = "../tests/import_projection_tests.rs"]
+mod import_projection_tests;

@@ -14,6 +14,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
@@ -163,6 +164,7 @@ impl FrontendProject {
         let options = HeaderParseOptions {
             entry_file_id,
             project_path_resolver: self.frontend.project_path_resolver.clone(),
+            active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };
 
         let mut prepared_outputs = Vec::with_capacity(tokenized_files.len());
@@ -192,6 +194,7 @@ impl FrontendProject {
             prepared_syntax,
             &self.frontend.external_package_registry,
             &ExternalImportResolutionTable::default(),
+            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
             options.project_path_resolver.as_ref(),
             &mut self.frontend.string_table,
         )
@@ -211,10 +214,12 @@ impl FrontendProject {
             .headers_to_ast(
                 sorted,
                 &self.entry_file,
+                ModuleRootRole::Normal,
                 FrontendBuildProfile::Dev,
                 Default::default(),
             )
             .expect("AST construction should succeed")
+            .ast
     }
 
     fn hir(&mut self) -> crate::compiler_frontend::hir::module::HirModule {
@@ -291,6 +296,7 @@ fn frontend_diagnostics_preserve_string_table_context() {
     let Err(messages) = project.frontend.headers_to_ast(
         sorted,
         &project.entry_file,
+        ModuleRootRole::Normal,
         FrontendBuildProfile::Dev,
         Default::default(),
     ) else {

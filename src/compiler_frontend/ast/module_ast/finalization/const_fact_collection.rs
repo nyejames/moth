@@ -63,7 +63,7 @@ impl<'a> ConstFactCollector<'a> {
         mut self,
         module_constants: &[Declaration],
         ast_nodes: &[AstNode],
-        start_function_path: &InternedPath,
+        start_function_path: Option<&InternedPath>,
     ) -> Result<AstConstFacts, TemplateNormalizationError> {
         self.collect_explicit_top_level_facts(module_constants)?;
         self.collect_private_and_body_local_facts(ast_nodes, start_function_path)?;
@@ -112,11 +112,11 @@ impl<'a> ConstFactCollector<'a> {
     fn collect_private_and_body_local_facts(
         &mut self,
         ast_nodes: &[AstNode],
-        start_function_path: &InternedPath,
+        start_function_path: Option<&InternedPath>,
     ) -> Result<(), TemplateNormalizationError> {
         for node in ast_nodes {
             if let NodeKind::Function(path, _, body) = &node.kind {
-                if path == start_function_path {
+                if start_function_path == Some(path) {
                     let mut start_env = self.module_explicit_env.clone();
                     self.walk_start_body(body, &mut start_env)?;
                 } else {

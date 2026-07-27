@@ -2,8 +2,8 @@
 //!
 //! WHAT: owns the immutable, remap-free side table that resolves each prepared source file
 //!       identity (`FileId`) to its owning `StableModuleOriginIdentity`. The table is
-//!       populated from the build-system-owned `ProjectModuleGraph` / `OwnedSourceSet`
-//!       ownership authority for directory modules, or from the single synthetic normal-module
+//!       populated from the build-system-owned central `SourceTreeIndex` through the
+//!       `ProjectModuleGraph` for directory modules, or from the single synthetic normal-module
 //!       origin for single-file compilation. It carries no `StringId` values, so it requires no
 //!       remap during string-table fork/merge.
 //! WHY: canonical public type projection needs to resolve a nominal declaration's defining

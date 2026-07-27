@@ -110,6 +110,7 @@ pub(crate) fn compile_html_module_wasm(
     let js_lowering_config = JsLoweringConfig::html_wasm_companion(
         input.release_build,
         Arc::clone(&input.external_package_registry),
+        input.reachability.backend_selection().clone(),
     );
     let js_module = lower_hir_to_js(
         input.hir_module,
@@ -125,7 +126,7 @@ pub(crate) fn compile_html_module_wasm(
         input.root_activity.runtime_fragment_count,
     );
 
-    let mut build_plan = build_html_wasm_plan(input.hir_module, slot_ids)
+    let mut build_plan = build_html_wasm_plan(input.hir_module, input.reachability, slot_ids)
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     build_plan.wasm_request.external_package_registry =
         Arc::clone(&input.external_package_registry);
@@ -198,10 +199,11 @@ pub(crate) fn compile_html_module_wasm(
 /// WHY: HTML orchestration must remain explicit and stable while backend internals evolve.
 pub(crate) fn build_html_wasm_plan(
     hir_module: &HirModule,
+    reachability: &crate::compiler_frontend::hir::reachability::HirReachability,
     js_entry_slot_ids: Vec<String>,
 ) -> Result<HtmlWasmBuildPlan, CompilerError> {
     let export_plan = build_html_wasm_export_plan(hir_module)?;
-    let wasm_request = build_wasm_backend_request(&export_plan);
+    let wasm_request = build_wasm_backend_request(&export_plan, reachability);
     // WHY: entry start() is exported as "moth_start"; JS evaluates it directly and consumes the
     //      returned fragment Vec handle. No JS-side wrapper installation is part of the contract.
     let js_start_invocation = String::from("instance.exports.moth_start()");
@@ -242,7 +244,10 @@ pub(crate) fn emit_html_wasm_artifacts(
         )
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
     };
-    let page_metadata = extract_html_page_metadata(hir_module, string_table)
+    let start_function = hir_module
+        .require_start_function("HTML-Wasm document rendering")
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let page_metadata = extract_html_page_metadata(hir_module, start_function, string_table)
         .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, string_table))?;
     let html = render_wasm_html_document(
         document_config,

@@ -1,5 +1,5 @@
 export:
-    import @./internal {
+    import @internal {
         greet as hello,
         farewell as goodbye,
     }

@@ -9,9 +9,11 @@
 //! from the single source-tree traversal so entry classification and dependency ordering have one
 //! structural owner instead of a parallel entry-candidate path.
 
+use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
@@ -19,12 +21,12 @@ use crate::projects::settings::Config;
 use std::fs;
 use std::path::PathBuf;
 
-use super::collision_detection::validate_source_package_tree_collisions;
+use super::module_namespace::ModuleNamespaceSet;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
-use super::root_validation::validate_source_package_roots;
 use super::source_package_discovery::{
-    discover_project_local_source_packages, merge_source_packages, prepare_source_package_roots,
+    build_source_package_boundary_indexes, discover_project_local_source_packages,
+    merge_source_packages,
 };
 use super::source_tree_index::SourceTreeIndex;
 
@@ -37,12 +39,15 @@ pub(super) struct ProjectRootResolution {
 /// Canonical directory-project roots plus the canonical project module graph built from the
 /// single Stage 0 source-tree traversal.
 ///
-/// The `SourceTreeIndex` is consumed to build the resolver's module-root table and the graph, then
-/// dropped. The graph is retained as the structural owner of entry classification and compile-wave
-/// scheduling so later Stage 0 steps do not keep a parallel entry-candidate path.
+/// The `SourceTreeIndex` is retained beside the graph so later Stage 0 code can resolve `SourceId`s
+/// through the central source record table. The graph is the structural owner of entry
+/// classification and compile-wave scheduling; the index remains the sole source inventory/ownership
+/// owner, so later Stage 0 steps do not keep a parallel entry-candidate or owned-source path.
 pub(super) struct ProjectPathResolverSetup {
     pub(super) resolver: ProjectPathResolver,
+    pub(super) source_tree_index: SourceTreeIndex,
     pub(super) project_module_graph: ProjectModuleGraph,
+    pub(super) module_namespace_set: ModuleNamespaceSet,
 }
 
 /// Build only the resolver for callers that don't need the directory module inventory.
@@ -53,10 +58,16 @@ pub(super) fn build_project_path_resolver(
     source_file_kinds: &SourceFileKindRegistry,
     string_table: &mut StringTable,
 ) -> Result<ProjectPathResolver, CompilerMessages> {
+    // Test-only resolver construction defaults to no external import providers; tests that
+    // exercise provider-owned indexing call `build_project_path_resolver_with_index` directly.
+    let external_import_providers = ExternalImportProviderRegistry::default();
+    let binding_packages = ExternalPackageRegistry::new();
     build_project_path_resolver_with_index(
         config,
         builder_source_packages,
         source_file_kinds,
+        &external_import_providers,
+        &binding_packages,
         string_table,
     )
     .map(|setup| setup.resolver)
@@ -70,6 +81,8 @@ pub(super) fn build_project_path_resolver_with_index(
     config: &Config,
     builder_source_packages: &SourcePackageRegistry,
     source_file_kinds: &SourceFileKindRegistry,
+    external_import_providers: &ExternalImportProviderRegistry,
+    binding_packages: &ExternalPackageRegistry,
     string_table: &mut StringTable,
 ) -> Result<ProjectPathResolverSetup, CompilerMessages> {
     let roots = resolve_project_roots(config, string_table)?;
@@ -84,9 +97,14 @@ pub(super) fn build_project_path_resolver_with_index(
         string_table,
     )?;
 
+    let source_package_boundary_indexes = build_source_package_boundary_indexes(
+        &merged_packages,
+        source_file_kinds,
+        external_import_providers,
+        string_table,
+    )?;
     let prepared_source_package_roots =
-        prepare_source_package_roots(&merged_packages, string_table)?;
-    validate_source_package_roots(&prepared_source_package_roots, string_table)?;
+        source_package_boundary_indexes.prepared_source_package_roots();
 
     let entry_root = roots.entry_root.clone();
     let source_tree_index = SourceTreeIndex::discover(
@@ -95,6 +113,7 @@ pub(super) fn build_project_path_resolver_with_index(
         config,
         &merged_packages,
         source_file_kinds,
+        external_import_providers,
         string_table,
     )?;
 
@@ -107,17 +126,24 @@ pub(super) fn build_project_path_resolver_with_index(
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-    validate_source_package_tree_collisions(&merged_packages, string_table)?;
-
     // Build the canonical project module graph directly from the single source-tree traversal.
-    // The graph consumes the index's identity table and owned source sets rather than recomputing
-    // them, so the index can be dropped after this point: later Stage 0 steps retain the graph as
-    // the structural owner of entry classification and compile-wave scheduling.
+    // The graph consumes the index's identity table rather than recomputing it and reads owned
+    // source data through the retained index rather than duplicating it, so the index is kept
+    // beside the graph as the sole source inventory/ownership owner.
     let project_module_graph = ProjectModuleGraph::from_source_tree_index(&source_tree_index);
+
+    let module_namespace_set = ModuleNamespaceSet::build(
+        &source_tree_index,
+        &project_module_graph,
+        source_package_boundary_indexes,
+        binding_packages,
+    );
 
     Ok(ProjectPathResolverSetup {
         resolver,
+        source_tree_index,
         project_module_graph,
+        module_namespace_set,
     })
 }
 

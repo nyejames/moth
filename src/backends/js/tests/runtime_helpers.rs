@@ -352,7 +352,7 @@ fn collection_push_call_is_not_wrapped_with_result_propagate() {
     let call_statement = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(push_id),
+            target: CallTarget::External(push_id),
             args: vec![
                 expression(
                     1,
@@ -416,7 +416,7 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
     let call_statement = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(remove_id),
+            target: CallTarget::External(remove_id),
             args: vec![
                 expression(
                     1,
@@ -494,7 +494,7 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
     let call_statement = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(length_id),
+            target: CallTarget::External(length_id),
             args: vec![expression(
                 1,
                 HirExpressionKind::Collection(vec![]),

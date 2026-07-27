@@ -53,7 +53,7 @@ impl<'a> HirBuilder<'a> {
             ..
         } = context;
         let validate_float_success =
-            matches!(&target, CallTarget::ExternalFunction(_)) && self.type_id_is_float(ok_type);
+            matches!(&target, CallTarget::External(_)) && self.type_id_is_float(ok_type);
         let result_local =
             self.emit_result_call_to_current_block(target, args, carrier_type, location)?;
         let current_block = self.current_block_id_or_error(location)?;

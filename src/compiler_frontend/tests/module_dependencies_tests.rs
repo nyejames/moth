@@ -70,6 +70,7 @@ fn parse_module_headers(
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         options.project_path_resolver.as_ref(),
         &mut string_table,
     )
@@ -364,6 +365,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         options.project_path_resolver.as_ref(),
         &mut string_table,
     );

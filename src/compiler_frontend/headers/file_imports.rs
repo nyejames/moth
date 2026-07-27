@@ -108,6 +108,7 @@ fn parse_and_record_import_clause(
                 provider: StructuralProviderReference {
                     path: normalized_path,
                     path_location: item.provider.path_location,
+                    from_grouped: item.provider.from_grouped,
                 },
                 alias: item.alias,
                 location: clause_location.clone(),

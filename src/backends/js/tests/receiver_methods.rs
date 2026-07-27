@@ -49,7 +49,7 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     let call_bump = statement(
         2,
         HirStatementKind::Call {
-            target: CallTarget::UserFunction(FunctionId(1)),
+            target: CallTarget::Local(FunctionId(1)),
             args: vec![expression(
                 2,
                 HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
@@ -85,7 +85,7 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     let mut module = HirModule::new();
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
@@ -155,7 +155,7 @@ fn receiver_method_call_assigns_value_for_fresh_return() {
     let call_bump = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::UserFunction(FunctionId(1)),
+            target: CallTarget::Local(FunctionId(1)),
             args: vec![expression(
                 1,
                 HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
@@ -185,7 +185,7 @@ fn receiver_method_call_assigns_value_for_fresh_return() {
     let mut module = HirModule::new();
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
@@ -261,7 +261,7 @@ fn receiver_method_call_assigns_borrow_for_alias_return() {
     let call_self_ref = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::UserFunction(FunctionId(1)),
+            target: CallTarget::Local(FunctionId(1)),
             args: vec![expression(
                 1,
                 HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
@@ -291,7 +291,7 @@ fn receiver_method_call_assigns_borrow_for_alias_return() {
     let mut module = HirModule::new();
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),

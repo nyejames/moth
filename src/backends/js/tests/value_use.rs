@@ -272,7 +272,7 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
     let call_stmt = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::UserFunction(FunctionId(1)),
+            target: CallTarget::Local(FunctionId(1)),
             args: vec![
                 expression(
                     1,
@@ -316,7 +316,7 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
     let mut module = HirModule::new();
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
@@ -381,7 +381,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
     let load_call = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(io_id),
+            target: CallTarget::External(io_id),
             args: vec![expression(
                 1,
                 HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
@@ -397,7 +397,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
     let copy_call = statement(
         2,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(io_id),
+            target: CallTarget::External(io_id),
             args: vec![expression(
                 2,
                 HirExpressionKind::Copy(HirPlace::Local(LocalId(1))),
@@ -498,7 +498,7 @@ fn load_in_return_value_passes_place_ref() {
     let mut module = HirModule::new();
     module.blocks = vec![block];
     module.functions = vec![function];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
@@ -567,7 +567,7 @@ fn copy_in_return_value_emits_clone_value() {
     let mut module = HirModule::new();
     module.blocks = vec![block];
     module.functions = vec![function];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
@@ -651,7 +651,7 @@ fn tuple_return_preserves_return_value_handling_per_element() {
     let mut module = HirModule::new();
     module.blocks = vec![block];
     module.functions = vec![function];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),

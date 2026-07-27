@@ -50,7 +50,7 @@ pub(super) fn start_function(module: &HirModule) -> &HirFunction {
     module
         .functions
         .iter()
-        .find(|function| function.id == module.start_function)
+        .find(|function| Some(function.id) == module.start_function)
         .expect("start function should exist")
 }
 

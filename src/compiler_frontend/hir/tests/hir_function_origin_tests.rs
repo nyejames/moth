@@ -90,7 +90,9 @@ fn classifies_entry_start_and_normal_functions() {
         find_function_id_by_path(&module, &normal_fn).expect("normal function should be present");
 
     assert_eq!(
-        module.function_origins.get(&module.start_function),
+        module
+            .start_function
+            .and_then(|start_function| module.function_origins.get(&start_function)),
         Some(&HirFunctionOrigin::EntryStart)
     );
     assert_eq!(
@@ -99,6 +101,10 @@ fn classifies_entry_start_and_normal_functions() {
     );
     // Every function has exactly one origin tag.
     assert_eq!(module.function_origins.len(), module.functions.len());
+    assert!(
+        module.function_ids_by_origin.is_empty(),
+        "private functions and the implicit start must not enter the stable public-origin relation"
+    );
 }
 
 #[test]
@@ -172,4 +178,121 @@ fn rejects_duplicate_stable_origins_before_lookup_insertion() {
     ]);
 
     assert!(result.is_err(), "duplicate stable origins must be rejected");
+}
+
+#[test]
+fn rejects_unused_concrete_origin_seed() {
+    let mut string_table = StringTable::new();
+
+    let entry_path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let entry_start = entry_path.join_str(IMPLICIT_START_FUNC_NAME, &mut string_table);
+    let normal_fn = entry_path.join_str("helper", &mut string_table);
+    let orphan_path = entry_path.join_str("orphan", &mut string_table);
+    let stable_module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("test-project"),
+        "shapes".to_owned(),
+        ModuleRootRole::Normal,
+    );
+
+    let ast = build_ast(
+        vec![
+            function_node(entry_start, location(1)),
+            function_node(normal_fn.clone(), location(2)),
+        ],
+        entry_path,
+    );
+
+    // One seed matches the lowered helper, the other points at a declaration path that no
+    // lowered function owns. The HIR lowering boundary must reject the unused seed instead of
+    // deferring a silent mismatch to public-interface finalization.
+    let lookup = HirFunctionOriginLookup::from_seeds(vec![
+        FunctionOriginSeed {
+            path: normal_fn,
+            origin: OriginFunctionId::new_free(stable_module_origin.clone(), "helper".to_owned()),
+        },
+        FunctionOriginSeed {
+            path: orphan_path,
+            origin: OriginFunctionId::new_free(stable_module_origin, "orphan".to_owned()),
+        },
+    ])
+    .expect("distinct seeds should be accepted");
+
+    let result = HirBuilder::new(
+        &mut string_table,
+        PathStringFormatConfig::default(),
+        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
+        lookup,
+    )
+    .build_hir_module(ast);
+
+    assert!(
+        result.is_err(),
+        "unused concrete origin seed must be rejected at the HIR lowering boundary"
+    );
+}
+
+#[test]
+fn hir_validation_rejects_two_origins_for_one_local_function() {
+    use crate::compiler_frontend::hir::hir_builder::validate_module_for_tests;
+
+    let mut string_table = StringTable::new();
+
+    let entry_path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let entry_start = entry_path.join_str(IMPLICIT_START_FUNC_NAME, &mut string_table);
+    let normal_fn = entry_path.join_str("helper", &mut string_table);
+    let stable_module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("test-project"),
+        "shapes".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let first_origin =
+        OriginFunctionId::new_free(stable_module_origin.clone(), "helper".to_owned());
+
+    let ast = build_ast(
+        vec![
+            function_node(entry_start, location(1)),
+            function_node(normal_fn.clone(), location(2)),
+        ],
+        entry_path.clone(),
+    );
+
+    let lookup = HirFunctionOriginLookup::from_seeds(vec![FunctionOriginSeed {
+        path: normal_fn,
+        origin: first_origin.clone(),
+    }])
+    .expect("single seed should be accepted");
+
+    let lowering = HirBuilder::new(
+        &mut string_table,
+        PathStringFormatConfig::default(),
+        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
+        lookup,
+    )
+    .build_hir_module(ast)
+    .expect("valid lowering should succeed");
+    let mut module = lowering.hir_module;
+    let type_environment = lowering.type_environment;
+
+    let local_function_id = module
+        .function_ids_by_origin
+        .get(&first_origin)
+        .copied()
+        .expect("the helper origin should map to its local function");
+
+    // Inject a second distinct stable origin pointing at the same local function. HIR validation
+    // must catch this reverse-direction violation against malformed inputs rather than relying
+    // only on construction-time map key uniqueness.
+    let second_origin = OriginFunctionId::new_free(stable_module_origin, "other".to_owned());
+    module
+        .function_ids_by_origin
+        .insert(second_origin, local_function_id);
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("two origins mapped to one local function must fail HIR validation");
+
+    let message = error.msg;
+    assert!(
+        message.contains("both map to local function"),
+        "validation error should name the injectivity violation, got: {message}"
+    );
 }

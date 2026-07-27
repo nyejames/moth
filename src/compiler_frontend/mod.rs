@@ -10,22 +10,16 @@ pub(crate) mod module_dependencies;
 pub(crate) mod numeric_text;
 pub(crate) mod plain_markdown;
 pub(crate) mod public_call_summary;
-// R2j exposes canonical bytes before the later fingerprint owner wires them into artefact
-// invalidation. Keep this dormant boundary explicit until that consumer lands.
-#[allow(dead_code)]
-pub(crate) mod public_interface_encoding;
 pub(crate) mod source_packages;
 pub(crate) mod style_directives;
 pub(crate) mod tokenizer;
 
 pub(crate) mod builtins;
 pub(crate) mod canonical_type_identity;
-pub(crate) mod defined_public_export_origins;
-pub(crate) mod defined_public_type_surface;
 pub(crate) mod folded_value;
 pub(crate) mod instrumentation;
 pub(crate) mod keywords;
-pub(crate) mod public_interface_draft;
+pub(crate) mod public_interface;
 pub(crate) mod semantic_identity;
 pub(crate) mod source_module_origin;
 pub(crate) mod synthetic_interface_provenance;

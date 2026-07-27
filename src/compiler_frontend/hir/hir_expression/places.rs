@@ -561,6 +561,37 @@ impl<'a> HirBuilder<'a> {
         Ok(function_id)
     }
 
+    pub(crate) fn resolve_call_target_or_error(
+        &self,
+        name: &InternedPath,
+        location: &SourceLocation,
+    ) -> Result<crate::compiler_frontend::external_packages::CallTarget, CompilerError> {
+        use crate::compiler_frontend::external_packages::CallTarget;
+        use crate::compiler_frontend::headers::import_environment::SourceFunctionTarget;
+
+        if let Some(function_id) = self.functions_by_name.get(name).copied() {
+            return Ok(CallTarget::Local(function_id));
+        }
+        if let Some(contract) = self.imported_functions_by_name.get(name) {
+            return match &contract.target {
+                SourceFunctionTarget::Imported { origin, .. } => {
+                    Ok(CallTarget::CrossModule(origin.clone()))
+                }
+                SourceFunctionTarget::Local(_) => Err(CompilerError::compiler_error(
+                    "Imported function contract carried a local function target",
+                )),
+            };
+        }
+
+        return_hir_transformation_error!(
+            format!(
+                "Unresolved function '{}' during HIR expression lowering",
+                self.symbol_name_for_diagnostics(name)
+            ),
+            self.hir_error_location(location)
+        );
+    }
+
     // WHAT: resolves a field path within one nominal struct declaration.
     // WHY: field access lowering must use declaration-time IDs so later passes can reason about
     //      fields without path scans.

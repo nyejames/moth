@@ -974,7 +974,7 @@ impl<'a> HirBuilder<'a> {
         );
         self.emit_statement_kind(
             HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(ExternalFunctionId::CollectionLength),
+                target: CallTarget::External(ExternalFunctionId::CollectionLength),
                 args: vec![iterable_for_length],
                 result: Some(length_local),
             },

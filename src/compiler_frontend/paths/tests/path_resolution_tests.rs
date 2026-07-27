@@ -15,9 +15,7 @@ use crate::compiler_frontend::paths::compile_time_paths::{
 use crate::compiler_frontend::paths::import_resolution::ImportPathResolutionError;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::source_packages::root_file::{
-    HashRootFileDiscovery, PreparedSourcePackageRoots,
-};
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
@@ -36,8 +34,15 @@ fn prepared_source_package_roots(
 ) -> PreparedSourcePackageRoots {
     let mut prep_string_table = StringTable::new();
     crate::build_system::create_project_modules::source_package_discovery::
-        prepare_source_package_roots(source_packages, &mut prep_string_table)
-        .expect("test source package roots should prepare")
+        build_source_package_boundary_indexes(
+            source_packages,
+            &SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::
+                ExternalImportProviderRegistry::default(),
+            &mut prep_string_table,
+        )
+        .expect("test source package boundary indexes should build")
+        .prepared_source_package_roots()
 }
 
 impl TestHarness {
@@ -384,6 +389,7 @@ fn source_package_import_resolves_to_package_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
+    fs::write(package_root.join("#mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -481,6 +487,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
+    fs::write(package_root.join("#mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
     fs::create_dir_all(entry_root.join("helper")).unwrap();
@@ -745,6 +752,7 @@ fn package_scan_root_name_is_not_import_prefix() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
+    fs::write(package_root.join("#mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::create_dir_all(entry_root.join("lib")).unwrap();
     fs::write(entry_root.join("lib/thing.moth"), b"").unwrap();
@@ -791,6 +799,7 @@ fn package_direct_child_is_import_prefix() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
+    fs::write(package_root.join("#mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -872,6 +881,7 @@ fn source_package_prefix_wins_consistently() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
+    fs::write(package_root.join("#mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
     fs::create_dir_all(entry_root.join("helper")).unwrap();
@@ -1050,6 +1060,7 @@ fn import_escape_package_root_rejected() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
+    fs::write(package_root.join("#mod.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
@@ -1483,7 +1494,7 @@ fn resolver_with_prepared_source_package_roots(roots: &[(&str, &str)]) -> Projec
         (
             (*prefix).to_owned(),
             PathBuf::from(root),
-            HashRootFileDiscovery::Missing,
+            PathBuf::from(root).join("#mod.moth"),
         )
     });
 

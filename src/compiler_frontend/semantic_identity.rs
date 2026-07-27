@@ -49,6 +49,24 @@ impl StablePackageIdentity {
         }
     }
 
+    /// Stable identity for one source-package compilation boundary.
+    ///
+    /// WHAT: builds the package identity from the registry's `PackageOrigin` and the package's
+    /// import prefix. The import prefix is the portable `@`-stripped spelling (for example
+    /// `"html"` or a project-local `"helper"`), so two packages with the same prefix but
+    /// different origins remain distinct, and the same logical package resolves to the same
+    /// identity across checkout roots.
+    /// WHY: each source-package boundary owns its own `SourceTreeIndex` with boundary-local
+    /// `SourceId`/`ModuleId` values. The stable package identity is the only cross-boundary
+    /// value those dense handles refer to, so it must be derivable from registry facts rather
+    /// than the configured project name or an absolute path.
+    pub(crate) fn source_package(origin: PackageOrigin, import_prefix: &str) -> Self {
+        Self {
+            origin,
+            name: import_prefix.to_owned(),
+        }
+    }
+
     /// The package origin classification.
     #[allow(dead_code)]
     pub(crate) fn origin(&self) -> PackageOrigin {
@@ -73,6 +91,12 @@ pub(crate) enum ModuleRootRole {
     Normal,
     Support,
     ProjectPackageFacade,
+}
+
+impl ModuleRootRole {
+    pub(crate) fn has_implicit_start(self) -> bool {
+        matches!(self, Self::Normal)
+    }
 }
 
 /// Owned, hashable, cross-build origin identity for one canonical module.
@@ -550,9 +574,9 @@ pub(crate) struct ExportBinding {
 impl ExportBinding {
     /// Construct one stable export binding for a directly defined public declaration.
     ///
-    /// Compiler-internal: the construction owner in `defined_public_export_origins` builds these
-    /// only for declarations admitted to the active module root's public surface, so the
-    /// exporting module, public name and origin identity are already known to be consistent.
+    /// Compiler-internal: the construction owner in `public_interface::export_projection`
+    /// builds these only for declarations admitted to the active module root's public surface,
+    /// so the exporting module, public name and origin identity are already known to be consistent.
     pub(crate) fn new(
         exporting_module: StableModuleOriginIdentity,
         public_name: String,
@@ -579,122 +603,5 @@ impl ExportBinding {
     /// The stable origin identity of the exported declaration.
     pub(crate) fn origin(&self) -> &OriginDeclarationId {
         &self.origin
-    }
-}
-
-/// Stable origins for the receiver methods attached to one exported receiver type surface.
-///
-/// WHAT: groups the stable function origins of receiver methods that travel with one exported
-///       nominal type's source surface. Each method origin is built with
-///       [`OriginFunctionId::new_receiver`] using the receiver's stable [`OriginTypeId`], so a
-///       method is unrepresentable as an independent free-namespace export. The receiver type
-///       identity is carried explicitly so consumers can group methods by receiver surface
-///       without inspecting each function origin's kind.
-/// WHY: the compiler design overview requires receiver methods to remain attached to their
-///      receiver type's exported surface and to never become independent free namespace entries
-///      that could be imported, aliased or re-exported separately.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct ReceiverSurfaceOrigins {
-    receiver: OriginTypeId,
-    methods: Vec<OriginFunctionId>,
-}
-
-impl ReceiverSurfaceOrigins {
-    /// Construct one receiver surface's method origins.
-    ///
-    /// Compiler-internal: the construction owner builds these only for exported nominal types
-    /// that are directly defined in the active module root, attaching the methods whose receiver
-    /// resolves to that type. `methods` must already be in the construction owner's deterministic
-    /// order.
-    pub(crate) fn new(receiver: OriginTypeId, methods: Vec<OriginFunctionId>) -> Self {
-        Self { receiver, methods }
-    }
-
-    /// The stable origin identity of the receiver type that owns this surface.
-    #[allow(dead_code)]
-    pub(crate) fn receiver(&self) -> &OriginTypeId {
-        &self.receiver
-    }
-
-    /// The stable function origins of the methods attached to this receiver surface, in the
-    /// construction owner's deterministic order.
-    #[allow(dead_code)]
-    pub(crate) fn methods(&self) -> &[OriginFunctionId] {
-        &self.methods
-    }
-}
-
-/// Immutable compiler-owned stable identity component for public declarations defined directly
-/// in the active module root.
-///
-/// WHAT: records the owning [`StableModuleOriginIdentity`], stable origin IDs and
-///       [`ExportBinding`] values for the declarations authored directly in the active module
-///       root's public surface, including direct `ExportBinding` facts, plus the receiver-method
-///       origins attached to each exported nominal type's surface. It is the immediate consumer
-///       of the Phase 7a [`StableModuleOriginIdentity`]: the module origin becomes the
-///       exporting-module and declaration-origin component of every recorded binding, and is
-///       carried so the consuming [`PublicInterfaceDraft`] can own its module origin even when
-///       the module exports nothing.
-///
-/// It is deliberately not the final `PublicSemanticInterface`. Canonical type shapes, folded
-/// constant payloads, generic templates, trait/conformance evidence, access and effect
-/// summaries, project-context provenance and cross-module call facts remain for later phases.
-///
-/// Source re-exports are absent from this component by construction: the current entry-closure
-/// compilation lacks completed provider interfaces, so donor-local source paths are not stable
-/// origins and must not be transported. The future completed provider interface owns re-export
-/// stable origin and binding. A directly defined public export is never silently omitted.
-///
-/// Order is deterministic and independent of hash-map iteration and declaration scheduling:
-/// `export_bindings` is sorted by public name (then declaration category), and
-/// `receiver_surfaces` is sorted by receiver defining name (then category) with methods sorted by
-/// defining name. Externally observed iteration over the vectors therefore cannot introduce
-/// nondeterminism.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DefinedPublicExportOrigins {
-    module_origin: StableModuleOriginIdentity,
-    export_bindings: Vec<ExportBinding>,
-    receiver_surfaces: Vec<ReceiverSurfaceOrigins>,
-}
-
-impl DefinedPublicExportOrigins {
-    /// Construct the component from the owning module origin and the already-built,
-    /// deterministically ordered bindings and receiver surfaces.
-    ///
-    /// Compiler-internal: the construction owner in `defined_public_export_origins` assembles the
-    /// vectors in the documented deterministic order before calling this.
-    pub(crate) fn new(
-        module_origin: StableModuleOriginIdentity,
-        export_bindings: Vec<ExportBinding>,
-        receiver_surfaces: Vec<ReceiverSurfaceOrigins>,
-    ) -> Self {
-        Self {
-            module_origin,
-            export_bindings,
-            receiver_surfaces,
-        }
-    }
-
-    /// The free-namespace export bindings for directly defined public declarations, in
-    /// deterministic order. Excludes receiver methods.
-    pub(crate) fn export_bindings(&self) -> &[ExportBinding] {
-        &self.export_bindings
-    }
-
-    /// The receiver-method origins attached to exported nominal type surfaces, in deterministic
-    /// order. Not free-namespace bindings.
-    pub(crate) fn receiver_surfaces(&self) -> &[ReceiverSurfaceOrigins] {
-        &self.receiver_surfaces
-    }
-
-    /// Consume the component, moving the module origin and export bindings into the draft.
-    ///
-    /// The only production consumer is [`PublicInterfaceDraftBuilder::build`], which calls this
-    /// after the borrowing type-surface and trait-surface projections finish. The receiver
-    /// surfaces were already projected into the type surface and are not needed by the draft.
-    pub(crate) fn into_module_origin_and_export_bindings(
-        self,
-    ) -> (StableModuleOriginIdentity, Vec<ExportBinding>) {
-        (self.module_origin, self.export_bindings)
     }
 }

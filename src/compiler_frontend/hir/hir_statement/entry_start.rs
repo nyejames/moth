@@ -25,7 +25,7 @@ impl<'a> HirBuilder<'a> {
         function_id: FunctionId,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
-        if function_id != self.module.start_function {
+        if Some(function_id) != self.module.start_function {
             return Ok(());
         }
 
@@ -61,7 +61,7 @@ impl<'a> HirBuilder<'a> {
         current_block: BlockId,
         location: &SourceLocation,
     ) -> Result<bool, CompilerError> {
-        if function_id != self.module.start_function {
+        if Some(function_id) != self.module.start_function {
             return Ok(false);
         }
 

@@ -11,6 +11,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::GenericParameterId;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
+use crate::compiler_frontend::headers::import_environment::SourceDeclarationTarget;
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, GenericDeclarationMetadata,
 };
@@ -26,8 +27,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) struct GenericParameterScopeBuildInput<'a> {
     pub(crate) generic_parameters: &'a GenericParameterList,
     pub(crate) canonical_by_local: Option<&'a FxHashMap<TypeParameterId, GenericParameterId>>,
-    pub(crate) visible_source_bindings: &'a FxHashMap<StringId, InternedPath>,
-    pub(crate) visible_type_aliases: &'a FxHashMap<StringId, InternedPath>,
+    pub(crate) visible_source_bindings: &'a FxHashMap<StringId, SourceDeclarationTarget>,
+    pub(crate) visible_type_aliases: &'a FxHashMap<StringId, SourceDeclarationTarget>,
     pub(crate) visible_external_symbols: &'a FxHashMap<StringId, ExternalSymbolId>,
     pub(crate) declaration_table: &'a TopLevelDeclarationTable,
     pub(crate) generic_declarations_by_path:

@@ -9,6 +9,8 @@
 //! - Backend layout, ABI, drop strategy, and runtime representation do NOT belong here.
 //! - Type compatibility POLICY does NOT belong here (see `type_coercion`).
 
+use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
@@ -89,6 +91,8 @@ pub struct TypeEnvironment {
     function_ids: FxHashMap<FunctionTypeKey, TypeId>,
     external_ids: FxHashMap<ExternalTypeId, TypeId>,
     generic_instance_ids: FxHashMap<GenericInstanceKey, TypeId>,
+    canonical_type_ids: FxHashMap<CanonicalTypeIdentity, TypeId>,
+    canonical_identities: FxHashMap<TypeId, CanonicalTypeIdentity>,
 
     // Nominal definition storage.
     // `NominalTypeId.0` indexes into `nominal_registry`.
@@ -251,6 +255,8 @@ impl TypeEnvironment {
             function_ids: FxHashMap::default(),
             external_ids: FxHashMap::default(),
             generic_instance_ids: FxHashMap::default(),
+            canonical_type_ids: FxHashMap::default(),
+            canonical_identities: FxHashMap::default(),
             nominal_registry: Vec::new(),
             struct_definitions: Vec::new(),
             choice_definitions: Vec::new(),
@@ -1010,6 +1016,48 @@ impl TypeEnvironment {
     /// Returns the `TypeId` for a nominal, if registered.
     pub fn type_id_for_nominal_id(&self, id: NominalTypeId) -> Option<TypeId> {
         self.nominal_to_type_id.get(&id).copied()
+    }
+
+    /// Registers one exact stable identity for a consumer-local type handle.
+    pub(crate) fn register_canonical_identity(
+        &mut self,
+        identity: CanonicalTypeIdentity,
+        type_id: TypeId,
+    ) -> Result<(), CompilerError> {
+        if let Some(existing_type_id) = self.canonical_type_ids.get(&identity)
+            && *existing_type_id != type_id
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "Canonical type identity {identity:?} was assigned to both TypeId({}) and TypeId({})",
+                existing_type_id.0, type_id.0
+            )));
+        }
+        if let Some(existing_identity) = self.canonical_identities.get(&type_id)
+            && existing_identity != &identity
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "TypeId({}) was assigned conflicting canonical identities {existing_identity:?} and {identity:?}",
+                type_id.0
+            )));
+        }
+
+        self.canonical_type_ids.insert(identity.clone(), type_id);
+        self.canonical_identities.insert(type_id, identity);
+        Ok(())
+    }
+
+    pub(crate) fn type_id_for_canonical_identity(
+        &self,
+        identity: &CanonicalTypeIdentity,
+    ) -> Option<TypeId> {
+        self.canonical_type_ids.get(identity).copied()
+    }
+
+    pub(crate) fn canonical_identity_for_type_id(
+        &self,
+        type_id: TypeId,
+    ) -> Option<&CanonicalTypeIdentity> {
+        self.canonical_identities.get(&type_id)
     }
 
     /// Returns the struct definition for a nominal ID, if it is a struct.

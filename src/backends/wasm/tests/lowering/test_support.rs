@@ -141,7 +141,7 @@ pub(crate) fn build_module(
         .map(|(function, _, _)| function.clone())
         .collect();
     module.blocks = blocks;
-    module.start_function = start_function;
+    module.start_function = Some(start_function);
 
     let mut max_region_id = 0u32;
     for block in &module.blocks {

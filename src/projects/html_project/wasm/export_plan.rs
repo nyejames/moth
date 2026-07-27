@@ -78,9 +78,11 @@ impl HtmlWasmHelperExports {
 pub(crate) fn build_html_wasm_export_plan(
     hir_module: &HirModule,
 ) -> Result<HtmlWasmExportPlan, CompilerError> {
+    let start_function = hir_module.require_start_function("HTML-Wasm export planning")?;
+
     Ok(HtmlWasmExportPlan {
         function_exports: vec![HtmlWasmFunctionExport {
-            function_id: hir_module.start_function,
+            function_id: start_function,
             export_name: String::from("moth_start"),
             purpose: HtmlWasmExportPurpose::EntryStart,
         }],

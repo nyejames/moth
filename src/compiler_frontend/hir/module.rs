@@ -13,6 +13,7 @@
 //! `ModuleCompilerMetadata` on the build-system module payload. `HirModule` carries only
 //! executable/semantic HIR state.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
@@ -22,6 +23,7 @@ use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::HirStruct;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::OriginFunctionId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -79,8 +81,8 @@ pub struct HirModule {
     pub choices: Vec<HirChoice>,
     pub side_table: HirSideTable,
 
-    /// Entry point for execution.
-    pub start_function: FunctionId,
+    /// Compiler-synthesised entry point for normal roots.
+    pub start_function: Option<FunctionId>,
     /// Classification for every function in the module.
     ///
     /// WHY: backends/builders need explicit semantic role tagging to keep
@@ -95,6 +97,7 @@ pub struct HirModule {
     /// WHY: public-interface finalization joins borrow summaries to declaration records through
     /// this side table rather than rendered names, paths or declaration order.
     pub function_ids_by_origin: FxHashMap<OriginFunctionId, FunctionId>,
+    pub(crate) imported_call_summaries: FxHashMap<OriginFunctionId, PublicCallSummary>,
 
     pub module_constants: Vec<HirModuleConst>,
 
@@ -129,9 +132,10 @@ impl HirModule {
             structs: vec![],
             choices: vec![],
             side_table: HirSideTable::default(),
-            start_function: FunctionId(0),
+            start_function: None,
             function_origins: FxHashMap::default(),
             function_ids_by_origin: FxHashMap::default(),
+            imported_call_summaries: FxHashMap::default(),
             module_constants: vec![],
             regions: vec![],
             const_facts: HirConstFacts::default(),
@@ -142,5 +146,13 @@ impl HirModule {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.side_table.remap_string_ids(remap);
         self.const_facts.remap_string_ids(remap);
+    }
+
+    pub(crate) fn require_start_function(&self, owner: &str) -> Result<FunctionId, CompilerError> {
+        self.start_function.ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "{owner} requires a normal module with an implicit start function"
+            ))
+        })
     }
 }

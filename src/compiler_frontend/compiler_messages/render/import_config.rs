@@ -205,12 +205,12 @@ pub(crate) fn invalid_config_message(
                 candidates,
             )
         }
-        InvalidConfigReason::MothFileFolderCollision {
+        InvalidConfigReason::SourceFileFolderCollision {
             file_name,
             folder_name,
             directory,
         } => format!(
-            "Project structure collision: '{}' and folder '{}' share the same import name in '{}'. Moth requires .moth files and folders in the same directory to have unique import names. Rename one of them to keep import paths unambiguous.",
+            "Project structure collision: '{}' and folder '{}' share the same import name in '{}'. Compiler-recognized source files and folders in the same directory must have unique import names. Rename one of them to keep import paths unambiguous.",
             string_table.resolve(*file_name),
             string_table.resolve(*folder_name),
             string_table.resolve(*directory),

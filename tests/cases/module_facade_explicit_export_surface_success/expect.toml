@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains_exactly_once = ["module_facade_explicit_export_surface_success  facade-card-private-import"]
+rendered_output_contains_exactly_once = ["module_facade_explicit_export_surface_success  facade-card-private-import  facade-card-private-import render failed"]
 rendered_output_not_contains = ["imported-root-runtime-must-not-execute"]

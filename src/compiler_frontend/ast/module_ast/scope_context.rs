@@ -54,7 +54,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalPackageRegistry, ExternalSymbolId, ExternalTypeDef, ExternalTypeId,
 };
 use crate::compiler_frontend::headers::import_environment::{
-    FileVisibility, HeaderImportEnvironment,
+    FileVisibility, HeaderImportEnvironment, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
@@ -386,12 +386,15 @@ impl ScopeContext {
             import_environment: HeaderImportEnvironment::default(),
             warnings: Vec::new(),
             declaration_table: top_level_declarations,
+            imported_functions_by_local_path: FxHashMap::default(),
+            imported_struct_definitions: Vec::new(),
+            imported_choice_definitions: Vec::new(),
             module_constants: Vec::new(),
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: Vec::new(),
             resolved_struct_fields_by_path: Rc::new(FxHashMap::default()),
             resolved_function_signatures_by_path: Rc::new(FxHashMap::default()),
-            generic_function_templates_by_path: Rc::new(FxHashMap::default()),
+            generic_function_templates_by_path: FxHashMap::default(),
             resolved_type_aliases_by_path: Rc::new(FxHashMap::default()),
             choice_variant_shells_by_path: Rc::new(FxHashMap::default()),
             declaration_semantics: Rc::new(DeclarationSemanticTable::empty()),

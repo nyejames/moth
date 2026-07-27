@@ -19,7 +19,7 @@ struct NoopBuilder;
 impl BackendBuilder for NoopBuilder {
     fn build_backend(
         &self,
-        _modules: Vec<crate::build_system::build::Module>,
+        _project_compilation: crate::build_system::build::ProjectCompilation,
         _config: &Config,
         _flags: &[Flag],
         _string_table: &mut StringTable,
@@ -49,7 +49,7 @@ struct ConflictingDirectiveBuilder;
 impl BackendBuilder for ConflictingDirectiveBuilder {
     fn build_backend(
         &self,
-        _modules: Vec<crate::build_system::build::Module>,
+        _project_compilation: crate::build_system::build::ProjectCompilation,
         _config: &Config,
         _flags: &[Flag],
         _string_table: &mut StringTable,

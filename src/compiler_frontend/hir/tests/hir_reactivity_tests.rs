@@ -16,7 +16,8 @@ use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::reachability::{
-    ReachableReactiveSinkKind, collect_reachability_from_start,
+    HirReachability, ReachableReactiveSinkKind, collect_module_function_link_facts,
+    collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::hir::reactivity::HirReactiveSourceKind;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
@@ -261,8 +262,13 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
     let ast = build_ast(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve sink metadata");
-    let reachability =
-        collect_reachability_from_start(&module).expect("reachability should collect sinks");
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should collect sinks");
 
     assert_eq!(
         reachability.reachable_reactive_templates.len(),
@@ -293,6 +299,14 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
 
 fn reactive_source(path: InternedPath, kind: ReactiveSourceKind) -> ReactiveSource {
     ReactiveSource { path, kind }
+}
+
+fn collect_test_reachability(
+    module: &crate::compiler_frontend::hir::module::HirModule,
+    roots: &[crate::compiler_frontend::hir::ids::FunctionId],
+) -> Result<HirReachability, crate::compiler_frontend::compiler_errors::CompilerError> {
+    let function_facts = collect_module_function_link_facts(module)?;
+    collect_reachability_from_function_link_facts(&function_facts, roots)
 }
 
 fn metadata_with_subscription(

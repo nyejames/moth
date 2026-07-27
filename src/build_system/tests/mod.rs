@@ -147,7 +147,7 @@ struct WarningBuilder;
 impl BackendBuilder for WarningBuilder {
     fn build_backend(
         &self,
-        _modules: Vec<super::Module>,
+        _project_compilation: super::ProjectCompilation,
         _config: &Config,
         _flags: &[Flag],
         _string_table: &mut StringTable,
@@ -188,10 +188,57 @@ struct ValidationTrackingBuilder {
     built: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
+struct EntryTrackingBuilder {
+    module_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    entry_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl BackendBuilder for EntryTrackingBuilder {
+    fn build_backend(
+        &self,
+        project_compilation: super::ProjectCompilation,
+        _config: &Config,
+        _flags: &[Flag],
+        _string_table: &mut StringTable,
+    ) -> Result<Project, CompilerMessages> {
+        self.module_count.store(
+            project_compilation.modules().len(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.entry_count.store(
+            project_compilation.entries().len(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+
+        Ok(Project {
+            output_files: vec![],
+            entry_page_rel: None,
+            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
+            warnings: vec![],
+        })
+    }
+
+    fn validate_project_config(
+        &self,
+        _config: &Config,
+        _string_table: &mut StringTable,
+    ) -> Result<(), ProjectConfigError> {
+        Ok(())
+    }
+
+    fn frontend_surface(&self) -> BuilderSurface {
+        BuilderSurface::with_mandatory_core()
+    }
+
+    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
+        Vec::new()
+    }
+}
+
 impl BackendBuilder for ValidationTrackingBuilder {
     fn build_backend(
         &self,
-        _modules: Vec<super::Module>,
+        _project_compilation: super::ProjectCompilation,
         _config: &Config,
         _flags: &[Flag],
         _string_table: &mut StringTable,
@@ -229,7 +276,7 @@ struct FailingValidationBuilder;
 impl BackendBuilder for FailingValidationBuilder {
     fn build_backend(
         &self,
-        _modules: Vec<super::Module>,
+        _project_compilation: super::ProjectCompilation,
         _config: &Config,
         _flags: &[Flag],
         _string_table: &mut StringTable,
@@ -264,7 +311,7 @@ struct NoDirectiveBuilder;
 impl BackendBuilder for NoDirectiveBuilder {
     fn build_backend(
         &self,
-        _modules: Vec<super::Module>,
+        _project_compilation: super::ProjectCompilation,
         _config: &Config,
         _flags: &[Flag],
         _string_table: &mut StringTable,
@@ -302,16 +349,18 @@ struct MultiModuleDiagnosticBuilder;
 impl BackendBuilder for MultiModuleDiagnosticBuilder {
     fn build_backend(
         &self,
-        modules: Vec<super::Module>,
+        project_compilation: super::ProjectCompilation,
         _config: &Config,
         _flags: &[Flag],
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
-        let homepage = modules
+        let homepage = project_compilation
+            .modules()
             .iter()
             .find(|module| module.metadata.entry_point.ends_with("src/#page.moth"))
             .expect("directory build should discover homepage module");
-        let docs_page = modules
+        let docs_page = project_compilation
+            .modules()
             .iter()
             .find(|module| module.metadata.entry_point.ends_with("src/docs/#page.moth"))
             .expect("directory build should discover docs module");

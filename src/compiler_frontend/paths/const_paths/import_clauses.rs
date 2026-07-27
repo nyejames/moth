@@ -24,6 +24,14 @@ type ImportClauseResult<T> = Result<T, Box<CompilerDiagnostic>>;
 pub struct StructuralProviderReference {
     pub path: InternedPath,
     pub path_location: SourceLocation,
+    /// Whether the last path component is an imported item rather than part of the provider.
+    ///
+    /// WHAT: grouped syntax such as `@helper { greet }` is tokenized as the complete path
+    ///       `@helper/greet`; this flag preserves that `greet` is the requested item while
+    ///       `@helper` is the structural provider.
+    /// WHY: Stage 0 namespace resolution must distinguish a grouped public-surface import from
+    ///      the directly authored private path `@helper/greet` without guessing from path shape.
+    pub from_grouped: bool,
 }
 
 impl StructuralProviderReference {
@@ -162,6 +170,7 @@ fn parse_path_clause_items(
             provider: StructuralProviderReference {
                 path: item.path.clone(),
                 path_location: item.path_location.clone(),
+                from_grouped: item.from_grouped,
             },
             alias: item.alias.or(trailing_alias),
             alias_location: item

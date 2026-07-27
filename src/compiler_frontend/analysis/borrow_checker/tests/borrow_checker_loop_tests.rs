@@ -184,7 +184,7 @@ render_listing |cards {String}| -> String:
         .flat_map(|block| block.statements.iter())
         .find_map(|statement| {
             let HirStatementKind::Call {
-                target: CallTarget::UserFunction(_),
+                target: CallTarget::Local(_),
                 args,
                 ..
             } = &statement.kind
@@ -245,7 +245,7 @@ render_listing |listing Listing| -> String:
         .flat_map(|block| block.statements.iter())
         .find_map(|statement| {
             let HirStatementKind::Call {
-                target: CallTarget::UserFunction(_),
+                target: CallTarget::Local(_),
                 args,
                 ..
             } = &statement.kind

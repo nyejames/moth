@@ -1,4 +1,4 @@
-import @./impl { add as internal_add }
+import @impl { add as internal_add }
 
 export:
     add |a Int, b Int| -> Int:

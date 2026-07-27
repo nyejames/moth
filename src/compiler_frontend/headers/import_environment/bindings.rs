@@ -9,6 +9,9 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::public_interface::PublicDeclarationRecord;
+use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginFunctionId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -24,14 +27,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// A member of a namespace record that is valid in value/expression context.
 #[derive(Clone, Debug)]
 pub(crate) enum NamespaceValueMember {
-    SourceDeclaration(InternedPath),
+    SourceDeclaration(SourceDeclarationTarget),
     ExternalSymbol(ExternalSymbolId),
 }
 
 /// A member of a namespace record that is valid in type context.
 #[derive(Clone, Debug)]
 pub(crate) enum NamespaceTypeMember {
-    SourceDeclaration(InternedPath),
+    SourceDeclaration(SourceDeclarationTarget),
     ExternalSymbol(ExternalSymbolId),
 }
 
@@ -145,8 +148,69 @@ pub(crate) fn lookup_namespace_member<'a>(
 /// namespace, so they need their own visibility entries and diagnostics.
 #[derive(Clone, Debug)]
 pub(crate) struct ReceiverMethodVisibility {
-    pub(crate) function_path: InternedPath,
+    pub(crate) target: SourceFunctionTarget,
     pub(crate) location: SourceLocation,
+}
+
+/// One source declaration visible in a consumer file.
+///
+/// Local declarations retain their module-local path handle. Imported declarations retain the
+/// stable origin selected from a completed provider interface plus a consumer-local path handle
+/// used only to index projected AST facts.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum SourceDeclarationTarget {
+    Local(InternedPath),
+    Imported {
+        origin: OriginDeclarationId,
+        local_path: InternedPath,
+    },
+}
+
+impl SourceDeclarationTarget {
+    pub(crate) fn local_path(&self) -> &InternedPath {
+        match self {
+            Self::Local(path)
+            | Self::Imported {
+                local_path: path, ..
+            } => path,
+        }
+    }
+}
+
+impl std::ops::Deref for SourceDeclarationTarget {
+    type Target = InternedPath;
+
+    fn deref(&self) -> &Self::Target {
+        self.local_path()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum SourceFunctionTarget {
+    Local(InternedPath),
+    Imported {
+        origin: OriginFunctionId,
+        local_path: InternedPath,
+    },
+}
+
+impl SourceFunctionTarget {
+    pub(crate) fn local_path(&self) -> &InternedPath {
+        match self {
+            Self::Local(path)
+            | Self::Imported {
+                local_path: path, ..
+            } => path,
+        }
+    }
+}
+
+impl std::ops::Deref for SourceFunctionTarget {
+    type Target = InternedPath;
+
+    fn deref(&self) -> &Self::Target {
+        self.local_path()
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -157,17 +221,17 @@ pub(crate) struct FileVisibility {
 
     /// Source-visible names → canonical declaration path.
     /// Includes same-file declarations and imported source symbols (aliased or not).
-    pub(crate) visible_source_names: FxHashMap<StringId, InternedPath>,
+    pub(crate) visible_source_names: FxHashMap<StringId, SourceDeclarationTarget>,
 
     /// Type aliases: local visible name → canonical type alias path.
-    pub(crate) visible_type_alias_names: FxHashMap<StringId, InternedPath>,
+    pub(crate) visible_type_alias_names: FxHashMap<StringId, SourceDeclarationTarget>,
 
     /// Trait declarations: local visible name → canonical trait path.
     ///
     /// WHY: traits are compile-time contracts, not value declarations or datatypes. Keeping them
     /// in their own map lets conformances and generic bounds resolve imported trait names without
     /// making `TRAIT` usable as a normal type annotation.
-    pub(crate) visible_trait_names: FxHashMap<StringId, InternedPath>,
+    pub(crate) visible_trait_names: FxHashMap<StringId, SourceDeclarationTarget>,
 
     /// External package functions/types/constants visible from this file.
     /// Populated by explicit virtual-package imports and prelude symbols.
@@ -206,7 +270,25 @@ pub(crate) struct FileVisibility {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HeaderImportEnvironment {
     pub(crate) file_visibility_by_source: FxHashMap<InternedPath, FileVisibility>,
+    pub(crate) imported_declarations_by_local_path:
+        FxHashMap<InternedPath, PublicDeclarationRecord>,
+    /// Stable declaration closure supplied by completed provider interfaces.
+    ///
+    /// AST projects these records into consumer-local semantic handles. Keeping the stable
+    /// records here lets nested canonical types resolve without retaining or reopening donor
+    /// syntax, AST, HIR or donor-local `TypeId` values.
+    pub(crate) imported_declarations_by_origin: FxHashMap<
+        crate::compiler_frontend::semantic_identity::OriginDeclarationId,
+        PublicDeclarationRecord,
+    >,
+    pub(crate) imported_functions_by_local_path: FxHashMap<InternedPath, ImportedFunctionContract>,
     pub(crate) warnings: Vec<CompilerDiagnostic>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ImportedFunctionContract {
+    pub(crate) target: SourceFunctionTarget,
+    pub(crate) summary: PublicCallSummary,
 }
 
 impl HeaderImportEnvironment {

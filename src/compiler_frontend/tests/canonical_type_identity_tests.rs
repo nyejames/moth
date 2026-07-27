@@ -328,6 +328,77 @@ fn builtin_none_identity_is_canonical() {
     );
 }
 
+#[test]
+fn builtin_error_struct_projects_to_builtin_identity() {
+    let mut env = TypeEnvironment::new();
+    let mut string_table = StringTable::new();
+    let (_, error_type_id) = register_struct(&mut env, &mut string_table, "Error");
+    let resolver = MapNominalOriginResolver::new();
+    let generic_resolver = MapGenericParameterOriginResolver::new();
+    let registry = ExternalPackageRegistry::new();
+    env.register_canonical_identity(
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+        error_type_id,
+    )
+    .expect("builtin Error identity should register");
+    let context = CanonicalTypeProjectionContext::new(&resolver, &generic_resolver, &registry);
+
+    let identity = project_type_id_to_canonical_identity(error_type_id, &env, &context)
+        .expect("builtin Error projection should succeed without a source origin");
+
+    assert_eq!(
+        identity,
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)
+    );
+}
+
+#[test]
+fn durable_canonical_interner_preserves_exact_origin_and_reuses_type_id() {
+    let mut env = TypeEnvironment::new();
+    let mut string_table = StringTable::new();
+    let (_, normal_type_id) = register_struct(&mut env, &mut string_table, "NormalCard");
+    let (_, support_type_id) = register_struct(&mut env, &mut string_table, "SupportCard");
+    let package = StablePackageIdentity::project_local("test-project");
+    let normal_identity = CanonicalTypeIdentity::SourceNominal(OriginTypeId::new(
+        StableModuleOriginIdentity::from_portable_path(
+            package.clone(),
+            "cards".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        "Card".to_owned(),
+        OriginTypeCategory::Struct,
+    ));
+    let support_identity = CanonicalTypeIdentity::SourceNominal(OriginTypeId::new(
+        StableModuleOriginIdentity::from_portable_path(
+            package,
+            "cards".to_owned(),
+            ModuleRootRole::Support,
+        ),
+        "Card".to_owned(),
+        OriginTypeCategory::Struct,
+    ));
+
+    env.register_canonical_identity(normal_identity.clone(), normal_type_id)
+        .expect("normal identity should register");
+    env.register_canonical_identity(normal_identity.clone(), normal_type_id)
+        .expect("repeated identity registration should reuse its TypeId");
+    env.register_canonical_identity(support_identity.clone(), support_type_id)
+        .expect("role-distinct identity should register independently");
+
+    assert_eq!(
+        env.type_id_for_canonical_identity(&normal_identity),
+        Some(normal_type_id)
+    );
+    assert_eq!(
+        env.type_id_for_canonical_identity(&support_identity),
+        Some(support_type_id)
+    );
+    assert_eq!(
+        env.canonical_identity_for_type_id(normal_type_id),
+        Some(&normal_identity)
+    );
+}
+
 // ---------------------------------------------------------------------------
 //  Source nominal projection
 // ---------------------------------------------------------------------------
@@ -404,23 +475,14 @@ fn projects_external_opaque_to_owned_package_and_symbol_path() {
     let identity = project_type_id_to_canonical_identity(type_id, &env, &context)
         .expect("external opaque projection should succeed");
 
-    let expected_symbol_path =
-        ExternalSymbolPath::from_components(vec!["input".to_owned(), "Input".to_owned()]);
-    match &identity {
-        CanonicalTypeIdentity::ExternalOpaque(opaque) => {
-            assert_eq!(
-                opaque.package_path(),
-                "@core/io",
-                "external opaque must carry the owned package path"
-            );
-            assert_eq!(
-                opaque.symbol_path(),
-                &expected_symbol_path,
-                "external opaque must carry the structured symbol path"
-            );
-        }
-        other => panic!("expected ExternalOpaque, got {other:?}"),
-    }
+    let expected = CanonicalTypeIdentity::ExternalOpaque(ExternalOpaqueTypeIdentity::new(
+        "@core/io".to_owned(),
+        ExternalSymbolPath::from_components(vec!["input".to_owned(), "Input".to_owned()]),
+    ));
+    assert_eq!(
+        identity, expected,
+        "external opaque projection must retain the owned package and structured symbol path"
+    );
 }
 
 #[test]
@@ -472,16 +534,11 @@ fn projects_external_opaque_from_test_registry() {
     let identity = project_type_id_to_canonical_identity(type_id, &env, &context)
         .expect("test external opaque projection should succeed");
 
-    match &identity {
-        CanonicalTypeIdentity::ExternalOpaque(opaque) => {
-            assert_eq!(opaque.package_path(), "@test/canvas");
-            assert_eq!(
-                opaque.symbol_path(),
-                &ExternalSymbolPath::from_single("Canvas")
-            );
-        }
-        other => panic!("expected ExternalOpaque, got {other:?}"),
-    }
+    let expected = CanonicalTypeIdentity::ExternalOpaque(ExternalOpaqueTypeIdentity::new(
+        "@test/canvas".to_owned(),
+        ExternalSymbolPath::from_single("Canvas"),
+    ));
+    assert_eq!(identity, expected);
 }
 
 // ---------------------------------------------------------------------------
@@ -557,12 +614,11 @@ fn projects_fixed_collection_distinct_from_growable() {
         "fixed and growable collections of the same element must be distinct"
     );
 
-    match &fixed_identity {
-        CanonicalTypeIdentity::Collection(collection) => {
-            assert_eq!(collection.fixed_capacity(), Some(4));
-        }
-        other => panic!("expected Collection, got {other:?}"),
-    }
+    let expected_fixed = CanonicalTypeIdentity::Collection(CollectionTypeIdentity::new(
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
+        Some(4),
+    ));
+    assert_eq!(fixed_identity, expected_fixed);
 }
 
 #[test]

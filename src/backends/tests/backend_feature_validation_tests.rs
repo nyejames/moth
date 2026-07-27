@@ -5,7 +5,7 @@
 //! proving that unreachable HIR helper bodies do not block a backend build.
 
 use crate::backends::backend_feature_validation::{
-    BackendFeatureValidationError, BackendFeatureValidationInput, BackendFeatureValidationRoot,
+    BackendFeatureValidationError, BackendFeatureValidationInput,
     validate_hir_backend_feature_support,
 };
 use crate::backends::external_package_validation::BackendTarget;
@@ -24,7 +24,10 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
-use crate::compiler_frontend::hir::reachability::ReachableFloatStatementKind;
+use crate::compiler_frontend::hir::reachability::{
+    ReachableFloatStatementKind, collect_module_function_link_facts,
+    collect_reachability_from_function_link_facts,
+};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -150,11 +153,12 @@ fn wasm_feature_validation_ignores_unreachable_checked_numeric_ops() {
         ],
     );
 
+    let reachability = test_reachability(&module);
     let result = validate_hir_backend_feature_support(
         BackendFeatureValidationInput {
             hir: &module,
+            reachability: &reachability,
             target: BackendTarget::Wasm,
-            root: BackendFeatureValidationRoot::StartFunction,
             type_environment: Some(&type_environment),
         },
         &mut string_table,
@@ -195,11 +199,12 @@ fn wasm_feature_validation_ignores_unreachable_float_statements() {
         ],
     );
 
+    let reachability = test_reachability(&module);
     let result = validate_hir_backend_feature_support(
         BackendFeatureValidationInput {
             hir: &module,
+            reachability: &reachability,
             target: BackendTarget::Wasm,
-            root: BackendFeatureValidationRoot::StartFunction,
             type_environment: Some(&type_environment),
         },
         &mut string_table,
@@ -217,11 +222,12 @@ fn wasm_feature_validation_diagnostic(
     string_table: &mut StringTable,
     expectation: &str,
 ) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+    let reachability = test_reachability(module);
     let error = validate_hir_backend_feature_support(
         BackendFeatureValidationInput {
             hir: module,
+            reachability: &reachability,
             target: BackendTarget::Wasm,
-            root: BackendFeatureValidationRoot::StartFunction,
             type_environment: Some(type_environment),
         },
         string_table,
@@ -234,6 +240,20 @@ fn wasm_feature_validation_diagnostic(
             panic!("expected a user-facing Rule diagnostic, not an infrastructure error")
         }
     }
+}
+
+fn test_reachability(
+    module: &HirModule,
+) -> crate::compiler_frontend::hir::reachability::HirReachability {
+    let facts = collect_module_function_link_facts(module)
+        .expect("test HIR should produce function link facts");
+    collect_reachability_from_function_link_facts(
+        &facts,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("test HIR should produce entry reachability")
 }
 
 fn assert_unsupported_feature(
@@ -264,7 +284,7 @@ fn hir_module(
     blocks: Vec<HirBlock>,
 ) -> HirModule {
     let mut module = HirModule::new();
-    module.start_function = start_function;
+    module.start_function = Some(start_function);
     module.functions = functions;
     module.blocks = blocks;
     module

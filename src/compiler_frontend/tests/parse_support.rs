@@ -17,6 +17,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -47,6 +48,7 @@ pub(crate) fn parse_single_file_ast_result(
     let options = HeaderParseOptions {
         entry_file_id: None,
         project_path_resolver: Some(test_project_path_resolver()),
+        active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
 
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
@@ -82,6 +84,7 @@ pub(crate) fn parse_single_file_ast_result(
         prepared_syntax,
         external_package_registry.as_ref(),
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         options.project_path_resolver.as_ref(),
         &mut string_table,
     )
@@ -112,7 +115,7 @@ pub(crate) fn parse_single_file_ast_result(
     })?;
 
     let entry_path = InternedPath::from_single_str("#page.moth", &mut string_table);
-    let ast = Ast::new(
+    let build_result = Ast::new(
         AstBuildInput {
             headers: sorted.headers,
             module_symbols: sorted.module_symbols,
@@ -120,6 +123,7 @@ pub(crate) fn parse_single_file_ast_result(
             top_level_const_fragments: sorted.top_level_const_fragments,
         },
         AstBuildContext {
+            root_role: ModuleRootRole::Normal,
             external_package_registry,
             style_directives: &style_directives,
             string_table: &mut string_table,
@@ -139,7 +143,7 @@ pub(crate) fn parse_single_file_ast_result(
         }
     })?;
 
-    Ok((ast, string_table))
+    Ok((build_result.ast, string_table))
 }
 
 pub(crate) fn parse_single_file_ast(source: &str) -> (Ast, StringTable) {

@@ -1,5 +1,5 @@
 use super::compile_project_frontend;
-use crate::build_system::build::BackendBuilder;
+use crate::build_system::build::{BackendBuilder, ProjectCompilation};
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::{
@@ -214,7 +214,7 @@ fn module_contains_external_call(module: &crate::build_system::build::Module) ->
             matches!(
                 &statement.kind,
                 HirStatementKind::Call {
-                    target: CallTarget::ExternalFunction(_),
+                    target: CallTarget::External(_),
                     ..
                 }
             )
@@ -229,7 +229,7 @@ fn module_contains_external_module_export(
     module.executable.hir.blocks.iter().any(|block| {
         block.statements.iter().any(|statement| {
             let HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(function_id),
+                target: CallTarget::External(function_id),
                 ..
             } = &statement.kind
             else {
@@ -379,17 +379,17 @@ fn provider_created_package_registry_survives_into_module() {
     let module = modules.into_iter().next().expect("expected one module");
 
     assert!(
-        !module.link_facts.module_external_imports.is_empty(),
+        !module.link_facts.external_import_candidates.is_empty(),
         "module should carry provider external imports"
     );
 
-    for import in &module.link_facts.module_external_imports {
+    for import in &module.link_facts.external_import_candidates {
         let package = module
             .link_facts
             .external_package_registry
             .get_package_by_id(import.package_id)
             .expect(
-                "package referenced by module_external_imports should exist in module registry",
+                "package referenced by external_import_candidates should exist in module registry",
             );
         assert_eq!(
             package.metadata,
@@ -410,7 +410,7 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("#page.moth"),
-        "import @./drawing.js { draw }\nimport @./other { run }\nvalue = draw()\nother_value = run()\n",
+        "import @./drawing.js { draw }\nimport @other { run }\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
     fs::write(
@@ -444,12 +444,12 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
         "same canonical JS file should be resolved through the provider cache once"
     );
     assert_eq!(
-        module.link_facts.module_external_imports.len(),
+        module.link_facts.external_import_candidates.len(),
         1,
         "same JS file imported twice should produce one deduped module external import"
     );
     assert!(
-        module.link_facts.module_external_imports[0]
+        module.link_facts.external_import_candidates[0]
             .runtime_asset
             .is_some(),
         "deduped import should carry runtime asset"
@@ -459,15 +459,12 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
 }
 
 #[test]
-fn provider_runtime_metadata_ignores_unreachable_external_calls() {
+fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     let dir = temp_dir("provider_runtime_metadata_unreachable");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(
-        dir.join("#page.moth"),
-        "import @./other { run }\nvalue = 1\n",
-    )
-    .expect("should write entry");
+    fs::write(dir.join("#page.moth"), "import @other { run }\nvalue = 1\n")
+        .expect("should write entry");
     fs::write(
         dir.join("other.moth"),
         "import @./drawing.js { get_number }\nrun || -> Int, Error!:\n    return get_number()!\n;\n",
@@ -499,15 +496,50 @@ fn provider_runtime_metadata_ignores_unreachable_external_calls() {
         "HIR should keep the unreachable function body and provider package metadata"
     );
     assert!(
-        module.link_facts.module_external_imports.is_empty(),
-        "module runtime metadata should ignore provider packages reached only by unreachable calls"
+        !module.link_facts.external_import_candidates.is_empty(),
+        "module link facts should retain provider candidates independently of entry reachability"
+    );
+    let project_compilation = ProjectCompilation::from_successful_modules(vec![module])
+        .expect("compiled module should assemble an entry");
+    let entries = project_compilation.entries();
+    assert_eq!(
+        entries.len(),
+        1,
+        "top-level runtime work should create one entry"
+    );
+    assert!(
+        entries[0].external_imports.is_empty(),
+        "entry runtime metadata should exclude packages used only by unreachable functions"
+    );
+    let entry = entries[0].clone();
+    let selection = entry.reachability.backend_selection();
+    let start_function_id = entry
+        .module
+        .executable
+        .hir
+        .start_function
+        .expect("entry module should have start");
+    let start_entry_block = entry
+        .module
+        .executable
+        .hir
+        .functions
+        .iter()
+        .find(|function| function.id == start_function_id)
+        .expect("entry start function should exist")
+        .entry;
+    assert_eq!(selection.function_count(), 1);
+    assert!(selection.contains_function(start_function_id));
+    assert_eq!(
+        selection.blocks_for_function(start_function_id),
+        Some(&[start_entry_block][..])
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
-fn builder_runtime_metadata_ignores_unreachable_source_package_wrappers() {
+fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     let dir = temp_dir("builder_runtime_metadata_unreachable");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
@@ -549,10 +581,25 @@ fn builder_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     assert!(
         module
             .link_facts
-            .module_external_imports
+            .external_import_candidates
+            .iter()
+            .any(|import| import.package_id == canvas_package_id),
+        "module link facts should retain the available @web/canvas runtime candidate"
+    );
+    let project_compilation = ProjectCompilation::from_successful_modules(vec![module])
+        .expect("compiled module should assemble an entry");
+    let entries = project_compilation.entries();
+    assert_eq!(
+        entries.len(),
+        1,
+        "top-level runtime work should create one entry"
+    );
+    assert!(
+        entries[0]
+            .external_imports
             .iter()
             .all(|import| import.package_id != canvas_package_id),
-        "unreachable @html wrappers should not attach @web/canvas runtime metadata"
+        "entry runtime metadata should exclude unreachable @web/canvas wrappers"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
@@ -587,8 +634,11 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
     .expect("provider-backed import should compile");
 
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
+    let project_compilation =
+        crate::build_system::build::ProjectCompilation::from_successful_modules(modules)
+            .expect("compiled modules should assemble entries");
     let project = builder
-        .build_backend(modules, &config, &[], &mut string_table)
+        .build_backend(project_compilation, &config, &[], &mut string_table)
         .expect("HTML build should succeed with module-owned registry");
 
     assert!(
@@ -890,7 +940,7 @@ fn provider_backed_grouped_import_compiles_and_reuses_cache() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("#page.moth"),
-        "import @./drawing.js { draw as render }\nimport @./other { run }\nvalue = render()\nother_value = run()\n",
+        "import @./drawing.js { draw as render }\nimport @other { run }\nvalue = render()\nother_value = run()\n",
     )
     .expect("should write page");
     fs::write(
@@ -976,7 +1026,7 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("#page.moth"),
-        "import @./a/use { run_a }\nimport @./b/use { run_b }\nvalue_a = run_a()\nvalue_b = run_b()\n",
+        "import @a/use { run_a }\nimport @b/use { run_b }\nvalue_a = run_a()\nvalue_b = run_b()\n",
     )
     .expect("should write page");
     fs::write(
@@ -1329,7 +1379,7 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("#page.moth"),
-        "import @./drawing.js { draw }\nimport @./other { run }\nvalue = draw()\nother_value = run()\n",
+        "import @./drawing.js { draw }\nimport @other { run }\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
     fs::write(
@@ -1360,7 +1410,7 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     let module = modules.into_iter().next().expect("expected one module");
 
     assert_eq!(
-        module.link_facts.module_external_imports.len(),
+        module.link_facts.external_import_candidates.len(),
         1,
         "same JS file imported twice should produce one deduped module external import"
     );
@@ -1368,51 +1418,6 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
-#[test]
-fn html_js_provider_js_import_from_source_package_resolves() {
-    let dir = temp_dir("html_js_provider_source_package");
-    fs::create_dir_all(dir.join("lib").join("ui")).expect("should create lib/ui dir");
-    fs::write(dir.join("config.moth"), "package_folders #= {\"lib\"}\n")
-        .expect("should write config");
-    fs::write(
-        dir.join("#page.moth"),
-        "import @ui { run }\nvalue = run()\n",
-    )
-    .expect("should write page");
-    fs::write(
-        dir.join("lib/ui/#mod.moth"),
-        "import @./helper.js { draw }\n\nexport:\n    run || -> Int:\n        return draw()\n    ;\n;\n",
-    )
-    .expect("should write module root");
-    fs::write(
-        dir.join("lib/ui/helper.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
-    )
-    .expect("should write js");
-
-    let mut config = Config::new(dir.clone());
-    let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
-    let mut frontend_surface = builder_surface_with_html_js_provider();
-
-    let modules = compile_project_frontend(
-        &mut config,
-        &[],
-        &style_directives,
-        &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("JS import from source-backed package should compile");
-
-    assert!(
-        modules
-            .iter()
-            .any(|module| module_contains_external_module_export(module, "draw")),
-        "HIR should contain JS export metadata for source-backed package JS function"
-    );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
-}
 #[test]
 fn html_js_provider_fallible_function_with_error_return_compiles() {
     let dir = temp_dir("html_js_provider_fallible");
@@ -1499,12 +1504,12 @@ fn single_file_rejects_source_package_moth_folder_collision() {
             matches!(
                 &diagnostic.payload,
                 DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::MothFileFolderCollision { .. },
+                    reason: InvalidConfigReason::SourceFileFolderCollision { .. },
                     ..
                 }
             )
         }),
-        "expected MothFileFolderCollision diagnostic, got {messages:?}"
+        "expected SourceFileFolderCollision diagnostic, got {messages:?}"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");

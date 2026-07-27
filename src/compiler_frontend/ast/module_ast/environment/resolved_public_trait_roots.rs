@@ -10,14 +10,13 @@
 //! WHY: the public-interface draft trait-requirement projection needs resolved trait facts
 //! available immediately before HIR lowering without reconstructing trait semantics from HIR
 //! or source. This is transient donor-local AST data consumed before HIR; it never enters
-//! `CompiledModuleResult`, `Module`, or a cross-module interface.
+//! `ModuleSemanticDraft`, `Module`, or a cross-module interface.
 
 use crate::compiler_frontend::ast::module_ast::environment::resolved_public_type_roots::ResolvedPublicTypeRootTable;
-use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
+use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
@@ -115,21 +114,22 @@ pub(crate) struct ResolvedPublicTraitRoot {
 ///
 /// WHAT: bundles the transient type-root [`ResolvedPublicTypeRootTable`] (declaration roots,
 /// receiver methods and trait-source facts for generic bounds and public incompatibilities),
-/// the directly-defined active-root public [`ResolvedPublicTraitRoot`] vector, the validated
-/// [`ReceiverMethodCatalog`] and the resolved trait and evidence environments into one closed
-/// input for the sole `PublicInterfaceDraftBuilder` consumer. It has a closed purpose: feeding
-/// the public-interface draft projection (declarations, trait surfaces and reusable evidence)
-/// immediately before HIR lowering. It is not an open-ended future-facts bag and never enters
-/// `CompiledModuleResult`, `Module` or a cross-module artefact.
-/// WHY: replacing the separate `Ast` fields with one named projection input keeps the
-/// public-surface projection input in one owned place and prevents later phases from
-/// widening the executable `Ast` with more transient public facts. The field on `Ast` is
-/// taken before HIR and may not gain unrelated future facts.
+/// the directly-defined active-root public [`ResolvedPublicTraitRoot`] vector and the resolved
+/// trait and evidence environments into one closed input for the sole
+/// `PublicInterfaceDraftBuilder` consumer. It has a closed purpose: feeding the public-interface
+/// draft projection (declarations, trait surfaces and reusable evidence) immediately before HIR
+/// lowering. It is not an open-ended future-facts bag and never enters `ModuleSemanticDraft`,
+/// `Module` or a cross-module artefact.
+/// WHY: keeping the public-surface projection input in one named aggregate prevents later
+/// phases from widening executable `Ast` with transient public facts. It is carried on
+/// [`AstBuildResult`] and consumed by the public-interface draft builder before HIR; it never
+/// reaches the `Ast` passed to HIR and may not gain unrelated future facts.
+///
+/// [`AstBuildResult`]: crate::compiler_frontend::ast::AstBuildResult
 #[derive(Clone, Default)]
 pub(crate) struct AstPublicInterfaceProjectionInput {
     pub(crate) root_table: ResolvedPublicTypeRootTable,
     pub(crate) trait_roots: Vec<ResolvedPublicTraitRoot>,
-    pub(crate) receiver_catalog: Option<Rc<ReceiverMethodCatalog>>,
     /// The resolved trait environment, retained for direct reusable-evidence projection.
     pub(crate) trait_environment: Option<Rc<TraitEnvironment>>,
     /// The validated trait evidence environment, retained for direct reusable-evidence
@@ -179,7 +179,7 @@ pub(crate) fn build_resolved_public_trait_roots(
 /// roots. Imported module roots, private traits, builtin declarations and source-package-only
 /// facts are excluded.
 fn is_active_root_public_trait_declaration(header: &Header) -> bool {
-    header.file_role == FileRole::ActiveModuleRoot
+    header.file_role.is_active_module_root()
         && header.export_mode.is_public()
         && header.kind.is_authored_public_export_declaration()
         && matches!(header.kind, HeaderKind::Trait { .. })

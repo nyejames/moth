@@ -43,9 +43,13 @@ impl<'a> HirBuilder<'a> {
             self.register_choice_id(&choice_def.nominal_path, &SourceLocation::default())?;
         }
 
+        for definition in &ast.imported_struct_definitions {
+            self.register_struct_declaration(&definition.nominal_path, &SourceLocation::default())?;
+        }
+
         for node in &ast.nodes {
-            if let NodeKind::StructDefinition(name, fields) = &node.kind {
-                self.register_struct_declaration(name, fields, &node.location)?;
+            if let NodeKind::StructDefinition(name, _) = &node.kind {
+                self.register_struct_declaration(name, &node.location)?;
             }
         }
 
@@ -210,7 +214,6 @@ impl<'a> HirBuilder<'a> {
     fn register_struct_declaration(
         &mut self,
         name: &InternedPath,
-        fields: &[Declaration],
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
         if self.structs_by_name.contains_key(name) {
@@ -234,17 +237,29 @@ impl<'a> HirBuilder<'a> {
                 ))
             })?;
 
+        let fields = self
+            .type_environment
+            .struct_definition_for(frontend_type_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "HIR invariant: nominal type '{}' is not a struct during HIR lowering",
+                    name.to_string(self.string_table)
+                ))
+            })?
+            .fields
+            .to_vec();
+
         let struct_id = self.allocate_struct_id();
         let mut hir_fields = Vec::with_capacity(fields.len());
 
-        for field in fields {
+        for field in &fields {
             // AST guarantees module-wide unique InternedPath symbols. For struct fields this
             // means each field path must be prefixed by its parent struct path.
-            let Some(parent) = field.id.parent() else {
+            let Some(parent) = field.name.parent() else {
                 return_hir_transformation_error!(
                     format!(
                         "HIR invariant: field '{}' has no parent struct path during HIR lowering",
-                        self.symbol_name_for_diagnostics(&field.id)
+                        self.symbol_name_for_diagnostics(&field.name)
                     ),
                     self.hir_error_location(location)
                 );
@@ -254,7 +269,7 @@ impl<'a> HirBuilder<'a> {
                 return_hir_transformation_error!(
                     format!(
                         "HIR invariant: field '{}' is not prefixed by struct '{}'",
-                        self.symbol_name_for_diagnostics(&field.id),
+                        self.symbol_name_for_diagnostics(&field.name),
                         self.symbol_name_for_diagnostics(name)
                     ),
                     self.hir_error_location(location)
@@ -263,31 +278,31 @@ impl<'a> HirBuilder<'a> {
 
             if self
                 .fields_by_struct_and_name
-                .contains_key(&(struct_id, field.id.to_owned()))
+                .contains_key(&(struct_id, field.name.to_owned()))
             {
                 return_hir_transformation_error!(
                     format!(
                         "HIR invariant: duplicate field '{}' in struct '{}'",
-                        self.symbol_name_for_diagnostics(&field.id),
+                        self.symbol_name_for_diagnostics(&field.name),
                         self.symbol_name_for_diagnostics(name)
                     ),
                     self.hir_error_location(location)
                 );
             }
 
-            let field_location = if field.value.location == SourceLocation::default() {
+            let field_location = if field.location == SourceLocation::default() {
                 location.clone()
             } else {
-                field.value.location.clone()
+                field.location.clone()
             };
 
-            let field_type = self.lower_type_id(field.value.type_id, &field_location)?;
+            let field_type = self.lower_type_id(field.type_id, &field_location)?;
             let field_id = self.allocate_field_id();
 
             self.fields_by_struct_and_name
-                .insert((struct_id, field.id.to_owned()), field_id);
+                .insert((struct_id, field.name.to_owned()), field_id);
             self.side_table
-                .bind_field_name(field_id, field.id.to_owned());
+                .bind_field_name(field_id, field.name.to_owned());
             self.side_table
                 .map_ast_to_hir(&field_location, HirLocation::Field(field_id));
             self.side_table
@@ -439,6 +454,11 @@ impl<'a> HirBuilder<'a> {
     }
 
     fn resolve_start_function(&mut self, ast: &Ast) -> Result<(), CompilerError> {
+        if !ast.root_role.has_implicit_start() {
+            self.module.start_function = None;
+            return Ok(());
+        }
+
         let start_name = ast
             .entry_path
             .join_str(IMPLICIT_START_FUNC_NAME, self.string_table);
@@ -459,7 +479,7 @@ impl<'a> HirBuilder<'a> {
             );
         };
 
-        self.module.start_function = start_function;
+        self.module.start_function = Some(start_function);
         Ok(())
     }
 

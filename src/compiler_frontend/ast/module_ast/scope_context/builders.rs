@@ -138,7 +138,7 @@ impl ScopeContext {
     /// position during expression parsing.
     pub fn with_visible_source_bindings(
         mut self,
-        bindings: FxHashMap<StringId, InternedPath>,
+        bindings: FxHashMap<StringId, SourceDeclarationTarget>,
     ) -> ScopeContext {
         self.update_file_visibility(|file_visibility| {
             file_visibility.visible_source_names = bindings;
@@ -153,7 +153,7 @@ impl ScopeContext {
     /// mistakenly used in value position.
     pub fn with_visible_type_aliases(
         mut self,
-        aliases: FxHashMap<StringId, InternedPath>,
+        aliases: FxHashMap<StringId, SourceDeclarationTarget>,
     ) -> ScopeContext {
         self.update_file_visibility(|file_visibility| {
             file_visibility.visible_type_alias_names = aliases;

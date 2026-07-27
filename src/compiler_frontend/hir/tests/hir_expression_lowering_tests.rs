@@ -95,6 +95,7 @@ pub(crate) fn setup_builder(string_table: &'_ mut StringTable) -> HirBuilder<'_>
     builder.test_set_current_block(BlockId(0));
     builder.test_register_function_name(test_function_name, function_id);
     builder.test_set_current_function(function_id);
+    builder.module.start_function = Some(function_id);
 
     builder
 }
@@ -986,7 +987,7 @@ fn lowers_function_call_to_call_statement_and_temp_load() {
             args,
             result,
         } => {
-            assert_eq!(target, &CallTarget::UserFunction(FunctionId(2)));
+            assert_eq!(target, &CallTarget::Local(FunctionId(2)));
             assert_eq!(args.len(), 1);
             result.expect("call with return should bind a temp local")
         }
@@ -1384,7 +1385,7 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
 
     match &lowered.prelude[0].kind {
         HirStatementKind::Call { target, args, .. } => {
-            assert_eq!(target, &CallTarget::UserFunction(FunctionId(22)));
+            assert_eq!(target, &CallTarget::Local(FunctionId(22)));
             assert_eq!(args.len(), 2);
             assert!(matches!(
                 args[0].kind,
@@ -1435,7 +1436,7 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
     assert_eq!(lowered.prelude.len(), 1);
     match &lowered.prelude[0].kind {
         HirStatementKind::Call { target, args, .. } => {
-            assert_eq!(target, &CallTarget::UserFunction(FunctionId(41)));
+            assert_eq!(target, &CallTarget::Local(FunctionId(41)));
             assert_eq!(args.len(), 1);
             assert!(matches!(
                 args[0].kind,
@@ -1474,7 +1475,7 @@ fn lowers_host_call_expression_with_host_target() {
     };
     assert_eq!(
         target,
-        &CallTarget::ExternalFunction(
+        &CallTarget::External(
             crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine
         )
     );
@@ -1530,9 +1531,9 @@ fn preserves_left_to_right_call_prelude_order_in_nested_call_args() {
     assert_eq!(
         targets,
         vec![
-            CallTarget::UserFunction(FunctionId(1)),
-            CallTarget::UserFunction(FunctionId(2)),
-            CallTarget::UserFunction(FunctionId(3)),
+            CallTarget::Local(FunctionId(1)),
+            CallTarget::Local(FunctionId(2)),
+            CallTarget::Local(FunctionId(3)),
         ]
     );
 }
@@ -2491,7 +2492,7 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
             matches!(
                 statement.kind,
                 HirStatementKind::Call {
-                    target: CallTarget::ExternalFunction(ExternalFunctionId::CollectionLength),
+                    target: CallTarget::External(ExternalFunctionId::CollectionLength),
                     ..
                 }
             )
@@ -3265,7 +3266,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
                 args,
                 result,
             } => {
-                assert_eq!(target, &CallTarget::ExternalFunction(expected_id));
+                assert_eq!(target, &CallTarget::External(expected_id));
                 assert_eq!(
                     result.is_some(),
                     expects_result,
@@ -3754,7 +3755,7 @@ fn external_float_call_emits_validate_float_in_current_block() {
         statements.iter().any(|statement| matches!(
             &statement.kind,
             HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(ExternalFunctionId::Synthetic(0)),
+                target: CallTarget::External(ExternalFunctionId::Synthetic(0)),
                 ..
             }
         )),
@@ -3897,7 +3898,7 @@ fn external_fallible_float_call_propagation_validates_success() {
         all_statements.iter().any(|statement| matches!(
             &statement.kind,
             HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(ExternalFunctionId::Synthetic(1)),
+                target: CallTarget::External(ExternalFunctionId::Synthetic(1)),
                 ..
             }
         )),
@@ -3979,7 +3980,7 @@ fn external_fallible_float_call_catch_validates_success() {
         all_statements.iter().any(|statement| matches!(
             &statement.kind,
             HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(ExternalFunctionId::Synthetic(2)),
+                target: CallTarget::External(ExternalFunctionId::Synthetic(2)),
                 ..
             }
         )),

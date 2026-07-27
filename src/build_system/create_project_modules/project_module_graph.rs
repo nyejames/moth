@@ -3,31 +3,32 @@
 //! WHAT: owns the deterministic project-module graph built directly from the Stage 0
 //! [`SourceTreeIndex`]. Each canonical module becomes one node carrying its `ModuleId`,
 //! stable origin, root role, root directory/file, nearest structural parent, direct children
-//! and owned source set. The graph classifies normal entry candidates and the optional project
-//! package facade, encodes strict scoped-support visibility as a query, and exposes
-//! deterministic dependency-edge insertion plus topological compile waves over
-//! provider-before-consumer edges.
+//! and structural dependency edges. The graph classifies normal entry candidates and the
+//! optional project package facade, encodes strict scoped-support visibility as a query, and
+//! exposes deterministic dependency-edge insertion, an explicit construction-to-completion
+//! phase transition that freezes provider/consumer adjacency into sorted `Vec<ModuleId>` storage,
+//! and topological compile waves over those frozen provider-before-consumer edges. Source records
+//! and ownership remain in `SourceTreeIndex`.
 //! WHY: the compiler cannot schedule canonical modules until Stage 0 can distinguish normal
 //! modules, support packages and the optional facade, and until dependency order can be
 //! derived without a second filesystem traversal or a parallel identity/topology table. This
-//! owner consumes the existing [`ModuleIdentityTable`] and owned source sets rather than
-//! recomputing them, so identity, ancestry and source ownership stay single-owned.
+//! owner consumes the existing [`ModuleIdentityTable`] rather than recomputing it and resolves
+//! source data through the retained index, so identity, ancestry and source ownership stay
+//! single-owned.
 //!
-//! Edge insertion is narrow and production-consumed by Phase 5b: reachable-file discovery
-//! retains one local structural dependency fact per cross-module import resolution and the
-//! inventory merge maps the fact's canonical roots through this graph before inserting
-//! provider-before-consumer edges, so dependency order is derived without a second filesystem
-//! traversal or a parallel identity/topology table.
+//! Reachable-file discovery resolves cross-module imports through the indexed namespace and
+//! inserts provider-before-consumer edges directly by `ModuleId`, so dependency order is derived
+//! from the canonical graph without another filesystem traversal or identity table.
 //!
 //! Production wiring: Stage 0 constructs the graph once from the [`SourceTreeIndex`] in
 //! `project_roots` and retains it as the structural owner. `compile_waves` and `entry_modules`
 //! drive deterministic entry selection in `module_inventory`, so graph construction, wave
 //! scheduling and dependency-edge insertion are genuine production paths. The
-//! scoped-support-visibility surface remains a future consumer and carries a narrowly scoped
-//! dead-code allowance until a later slice exercises support-package visibility.
+//! namespace builder consumes the scoped-support-visibility surface for project and package
+//! boundaries.
 
-use super::module_identity::ModuleId;
-use super::source_tree_index::{OwnedSourceSet, SourceTreeIndex};
+use super::module_identity::{ModuleId, ModuleIdentityTable};
+use super::source_tree_index::SourceTreeIndex;
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
@@ -50,6 +51,16 @@ pub(crate) enum DependencyEdgeOutcome {
     AlreadyPresent,
 }
 
+/// The structural facts needed by the scoped-support visibility rule.
+///
+/// The project graph and package-boundary identity tables use one rule owner while retaining
+/// their separate boundary-local identities and storage.
+trait SupportVisibilityTopology {
+    fn role(&self, module_id: ModuleId) -> ModuleRootRole;
+
+    fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId>;
+}
+
 /// One canonical module node in the project module graph.
 ///
 /// Nodes are stored in deterministic `ModuleId` order so the graph stays aligned with the
@@ -64,7 +75,6 @@ pub(crate) struct ProjectModuleGraphNode {
     root_file: std::path::PathBuf,
     nearest_parent: Option<ModuleId>,
     direct_children: Vec<ModuleId>,
-    owned_source_set: OwnedSourceSet,
 }
 
 impl ProjectModuleGraphNode {
@@ -73,7 +83,7 @@ impl ProjectModuleGraphNode {
         self.module_id
     }
 
-    // Phase 5b/future-consumer node accessors. `module_id` and `root_file` are production-consumed
+    // Structural node accessors. `module_id` and `root_file` are production-consumed
     // by compile-wave scheduling and entry selection; the remaining identity, ancestry and
     // source-set accessors expose data the graph carries for later provider-edge and source-set
     // consumers and are exercised by focused graph-invariant tests.
@@ -110,11 +120,26 @@ impl ProjectModuleGraphNode {
     pub(crate) fn direct_children(&self) -> &[ModuleId] {
         &self.direct_children
     }
+}
 
-    /// The deterministic owned supported-source set for this module.
-    pub(crate) fn owned_source_set(&self) -> &OwnedSourceSet {
-        &self.owned_source_set
-    }
+/// Provider and consumer adjacency held over the graph lifecycle.
+///
+/// WHAT: holds one live representation of provider/consumer adjacency at a time. During
+///       construction, sorted `BTreeSet<ModuleId>` storage deduplicates incoming edges. After
+///       completion, adjacency is converted to sorted `Vec<ModuleId>` storage and the
+///       construction sets are dropped, so the graph keeps one complete adjacency representation.
+/// WHY: the construction sets exist only for idempotent insertion. The frozen vectors are the
+///      single adjacency consumed for indegree counting and compile-wave scheduling. Keeping both
+///      directions in one state prevents phase or storage disagreement by construction.
+enum ProjectModuleDependencies {
+    UnderConstruction {
+        dependency_providers: Vec<BTreeSet<ModuleId>>,
+        provider_consumers: Vec<BTreeSet<ModuleId>>,
+    },
+    Frozen {
+        dependency_providers: Vec<Vec<ModuleId>>,
+        provider_consumers: Vec<Vec<ModuleId>>,
+    },
 }
 
 /// The canonical structural project module graph for one build boundary.
@@ -122,21 +147,15 @@ impl ProjectModuleGraphNode {
 /// Built directly from a [`SourceTreeIndex`] without filesystem IO or a second identity/topology
 /// table. Nodes are stored in deterministic `ModuleId` order. Normal modules are entry
 /// candidates; support roots are never entries; the optional project package facade is a node
-/// outside the normal ancestry tree.
+/// outside the normal ancestry tree. Edge insertion and compile-wave scheduling are separated by
+/// one explicit [`ProjectModuleDependencies`] transition: edges are inserted while the graph is
+/// under construction, then [`ProjectModuleGraph::complete`] freezes adjacency into sorted
+/// `Vec<ModuleId>` storage before [`ProjectModuleGraph::compile_waves`] consumes it.
 pub(crate) struct ProjectModuleGraph {
     nodes: Vec<ProjectModuleGraphNode>,
     entry_modules: Vec<ModuleId>,
     facade: Option<ModuleId>,
-    // Per-consumer provider sets: the providers each consumer must compile after. Used for
-    // indegree counting and idempotent duplicate detection.
-    dependency_providers: Vec<BTreeSet<ModuleId>>,
-    // Per-provider consumer sets: the consumers that depend on each provider. Used for wave
-    // traversal. Maintained in lockstep with `dependency_providers`.
-    provider_consumers: Vec<BTreeSet<ModuleId>>,
-    // Canonical module root directory to `ModuleId` lookup, owned by the graph so the Phase 5b
-    // dependency-fact merge can resolve retained canonical roots to graph identities without
-    // recreating the identity table or scanning the filesystem.
-    root_directory_to_module_id: FxHashMap<std::path::PathBuf, ModuleId>,
+    dependencies: ProjectModuleDependencies,
     // Retained authored source location for each inserted provider-before-consumer edge, keyed
     // by the (provider, consumer) `ModuleId` pair. Only the first observation in deterministic
     // merge order is retained; duplicate observations are idempotent for the edge and never
@@ -147,7 +166,8 @@ pub(crate) struct ProjectModuleGraph {
 impl ProjectModuleGraph {
     /// Build the graph directly from the Stage 0 source-tree index.
     ///
-    /// Consumes the index's identity table and owned source sets rather than recomputing them.
+    /// Consumes the index's identity table rather than recomputing it. Source ownership remains
+    /// in the retained index and is not copied into graph nodes.
     /// Each module becomes one node in deterministic `ModuleId` order. Normal modules are
     /// classified as entry candidates; the optional project package facade is recorded as a
     /// node outside the normal ancestry tree.
@@ -164,7 +184,6 @@ impl ProjectModuleGraph {
             let record = identities.record(*module_id);
             let nearest_parent = identities.nearest_ancestor_module(*module_id);
             let direct_children = identities.direct_child_modules(*module_id).to_vec();
-            let owned_source_set = source_tree_index.owned_source_set(*module_id).clone();
 
             nodes.push(ProjectModuleGraphNode {
                 module_id: *module_id,
@@ -174,7 +193,6 @@ impl ProjectModuleGraph {
                 root_file: record.root_file().to_path_buf(),
                 nearest_parent,
                 direct_children,
-                owned_source_set,
             });
 
             match record.role() {
@@ -192,18 +210,14 @@ impl ProjectModuleGraph {
         let dependency_providers = (0..node_count).map(|_| BTreeSet::new()).collect();
         let provider_consumers = (0..node_count).map(|_| BTreeSet::new()).collect();
 
-        let mut root_directory_to_module_id = FxHashMap::default();
-        for node in &nodes {
-            root_directory_to_module_id.insert(node.root_directory.clone(), node.module_id);
-        }
-
         Self {
             nodes,
             entry_modules,
             facade,
-            dependency_providers,
-            provider_consumers,
-            root_directory_to_module_id,
+            dependencies: ProjectModuleDependencies::UnderConstruction {
+                dependency_providers,
+                provider_consumers,
+            },
             edge_source_locations: BTreeMap::new(),
         }
     }
@@ -233,6 +247,29 @@ impl ProjectModuleGraph {
         &self.entry_modules
     }
 
+    /// Completed source providers required before one module may bind imports.
+    pub(crate) fn dependency_providers(
+        &self,
+        module_id: ModuleId,
+    ) -> Result<&[ModuleId], CompilerError> {
+        if !self.is_valid_module_id(module_id) {
+            return Err(CompilerError::compiler_error(format!(
+                "Project module graph received out-of-range ModuleId {} for provider lookup",
+                module_id.index()
+            )));
+        }
+
+        let ProjectModuleDependencies::Frozen {
+            dependency_providers,
+            ..
+        } = &self.dependencies
+        else {
+            return Err(Self::scheduling_before_completion_error());
+        };
+
+        Ok(&dependency_providers[module_id.index()])
+    }
+
     #[allow(dead_code)]
     /// The optional project package facade module, outside the normal ancestry tree.
     pub(crate) fn facade(&self) -> Option<ModuleId> {
@@ -246,96 +283,61 @@ impl ProjectModuleGraph {
     /// strictly nested normal scope. It is not visible above `P`, outside `P`'s subtree, to `S`
     /// itself, to `S`'s private descendants, or to another support module owned by `P`. Returns
     /// `false` when `support_id` is not a support module.
-    #[allow(dead_code)]
     pub(crate) fn is_support_visible_to_consumer(
         &self,
         support_id: ModuleId,
         consumer_id: ModuleId,
     ) -> bool {
-        if self.role(support_id) != ModuleRootRole::Support {
-            return false;
-        }
-        let Some(owner) = self.nearest_normal_ancestor(support_id) else {
-            return false;
-        };
-
-        match self.role(consumer_id) {
-            ModuleRootRole::Normal => {
-                // The owner and normal modules in its remaining subtree consume this package.
-                // Normal descendants inside the package's private subtree cannot import their
-                // own facade.
-                consumer_id == owner
-                    || (self.is_ancestor_of(owner, consumer_id)
-                        && !self.is_ancestor_of(support_id, consumer_id))
-            }
-
-            ModuleRootRole::Support => {
-                // A support facade may import packages from a strictly outer scope. Same-scope
-                // support siblings and support facades inside this package's private subtree stay
-                // isolated.
-                let Some(consumer_owner) = self.nearest_normal_ancestor(consumer_id) else {
-                    return false;
-                };
-
-                consumer_id != support_id
-                    && consumer_owner != owner
-                    && self.is_ancestor_of(owner, consumer_owner)
-                    && !self.is_ancestor_of(support_id, consumer_id)
-            }
-
-            ModuleRootRole::ProjectPackageFacade => false,
-        }
-    }
-
-    /// The canonical `ModuleId` whose root directory matches `root_directory`, or `None` when
-    /// the root is not a project module graph node.
-    ///
-    /// WHAT: the graph-owned canonical-root-to-`ModuleId` mapping consumed by the Phase 5b
-    ///       dependency-fact merge. Registered source-package roots outside the project graph
-    ///       are intentionally absent and are ignored by the caller before edge insertion.
-    /// WHY: edge insertion must not recreate the `ModuleIdentityTable` or scan the filesystem;
-    ///      the graph already carries every canonical root directory as a node field.
-    pub(crate) fn module_id_for_root_directory(&self, root_directory: &Path) -> Option<ModuleId> {
-        self.root_directory_to_module_id
-            .get(root_directory)
-            .copied()
+        support_is_visible(self, support_id, consumer_id)
     }
 
     /// Build a lookup from canonical source path to owning stable module origin from every
-    /// module's owned source set.
+    /// module's owned source IDs.
     ///
-    /// WHAT: the one production path that materializes the graph's OwnedSourceSet ownership
-    ///       authority into a canonical-path-to-StableModuleOriginIdentity map consumed by
-    ///       directory-module preparation to build the per-module SourceModuleOriginTable.
+    /// WHAT: the one production path that projects the retained central `SourceTreeIndex`
+    ///       ownership authority into a canonical-path-to-StableModuleOriginIdentity map
+    ///       consumed by directory-module preparation to build the per-module
+    ///       SourceModuleOriginTable. The graph carries no source records; it reads the index
+    ///       directly so source ownership stays single-owned by the index.
     /// WHY: the SourceModuleOriginTable must resolve each prepared source file to its
-    ///      graph-owned origin without a second filesystem traversal or a parallel topology
-    ///      table. The graph already carries every owned source entry with its stable identity,
-    ///      so this lookup is a direct projection, not a scan or guess.
+    ///      owning stable module origin without a second filesystem traversal or a parallel
+    ///      topology table. The index already carries every owned source record with its
+    ///      portable logical identity, so this lookup is a direct projection, not a scan or
+    ///      guess.
     ///
-    /// A canonical path owned by two modules is a proven graph-construction invariant violation
-    /// surfaced through CompilerError rather than silently overwriting one origin.
+    /// A canonical path owned by two modules, or an owned source whose logical identity module
+    /// origin does not match its graph node origin, is a proven invariant violation surfaced
+    /// through CompilerError rather than silently overwriting one origin.
     pub(crate) fn build_source_origin_lookup(
         &self,
+        source_tree_index: &SourceTreeIndex,
     ) -> Result<FxHashMap<std::path::PathBuf, StableModuleOriginIdentity>, CompilerError> {
         let mut origins: FxHashMap<std::path::PathBuf, StableModuleOriginIdentity> =
             FxHashMap::default();
 
         for node in &self.nodes {
             let node_origin = node.stable_origin();
-            for entry in node.owned_source_set().entries() {
-                let entry_origin = entry.stable_identity().module_origin();
+            for source_id in source_tree_index.owned_source_ids(node.module_id()) {
+                let record = source_tree_index.source(*source_id);
+                let Some(entry_origin) = record.logical_identity().module_origin() else {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Project module graph owned source ID {} resolves to an unrooted record; \
+                         an owned source record must carry an owned logical identity",
+                        source_id.index(),
+                    )));
+                };
                 if entry_origin != node_origin {
                     return Err(CompilerError::compiler_error(format!(
                         "Project module graph owned source entry {} has a stable identity module origin ({:?}) that does not match its containing graph node origin ({:?})",
-                        entry.canonical_path().display(),
+                        record.canonical_path().display(),
                         entry_origin,
                         node_origin,
                     )));
                 }
-                let canonical_path = entry.canonical_path().to_path_buf();
+                let canonical_path = record.canonical_path().to_path_buf();
                 if origins.contains_key(&canonical_path) {
                     return Err(CompilerError::compiler_error(format!(
-                        "Project module graph owned source sets assign canonical path {} to multiple modules; each source file must have exactly one owning module",
+                        "Source tree index owned source ID sets assign canonical path {} to multiple modules; each source file must have exactly one owning module",
                         canonical_path.display()
                     )));
                 }
@@ -365,27 +367,74 @@ impl ProjectModuleGraph {
             return Err(self.self_edge_error(provider));
         }
 
-        if self.dependency_providers[consumer.index()].contains(&provider) {
+        let ProjectModuleDependencies::UnderConstruction {
+            dependency_providers,
+            provider_consumers,
+        } = &mut self.dependencies
+        else {
+            return Err(Self::mutation_after_completion_error());
+        };
+
+        if dependency_providers[consumer.index()].contains(&provider) {
             return Ok(DependencyEdgeOutcome::AlreadyPresent);
         }
 
-        self.dependency_providers[consumer.index()].insert(provider);
-        self.provider_consumers[provider.index()].insert(consumer);
+        dependency_providers[consumer.index()].insert(provider);
+        provider_consumers[provider.index()].insert(consumer);
 
         Ok(DependencyEdgeOutcome::Inserted)
     }
 
-    /// Insert one resolved local structural dependency edge and retain its authored location.
+    /// Freeze provider and consumer adjacency into sorted `Vec<ModuleId>` storage.
     ///
-    /// WHAT: the Phase 5b production edge-insertion path. Maps already-resolved `ModuleId`
+    /// WHAT: the one-time construction-to-completion transition. Construction `BTreeSet` storage
+    ///       is converted to sorted `Vec<ModuleId>` storage for both provider and consumer
+    ///       adjacency in lockstep, and the dependency state becomes `Frozen`. The retained
+    ///       authored edge locations are unaffected.
+    /// WHY: compile-wave scheduling reads only the frozen adjacency so the graph keeps one
+    ///      complete adjacency representation. Completing an already-completed graph is a
+    ///      mutation after completion and reports an internal [`CompilerError`] rather than
+    ///      silently no-op-ing, so the lifecycle transition stays a single explicit step.
+    pub(crate) fn complete(&mut self) -> Result<(), CompilerError> {
+        let (dependency_providers, provider_consumers) = match &mut self.dependencies {
+            ProjectModuleDependencies::UnderConstruction {
+                dependency_providers,
+                provider_consumers,
+            } => (
+                std::mem::take(dependency_providers),
+                std::mem::take(provider_consumers),
+            ),
+            ProjectModuleDependencies::Frozen { .. } => {
+                return Err(Self::mutation_after_completion_error());
+            }
+        };
+
+        let dependency_providers = dependency_providers
+            .into_iter()
+            .map(|providers| providers.into_iter().collect())
+            .collect();
+        let provider_consumers = provider_consumers
+            .into_iter()
+            .map(|consumers| consumers.into_iter().collect())
+            .collect();
+        self.dependencies = ProjectModuleDependencies::Frozen {
+            dependency_providers,
+            provider_consumers,
+        };
+
+        Ok(())
+    }
+
+    /// Insert one resolved structural dependency edge and retain its authored location.
+    ///
+    /// WHAT: the production edge-insertion path maps already-resolved `ModuleId`
     ///       identities to the low-level [`add_dependency_edge`] inserter and, for a newly
     ///       inserted edge, retains the exact authored `SourceLocation` carried by the
-    ///       dependency fact. Duplicate observations are idempotent for the edge and never
+    ///       import reference. Duplicate observations are idempotent for the edge and never
     ///       overwrite the retained location; source locations are never used for edge identity.
-    /// WHY: the inventory merge resolves canonical roots to `ModuleId` through
-    ///      [`module_id_for_root_directory`] and then calls this method so the graph stays the
-    ///      single owner of both edge adjacency and the retained dependency-fact provenance.
-    pub(crate) fn add_local_structural_dependency_edge(
+    /// WHY: the namespace resolves imports to `ModuleId` directly and then calls this method so
+    ///      the graph stays the single owner of both edge adjacency and retained provenance.
+    pub(crate) fn add_resolved_dependency_edge(
         &mut self,
         provider: ModuleId,
         consumer: ModuleId,
@@ -402,7 +451,7 @@ impl ProjectModuleGraph {
     /// The retained authored source location for one provider-before-consumer edge, if present.
     ///
     /// Focused graph-invariant tests use this to verify that exact authored source locations
-    /// survive the Phase 5b dependency-fact merge.
+    /// survive direct edge insertion.
     #[cfg(test)]
     pub(crate) fn edge_source_location(
         &self,
@@ -413,11 +462,25 @@ impl ProjectModuleGraph {
     }
 
     /// Whether a provider-before-consumer dependency edge is currently present.
-    #[allow(dead_code)]
+    ///
+    /// Reads adjacency in either lifecycle phase so the query stays valid after edge insertion
+    /// (construction) and after the graph is completed for scheduling (frozen).
+    #[cfg(test)]
     pub(crate) fn has_dependency_edge(&self, provider: ModuleId, consumer: ModuleId) -> bool {
-        self.dependency_providers
-            .get(consumer.index())
-            .is_some_and(|providers| providers.contains(&provider))
+        if !self.is_valid_module_id(provider) || !self.is_valid_module_id(consumer) {
+            return false;
+        }
+
+        match &self.dependencies {
+            ProjectModuleDependencies::UnderConstruction {
+                dependency_providers,
+                ..
+            } => dependency_providers[consumer.index()].contains(&provider),
+            ProjectModuleDependencies::Frozen {
+                dependency_providers,
+                ..
+            } => dependency_providers[consumer.index()].contains(&provider),
+        }
     }
 
     /// Deterministic topological compile waves over provider-before-consumer edges.
@@ -431,9 +494,15 @@ impl ProjectModuleGraph {
     /// A defensive cycle returns an internal [`CompilerError`] naming the modules left blocked by
     /// cyclic dependencies in deterministic `ModuleId` order.
     pub(crate) fn compile_waves(&self) -> Result<Vec<Vec<ModuleId>>, CompilerError> {
+        let ProjectModuleDependencies::Frozen {
+            dependency_providers,
+            provider_consumers,
+        } = &self.dependencies
+        else {
+            return Err(Self::scheduling_before_completion_error());
+        };
         let node_count = self.node_count();
-        let mut remaining_providers: Vec<usize> = self
-            .dependency_providers
+        let mut remaining_providers: Vec<usize> = dependency_providers
             .iter()
             .map(|providers| providers.len())
             .collect();
@@ -456,11 +525,11 @@ impl ProjectModuleGraph {
 
             let mut next_ready: Vec<ModuleId> = Vec::new();
             for provider in &ready {
-                for consumer in self.provider_consumers[provider.index()].iter() {
+                for consumer in provider_consumers[provider.index()].iter().copied() {
                     let outstanding = &mut remaining_providers[consumer.index()];
                     *outstanding -= 1;
                     if *outstanding == 0 {
-                        next_ready.push(*consumer);
+                        next_ready.push(consumer);
                     }
                 }
             }
@@ -477,49 +546,27 @@ impl ProjectModuleGraph {
         Ok(waves)
     }
 
-    #[allow(dead_code)]
-    /// The structural root role for one module.
-    fn role(&self, module_id: ModuleId) -> ModuleRootRole {
-        self.nodes[module_id.index()].role
-    }
-
-    #[allow(dead_code)]
-    /// Whether `ancestor` is the nearest parent, or a transitive nearest-parent, of
-    /// `descendant`.
-    fn is_ancestor_of(&self, ancestor: ModuleId, descendant: ModuleId) -> bool {
-        let mut current = self.nodes[descendant.index()].nearest_parent;
-        while let Some(parent) = current {
-            if parent == ancestor {
-                return true;
-            }
-            current = self.nodes[parent.index()].nearest_parent;
-        }
-        false
-    }
-
-    /// The nearest normal ancestor of `module_id`, walking past intervening support modules.
-    ///
-    /// Returns `None` for the entry root, the facade and any support module with no enclosing
-    /// normal module.
-    #[allow(dead_code)]
-    fn nearest_normal_ancestor(&self, module_id: ModuleId) -> Option<ModuleId> {
-        let mut current = self.nodes[module_id.index()].nearest_parent;
-        while let Some(parent) = current {
-            if self.nodes[parent.index()].role == ModuleRootRole::Normal {
-                return Some(parent);
-            }
-            current = self.nodes[parent.index()].nearest_parent;
-        }
-        None
-    }
-
-    #[allow(dead_code)]
     /// Whether `module_id` is a valid graph identity.
     fn is_valid_module_id(&self, module_id: ModuleId) -> bool {
         module_id.index() < self.node_count()
     }
 
-    #[allow(dead_code)]
+    /// Build an internal graph failure for mutating a completed graph.
+    fn mutation_after_completion_error() -> CompilerError {
+        CompilerError::compiler_error(
+            "Project module graph was mutated after completion; dependency edges must be inserted \
+             before the graph completes and freezes its adjacency for compile-wave scheduling",
+        )
+    }
+
+    /// Build an internal graph failure for scheduling before the graph completes.
+    fn scheduling_before_completion_error() -> CompilerError {
+        CompilerError::compiler_error(
+            "Project module graph compile waves were requested before completion; the graph must \
+             complete and freeze its adjacency before compile-wave scheduling reads it",
+        )
+    }
+
     /// Build an internal graph failure for an out-of-range module ID supplied to edge insertion.
     fn invalid_module_id_edge_error(
         &self,
@@ -535,7 +582,6 @@ impl ProjectModuleGraph {
         ))
     }
 
-    #[allow(dead_code)]
     /// Build an internal graph failure for a self-edge supplied to edge insertion.
     fn self_edge_error(&self, module_id: ModuleId) -> CompilerError {
         let origin = self.describe_module(module_id);
@@ -577,4 +623,104 @@ impl ProjectModuleGraph {
             module_id.index()
         )
     }
+}
+
+impl SupportVisibilityTopology for ProjectModuleGraph {
+    fn role(&self, module_id: ModuleId) -> ModuleRootRole {
+        self.nodes[module_id.index()].role
+    }
+
+    fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId> {
+        self.nodes[module_id.index()].nearest_parent
+    }
+}
+
+impl SupportVisibilityTopology for ModuleIdentityTable {
+    fn role(&self, module_id: ModuleId) -> ModuleRootRole {
+        self.record(module_id).role()
+    }
+
+    fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId> {
+        self.nearest_ancestor_module(module_id)
+    }
+}
+
+/// Apply the project graph's scoped-support visibility rule to one package identity table.
+///
+/// Package boundaries don't yet retain their own graph, so namespace construction consumes the
+/// same structural rule directly over the package's boundary-local identity table.
+pub(super) fn is_support_visible_in_identity_table(
+    identities: &ModuleIdentityTable,
+    support_id: ModuleId,
+    consumer_id: ModuleId,
+) -> bool {
+    support_is_visible(identities, support_id, consumer_id)
+}
+
+fn support_is_visible(
+    topology: &impl SupportVisibilityTopology,
+    support_id: ModuleId,
+    consumer_id: ModuleId,
+) -> bool {
+    if topology.role(support_id) != ModuleRootRole::Support {
+        return false;
+    }
+
+    let Some(owner) = nearest_normal_ancestor(topology, support_id) else {
+        return false;
+    };
+
+    match topology.role(consumer_id) {
+        ModuleRootRole::Normal => {
+            consumer_id == owner
+                || (is_ancestor_of(topology, owner, consumer_id)
+                    && !is_ancestor_of(topology, support_id, consumer_id))
+        }
+
+        ModuleRootRole::Support => {
+            let Some(consumer_owner) = nearest_normal_ancestor(topology, consumer_id) else {
+                return false;
+            };
+
+            consumer_id != support_id
+                && consumer_owner != owner
+                && is_ancestor_of(topology, owner, consumer_owner)
+                && !is_ancestor_of(topology, support_id, consumer_id)
+        }
+
+        ModuleRootRole::ProjectPackageFacade => false,
+    }
+}
+
+fn nearest_normal_ancestor(
+    topology: &impl SupportVisibilityTopology,
+    module_id: ModuleId,
+) -> Option<ModuleId> {
+    let mut current = topology.nearest_parent(module_id);
+
+    while let Some(parent) = current {
+        if topology.role(parent) == ModuleRootRole::Normal {
+            return Some(parent);
+        }
+        current = topology.nearest_parent(parent);
+    }
+
+    None
+}
+
+fn is_ancestor_of(
+    topology: &impl SupportVisibilityTopology,
+    ancestor: ModuleId,
+    descendant: ModuleId,
+) -> bool {
+    let mut current = topology.nearest_parent(descendant);
+
+    while let Some(parent) = current {
+        if parent == ancestor {
+            return true;
+        }
+        current = topology.nearest_parent(parent);
+    }
+
+    false
 }

@@ -4,7 +4,7 @@
 //! [`extract_validated_generic_template_artefacts`]: stable-origin retention, private and
 //! non-generic exclusion, and missing/duplicate/mismatch failure. These are side-table facts
 //! that integration output cannot inspect.
-//! WHY: the store is compiler metadata for the future generated sidecar worklist (R3), not
+//! WHY: the store is compiler metadata for the future generated sidecar worklist (R5D-R5G), not
 //! user-visible behaviour. The invariants are owned by
 //! `compiler_frontend::validated_generic_template_metadata`.
 
@@ -15,13 +15,13 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
-use crate::compiler_frontend::defined_public_type_surface::PublicCallableOriginSeed;
-use crate::compiler_frontend::defined_public_type_surface::PublicGenericParameterSurface;
-use crate::compiler_frontend::public_call_summary::PublicCallSummaryState;
-use crate::compiler_frontend::public_interface_draft::{
-    PublicDeclarationRecord, PublicDeclarationSemantics, PublicFunctionSemantics,
-    PublicGenericTemplateDescriptor, PublicInterfaceDraft, PublicReceiverMethodSemantics,
-    PublicStructSemantics,
+use crate::compiler_frontend::public_interface::{
+    CallableSeed, CallableSeedKind, PublicGenericParameterSurface,
+};
+use crate::compiler_frontend::public_interface::{
+    PublicDeclarationRecord, PublicDeclarationSemantics, PublicFunctionCategory,
+    PublicFunctionSemantics, PublicGenericTemplateDescriptor, PublicInterfaceDraft,
+    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
@@ -47,8 +47,8 @@ fn free_function_origin(name: &str) -> OriginFunctionId {
 }
 
 fn function_record(name: &str, is_generic: bool) -> PublicDeclarationRecord {
-    let generic_template = if is_generic {
-        Some(PublicGenericTemplateDescriptor {
+    let category = if is_generic {
+        PublicFunctionCategory::GenericTemplate(PublicGenericTemplateDescriptor {
             generic_parameters: vec![PublicGenericParameterSurface {
                 identity: ExportedGenericParameterIdentity::new(
                     GenericDeclarationOrigin::free_function(free_function_origin(name))
@@ -60,21 +60,16 @@ fn function_record(name: &str, is_generic: bool) -> PublicDeclarationRecord {
             }],
         })
     } else {
-        None
+        PublicFunctionCategory::ConcreteLocal
     };
 
     PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(free_function_origin(name)),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
-            generic_template,
+            category,
             parameters: vec![],
             returns: vec![],
             error_return: None,
-            call_summary: if is_generic {
-                PublicCallSummaryState::PendingGenerated
-            } else {
-                PublicCallSummaryState::PendingLocal
-            },
         }),
     }
 }
@@ -120,11 +115,12 @@ fn callable_seed(
     name: &str,
     generic_template: bool,
     string_table: &mut StringTable,
-) -> PublicCallableOriginSeed {
-    PublicCallableOriginSeed {
+) -> CallableSeed {
+    CallableSeed {
         path: InternedPath::from_single_str(name, string_table),
         origin: free_function_origin(name),
         generic_template,
+        kind: CallableSeedKind::FreeFunction,
     }
 }
 
@@ -132,11 +128,15 @@ fn receiver_origin(receiver_name: &str, method_name: &str) -> OriginFunctionId {
     OriginFunctionId::new_receiver(
         module_origin(),
         method_name.to_owned(),
-        OriginTypeId::new(
-            module_origin(),
-            receiver_name.to_owned(),
-            OriginTypeCategory::Struct,
-        ),
+        receiver_type_origin(receiver_name),
+    )
+}
+
+fn receiver_type_origin(receiver_name: &str) -> OriginTypeId {
+    OriginTypeId::new(
+        module_origin(),
+        receiver_name.to_owned(),
+        OriginTypeCategory::Struct,
     )
 }
 
@@ -155,11 +155,10 @@ fn receiver_record(
             fields: vec![],
             receiver_methods: vec![PublicReceiverMethodSemantics {
                 method_origin,
-                generic_template: true,
+                category: PublicReceiverMethodCategory::GenericTemplate,
                 parameters: vec![],
                 returns: vec![],
                 error_return: None,
-                call_summary: PublicCallSummaryState::PendingGenerated,
             }],
         }),
     }
@@ -225,6 +224,8 @@ fn same_named_generic_receiver_methods_retain_distinct_exact_origins() {
     let mut string_table = StringTable::new();
     let first_method = receiver_origin("First", "map");
     let second_method = receiver_origin("Second", "map");
+    let first_receiver = receiver_type_origin("First");
+    let second_receiver = receiver_type_origin("Second");
     let draft = empty_draft(vec![
         receiver_record("First", first_method.clone()),
         receiver_record("Second", second_method.clone()),
@@ -240,15 +241,23 @@ fn same_named_generic_receiver_methods_retain_distinct_exact_origins() {
     templates.insert(first_path.clone(), first_template);
     templates.insert(second_path.clone(), second_template);
     let seeds = [
-        PublicCallableOriginSeed {
+        CallableSeed {
             path: first_path,
             origin: first_method.clone(),
             generic_template: true,
+            kind: CallableSeedKind::ReceiverMethod {
+                receiver_origin: first_receiver,
+                method_index: 0,
+            },
         },
-        PublicCallableOriginSeed {
+        CallableSeed {
             path: second_path,
             origin: second_method.clone(),
             generic_template: true,
+            kind: CallableSeedKind::ReceiverMethod {
+                receiver_origin: second_receiver,
+                method_index: 1,
+            },
         },
     ];
 
@@ -457,10 +466,11 @@ fn duplicate_public_callable_seed_origin_is_compiler_error() {
         function_record("render", true),
     ]);
     let identity_seed = callable_seed("identity", true, &mut string_table);
-    let duplicate_origin_seed = PublicCallableOriginSeed {
+    let duplicate_origin_seed = CallableSeed {
         path: InternedPath::from_single_str("render", &mut string_table),
         origin: identity_seed.origin.clone(),
         generic_template: true,
+        kind: CallableSeedKind::FreeFunction,
     };
 
     let result = extract_validated_generic_template_artefacts(

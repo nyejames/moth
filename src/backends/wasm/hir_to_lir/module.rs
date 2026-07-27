@@ -14,7 +14,6 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::{HirReachabilityInput, collect_hir_reachability};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashSet;
 
@@ -34,7 +33,7 @@ pub(crate) fn lower_hir_module_to_lir(
         string_table,
         type_environment,
     );
-    let function_selection = select_functions_for_lowering(hir_module, request, string_table)?;
+    let function_selection = select_functions_for_lowering(hir_module, request);
 
     // WHAT: register stable function mappings before lowering any bodies.
     // WHY: call lowering depends on these mappings even for forward references.
@@ -46,7 +45,13 @@ pub(crate) fn lower_hir_module_to_lir(
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 
     for hir_function in &function_selection.functions {
-        let lowered = lower_function(&mut context, hir_function)
+        let selected_blocks = match &request.function_emission_policy {
+            WasmFunctionEmissionPolicy::AllFunctions => None,
+            WasmFunctionEmissionPolicy::Selected(selection) => {
+                selection.blocks_for_function(hir_function.id)
+            }
+        };
+        let lowered = lower_function(&mut context, hir_function, selected_blocks)
             .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
         context.lir_module.functions.push(lowered);
     }
@@ -67,31 +72,24 @@ struct WasmFunctionLoweringSelection {
 fn select_functions_for_lowering(
     hir_module: &HirModule,
     request: &WasmBackendRequest,
-    string_table: &StringTable,
-) -> Result<WasmFunctionLoweringSelection, CompilerMessages> {
+) -> WasmFunctionLoweringSelection {
     // WHAT: choose the backend function set before assigning LIR ids.
     // WHY: HTML-Wasm page bundles must not lower unused source-backed package wrappers, while the
     // generic Wasm backend keeps its existing all-functions default for direct tests.
-    match request.function_emission_policy {
-        WasmFunctionEmissionPolicy::AllFunctions => Ok(WasmFunctionLoweringSelection {
+    match &request.function_emission_policy {
+        WasmFunctionEmissionPolicy::AllFunctions => WasmFunctionLoweringSelection {
             functions: sorted_functions(hir_module.functions.clone()),
             reachable_blocks: None,
-        }),
+        },
 
-        WasmFunctionEmissionPolicy::ReachableFromExports => {
-            let reachability = collect_hir_reachability(HirReachabilityInput {
-                hir: hir_module,
-                root_functions: request.export_policy.exported_functions.clone(),
-            })
-            .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-
+        WasmFunctionEmissionPolicy::Selected(selection) => {
             let mut functions = hir_module.functions.clone();
-            functions.retain(|function| reachability.reachable_functions.contains(&function.id));
+            functions.retain(|function| selection.contains_function(function.id));
 
-            Ok(WasmFunctionLoweringSelection {
+            WasmFunctionLoweringSelection {
                 functions: sorted_functions(functions),
-                reachable_blocks: Some(reachability.reachable_blocks),
-            })
+                reachable_blocks: Some(selection.blocks().clone()),
+            }
         }
     }
 }

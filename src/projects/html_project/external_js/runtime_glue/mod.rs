@@ -14,7 +14,7 @@ mod source;
 pub(crate) use runtime_modules::emit_build_runtime_modules;
 
 use crate::backends::js::external_module_export_glue_function_name;
-use crate::build_system::build::{FileKind, Module, OutputFile};
+use crate::build_system::build::{FileKind, Module, ModuleExternalImport, OutputFile};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
@@ -47,6 +47,7 @@ pub(crate) struct ModuleGlueResult {
 ///      or emit it separately.
 pub(crate) fn generate_module_glue(
     module: &Module,
+    external_imports: &[ModuleExternalImport],
     referenced_external_functions: &HashSet<ExternalFunctionId>,
     registry: &ExternalPackageRegistry,
     html_output_path: &Path,
@@ -65,7 +66,7 @@ pub(crate) fn generate_module_glue(
     // Build a map from package ID to its emitted asset path so glue can import it.
     // WHY: paths must be relative to the glue module, not the HTML document, because
     //      the browser resolves ES module imports relative to the importing module's URL.
-    let package_asset_paths = build_package_asset_path_map(module);
+    let package_asset_paths = build_package_asset_path_map(module, external_imports);
 
     // Generate the glue module source.
     let glue_source = source::generate_glue_module_source(
@@ -90,7 +91,7 @@ pub(crate) fn generate_module_glue(
         glue_import_path
     );
 
-    let import_map_html = import_map::build_import_map_html(module, html_output_path);
+    let import_map_html = import_map::build_import_map_html(external_imports, html_output_path);
 
     Ok(ModuleGlueResult {
         glue_output_files: vec![glue_output_file],
@@ -103,11 +104,14 @@ pub(crate) fn generate_module_glue(
 ///
 /// WHAT: computes paths relative to the glue module so ES module imports resolve correctly
 ///       when the glue module imports from emitted JS runtime assets.
-fn build_package_asset_path_map(module: &Module) -> HashMap<ExternalPackageId, String> {
+fn build_package_asset_path_map(
+    module: &Module,
+    external_imports: &[ModuleExternalImport],
+) -> HashMap<ExternalPackageId, String> {
     let mut map = HashMap::new();
     let glue_output_path = paths::glue_module_output_path(module);
 
-    for external_import in &module.link_facts.module_external_imports {
+    for external_import in external_imports {
         let Some(asset) = &external_import.runtime_asset else {
             continue;
         };

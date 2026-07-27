@@ -133,11 +133,11 @@ impl<'a> HirDisplayContext<'a> {
         );
 
         out.push_str("hir_module {\n");
-        let _ = writeln!(
-            out,
-            "  start_function: {}",
-            self.function_label(module.start_function)
-        );
+        let start_function = module
+            .start_function
+            .map(|function_id| self.function_label(function_id))
+            .unwrap_or_else(|| String::from("none"));
+        let _ = writeln!(out, "  start_function: {start_function}");
 
         let _ = writeln!(out, "  regions: {}", module.regions.len());
 
@@ -764,8 +764,11 @@ impl<'a> HirDisplayContext<'a> {
 
     fn render_call_target(&self, target: &CallTarget) -> String {
         match target {
-            CallTarget::UserFunction(function_id) => self.function_label(*function_id),
-            CallTarget::ExternalFunction(id) => id.name().to_owned(),
+            CallTarget::Local(function_id) => self.function_label(*function_id),
+            CallTarget::CrossModule(origin) => {
+                format!("imported {}", origin.defining_name())
+            }
+            CallTarget::External(id) => id.name().to_owned(),
         }
     }
 

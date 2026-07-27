@@ -62,7 +62,10 @@ fn allocates_parameter_locals_and_binds_names() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start_fn = &module.functions[module.start_function.0 as usize];
+    let start_fn = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     assert_eq!(start_fn.params.len(), 1);
 
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
@@ -101,7 +104,10 @@ fn variable_declaration_emits_local_and_assign_statement() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start_fn = &module.functions[module.start_function.0 as usize];
+    let start_fn = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
 
     assert!(!entry_block.locals.is_empty());
@@ -213,7 +219,10 @@ fn assignment_lowers_value_prelude_before_assign() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let block = &module.blocks[start.entry.0 as usize];
 
     let call_pos = block
@@ -301,7 +310,10 @@ fn call_expression_statements_materialize_result_values() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let block = &module.blocks[start.entry.0 as usize];
 
     let call_results = block
@@ -374,8 +386,12 @@ fn return_lowering_handles_zero_one_and_many_values() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start_block =
-        &module.blocks[module.functions[module.start_function.0 as usize].entry.0 as usize];
+    let start_block = &module.blocks[module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize];
     assert!(matches!(
         &start_block.terminator,
         HirTerminator::Return(value)

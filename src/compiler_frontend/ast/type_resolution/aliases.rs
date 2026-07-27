@@ -52,9 +52,12 @@ pub(super) fn visible_type_alias_annotation(
     increment_ast_counter(AstCounter::VisibleTypeAliasLookupAttempts);
 
     let alias_path = context.visible_type_aliases?.get(&name)?;
-    let annotation = context.resolved_type_aliases?.get(alias_path)?.clone();
+    let annotation = context
+        .resolved_type_aliases?
+        .get(alias_path.local_path())?
+        .clone();
 
-    Some((alias_path.clone(), annotation))
+    Some((alias_path.local_path().clone(), annotation))
 }
 
 /// Look up a visible type alias by namespace-qualified name.
@@ -75,9 +78,12 @@ pub(super) fn visible_namespaced_type_alias_annotation(
             Some(NamespaceTypeMember::SourceDeclaration(path)) => Some(path),
             _ => None,
         })?;
-    let annotation = context.resolved_type_aliases?.get(alias_path)?.clone();
+    let annotation = context
+        .resolved_type_aliases?
+        .get(alias_path.local_path())?
+        .clone();
 
-    Some((alias_path.clone(), annotation))
+    Some((alias_path.local_path().clone(), annotation))
 }
 
 /// Re-resolve a type alias target so the use site gets the right semantic identity.

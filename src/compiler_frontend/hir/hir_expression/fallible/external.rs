@@ -62,7 +62,7 @@ impl<'a> HirBuilder<'a> {
         let (carrier_type, ok_type, err_type) =
             self.fallible_call_carrier_from_slots(result_type_ids, error_type_id, location)?;
         let result_local = self.emit_result_call_to_current_block(
-            CallTarget::ExternalFunction(id),
+            CallTarget::External(id),
             args,
             carrier_type,
             location,

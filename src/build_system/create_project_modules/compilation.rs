@@ -3,15 +3,19 @@
 //! WHAT: compiles project modules through the frontend pipeline for single-file and directory entries.
 //! WHY: separating the two flows keeps each path readable as orchestration over named steps.
 
-use crate::build_system::build::{CompiledModuleResult, Module};
+use crate::build_system::build::{CompiledModuleArtifact, Module, ModuleSemanticDraft};
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::public_interface::{
+    PublicSemanticInterface, SourceProviderImport, SourceProviderImportSet,
+};
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
@@ -31,17 +35,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::collision_detection::validate_source_package_tree_collisions;
 use super::frontend_orchestration::{
     FrontendModuleBuildContext, ModuleCompilationOutcome, ModulePreparationContext,
     module_timing_label, record_module_input_counters,
 };
 use super::module_inventory;
+use super::module_namespace::DirectoryImportResolution;
+use super::prepared_module::PreparedModule;
 use super::project_roots;
 use super::project_structure_diagnostics::non_utf8_filesystem_name_error;
+use super::provider_store::{ModuleProviderStore, ProviderSlot};
 use super::reachable_file_discovery;
-use super::root_validation::validate_source_package_roots;
-use super::source_package_discovery::prepare_source_package_roots;
+use super::reachable_file_discovery::ResolvedDependencyEdge;
+use super::source_package_discovery::build_source_package_boundary_indexes;
 use super::source_tree_index::SourceTreeIndex;
 
 /// Record a Stage 0 build-system timing through the central `timers` substrate.
@@ -156,30 +162,22 @@ pub(crate) fn compile_single_file_frontend(
 
     // 3. Initialize path resolver for imports.
     let path_resolver_start = crate::timing::start_pipeline_timing();
-    let prepared_source_package_roots =
-        match prepare_source_package_roots(&builder_surface.source_packages, string_table) {
-            Ok(roots) => roots,
-            Err(messages) => {
-                log_stage_timing("stage0.single_file.path_resolver", path_resolver_start);
-                log_stage_timing("stage0.single_file.total", total_start);
-                return Err(messages);
-            }
-        };
-    if let Err(messages) =
-        validate_source_package_roots(&prepared_source_package_roots, string_table)
-    {
-        log_stage_timing("stage0.single_file.path_resolver", path_resolver_start);
-        log_stage_timing("stage0.single_file.total", total_start);
-        return Err(messages);
-    }
-
-    if let Err(messages) =
-        validate_source_package_tree_collisions(&builder_surface.source_packages, string_table)
-    {
-        log_stage_timing("stage0.single_file.path_resolver", path_resolver_start);
-        log_stage_timing("stage0.single_file.total", total_start);
-        return Err(messages);
-    }
+    // Build one independent source-package boundary index per registered package. The traversal
+    // owns direct root discovery and sibling collision checks, so the resolver view is derived
+    // from indexed facts and no separate package-root or package-tree scan remains.
+    let prepared_source_package_roots = match build_source_package_boundary_indexes(
+        &builder_surface.source_packages,
+        &builder_surface.source_file_kinds,
+        &builder_surface.external_import_providers,
+        string_table,
+    ) {
+        Ok(indexes) => indexes.prepared_source_package_roots(),
+        Err(messages) => {
+            log_stage_timing("stage0.single_file.path_resolver", path_resolver_start);
+            log_stage_timing("stage0.single_file.total", total_start);
+            return Err(messages);
+        }
+    };
 
     let entry_file_name = match entry_path.file_name().and_then(|name| name.to_str()) {
         Some(name) => name,
@@ -198,6 +196,7 @@ pub(crate) fn compile_single_file_frontend(
             config,
             &builder_surface.source_packages,
             &builder_surface.source_file_kinds,
+            &builder_surface.external_import_providers,
             string_table,
         ) {
             Ok(module_roots) => module_roots,
@@ -240,6 +239,7 @@ pub(crate) fn compile_single_file_frontend(
         &project_path_resolver,
         style_directives,
         &mut external_imports,
+        None,
         None,
         string_table,
     ) {
@@ -335,6 +335,7 @@ pub(crate) fn compile_single_file_frontend(
     // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
     // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and runs
     // borrow validation.
+    let source_provider_imports = SourceProviderImportSet::default();
     let compile_context = FrontendModuleBuildContext {
         config,
         build_profile,
@@ -342,6 +343,7 @@ pub(crate) fn compile_single_file_frontend(
         style_directives,
         external_packages: Arc::clone(&external_packages),
         external_import_resolution_table: &builder_surface.external_import_resolution_table,
+        source_provider_imports: &source_provider_imports,
         builder_runtime_packages: &builder_surface.builder_runtime_packages,
     };
 
@@ -379,21 +381,22 @@ pub(crate) fn compile_single_file_frontend(
     // 6. Merge local results back into the global build context.
     let merge_delta_start = crate::timing::start_pipeline_timing();
     let remap = string_table.merge_delta_from(&result.string_table, base_len);
-    // The transient `CompiledModuleResult` also carries the aggregate public-interface draft
-    // for the next graph/interface slice. The legacy flat `Vec<Module>` handoff drops it here
-    // at the migration boundary; the accepted three-lane `Module` does not store it.
-    let CompiledModuleResult {
+    // The internal `ModuleSemanticDraft` carries the completed local public interface for the
+    // future graph consumer. The pre-provider project-compilation boundary drops it here because
+    // the current three-lane `Module` does not store it.
+    let ModuleSemanticDraft {
         mut module,
         string_table: _,
-        public_interface_draft,
+        public_interface,
     } = result;
-    // Explicit drop keeps production ownership honest until the graph consumer lands.
-    drop(public_interface_draft);
-    // The validated generic-template store is a body-artefact checkpoint for the future
-    // generated sidecar worklist (R3). The legacy flat `Vec<Module>` handoff discards it here
+    // The direct public interface is a semantic draft that the future graph consumer will resolve
+    // into a completed provider interface. Drop it until that consumer lands.
+    drop(public_interface);
+    // The validated generic-template store is a body-artefact checkpoint for the future R5D-R5G
+    // generated-sidecar worklist. The pre-provider project-compilation boundary discards it here
     // before string-table remap because the retained `FunctionSignature` carries donor-local
-    // `StringId`s whose remap owner is not in scope for this slice. Discarding before remap
-    // keeps stale local `StringId`s from reaching backends.
+    // `StringId`s whose remap owner is not in scope for this slice. Discarding before remap keeps
+    // stale local `StringId`s from reaching backends.
     module.metadata.discard_validated_generic_templates();
     if !remap.is_identity() {
         module.remap_string_ids(&remap);
@@ -409,23 +412,16 @@ pub(crate) fn compile_single_file_frontend(
 //  Directory Compilation
 // -------------------------
 
-/// Module compilation result plus the fork marker needed at merge time.
-///
-/// Preparation still returns the build-boundary `CompilerMessages`, so the per-module task keeps
-/// the build/render-boundary `CompilerMessages` form for failures. The typed semantic result from
-/// `compile_module_semantic` is packaged into this form once, here: a `Diagnosed` module becomes
-/// its `ModuleDiagnostics::into_messages` inverse, and an infrastructure `CompilerError` becomes
-/// an infrastructure `CompilerMessages` through `CompilerMessages::from_error`. The directory
-/// aggregation and renderer then consume `CompilerMessages` without re-classifying it.
 struct DirectoryModuleTaskResult {
-    entry_path: PathBuf,
+    module_id: super::module_identity::ModuleId,
     string_table_base_len: usize,
-    result: Result<CompiledModuleResult, CompilerMessages>,
+    outcome: DirectoryModuleTaskOutcome,
 }
 
-struct SuccessfulModuleCompilation {
-    string_table_base_len: usize,
-    compiled: CompiledModuleResult,
+enum DirectoryModuleTaskOutcome {
+    Success(Box<ModuleSemanticDraft>),
+    Diagnosed(CompilerMessages),
+    Infrastructure(CompilerError),
 }
 
 struct FailedModuleCompilation {
@@ -442,6 +438,51 @@ struct DirectoryModuleCompileContext<'a> {
     external_packages: &'a Arc<ExternalPackageRegistry>,
     builder_surface: &'a BuilderSurface,
     source_origin_lookup: &'a FxHashMap<std::path::PathBuf, StableModuleOriginIdentity>,
+    provider_store: &'a ModuleProviderStore,
+    provider_bindings: &'a [ResolvedDependencyEdge],
+}
+
+fn build_source_provider_imports<'a>(
+    consumer_module_id: super::module_identity::ModuleId,
+    prepared: &PreparedModule,
+    provider_bindings: &[ResolvedDependencyEdge],
+    provider_store: &'a ModuleProviderStore,
+) -> Result<SourceProviderImportSet<'a>, CompilerError> {
+    let mut imports = Vec::new();
+
+    for (importer_source, file_imports) in &prepared
+        .prepared_header_syntax
+        .module_symbols
+        .file_imports_by_source
+    {
+        for import in file_imports {
+            let Some(binding) = provider_bindings.iter().find(|binding| {
+                binding.consumer_module_id == consumer_module_id
+                    && binding.provider.path == import.provider.path
+                    && binding.provider.from_grouped == import.provider.from_grouped
+            }) else {
+                continue;
+            };
+            let interface = provider_store
+                .interface(binding.provider_module_id)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
+                        consumer_module_id.index(),
+                        binding.provider_module_id.index()
+                    ))
+                })?;
+
+            imports.push(SourceProviderImport {
+                importer_source: importer_source.clone(),
+                imported_path: import.provider.path.clone(),
+                from_grouped: import.from_grouped,
+                interface,
+            });
+        }
+    }
+
+    Ok(SourceProviderImportSet::new(imports))
 }
 
 impl DirectoryModuleCompileContext<'_> {
@@ -449,6 +490,7 @@ impl DirectoryModuleCompileContext<'_> {
         let string_table_fork = self.string_table_fork_source.fork_for_module();
         let (local_table, base_len) = string_table_fork.into_parts();
         let module_inventory::DiscoveredModule {
+            module_id,
             stable_origin,
             entry_point,
             input_files,
@@ -492,9 +534,9 @@ impl DirectoryModuleCompileContext<'_> {
                     module_label,
                 );
                 return DirectoryModuleTaskResult {
-                    entry_path: entry_point,
+                    module_id,
                     string_table_base_len: base_len,
-                    result: Err(messages),
+                    outcome: classify_directory_failure(messages),
                 };
             }
         };
@@ -502,6 +544,21 @@ impl DirectoryModuleCompileContext<'_> {
         // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
         // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and
         // runs borrow validation.
+        let source_provider_imports = match build_source_provider_imports(
+            module_id,
+            &prepared,
+            self.provider_bindings,
+            self.provider_store,
+        ) {
+            Ok(imports) => imports,
+            Err(error) => {
+                return DirectoryModuleTaskResult {
+                    module_id,
+                    string_table_base_len: base_len,
+                    outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
+                };
+            }
+        };
         let compile_context = FrontendModuleBuildContext {
             config: self.config,
             build_profile: self.build_profile,
@@ -511,6 +568,7 @@ impl DirectoryModuleCompileContext<'_> {
             external_import_resolution_table: &self
                 .builder_surface
                 .external_import_resolution_table,
+            source_provider_imports: &source_provider_imports,
             builder_runtime_packages: &self.builder_surface.builder_runtime_packages,
         };
 
@@ -525,20 +583,15 @@ impl DirectoryModuleCompileContext<'_> {
         // supplies the shared base prefix the aggregation's `merge_delta_from` expects; the
         // error's attached context supplies the post-base path strings, so the location table is
         // preserved instead of reconstructed lossily.
-        let result =
+        let outcome =
             match compile_context.compile_module_semantic(prepared, &entry_point, module_label) {
-                Ok(ModuleCompilationOutcome::Success(compiled)) => Ok(*compiled),
+                Ok(ModuleCompilationOutcome::Success(compiled)) => {
+                    DirectoryModuleTaskOutcome::Success(compiled)
+                }
                 Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)) => {
-                    Err(diagnostics.into_messages())
+                    DirectoryModuleTaskOutcome::Diagnosed(diagnostics.into_messages())
                 }
-                Err(error) => {
-                    let module_string_table = self
-                        .string_table_fork_source
-                        .fork_for_module()
-                        .into_parts()
-                        .0;
-                    Err(CompilerMessages::from_error(error, module_string_table))
-                }
+                Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
             };
         crate::timing::record_started_pipeline_timing_with_label(
             "frontend.module.total",
@@ -547,10 +600,17 @@ impl DirectoryModuleCompileContext<'_> {
         );
 
         DirectoryModuleTaskResult {
-            entry_path: entry_point,
+            module_id,
             string_table_base_len: base_len,
-            result,
+            outcome,
         }
+    }
+}
+
+fn classify_directory_failure(messages: CompilerMessages) -> DirectoryModuleTaskOutcome {
+    match ModuleDiagnostics::from_messages(messages) {
+        Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics.into_messages()),
+        Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
     }
 }
 
@@ -570,6 +630,8 @@ pub(crate) fn compile_directory_frontend(
         config,
         &builder_surface.source_packages,
         &builder_surface.source_file_kinds,
+        &builder_surface.external_import_providers,
+        &builder_surface.binding_packages,
         string_table,
     ) {
         Ok(resolver) => resolver,
@@ -591,12 +653,17 @@ pub(crate) fn compile_directory_frontend(
     };
 
     let module_inventory_start = crate::timing::start_pipeline_timing();
+    let directory_import_resolution = DirectoryImportResolution::new(
+        &project_setup.module_namespace_set,
+        &project_setup.source_tree_index,
+    );
     let module_waves = match module_inventory::discover_all_modules_in_project(
         config,
         &project_path_resolver,
         &mut project_setup.project_module_graph,
         style_directives,
         &mut external_imports,
+        directory_import_resolution,
         string_table,
     ) {
         Ok(module_waves) => module_waves,
@@ -608,13 +675,14 @@ pub(crate) fn compile_directory_frontend(
     };
     log_stage_timing("stage0.directory.module_inventory", module_inventory_start);
 
-    // Build the immutable source-origin lookup from the graph's owned source sets so each
-    // directory module's preparation can resolve every prepared source file to its owning
-    // stable module origin. The lookup is shared across all module compilations and is a direct
-    // projection of the graph ownership authority, not a filesystem scan or longest-prefix guess.
+    // Build the immutable source-origin lookup by projecting the retained central source index
+    // through the graph's owned source IDs so each directory module's preparation can resolve
+    // every prepared source file to its owning stable module origin. The lookup is shared across
+    // all module compilations and is a direct projection of the index ownership authority, not a
+    // filesystem scan or longest-prefix guess.
     let source_origin_lookup = match project_setup
         .project_module_graph
-        .build_source_origin_lookup()
+        .build_source_origin_lookup(&project_setup.source_tree_index)
     {
         Ok(lookup) => lookup,
         Err(error) => {
@@ -627,31 +695,18 @@ pub(crate) fn compile_directory_frontend(
     // directory modules may compile in parallel and can safely read the same Arc.
     let external_packages = Arc::new(builder_surface.binding_packages.clone());
 
-    // 3. Compile modules one compile wave at a time, each with its own local string-table delta.
-    //
-    // The fork source owns one shared base snapshot for the whole project. Individual module forks
-    // then keep only strings introduced during that module's frontend pipeline. Phase 5c schedules
-    // the temporary normal-entry jobs in graph wave order: waves are consumed sequentially so a
-    // provider's entry job finishes before its consumers' entry jobs start, and within a ready
-    // wave Rayon parallelism is used only when the wave has multiple entry jobs. This preserves
-    // wave boundaries only; current entry-closure payload semantics are unchanged and no immutable
-    // provider interface is produced or consumed yet, which remains a Phase 5d concern.
+    // 3. Compile and publish one dependency wave at a time. The provider store changes only
+    // between waves, so parallel jobs borrow one immutable snapshot and later waves can bind only
+    // interfaces that have already reached a complete successful artefact.
     let string_table_fork_source = string_table.fork_source();
-    let compile_context = DirectoryModuleCompileContext {
-        string_table_fork_source: &string_table_fork_source,
-        config,
-        build_profile,
-        project_path_resolver: &project_path_resolver,
-        style_directives,
-        external_packages: &external_packages,
-        builder_surface,
-        source_origin_lookup: &source_origin_lookup,
-    };
+    let module_count = project_setup.project_module_graph.nodes().len();
+    let mut provider_store = ModuleProviderStore::new(module_count);
+    let (module_waves, provider_bindings) = module_waves.into_parts();
 
     // Record frontend counters per wave: multi-job waves contribute to the parallel-task count and
     // singleton waves contribute to the serial count. This avoids claiming cross-wave tasks as
     // parallel when only intra-wave jobs run concurrently.
-    for wave in module_waves.waves() {
+    for wave in &module_waves {
         if wave.len() > 1 {
             add_frontend_counter(
                 FrontendCounter::ModuleCompilationParallelTaskCount,
@@ -664,50 +719,110 @@ pub(crate) fn compile_directory_frontend(
 
     let module_compile_batch_start = crate::timing::start_pipeline_timing();
 
-    // Compile one wave at a time. Results are appended in deterministic graph order so the
-    // subsequent entry-path sort and string-table/diagnostic aggregation are independent of
-    // worker completion order. A wave with 0 or 1 entry jobs compiles serially; a wave with
-    // multiple ready jobs uses the existing Rayon indexed parallel iterator. Each wave finishes
-    // before the next starts.
-    let mut results: Vec<DirectoryModuleTaskResult> = Vec::new();
-    for wave in module_waves.into_waves() {
-        let wave_results = if wave.len() > 1 {
-            wave.into_par_iter()
+    let mut failures = Vec::new();
+
+    for wave in module_waves {
+        let mut ready = Vec::new();
+        for discovered in wave {
+            let mut blocked = false;
+            for provider_id in project_setup
+                .project_module_graph
+                .dependency_providers(discovered.module_id)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
+            {
+                match provider_store
+                    .slot(*provider_id)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
+                {
+                    ProviderSlot::Successful(_) => {}
+                    ProviderSlot::Diagnosed | ProviderSlot::Blocked => blocked = true,
+                    ProviderSlot::Unavailable => {
+                        let error = CompilerError::compiler_error(format!(
+                            "ModuleId {} became ready before provider ModuleId {} completed",
+                            discovered.module_id.index(),
+                            provider_id.index()
+                        ));
+                        return Err(CompilerMessages::from_error_ref(error, string_table));
+                    }
+                }
+            }
+
+            if blocked {
+                provider_store
+                    .mark_blocked(discovered.module_id)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            } else {
+                ready.push(discovered);
+            }
+        }
+
+        let compile_context = DirectoryModuleCompileContext {
+            string_table_fork_source: &string_table_fork_source,
+            config,
+            build_profile,
+            project_path_resolver: &project_path_resolver,
+            style_directives,
+            external_packages: &external_packages,
+            builder_surface,
+            source_origin_lookup: &source_origin_lookup,
+            provider_store: &provider_store,
+            provider_bindings: &provider_bindings,
+        };
+        let mut wave_results = if ready.len() > 1 {
+            ready
+                .into_par_iter()
                 .map(|discovered| compile_context.compile(discovered))
                 .collect::<Vec<DirectoryModuleTaskResult>>()
         } else {
-            wave.into_iter()
+            ready
+                .into_iter()
                 .map(|discovered| compile_context.compile(discovered))
                 .collect::<Vec<DirectoryModuleTaskResult>>()
         };
-        results.extend(wave_results);
+        sort_directory_module_results(&mut wave_results);
+
+        for outcome in wave_results {
+            match outcome.outcome {
+                DirectoryModuleTaskOutcome::Success(compiled) => {
+                    let compiled = *compiled;
+                    let remap = string_table
+                        .merge_delta_from(&compiled.string_table, outcome.string_table_base_len);
+                    let ModuleSemanticDraft {
+                        mut module,
+                        string_table: _,
+                        public_interface,
+                    } = compiled;
+                    module.metadata.discard_validated_generic_templates();
+                    if !remap.is_identity() {
+                        module.remap_string_ids(&remap);
+                    }
+                    let artifact = CompiledModuleArtifact {
+                        module,
+                        interface: PublicSemanticInterface::from_local(public_interface),
+                    };
+                    provider_store
+                        .publish_success(outcome.module_id, artifact)
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                }
+                DirectoryModuleTaskOutcome::Diagnosed(messages) => {
+                    provider_store
+                        .mark_diagnosed(outcome.module_id)
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    failures.push(FailedModuleCompilation {
+                        string_table_base_len: outcome.string_table_base_len,
+                        messages,
+                    });
+                }
+                DirectoryModuleTaskOutcome::Infrastructure(error) => {
+                    return Err(CompilerMessages::from_error_ref(error, string_table));
+                }
+            }
+        }
     }
     log_stage_timing(
         "stage0.directory.module_compile_batch",
         module_compile_batch_start,
     );
-
-    // 4. Deterministic ordering by entry path.
-    let result_sort_start = crate::timing::start_pipeline_timing();
-    results.sort_by(|a, b| a.entry_path.cmp(&b.entry_path));
-    log_stage_timing("stage0.directory.result_sort", result_sort_start);
-
-    // 5. Partition into successes and failures.
-    let mut successes = Vec::with_capacity(results.len());
-    let mut failures = Vec::new();
-
-    for outcome in results {
-        match outcome.result {
-            Ok(compiled) => successes.push(SuccessfulModuleCompilation {
-                string_table_base_len: outcome.string_table_base_len,
-                compiled,
-            }),
-            Err(messages) => failures.push(FailedModuleCompilation {
-                string_table_base_len: outcome.string_table_base_len,
-                messages,
-            }),
-        }
-    }
 
     // 6. If any module failed, aggregate all diagnostics deterministically and exit.
     if !failures.is_empty() {
@@ -738,40 +853,56 @@ pub(crate) fn compile_directory_frontend(
         return Err(aggregated_messages);
     }
 
-    // 7. All succeeded: merge each local table into the build table and remap.
-    let success_merge_start = crate::timing::start_pipeline_timing();
-    let mut compiled_modules = Vec::with_capacity(successes.len());
-
-    for success in successes {
-        let remap = string_table.merge_delta_from(
-            &success.compiled.string_table,
-            success.string_table_base_len,
-        );
-        // The transient `CompiledModuleResult` also carries the aggregate public-interface
-        // draft for the next graph/interface slice. The legacy flat `Vec<Module>` handoff
-        // drops it here at the migration boundary; the accepted three-lane `Module` does not
-        // store it.
-        let CompiledModuleResult {
-            mut module,
-            string_table: _,
-            public_interface_draft,
-        } = success.compiled;
-        // Explicit drop keeps production ownership honest until the graph consumer lands.
-        drop(public_interface_draft);
-        // The validated generic-template store is a body-artefact checkpoint for the future
-        // generated sidecar worklist (R3). The legacy flat `Vec<Module>` handoff discards it here
-        // before string-table remap because the retained `FunctionSignature` carries donor-local
-        // `StringId`s whose remap owner is not in scope for this slice. Discarding before remap
-        // keeps stale local `StringId`s from reaching backends.
-        module.metadata.discard_validated_generic_templates();
-        if !remap.is_identity() {
-            module.remap_string_ids(&remap);
-        }
-        compiled_modules.push(module);
-    }
-    log_stage_timing("stage0.directory.success_merge", success_merge_start);
+    let compiled_modules = provider_store
+        .into_artifacts()
+        .into_iter()
+        .map(|artifact| artifact.module)
+        .collect();
 
     log_stage_timing("stage0.directory.total", total_start);
 
     Ok(compiled_modules)
+}
+
+/// Restore graph-assigned job order after parallel completion.
+///
+/// ModuleId is the sole build-local ordering identity for module results. Keeping this operation
+/// beside aggregation makes the merge and diagnostic ordering dependency explicit.
+fn sort_directory_module_results(results: &mut [DirectoryModuleTaskResult]) {
+    results.sort_by_key(|result| result.module_id.index());
+}
+
+#[cfg(test)]
+mod directory_result_order_tests {
+    use super::{DirectoryModuleTaskResult, sort_directory_module_results};
+    use crate::build_system::create_project_modules::module_identity::ModuleId;
+    use crate::compiler_frontend::compiler_errors::CompilerMessages;
+    use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+    fn diagnosed_result(module_index: usize) -> DirectoryModuleTaskResult {
+        DirectoryModuleTaskResult {
+            module_id: ModuleId::from_index(module_index),
+            string_table_base_len: 0,
+            outcome: super::DirectoryModuleTaskOutcome::Diagnosed(CompilerMessages::empty(
+                StringTable::new(),
+            )),
+        }
+    }
+
+    #[test]
+    fn completed_directory_tasks_restore_module_id_order_before_aggregation() {
+        let mut results = vec![
+            diagnosed_result(2),
+            diagnosed_result(0),
+            diagnosed_result(1),
+        ];
+
+        sort_directory_module_results(&mut results);
+
+        let module_indexes: Vec<_> = results
+            .iter()
+            .map(|result| result.module_id.index())
+            .collect();
+        assert_eq!(module_indexes, vec![0, 1, 2]);
+    }
 }

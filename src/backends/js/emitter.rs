@@ -17,7 +17,6 @@ use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, HirValueI
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
-use crate::compiler_frontend::hir::reachability::collect_reachability_from_start;
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -106,9 +105,13 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn lower_module(&mut self) -> Result<JsModule, CompilerError> {
-        self.build_symbol_maps();
+        if let JsFunctionEmissionPolicy::Selected(selection) = &self.config.function_emission_policy
+        {
+            selection.validate_for_hir(self.hir)?;
+        }
+        self.build_symbol_maps()?;
 
-        let functions = self.functions_to_emit()?;
+        let functions = self.functions_to_emit();
         let emitted_code_uses_maps = self.emitted_functions_use_maps(&functions)?;
         let emitted_code_uses_numeric_helpers =
             self.emitted_functions_use_numeric_helpers(&functions)?;
@@ -136,14 +139,13 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         if self.config.auto_invoke_start {
-            let Some(start_name) = self
-                .function_name_by_id
-                .get(&self.hir.start_function)
-                .cloned()
-            else {
+            let start_function = self
+                .hir
+                .require_start_function("JavaScript automatic start invocation")?;
+            let Some(start_name) = self.function_name_by_id.get(&start_function).cloned() else {
                 return Err(CompilerError::compiler_error(format!(
                     "JavaScript backend: start function {:?} has no generated JS name",
-                    self.hir.start_function
+                    start_function
                 )));
             };
 
@@ -161,29 +163,16 @@ impl<'hir> JsEmitter<'hir> {
         })
     }
 
-    fn functions_to_emit(&self) -> Result<Vec<&'hir HirFunction>, CompilerError> {
-        let reachable_functions = match self.config.function_emission_policy {
-            JsFunctionEmissionPolicy::AllFunctions => None,
-            JsFunctionEmissionPolicy::ReachableFromStart => {
-                Some(self.collect_js_reachable_functions()?)
-            }
-        };
-
+    fn functions_to_emit(&self) -> Vec<&'hir HirFunction> {
         let mut functions = self
             .hir
             .functions
             .iter()
-            .filter(|function| {
-                let Some(reachable) = reachable_functions.as_ref() else {
-                    return true;
-                };
-
-                reachable.contains(&function.id)
-            })
+            .filter(|function| self.config.function_emission_policy.includes(function.id))
             .collect::<Vec<_>>();
         functions.sort_by_key(|function| function.id.0);
 
-        Ok(functions)
+        functions
     }
 
     /// Records which checked numeric helper families are needed by emitted reachable JS bodies.
@@ -726,13 +715,6 @@ impl<'hir> JsEmitter<'hir> {
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_) => false,
         }
-    }
-
-    fn collect_js_reachable_functions(
-        &self,
-    ) -> Result<rustc_hash::FxHashSet<FunctionId>, CompilerError> {
-        let reachability = collect_reachability_from_start(self.hir)?;
-        Ok(reachability.reachable_functions)
     }
 }
 

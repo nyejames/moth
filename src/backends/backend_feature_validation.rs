@@ -13,14 +13,13 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
+use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reachability::{
-    HirReachability, HirReachabilityInput, ReachableFloatStatementKind, ReachableFloatStatementUse,
-    ReachableMapUse, ReachableMapUseKind, ReachableNumericOpUse, ReachableReactiveSinkKind,
+    HirReachability, ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse,
+    ReachableMapUseKind, ReachableNumericOpUse, ReachableReactiveSinkKind,
     ReachableReactiveSinkUse, ReachableReactiveTemplateUse, ReachableRuntimeCastUse,
-    collect_hir_reachability, collect_reachability_from_start,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -31,35 +30,22 @@ use rustc_hash::FxHashSet;
 
 /// Failure mode for backend feature validation.
 ///
-/// WHAT: either a user-facing diagnostic for an unsupported reachable operation, or an
-///       infrastructure error if reachability collection itself fails.
+/// WHAT: either a user-facing diagnostic for an unsupported selected operation, or an
+/// infrastructure error if supplied compiler metadata is inconsistent.
 pub enum BackendFeatureValidationError {
     Diagnostic(Box<CompilerDiagnostic>),
     Infrastructure(Box<CompilerError>),
 }
 
-/// Root selection for backend feature validation.
+/// Explicit build-owned selection consumed by backend feature validation.
 ///
-/// WHAT: different HTML builder modes validate from different execution roots. The default
-///       start-function root matches ordinary JS-mode validation; HTML-Wasm validates from the
-///       functions exported by the builder so dead helper bodies do not fail support checks.
-/// WHY: keeps the validation boundary explicit and avoids mixing builder export policy into
-///      backend-neutral reachability collection.
-#[derive(Clone, Debug)]
-pub enum BackendFeatureValidationRoot {
-    StartFunction,
-    ExplicitRoots(Vec<FunctionId>),
-}
-
-/// Input that selects which HIR roots a backend feature validation pass should inspect.
-///
-/// WHAT: backend-neutral validation needs to know where execution can begin, which backend target
-///       is active, and optionally the module type environment for typed feature checks.
+/// WHAT: backend-neutral validation receives the exact reachable union, active target and optional
+/// module type environment needed for typed feature checks.
 #[derive(Clone, Debug)]
 pub struct BackendFeatureValidationInput<'a> {
     pub hir: &'a HirModule,
+    pub reachability: &'a HirReachability,
     pub target: BackendTarget,
-    pub root: BackendFeatureValidationRoot,
     pub type_environment: Option<&'a TypeEnvironment>,
 }
 
@@ -75,11 +61,11 @@ pub fn validate_hir_backend_feature_support(
     input: BackendFeatureValidationInput<'_>,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let reachability = collect_reachability_for_validation(&input)
-        .map_err(|error| BackendFeatureValidationError::Infrastructure(Box::new(error)))?;
+    let reachability = input.reachability;
 
     match input.target {
         BackendTarget::Wasm => {
+            validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
             // Wasm does not yet lower hashmaps, reactive runtime features, runtime casts, checked
             // numeric operations, or generic runtime values.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
@@ -106,7 +92,7 @@ pub fn validate_hir_backend_feature_support(
             validate_wasm_generic_runtime_values(
                 input.hir,
                 input.type_environment,
-                &reachability.reachable_blocks,
+                reachability.backend_selection().blocks(),
                 input.target,
                 string_table,
             )?;
@@ -126,22 +112,49 @@ pub fn validate_hir_backend_feature_support(
     Ok(())
 }
 
-/// Collects HIR reachability using the root policy selected by the validation input.
-///
-/// WHY: validation should not collect reachability more than once for the same boundary. The
-///      caller selects the root; this helper translates that selection into one reachability pass.
-fn collect_reachability_for_validation(
-    input: &BackendFeatureValidationInput<'_>,
-) -> Result<HirReachability, CompilerError> {
-    match &input.root {
-        BackendFeatureValidationRoot::StartFunction => collect_reachability_from_start(input.hir),
-        BackendFeatureValidationRoot::ExplicitRoots(root_functions) => {
-            collect_hir_reachability(HirReachabilityInput {
-                hir: input.hir,
-                root_functions: root_functions.clone(),
-            })
-        }
+fn validate_wasm_cross_module_calls(
+    hir: &HirModule,
+    reachability: &HirReachability,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    if reachability.reachable_cross_module_functions.is_empty() {
+        return Ok(());
     }
+
+    let selected_blocks = reachability.backend_selection().blocks();
+    let statement = hir
+        .blocks
+        .iter()
+        .filter(|block| selected_blocks.contains(&block.id))
+        .flat_map(|block| &block.statements)
+        .find(|statement| {
+            matches!(
+                statement.kind,
+                HirStatementKind::Call {
+                    target: crate::compiler_frontend::external_packages::CallTarget::CrossModule(_),
+                    ..
+                }
+            )
+        })
+        .ok_or_else(|| {
+            BackendFeatureValidationError::Infrastructure(Box::new(
+                CompilerError::compiler_error(
+                    "Wasm validation received cross-module reachability without a selected cross-module call statement",
+                ),
+            ))
+        })?;
+    let backend_name = string_table.intern(match target {
+        BackendTarget::Wasm => "Wasm",
+        BackendTarget::Js => "JavaScript",
+    });
+    Err(BackendFeatureValidationError::Diagnostic(Box::new(
+        CompilerDiagnostic::unsupported_backend_feature(
+            backend_name,
+            UnsupportedBackendFeatureReason::CrossModuleCalls,
+            statement.location.clone(),
+        ),
+    )))
 }
 
 /// Reports the first reachable unsupported hashmap operation for the Wasm target.

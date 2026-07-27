@@ -371,7 +371,7 @@ fn mutable_call_argument_records_reactive_invalidation() {
     assert!(matches!(
         &facts[0].kind,
         ReactiveInvalidationKind::MutableCallArgument {
-            target: CallTarget::UserFunction(_),
+            target: CallTarget::Local(_),
             argument_index: 0,
         }
     ));
@@ -731,7 +731,9 @@ fn append_synthetic_map_clear(
         location,
     };
 
-    let start_function = hir.start_function;
+    let start_function = hir
+        .start_function
+        .expect("normal test module should have start");
     let entry_block = hir
         .functions
         .iter()
@@ -785,7 +787,9 @@ fn append_synthetic_field_write(
         location,
     };
 
-    let start_function = hir.start_function;
+    let start_function = hir
+        .start_function
+        .expect("normal test module should have start");
     let entry_block = hir
         .functions
         .iter()

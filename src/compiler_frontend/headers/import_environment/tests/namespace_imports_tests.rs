@@ -56,6 +56,7 @@ fn test_import(header_path: InternedPath, string_table: &mut StringTable) -> Fil
         provider: StructuralProviderReference {
             path: header_path,
             path_location: location_for(&["src", "#page.moth"], string_table),
+            from_grouped: false,
         },
         alias: None,
         location: location_for(&["src", "#page.moth"], string_table),
@@ -136,6 +137,7 @@ fn external_nested_namespace_tree_builds_correctly() {
         module_symbols: &mut module_symbols,
         external_package_registry: &registry,
         external_import_resolution_table: &external_import_resolution_table,
+        source_provider_imports: &Default::default(),
         string_table: &mut string_table,
     })
     .expect("external namespace import should prepare");
@@ -320,10 +322,12 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
 
     let registry = ExternalPackageRegistry::new();
     let external_import_resolution_table = ExternalImportResolutionTable::new();
+    let source_provider_imports = Default::default();
     let builder = ImportEnvironmentBuilder {
         module_symbols: &module_symbols,
         external_package_registry: &registry,
         external_import_resolution_table: &external_import_resolution_table,
+        source_provider_imports: &source_provider_imports,
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -369,10 +373,12 @@ fn module_root_namespace_uses_prepared_root_file_identity() {
 
     let registry = ExternalPackageRegistry::new();
     let external_import_resolution_table = ExternalImportResolutionTable::new();
+    let source_provider_imports = Default::default();
     let mut builder = ImportEnvironmentBuilder {
         module_symbols: &module_symbols,
         external_package_registry: &registry,
         external_import_resolution_table: &external_import_resolution_table,
+        source_provider_imports: &source_provider_imports,
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -417,6 +423,7 @@ fn prelude_symbol_visibility_has_no_authored_location() {
         module_symbols: &mut module_symbols,
         external_package_registry: &registry,
         external_import_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_imports: &Default::default(),
         string_table: &mut string_table,
     })
     .expect("prelude symbol visibility should prepare");
@@ -463,6 +470,7 @@ fn explicit_external_symbol_import_retains_authored_location() {
         provider: StructuralProviderReference {
             path: intern_path(&["test", "explicit_symbols", "run"], &mut string_table),
             path_location: import_location.clone(),
+            from_grouped: true,
         },
         alias: None,
         location: import_location.clone(),
@@ -481,6 +489,7 @@ fn explicit_external_symbol_import_retains_authored_location() {
         module_symbols: &mut module_symbols,
         external_package_registry: &registry,
         external_import_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_imports: &Default::default(),
         string_table: &mut string_table,
     })
     .expect("explicit external symbol visibility should prepare");
@@ -535,6 +544,7 @@ fn prelude_namespace_alias_injects_unshadowed_record() {
         module_symbols: &mut module_symbols,
         external_package_registry: &registry,
         external_import_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_imports: &Default::default(),
         string_table: &mut string_table,
     })
     .expect("import environment should build");
@@ -589,6 +599,7 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
         module_symbols: &mut module_symbols,
         external_package_registry: &registry,
         external_import_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_imports: &Default::default(),
         string_table: &mut string_table,
     });
 
@@ -616,6 +627,7 @@ fn prelude_namespace_alias_coexists_with_explicit_import_of_same_target() {
         provider: StructuralProviderReference {
             path: import_path,
             path_location: location_for(&["src", "#page.moth"], &mut string_table),
+            from_grouped: false,
         },
         alias: None,
         location: location_for(&["src", "#page.moth"], &mut string_table),
@@ -634,6 +646,7 @@ fn prelude_namespace_alias_coexists_with_explicit_import_of_same_target() {
         module_symbols: &mut module_symbols,
         external_package_registry: &registry,
         external_import_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_imports: &Default::default(),
         string_table: &mut string_table,
     })
     .expect("explicit import of same package should coexist with prelude alias");
@@ -645,5 +658,74 @@ fn prelude_namespace_alias_coexists_with_explicit_import_of_same_target() {
             .visible_namespace_records
             .contains_key(&prelude_ns_name),
         "prelude namespace record should be present"
+    );
+}
+
+/// A nested module root that namespace-imports a deeper child module facade must resolve
+/// to that child's prepared root file. The effective path becomes `<importer-prefix>/child`,
+/// matching the child module root's import prefix.
+#[test]
+fn nested_module_root_imports_child_facade_resolves_child_root() {
+    let mut string_table = StringTable::new();
+    let helper_root = intern_path(&["helper-root"], &mut string_table);
+    let helper_mod_file = intern_path(&["helper", "#mod.moth"], &mut string_table);
+    let grandchild_root = intern_path(&["helper", "child-root"], &mut string_table);
+    let grandchild_mod_file = intern_path(&["helper", "child", "#mod.moth"], &mut string_table);
+
+    // The helper module root namespace-imports its grandchild module by bare name `child`.
+    let import = test_import(
+        intern_path(&["child"], &mut string_table),
+        &mut string_table,
+    );
+
+    let mut module_symbols = ModuleSymbols::empty();
+    module_symbols
+        .module_file_paths
+        .insert(helper_mod_file.clone());
+    module_symbols
+        .module_file_paths
+        .insert(grandchild_mod_file.clone());
+    module_symbols
+        .file_module_membership
+        .insert(helper_mod_file.clone(), helper_root.clone());
+    module_symbols
+        .file_module_membership
+        .insert(grandchild_mod_file.clone(), grandchild_root.clone());
+    module_symbols
+        .module_root_boundaries
+        .push(ModuleRootBoundary {
+            import_prefix: intern_path(&["helper"], &mut string_table),
+            module_root: helper_root.clone(),
+            root_file: helper_mod_file.clone(),
+        });
+    module_symbols
+        .module_root_boundaries
+        .push(ModuleRootBoundary {
+            import_prefix: intern_path(&["helper", "child"], &mut string_table),
+            module_root: grandchild_root.clone(),
+            root_file: grandchild_mod_file.clone(),
+        });
+
+    let registry = ExternalPackageRegistry::new();
+    let external_import_resolution_table = ExternalImportResolutionTable::new();
+    let source_provider_imports = Default::default();
+    let mut builder = ImportEnvironmentBuilder {
+        module_symbols: &module_symbols,
+        external_package_registry: &registry,
+        external_import_resolution_table: &external_import_resolution_table,
+        source_provider_imports: &source_provider_imports,
+        string_table: &mut string_table,
+        environment: Default::default(),
+        warnings: Vec::new(),
+    };
+
+    let Some(ResolvedNamespaceTarget::SourceFile(path)) =
+        builder.resolve_module_root_public_export(&import.provider.path, &helper_mod_file)
+    else {
+        panic!("nested module root importing a child facade should resolve to the child root file");
+    };
+    assert_eq!(
+        path, grandchild_mod_file,
+        "nested child namespace import should resolve to the grandchild module's root file"
     );
 }

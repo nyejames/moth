@@ -53,6 +53,11 @@ pub(crate) struct AstModuleLookups {
     // Declaration tables and resolved constant artifacts.
     // WHY: body emission and type resolution share one indexed declaration source.
     pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
+    pub(crate) imported_functions_by_local_path:
+        FxHashMap<InternedPath, crate::compiler_frontend::ast::AstImportedFunctionContract>,
+    pub(crate) imported_struct_definitions:
+        Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
+    pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,
     pub(crate) module_constants: Vec<Declaration>,
     pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
@@ -62,8 +67,10 @@ pub(crate) struct AstModuleLookups {
     pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
     pub(crate) resolved_function_signatures_by_path:
         Rc<FxHashMap<InternedPath, ResolvedFunctionSignature>>,
-    pub(crate) generic_function_templates_by_path:
-        Rc<FxHashMap<InternedPath, GenericFunctionTemplate>>,
+    // Owned directly: this map is only borrowed (never cloned as an `Rc`) during emission, so
+    // AST finalization can move it straight into the `AstBuildResult` generic-template side
+    // result without an `Rc::try_unwrap` dance.
+    pub(crate) generic_function_templates_by_path: FxHashMap<InternedPath, GenericFunctionTemplate>,
     pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
     pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
 

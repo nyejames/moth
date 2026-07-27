@@ -14,7 +14,7 @@ use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, PublicExportEntry, PublicExportTarget,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -140,6 +140,36 @@ fn try_resolve_package_public_export(
     })
 }
 
+/// Derive the canonical module-boundary path for an import authored from `importer_file`.
+///
+/// WHAT: prepends the importer module root's public import prefix (relative to the entry root)
+/// to the authored import path components. For an entry-root importer the prefix is empty, so
+/// ordinary `@child` stays unchanged. For a nested module importer, `@child` becomes
+/// `<importer-prefix>/child`, which is the canonical module-root-relative interpretation.
+/// WHY: grouped, direct and namespace imports share one boundary classification algorithm.
+///      Centralising the derivation prevents the physical-parent or `@./` interpretation from
+///      reappearing in a sibling owner.
+pub(super) fn effective_module_boundary_path(
+    importer_file: &InternedPath,
+    import_path: &InternedPath,
+    file_module_membership: &FxHashMap<InternedPath, InternedPath>,
+    module_root_boundaries: &[ModuleRootBoundary],
+) -> InternedPath {
+    let module_root_prefix: &[StringId] = file_module_membership
+        .get(importer_file)
+        .and_then(|root| {
+            module_root_boundaries
+                .iter()
+                .find(|boundary| &boundary.module_root == root)
+                .map(|boundary| boundary.import_prefix.as_components())
+        })
+        .unwrap_or(&[]);
+
+    let mut combined = module_root_prefix.to_vec();
+    combined.extend_from_slice(import_path.as_components());
+    InternedPath::from_components(combined)
+}
+
 /// Cross-module-root public export lookup.
 ///
 /// WHAT: when an import path targets a regular module root under the entry root and the
@@ -151,27 +181,17 @@ fn try_resolve_module_root_public_export(
         return None;
     }
 
-    // Build the effective path to match against module root prefixes.
-    // For entry-root imports, this is just the header path.
-    // For relative imports, prepend the importer's parent directory.
     let components = input.header_path.as_components();
     if components.is_empty() {
         return None;
     }
 
-    let is_relative = input.string_table.resolve(components[0]) == ".";
-    let effective_path = if is_relative {
-        if let Some(importer_dir) = input.importer_file.parent() {
-            let mut combined = importer_dir.as_components().to_vec();
-            // Skip the leading "." component.
-            combined.extend_from_slice(&components[1..]);
-            InternedPath::from_components(combined)
-        } else {
-            input.header_path.clone()
-        }
-    } else {
-        input.header_path.clone()
-    };
+    let effective_path = effective_module_boundary_path(
+        input.importer_file,
+        input.header_path,
+        input.file_module_membership,
+        input.module_root_boundaries,
+    );
 
     // Find the longest matching module root prefix.
     for boundary in input.module_root_boundaries {
@@ -357,3 +377,7 @@ pub(crate) fn check_module_boundary(
         input.location,
     )))
 }
+
+#[cfg(test)]
+#[path = "tests/public_export_resolution_tests.rs"]
+mod tests;

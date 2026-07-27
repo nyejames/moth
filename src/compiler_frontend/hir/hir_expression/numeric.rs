@@ -404,7 +404,7 @@ impl<'a> HirBuilder<'a> {
         let current_function_id = self.current_function_id_or_error(location)?;
 
         // Entry `start()` is implicitly non-fallible regardless of its carrier shape.
-        if Some(current_function_id) == Some(self.module.start_function) {
+        if Some(current_function_id) == self.module.start_function {
             return Ok(NumericFailureMode::Trap);
         }
 

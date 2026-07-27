@@ -4,7 +4,9 @@ use crate::backends::error_types::{BackendErrorType, lir_transformation_error};
 use crate::backends::wasm::debug::build_debug_outputs;
 use crate::backends::wasm::emit::module::emit_lir_to_wasm_module;
 use crate::backends::wasm::hir_to_lir::module::lower_hir_module_to_lir;
-use crate::backends::wasm::request::{WasmBackendRequest, WasmCfgLoweringStrategy};
+use crate::backends::wasm::request::{
+    WasmBackendRequest, WasmCfgLoweringStrategy, WasmFunctionEmissionPolicy,
+};
 use crate::backends::wasm::result::WasmLirBackendResult;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
@@ -99,6 +101,10 @@ fn validate_request(
     let mut seen = HashSet::new();
     let mut export_name_set = HashSet::new();
 
+    if let WasmFunctionEmissionPolicy::Selected(selection) = &request.function_emission_policy {
+        selection.validate_for_hir(hir_module)?;
+    }
+
     for function_id in &request.export_policy.exported_functions {
         if !seen.insert(function_id.0) {
             return Err(lir_transformation_error(format!(
@@ -109,6 +115,14 @@ fn validate_request(
         if !contains_function(hir_module, *function_id) {
             return Err(lir_transformation_error(format!(
                 "Wasm backend request references missing function {function_id:?}",
+            )));
+        }
+
+        if let WasmFunctionEmissionPolicy::Selected(selection) = &request.function_emission_policy
+            && !selection.contains_function(*function_id)
+        {
+            return Err(lir_transformation_error(format!(
+                "Wasm backend export {function_id:?} is absent from the selected function plan"
             )));
         }
 

@@ -321,7 +321,10 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
 
     let arms = match &entry_block.terminator {
@@ -400,7 +403,10 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
     let ast = build_ast(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
 
     let arms = match &entry_block.terminator {
@@ -634,7 +640,10 @@ fn unit_implicit_return_lowers_to_return_terminator() {
     let ast = build_ast(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("unit fallthrough should succeed");
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
     assert!(matches!(entry_block.terminator, HirTerminator::Return(_)));
 }
@@ -740,7 +749,10 @@ fn lowers_relational_pattern_to_hir_relational() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
 
     let arms = match &entry_block.terminator {
@@ -835,7 +847,10 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
 
     let arms = match &entry_block.terminator {
@@ -959,7 +974,10 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
 
     let arms = match &entry_block.terminator {
@@ -1067,7 +1085,10 @@ fn lowers_capture_pattern_to_hir_capture_with_assignment() {
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
 
     let arms = match &entry_block.terminator {
@@ -1182,7 +1203,10 @@ fn lowers_option_present_capture_to_payload_assignment() {
 
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
 
     let arms = match &entry_block.terminator {

@@ -60,6 +60,7 @@ mod non_utf8_filesystem_identity {
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect_err("non-UTF-8 file name should be rejected");
@@ -92,6 +93,7 @@ mod non_utf8_filesystem_identity {
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect_err("non-UTF-8 folder name should be rejected");
@@ -126,6 +128,7 @@ mod non_utf8_filesystem_identity {
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect_err("non-UTF-8 project-root child should be rejected during facade discovery");
@@ -135,8 +138,8 @@ mod non_utf8_filesystem_identity {
     }
 
     #[test]
-    fn collision_detection_rejects_non_utf8_name() {
-        let root = temp_dir("collision_non_utf8_name");
+    fn package_boundary_traversal_rejects_non_utf8_name() {
+        let root = temp_dir("package_boundary_non_utf8_name");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
@@ -152,11 +155,14 @@ mod non_utf8_filesystem_identity {
         );
 
         let mut string_table = StringTable::new();
-        let messages = super::collision_detection::validate_source_package_tree_collisions(
+        let messages = super::source_package_discovery::build_source_package_boundary_indexes(
             &source_packages,
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::
+                ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
-        .expect_err("non-UTF-8 name in collision check should be rejected");
+        .expect_err("non-UTF-8 name in package boundary traversal should be rejected");
 
         assert_file_infrastructure_error(&messages);
         fs::remove_dir_all(&root).expect("should remove temp root");
@@ -274,218 +280,368 @@ mod non_utf8_single_file_identity {
     }
 }
 
-mod prepare_source_package_roots_tests {
+mod source_package_boundary_indexes_tests {
     use super::*;
     use crate::builder_surface::SourcePackageRegistry;
+    use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
+    use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
     use crate::compiler_frontend::compiler_errors::ErrorType;
-    use crate::compiler_frontend::source_packages::root_file::HashRootFileDiscovery;
+    use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+    use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
+    use std::path::Path;
+    use std::sync::Arc;
 
-    fn assert_canonicalization_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
-            .expect("expected an infrastructure file error");
-        assert_eq!(
-            *error_type,
-            ErrorType::File,
-            "canonicalization failure should be a File infrastructure error"
+    fn build_indexes(
+        source_packages: &SourcePackageRegistry,
+        string_table: &mut StringTable,
+    ) -> Result<super::source_package_discovery::SourcePackageBoundaryIndexes, CompilerMessages>
+    {
+        super::source_package_discovery::build_source_package_boundary_indexes(
+            source_packages,
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::
+                ExternalImportProviderRegistry::default(),
+            string_table,
+        )
+    }
+
+    fn register_pkg(source_packages: &mut SourcePackageRegistry, package_root: &Path) {
+        source_packages.register_filesystem_root(
+            "pkg",
+            package_root.to_path_buf(),
+            crate::builder_surface::PackageOrigin::ProjectLocal,
         );
+    }
+
+    fn assert_invalid_config_reason(
+        messages: &CompilerMessages,
+        matcher: impl Fn(&InvalidConfigReason) -> bool,
+    ) {
         assert!(
-            message.contains("canonicalize"),
-            "error message should mention canonicalization: {message}"
+            messages.error_diagnostics().any(|diagnostic| {
+                matches!(&diagnostic.payload,
+                    DiagnosticPayload::InvalidConfig { reason, .. } if matcher(reason))
+            }),
+            "expected an InvalidConfig diagnostic, got {messages:?}"
         );
     }
 
     #[test]
-    fn canonical_root_with_single_hash_file_succeeds() {
-        let root = temp_dir("prepare_roots_canonical_success");
+    fn canonical_root_with_single_hash_file_derives_unique_view() {
+        let root = temp_dir("package_boundary_canonical_success");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("#home.moth"), "").expect("should write hash root");
 
         let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "pkg",
-            package_root.clone(),
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let prepared = super::source_package_discovery::prepare_source_package_roots(
-            &source_packages,
-            &mut string_table,
-        )
-        .expect("canonical root should prepare successfully");
+        let indexes = build_indexes(&source_packages, &mut string_table)
+            .expect("canonical package root should build a boundary index");
 
+        // The package boundary index is the single owner; the resolver view is derived from it.
+        let prepared = indexes.prepared_source_package_roots();
         let roots = prepared.roots();
-        assert_eq!(roots.len(), 1, "one root should be prepared");
+        assert_eq!(roots.len(), 1, "one package root should be derived");
         let canonical = roots.get("pkg").expect("pkg root should exist");
         assert_eq!(
             *canonical,
             fs::canonicalize(&package_root).expect("root should canonicalize"),
-            "prepared root should be canonical"
+            "derived root should be canonical"
         );
 
-        let root_files = prepared.root_files();
-        let discovery = root_files.get("pkg").expect("pkg discovery should exist");
-        match discovery {
-            HashRootFileDiscovery::Unique(file) => {
-                assert_eq!(
-                    *file,
-                    fs::canonicalize(package_root.join("#home.moth"))
-                        .expect("hash root file should canonicalize"),
-                    "discovered root file should be canonical"
-                );
-            }
-            other => panic!("expected Unique hash root, got {other:?}"),
-        }
+        let root_file = prepared
+            .root_files()
+            .get("pkg")
+            .expect("pkg root file should exist");
+        let canonical_root_file = fs::canonicalize(package_root.join("#home.moth"))
+            .expect("hash root file should canonicalize");
+        assert_eq!(
+            *root_file, canonical_root_file,
+            "derived root file should be canonical"
+        );
+
+        // Boundary-local invariant: the package index owns exactly one module rooted at the
+        // package root, with boundary-local dense IDs. Raw IDs never cross boundaries.
+        let mut iter = indexes.iter();
+        let (_, index) = iter.next().expect("one package index should exist");
+        assert!(
+            iter.next().is_none(),
+            "exactly one package index should exist"
+        );
+        assert_eq!(
+            index.root_file_for_entry_root(),
+            Some(canonical_root_file.as_path()),
+            "package root module file should match the derived public surface"
+        );
 
         fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn canonicalization_failure_returns_file_error() {
-        let root = temp_dir("prepare_roots_canonical_failure");
+        let root = temp_dir("package_boundary_canonical_failure");
         fs::create_dir_all(&root).expect("should create temp root");
         let nonexistent = root.join("does_not_exist");
 
         let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "pkg",
-            nonexistent,
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        register_pkg(&mut source_packages, &nonexistent);
 
         let mut string_table = StringTable::new();
-        let messages = super::source_package_discovery::prepare_source_package_roots(
-            &source_packages,
-            &mut string_table,
-        )
-        .expect_err("nonexistent root should fail canonicalization");
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("nonexistent root should fail canonicalization");
 
-        assert_canonicalization_error(&messages);
+        let (error_type, message, _location) = messages
+            .first_infrastructure_error_for_tests()
+            .expect("expected an infrastructure file error");
+        assert_eq!(*error_type, ErrorType::File);
+        assert!(
+            message.contains("canonicalize"),
+            "error message should mention canonicalization: {message}"
+        );
+
         fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
-    fn missing_hash_root_preserves_missing_outcome() {
-        let root = temp_dir("prepare_roots_missing");
+    fn missing_hash_root_rejected_during_boundary_indexing() {
+        let root = temp_dir("package_boundary_missing_root");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
         let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "pkg",
-            package_root,
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let prepared = super::source_package_discovery::prepare_source_package_roots(
-            &source_packages,
-            &mut string_table,
-        )
-        .expect("root without hash file should still prepare");
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("package root without a hash root should fail boundary indexing");
 
-        let discovery = prepared
-            .root_files()
-            .get("pkg")
-            .expect("pkg discovery should exist");
-        assert_eq!(
-            *discovery,
-            HashRootFileDiscovery::Missing,
-            "root with no hash file should be Missing"
-        );
+        assert_invalid_config_reason(&messages, |reason| {
+            matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
+        });
 
         fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
-    fn multiple_hash_roots_preserves_multiple_outcome() {
-        let root = temp_dir("prepare_roots_multiple");
+    fn support_root_does_not_satisfy_package_hash_root_requirement() {
+        let root = temp_dir("package_boundary_support_only");
+        let package_root = root.join("pkg");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        fs::write(package_root.join("+support.moth"), "").expect("should write support root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a support root cannot replace the package hash root");
+
+        assert_invalid_config_reason(&messages, |reason| {
+            matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
+        });
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn support_root_beside_package_hash_root_uses_shared_root_collision_diagnostic() {
+        let root = temp_dir("package_boundary_hash_and_support");
+        let package_root = root.join("pkg");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        fs::write(package_root.join("#mod.moth"), "").expect("should write hash root");
+        fs::write(package_root.join("+support.moth"), "").expect("should write support root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("one directory cannot contain hash and support roots");
+
+        assert_invalid_config_reason(&messages, |reason| {
+            matches!(reason, InvalidConfigReason::MultipleModuleRootFiles { .. })
+        });
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn multiple_hash_roots_rejected_during_boundary_indexing() {
+        let root = temp_dir("package_boundary_multiple_roots");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("#home.moth"), "").expect("should write first hash root");
         fs::write(package_root.join("#page.moth"), "").expect("should write second hash root");
 
         let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "pkg",
-            package_root,
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let prepared = super::source_package_discovery::prepare_source_package_roots(
-            &source_packages,
-            &mut string_table,
-        )
-        .expect("root with multiple hash files should still prepare");
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("package root with multiple hash roots should fail boundary indexing");
 
-        let discovery = prepared
-            .root_files()
-            .get("pkg")
-            .expect("pkg discovery should exist");
-        assert!(
-            matches!(discovery, HashRootFileDiscovery::Multiple(_)),
-            "root with two hash files should be Multiple"
-        );
+        assert_invalid_config_reason(&messages, |reason| {
+            matches!(
+                reason,
+                InvalidConfigReason::SourcePackageMultipleRoots { .. }
+            )
+        });
 
         fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[cfg(unix)]
     #[test]
-    fn unreadable_hash_root_preserves_unreadable_outcome() {
+    fn unreadable_hash_root_returns_file_error() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = temp_dir("prepare_roots_unreadable");
+        let root = temp_dir("package_boundary_unreadable");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("#home.moth"), "").expect("should write hash root");
 
-        // Remove read permission so discover_hash_root_file cannot read the directory.
+        // Remove read permission so the package boundary traversal cannot read the directory.
         // Canonicalization still succeeds because it only traverses the parent.
         fs::set_permissions(&package_root, fs::Permissions::from_mode(0o000))
             .expect("should remove read permissions");
 
         let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "pkg",
-            package_root.clone(),
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let prepared = super::source_package_discovery::prepare_source_package_roots(
-            &source_packages,
-            &mut string_table,
-        )
-        .expect("canonicalization should succeed even without read permission");
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("unreadable package root should fail boundary indexing");
 
-        let discovery = prepared
-            .root_files()
-            .get("pkg")
-            .expect("pkg discovery should exist");
-        assert!(
-            matches!(discovery, HashRootFileDiscovery::Unreadable(_)),
-            "unreadable root should be Unreadable, got {discovery:?}"
-        );
+        let (error_type, _message, _location) = messages
+            .first_infrastructure_error_for_tests()
+            .expect("expected an infrastructure file error");
+        assert_eq!(*error_type, ErrorType::File);
 
         // Restore permissions so cleanup can remove the directory.
         fs::set_permissions(&package_root, fs::Permissions::from_mode(0o755))
             .expect("should restore permissions");
         fs::remove_dir_all(&root).expect("should remove temp root");
     }
+
+    #[test]
+    fn independent_package_indexes_have_boundary_local_module_ids() {
+        let root = temp_dir("package_boundary_local_ids");
+        let alpha_root = root.join("alpha");
+        let beta_root = root.join("beta");
+        fs::create_dir_all(&alpha_root).expect("should create alpha root");
+        fs::create_dir_all(&beta_root).expect("should create beta root");
+        fs::write(alpha_root.join("#mod.moth"), "").expect("should write alpha root");
+        fs::write(beta_root.join("#mod.moth"), "").expect("should write beta root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages.register_filesystem_root(
+            "alpha",
+            alpha_root.clone(),
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+        );
+        source_packages.register_filesystem_root(
+            "beta",
+            beta_root.clone(),
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+        );
+
+        let mut string_table = StringTable::new();
+        let indexes = build_indexes(&source_packages, &mut string_table)
+            .expect("two package roots should build two boundary indexes");
+
+        // Deterministic import-prefix order.
+        let prefixes: Vec<&str> = indexes.iter().map(|(prefix, _)| prefix).collect();
+        assert_eq!(
+            prefixes,
+            vec!["alpha", "beta"],
+            "package indexes are prefix-ordered"
+        );
+
+        // Each boundary owns exactly one module rooted at its package root, with boundary-local
+        // dense ModuleIds. Raw IDs never cross boundaries.
+        for (expected_prefix, expected_root) in [("alpha", &alpha_root), ("beta", &beta_root)] {
+            let (_, index) = indexes
+                .iter()
+                .find(|(prefix, _)| *prefix == expected_prefix)
+                .expect("package index should exist");
+            let module_id = index
+                .module_identities()
+                .module_ids()
+                .next()
+                .expect("one module rooted at the package root");
+            assert_eq!(
+                index.module_identities().record(module_id).root_directory(),
+                &fs::canonicalize(expected_root).unwrap(),
+                "module root directory should be the package root"
+            );
+        }
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn package_boundary_indexes_classify_provider_files_under_nearest_module() {
+        let root = temp_dir("package_boundary_provider_file");
+        let package_root = root.join("pkg");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        fs::write(package_root.join("#mod.moth"), "").expect("should write package root");
+        fs::write(package_root.join("helper.js"), "").expect("should write provider file");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+        let mut providers = ExternalImportProviderRegistry::empty();
+        providers.register(Arc::new(JsExternalImportProvider::new()));
+
+        let mut string_table = StringTable::new();
+        let indexes = super::source_package_discovery::build_source_package_boundary_indexes(
+            &source_packages,
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &providers,
+            &mut string_table,
+        )
+        .expect("provider-owned package source should be indexed");
+
+        let (_, index) = indexes
+            .iter()
+            .next()
+            .expect("one package index should exist");
+        let module_id = index
+            .module_identities()
+            .module_ids()
+            .next()
+            .expect("package root module should exist");
+        let provider_record = index
+            .owned_source_ids(module_id)
+            .iter()
+            .map(|source_id| index.source(*source_id))
+            .find(|record| {
+                matches!(
+                    record.classification(),
+                    super::source_tree_index::SourceClassification::ProviderOwned(extension)
+                        if extension == &ExternalFileExtension::from("js")
+                )
+            })
+            .expect("helper.js should be a provider-owned record");
+
+        assert_eq!(
+            provider_record.ownership(),
+            super::source_tree_index::SourceOwnership::Owned(module_id)
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
 }
 
 /// Linux preparation tests for non-UTF-8 direct-child hash-root candidates.
 ///
-/// Directory, single-file and config compilation all delegate source-package preparation to
-/// `prepare_source_package_roots`, so these tests cover the shared owner instead of duplicating the
-/// same assertion at each orchestration boundary. macOS rejects the invalid-byte fixture before
-/// discovery can inspect it.
+/// Directory, single-file and config compilation all delegate source-package boundary indexing
+/// to `build_source_package_boundary_indexes`, so these tests cover the shared traversal owner
+/// instead of duplicating the same assertion at each orchestration boundary. macOS rejects the
+/// invalid-byte fixture before the traversal can inspect it.
 #[cfg(target_os = "linux")]
-mod non_utf8_hash_root_candidate_tests {
+mod non_utf8_package_boundary_candidate_tests {
     use super::*;
     use crate::builder_surface::SourcePackageRegistry;
     use crate::compiler_frontend::compiler_errors::ErrorType;
@@ -500,20 +656,30 @@ mod non_utf8_hash_root_candidate_tests {
         assert_eq!(
             *error_type,
             ErrorType::File,
-            "non-UTF-8 hash-root candidate should be a File infrastructure error"
+            "non-UTF-8 package boundary candidate should be a File infrastructure error"
         );
         assert!(
             message.contains("Non-UTF-8"),
             "error message should mention non-UTF-8: {message}"
         );
-        assert!(
-            message.contains("hash-root public-surface candidate"),
-            "error message should name the hash-root context: {message}"
-        );
+    }
+
+    fn build_indexes(
+        source_packages: &SourcePackageRegistry,
+        string_table: &mut StringTable,
+    ) -> Result<super::source_package_discovery::SourcePackageBoundaryIndexes, CompilerMessages>
+    {
+        super::source_package_discovery::build_source_package_boundary_indexes(
+            source_packages,
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::
+                ExternalImportProviderRegistry::default(),
+            string_table,
+        )
     }
 
     fn package_with_non_utf8_child() -> (PathBuf, PathBuf) {
-        let root = temp_dir("prepare_roots_non_utf8_candidate");
+        let root = temp_dir("package_boundary_non_utf8_candidate");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
@@ -536,11 +702,8 @@ mod non_utf8_hash_root_candidate_tests {
         );
 
         let mut string_table = StringTable::new();
-        let messages = super::source_package_discovery::prepare_source_package_roots(
-            &source_packages,
-            &mut string_table,
-        )
-        .expect_err("non-UTF-8 candidate should fail preparation");
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("non-UTF-8 candidate should fail boundary indexing");
 
         assert_non_utf8_file_error(&messages);
         fs::remove_dir_all(&root).expect("should remove temp root");
@@ -559,11 +722,8 @@ mod non_utf8_hash_root_candidate_tests {
         );
 
         let mut string_table = StringTable::new();
-        let messages = super::source_package_discovery::prepare_source_package_roots(
-            &source_packages,
-            &mut string_table,
-        )
-        .expect_err("valid root plus invalid candidate should still fail");
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("valid root plus invalid candidate should still fail");
 
         assert_non_utf8_file_error(&messages);
         fs::remove_dir_all(&root).expect("should remove temp root");
@@ -611,6 +771,7 @@ mod module_identity_tests {
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect("source tree index should build");
@@ -950,6 +1111,7 @@ mod module_identity_tests {
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect_err("missing project root should surface a file error, not a missing facade");
@@ -987,6 +1149,7 @@ mod module_identity_tests {
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect_err("unreadable project root should surface a file error, not a missing facade");
@@ -1067,6 +1230,7 @@ mod module_identity_tests {
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect_err("multiple hash roots should be rejected");
@@ -1098,6 +1262,7 @@ mod module_identity_tests {
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect_err("mixed normal and support roots should be rejected");
@@ -1129,6 +1294,7 @@ mod module_identity_tests {
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect_err("multiple support roots should be rejected");
@@ -1170,6 +1336,7 @@ mod module_identity_tests {
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect("source tree index should build");
@@ -1507,12 +1674,21 @@ mod module_identity_tests {
 }
 mod owned_source_inventory_tests {
     use super::module_identity::ModuleId;
-    use super::source_tree_index::SourceTreeIndex;
+    use super::source_tree_index::{
+        SourceClassification, SourceLogicalIdentity, SourceOwnership, SourceTreeIndex,
+    };
     use super::*;
+    use crate::builder_surface::external_import_providers::provider::{
+        ExternalFileExtension, ExternalImportProvider, ExternalImportProviderContext,
+        ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
+    };
+    use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
     use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
+    use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     /// Discover the source tree index for one checkout root with a selected source-kind
     /// registry and configured project name.
@@ -1540,6 +1716,7 @@ mod owned_source_inventory_tests {
             &config,
             &SourcePackageRegistry::default(),
             source_file_kinds,
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect("source tree index should build")
@@ -1554,10 +1731,72 @@ mod owned_source_inventory_tests {
 
     fn owned_relative_paths(index: &SourceTreeIndex, module_id: ModuleId) -> Vec<String> {
         index
-            .owned_source_set(module_id)
-            .entries()
+            .owned_source_ids(module_id)
             .iter()
-            .map(|entry| entry.stable_identity().relative_source_path().to_owned())
+            .map(|source_id| owned_relative_path(index, *source_id))
+            .collect()
+    }
+
+    /// Resolve one owned source's portable module-relative path through the central index.
+    fn owned_relative_path(
+        index: &SourceTreeIndex,
+        source_id: super::source_tree_index::SourceId,
+    ) -> String {
+        match index.source(source_id).logical_identity() {
+            SourceLogicalIdentity::Owned(identity) => identity.relative_source_path().to_owned(),
+            other => {
+                panic!("owned source {source_id:?} has a non-owned logical identity: {other:?}")
+            }
+        }
+    }
+
+    /// Resolve the source kinds for one module's owned source IDs through the central index.
+    fn owned_kinds(index: &SourceTreeIndex, module_id: ModuleId) -> Vec<SourceFileKind> {
+        index
+            .owned_source_ids(module_id)
+            .iter()
+            .filter_map(
+                |source_id| match index.source(*source_id).classification() {
+                    SourceClassification::CompilerSemantic(kind) => Some(*kind),
+                    SourceClassification::ProviderOwned(_) => None,
+                },
+            )
+            .collect()
+    }
+
+    /// Resolve the owned source record for one module-relative path, or `None` when absent.
+    fn owned_source_for_path<'a>(
+        index: &'a SourceTreeIndex,
+        module_id: ModuleId,
+        relative_path: &str,
+    ) -> Option<&'a super::source_tree_index::SourceRecord> {
+        index
+            .owned_source_ids(module_id)
+            .iter()
+            .find_map(|source_id| {
+                let record = index.source(*source_id);
+                match record.logical_identity() {
+                    SourceLogicalIdentity::Owned(identity) => {
+                        (identity.relative_source_path() == relative_path).then_some(record)
+                    }
+                    _ => None,
+                }
+            })
+    }
+
+    /// Resolve the portable entry-root-relative logical paths for the unrooted source IDs.
+    fn unrooted_logical_paths(index: &SourceTreeIndex) -> Vec<String> {
+        index
+            .unrooted_source_ids()
+            .iter()
+            .map(
+                |source_id| match index.source(*source_id).logical_identity() {
+                    SourceLogicalIdentity::Unrooted(path) => path.as_str().to_owned(),
+                    other => panic!(
+                        "unrooted source {source_id:?} has a non-unrooted identity: {other:?}"
+                    ),
+                },
+            )
             .collect()
     }
 
@@ -1619,20 +1858,14 @@ mod owned_source_inventory_tests {
         );
 
         // The inner root file and a same-named entry root file keep distinct stable identities.
-        let entry_root_identity = index
-            .owned_source_set(entry_id)
-            .entries()
-            .iter()
-            .find(|entry| entry.stable_identity().relative_source_path() == "#page.moth")
+        let entry_root_identity = owned_source_for_path(&index, entry_id, "#page.moth")
             .expect("entry root owned source should exist")
-            .stable_identity();
-        let inner_root_identity = index
-            .owned_source_set(inner_id)
-            .entries()
-            .iter()
-            .find(|entry| entry.stable_identity().relative_source_path() == "#page.moth")
+            .logical_identity()
+            .clone();
+        let inner_root_identity = owned_source_for_path(&index, inner_id, "#page.moth")
             .expect("inner root owned source should exist")
-            .stable_identity();
+            .logical_identity()
+            .clone();
         assert_ne!(
             entry_root_identity, inner_root_identity,
             "two #page.moth root files in different modules must keep distinct identities"
@@ -1690,12 +1923,7 @@ mod owned_source_inventory_tests {
             })
             .expect("entry root module should exist");
 
-        let kinds: Vec<SourceFileKind> = index
-            .owned_source_set(entry_id)
-            .entries()
-            .iter()
-            .map(|entry| entry.kind())
-            .collect();
+        let kinds: Vec<SourceFileKind> = owned_kinds(&index, entry_id);
         assert!(
             kinds.contains(&SourceFileKind::MothTemplate),
             "registered .mtf files must enter the owned source set: {kinds:?}"
@@ -1714,7 +1942,7 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn known_but_unselected_and_unknown_extensions_are_excluded() {
+    fn known_but_unselected_sources_are_indexed_as_unsupported() {
         let root = temp_dir("owned_source_excluded_kinds");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
@@ -1740,11 +1968,18 @@ mod owned_source_inventory_tests {
 
         assert_eq!(
             owned_relative_paths(&index, entry_id),
-            vec!["#page.moth"],
-            "known-but-unselected and unknown extensions must stay out of owned source sets"
+            vec!["#page.moth", "content.md", "page.mtf"],
+            "recognized source kinds remain indexed while unknown extensions stay excluded"
         );
+        let unsupported_paths = index
+            .owned_source_ids(entry_id)
+            .iter()
+            .filter(|source_id| !index.source(**source_id).supported())
+            .map(|source_id| owned_relative_path(&index, *source_id))
+            .collect::<Vec<_>>();
+        assert_eq!(unsupported_paths, vec!["content.md", "page.mtf"]);
         assert!(
-            index.unrooted_candidates().is_empty(),
+            index.unrooted_source_ids().is_empty(),
             "excluded files are not unrooted facts"
         );
 
@@ -1808,18 +2043,22 @@ mod owned_source_inventory_tests {
             .find(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
             .expect("project package facade should exist");
 
-        let facade_entries = index.owned_source_set(facade_id).entries();
+        let facade_ids = index.owned_source_ids(facade_id);
         assert_eq!(
-            facade_entries.len(),
+            facade_ids.len(),
             1,
             "facade module owns exactly its root source file"
         );
+        let facade_record = index.source(facade_ids[0]);
         assert_eq!(
-            facade_entries[0].stable_identity().relative_source_path(),
+            owned_relative_path(&index, facade_ids[0]),
             "+package.moth",
             "facade root file identity is module-relative to the facade root directory"
         );
-        assert_eq!(facade_entries[0].kind(), SourceFileKind::Moth);
+        assert_eq!(
+            facade_record.classification(),
+            &SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+        );
 
         fs::remove_dir_all(&root).expect("should remove temp root");
     }
@@ -1836,25 +2075,26 @@ mod owned_source_inventory_tests {
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
 
-        // No modules were discovered, so no owned source sets and no silent discard.
-        assert!(
-            index.owned_source_sets().is_empty(),
+        // No modules were discovered, so no owned source IDs and no silent discard.
+        assert_eq!(
+            index.module_identities().module_ids().count(),
+            0,
             "unrooted candidates must not be assigned to a module"
         );
-        let unrooted = index.unrooted_candidates();
+        let unrooted = index.unrooted_source_ids();
         assert_eq!(
             unrooted.len(),
             2,
             "both supported unrooted files must remain explicit facts"
         );
-        // Unrooted candidates are sorted by portable logical candidate path.
+        // Unrooted records are sorted by portable logical path.
+        let unrooted_paths = unrooted_logical_paths(&index);
         assert!(
-            unrooted[0].logical_candidate_path() < unrooted[1].logical_candidate_path(),
+            unrooted_paths[0] < unrooted_paths[1],
             "unrooted candidates must sort by portable logical path"
         );
         assert_eq!(
-            unrooted[0].logical_candidate_path(),
-            "orphan.moth",
+            unrooted_paths[0], "orphan.moth",
             "the logical candidate path is entry-root-relative and portable"
         );
 
@@ -1885,26 +2125,21 @@ mod owned_source_inventory_tests {
             .find(|id| table_b.record(*id).logical_module_path() == Path::new("alpha"))
             .expect("alpha module should exist in tree b");
 
-        let helper_a = index_a
-            .owned_source_set(alpha_a)
-            .entries()
-            .iter()
-            .find(|entry| entry.stable_identity().relative_source_path() == "helper.moth")
-            .expect("alpha helper owned source should exist in tree a");
-        let helper_b = index_b
-            .owned_source_set(alpha_b)
-            .entries()
-            .iter()
-            .find(|entry| entry.stable_identity().relative_source_path() == "helper.moth")
-            .expect("alpha helper owned source should exist in tree b");
+        let helper_a = owned_source_for_path(&index_a, alpha_a, "helper.moth")
+            .expect("alpha helper owned source should exist in tree a")
+            .logical_identity()
+            .clone();
+        let helper_b = owned_source_for_path(&index_b, alpha_b, "helper.moth")
+            .expect("alpha helper owned source should exist in tree b")
+            .logical_identity()
+            .clone();
 
         assert_eq!(
-            helper_a.stable_identity(),
-            helper_b.stable_identity(),
+            helper_a, helper_b,
             "owned-source identity must be equal across distinct checkout roots"
         );
         // The identity debug representation must not embed either absolute checkout root.
-        let debug = format!("{:?}", helper_a.stable_identity());
+        let debug = format!("{:?}", helper_a);
         assert!(
             !debug.contains(root_a.to_str().expect("root_a is UTF-8"))
                 && !debug.contains(root_b.to_str().expect("root_b is UTF-8")),
@@ -1946,7 +2181,7 @@ mod owned_source_inventory_tests {
             "an arbitrary registered unknown extension must not enter owned source sets"
         );
         assert!(
-            index.unrooted_candidates().is_empty(),
+            index.unrooted_source_ids().is_empty(),
             "an excluded unknown registered extension is not an unrooted fact"
         );
 
@@ -1954,7 +2189,7 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn mismatched_known_extension_mapping_is_excluded() {
+    fn mismatched_known_extension_mapping_is_indexed_as_unsupported() {
         let root = temp_dir("owned_source_mismatched_mapping");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
@@ -1962,7 +2197,7 @@ mod owned_source_inventory_tests {
         fs::write(src.join("page.mtf"), "").expect("should write moth-template-extension file");
 
         // Registering mtf -> PlainMarkdown mismatches the compiler-recognized mapping (mtf ->
-        // MothTemplate), so .mtf must stay out of owned source sets.
+        // MothTemplate), so .mtf remains indexed but cannot become a prepared semantic source.
         let mut kinds = SourceFileKindRegistry::new();
         kinds.register("mtf", SourceFileKind::PlainMarkdown);
         let index = discover_index_with_kinds(&root, "src", "my-project", &kinds);
@@ -1980,11 +2215,18 @@ mod owned_source_inventory_tests {
 
         assert_eq!(
             owned_relative_paths(&index, entry_id),
-            vec!["#page.moth"],
-            "a mismatched known extension mapping must not enter owned source sets"
+            vec!["#page.moth", "page.mtf"],
+            "recognized source identity is independent of active builder support"
         );
+        let page_source_id = index
+            .owned_source_ids(entry_id)
+            .iter()
+            .copied()
+            .find(|source_id| owned_relative_path(&index, *source_id) == "page.mtf")
+            .expect("recognized Moth template should have a source ID");
+        assert!(!index.source(page_source_id).supported());
         assert!(
-            index.unrooted_candidates().is_empty(),
+            index.unrooted_source_ids().is_empty(),
             "an excluded mismatched mapping is not an unrooted fact"
         );
 
@@ -1992,9 +2234,9 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn unrooted_candidates_are_ordered_by_portable_logical_path_across_roots() {
+    fn unrooted_source_ids_are_ordered_by_portable_logical_path_across_roots() {
         // Two distinct checkout roots with unrooted files created in reverse-logical order.
-        // The unrooted candidate list must sort by portable entry-root-relative logical path,
+        // The unrooted source IDs must sort by portable entry-root-relative logical path,
         // not by absolute checkout path or creation order.
         let root_a = temp_dir("unrooted_logical_order_a");
         let root_b = temp_dir("unrooted_logical_order_b");
@@ -2016,16 +2258,8 @@ mod owned_source_inventory_tests {
         let index_b =
             discover_index_with_kinds(&root_b, "src", "my-project", &html_source_file_kinds());
 
-        let paths_a: Vec<&str> = index_a
-            .unrooted_candidates()
-            .iter()
-            .map(|candidate| candidate.logical_candidate_path())
-            .collect();
-        let paths_b: Vec<&str> = index_b
-            .unrooted_candidates()
-            .iter()
-            .map(|candidate| candidate.logical_candidate_path())
-            .collect();
+        let paths_a = unrooted_logical_paths(&index_a);
+        let paths_b = unrooted_logical_paths(&index_b);
 
         assert_eq!(
             paths_a,
@@ -2070,14 +2304,14 @@ mod owned_source_inventory_tests {
             })
             .expect("entry root normal module should exist");
 
-        let facade_entries = index.owned_source_set(facade_id).entries();
+        let facade_ids = index.owned_source_ids(facade_id);
         assert_eq!(
-            facade_entries.len(),
+            facade_ids.len(),
             1,
             "facade module owns exactly its root source file"
         );
         assert_eq!(
-            facade_entries[0].stable_identity().relative_source_path(),
+            owned_relative_path(&index, facade_ids[0]),
             "+package.moth",
             "facade root file identity is module-relative to the facade root directory"
         );
@@ -2092,6 +2326,415 @@ mod owned_source_inventory_tests {
             entry_paths,
             vec!["#page.moth"],
             "entry-root normal module owns only its own root file"
+        );
+
+        let facade_record_count = index
+            .sources()
+            .iter()
+            .filter(|record| match record.logical_identity() {
+                SourceLogicalIdentity::Owned(identity) => {
+                    identity.relative_source_path() == "+package.moth"
+                        && identity.module_origin() == table.record(facade_id).stable_origin()
+                }
+                SourceLogicalIdentity::Unrooted(_) => false,
+            })
+            .count();
+        assert_eq!(
+            facade_record_count, 1,
+            "the facade source must appear exactly once in the central source table"
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn source_ids_equal_their_contiguous_table_index() {
+        let root = temp_dir("source_id_contiguous_index");
+        build_nested_module_tree(&root);
+        let index =
+            discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
+
+        let sources = index.sources();
+        for (position, record) in sources.iter().enumerate() {
+            assert_eq!(
+                record.id().index(),
+                position,
+                "each SourceId must equal its contiguous table index"
+            );
+        }
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn every_supported_file_appears_exactly_once() {
+        let root = temp_dir("source_id_exact_once");
+        build_nested_module_tree(&root);
+        let index =
+            discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
+
+        let mut referenced_ids = Vec::new();
+        for module_id in index.module_identities().module_ids() {
+            referenced_ids.extend(
+                index
+                    .owned_source_ids(module_id)
+                    .iter()
+                    .map(|source_id| source_id.index()),
+            );
+        }
+        referenced_ids.extend(
+            index
+                .unrooted_source_ids()
+                .iter()
+                .map(|source_id| source_id.index()),
+        );
+        referenced_ids.sort_unstable();
+        assert_eq!(
+            referenced_ids,
+            (0..index.sources().len()).collect::<Vec<_>>(),
+            "every source record must appear exactly once in one owned set or the unrooted list"
+        );
+
+        // Canonical paths are unique across the whole table: no file is recorded twice.
+        let mut paths: Vec<PathBuf> = index
+            .sources()
+            .iter()
+            .map(|record| record.canonical_path().to_path_buf())
+            .collect();
+        let total = paths.len();
+        paths.sort();
+        paths.dedup();
+        assert_eq!(
+            paths.len(),
+            total,
+            "no canonical path may appear in two source records"
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn owned_and_unrooted_sets_reference_valid_records_with_matching_state() {
+        let root = temp_dir("source_id_matching_state");
+        build_nested_module_tree(&root);
+        let index =
+            discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
+
+        for module_id in index.module_identities().module_ids() {
+            for source_id in index.owned_source_ids(module_id) {
+                let record = index.source(*source_id);
+                assert_eq!(
+                    record.ownership(),
+                    SourceOwnership::Owned(module_id),
+                    "owned source ID {} must reference a record owned by its module",
+                    source_id.index()
+                );
+                assert!(
+                    matches!(record.logical_identity(), SourceLogicalIdentity::Owned(_)),
+                    "an owned source record must carry an owned logical identity"
+                );
+            }
+        }
+
+        let unrooted_root = temp_dir("source_id_matching_unrooted_state");
+        let unrooted_src = unrooted_root.join("src");
+        fs::create_dir_all(&unrooted_src).expect("should create unrooted source directory");
+        fs::write(unrooted_src.join("orphan.moth"), "").expect("should write unrooted source");
+        let unrooted_index = discover_index_with_kinds(
+            &unrooted_root,
+            "src",
+            "my-project",
+            &html_source_file_kinds(),
+        );
+        assert_eq!(
+            unrooted_index.unrooted_source_ids().len(),
+            1,
+            "the focused unrooted tree must exercise one unrooted record"
+        );
+        for source_id in unrooted_index.unrooted_source_ids() {
+            let record = unrooted_index.source(*source_id);
+            assert_eq!(
+                record.ownership(),
+                SourceOwnership::Unrooted,
+                "unrooted source ID {} must reference an unrooted record",
+                source_id.index()
+            );
+            assert!(
+                matches!(
+                    record.logical_identity(),
+                    SourceLogicalIdentity::Unrooted(_)
+                ),
+                "an unrooted source record must carry an unrooted logical identity"
+            );
+        }
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+        fs::remove_dir_all(&unrooted_root).expect("should remove unrooted temp root");
+    }
+
+    #[test]
+    fn source_ids_are_deterministic_across_creation_order_and_checkout_roots() {
+        // The same logical tree built in two distinct checkout roots with reverse creation order
+        // must assign identical SourceId -> logical identity mappings, because SourceIds are
+        // derived from portable logical identity, not traversal or absolute paths.
+        let root_a = temp_dir("source_id_deterministic_a");
+        let root_b = temp_dir("source_id_deterministic_b");
+
+        let build_tree_reverse = |root: &Path| {
+            let src = root.join("src");
+            fs::create_dir_all(src.join("alpha/inner")).expect("should create nested dirs");
+            // Reverse creation order relative to logical path order.
+            fs::write(src.join("alpha/inner/deep.moth"), "").expect("should write deep");
+            fs::write(src.join("alpha/inner/#page.moth"), "").expect("should write inner root");
+            fs::write(src.join("alpha/helper.moth"), "").expect("should write alpha helper");
+            fs::write(src.join("alpha/#mod.moth"), "").expect("should write alpha root");
+            fs::write(src.join("accounts.moth"), "").expect("should write accounts");
+            fs::write(src.join("#page.moth"), "").expect("should write entry root");
+        };
+        let build_tree_forward = |root: &Path| {
+            let src = root.join("src");
+            fs::create_dir_all(src.join("alpha/inner")).expect("should create nested dirs");
+            fs::write(src.join("#page.moth"), "").expect("should write entry root");
+            fs::write(src.join("accounts.moth"), "").expect("should write accounts");
+            fs::write(src.join("alpha/#mod.moth"), "").expect("should write alpha root");
+            fs::write(src.join("alpha/helper.moth"), "").expect("should write alpha helper");
+            fs::write(src.join("alpha/inner/#page.moth"), "").expect("should write inner root");
+            fs::write(src.join("alpha/inner/deep.moth"), "").expect("should write deep");
+        };
+        build_tree_reverse(&root_a);
+        build_tree_forward(&root_b);
+
+        let index_a =
+            discover_index_with_kinds(&root_a, "src", "my-project", &html_source_file_kinds());
+        let index_b =
+            discover_index_with_kinds(&root_b, "src", "my-project", &html_source_file_kinds());
+
+        let identities_a: Vec<SourceLogicalIdentity> = index_a
+            .sources()
+            .iter()
+            .map(|record| record.logical_identity().clone())
+            .collect();
+        let identities_b: Vec<SourceLogicalIdentity> = index_b
+            .sources()
+            .iter()
+            .map(|record| record.logical_identity().clone())
+            .collect();
+        assert_eq!(
+            identities_a, identities_b,
+            "SourceId -> logical identity mapping must be identical across creation order and \
+             checkout roots"
+        );
+
+        // The logical identity debug representation must not embed either absolute checkout root.
+        let root_a_str = root_a.to_str().expect("root_a is UTF-8");
+        let root_b_str = root_b.to_str().expect("root_b is UTF-8");
+        for identity in &identities_a {
+            let identity_debug = format!("{identity:?}");
+            assert!(
+                !identity_debug.contains(root_a_str) && !identity_debug.contains(root_b_str),
+                "source logical identity must not embed an absolute checkout root: {identity_debug}"
+            );
+        }
+
+        fs::remove_dir_all(&root_a).expect("should remove root a");
+        fs::remove_dir_all(&root_b).expect("should remove root b");
+    }
+
+    /// A minimal external import provider that supports `.js` files and declines every request.
+    /// The classification test only needs the registry to recognise the extension.
+    #[derive(Debug)]
+    struct JsOnlyProvider {
+        extensions: Vec<ExternalFileExtension>,
+    }
+
+    impl JsOnlyProvider {
+        fn new() -> Self {
+            Self {
+                extensions: vec![ExternalFileExtension::from("js")],
+            }
+        }
+    }
+
+    impl ExternalImportProvider for JsOnlyProvider {
+        fn kind(&self) -> ExternalImportProviderKind {
+            ExternalImportProviderKind::new("js-only")
+        }
+
+        fn supported_extensions(&self) -> &[ExternalFileExtension] {
+            &self.extensions
+        }
+
+        fn resolve_external_import(
+            &self,
+            _request: ExternalImportRequest,
+            _context: &mut ExternalImportProviderContext,
+        ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+            Ok(None)
+        }
+    }
+
+    /// Discover the source tree index with a `.js` provider registered so provider-owned files
+    /// enter the central source table.
+    fn discover_index_with_js_provider(
+        root: &Path,
+        entry_root_relative: &str,
+        project_name: &str,
+    ) -> SourceTreeIndex {
+        let entry_root = root.join(entry_root_relative);
+        let mut config = Config::new(root.to_path_buf());
+        config.entry_root = PathBuf::from(entry_root_relative);
+        config.project_name = String::from(project_name);
+
+        let canonical_root = fs::canonicalize(root).expect("project root should canonicalize");
+        let canonical_entry_root =
+            fs::canonicalize(&entry_root).expect("entry root should canonicalize");
+        let mut string_table = StringTable::new();
+        let mut providers = ExternalImportProviderRegistry::empty();
+        providers.register(Arc::new(JsOnlyProvider::new()));
+
+        SourceTreeIndex::discover(
+            canonical_entry_root,
+            &canonical_root,
+            &config,
+            &SourcePackageRegistry::default(),
+            &SourceFileKindRegistry::default(),
+            &providers,
+            &mut string_table,
+        )
+        .expect("source tree index should build with a js provider")
+    }
+
+    #[test]
+    fn provider_owned_files_are_classified_and_owned_by_nearest_module() {
+        let root = temp_dir("provider_owned_classification");
+        let src = root.join("src");
+        let feature = src.join("feature");
+        fs::create_dir_all(&feature).expect("should create feature module");
+        fs::write(src.join("#page.moth"), "").expect("should write entry root");
+        fs::write(src.join("helper.js"), "").expect("should write entry provider file");
+        fs::write(feature.join("#mod.moth"), "").expect("should write feature root");
+        fs::write(feature.join("util.js"), "").expect("should write feature provider file");
+
+        let index = discover_index_with_js_provider(&root, "src", "provider-project");
+        let table = index.module_identities();
+
+        let entry_id = table
+            .module_ids()
+            .find(|id| {
+                table
+                    .record(*id)
+                    .logical_module_path()
+                    .as_os_str()
+                    .is_empty()
+            })
+            .expect("entry root module should exist");
+        let feature_id = table
+            .module_ids()
+            .find(|id| table.record(*id).logical_module_path() == Path::new("feature"))
+            .expect("feature module should exist");
+
+        // The entry module owns both its compiler-semantic root and its provider-owned helper.
+        let page_record =
+            owned_source_for_path(&index, entry_id, "#page.moth").expect("page root is indexed");
+        assert_eq!(
+            page_record.classification(),
+            &SourceClassification::CompilerSemantic(SourceFileKind::Moth),
+            "compiler semantic files keep their SourceFileKind classification"
+        );
+
+        let helper_record =
+            owned_source_for_path(&index, entry_id, "helper.js").expect("helper.js is indexed");
+        assert_eq!(
+            helper_record.classification(),
+            &SourceClassification::ProviderOwned(ExternalFileExtension::from("js")),
+            "provider-owned files are classified as ProviderOwned with their extension"
+        );
+        assert_eq!(
+            helper_record.ownership(),
+            SourceOwnership::Owned(entry_id),
+            "provider-owned files are owned by their nearest module"
+        );
+
+        // The feature module owns its provider-owned file separately.
+        let util_record =
+            owned_source_for_path(&index, feature_id, "util.js").expect("util.js is indexed");
+        assert_eq!(
+            util_record.classification(),
+            &SourceClassification::ProviderOwned(ExternalFileExtension::from("js"))
+        );
+        assert_eq!(
+            util_record.ownership(),
+            SourceOwnership::Owned(feature_id),
+            "nested-module provider files are owned by the nested module"
+        );
+
+        // The logical-path lookup map resolves both provider targets by entry-root-relative path.
+        let helper_id = index
+            .source_id_for_entry_root_relative_logical_path("helper.js")
+            .expect("helper.js logical path resolves to a SourceId");
+        assert_eq!(
+            index.source(helper_id).canonical_path(),
+            helper_record.canonical_path()
+        );
+        let util_id = index
+            .source_id_for_entry_root_relative_logical_path("feature/util.js")
+            .expect("feature/util.js logical path resolves to a SourceId");
+        assert_eq!(
+            index.source(util_id).canonical_path(),
+            util_record.canonical_path()
+        );
+
+        // The canonical-path lookup map resolves an importer to its owning record.
+        let page_canonical = page_record.canonical_path();
+        let page_lookup_id = index
+            .source_id_for_canonical_path(page_canonical)
+            .expect("page canonical path resolves to a SourceId");
+        assert_eq!(
+            index.source(page_lookup_id).ownership(),
+            SourceOwnership::Owned(entry_id)
+        );
+
+        // SourceIds are assigned in deterministic portable logical identity order. The root
+        // module precedes the child module, so helper.js precedes feature/util.js regardless of
+        // traversal or creation order.
+        assert!(
+            helper_id.index() < util_id.index(),
+            "provider SourceIds must follow deterministic logical identity order"
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn provider_owned_files_without_a_registered_provider_are_not_indexed() {
+        let root = temp_dir("provider_owned_unregistered_extension");
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        fs::write(src.join("#page.moth"), "").expect("should write entry root");
+        fs::write(src.join("drawing.wit"), "").expect("should write unregistered provider file");
+
+        // No provider registered for `.wit`, so the file must not enter the inventory.
+        let index = discover_index_with_kinds(
+            &root,
+            "src",
+            "unregistered",
+            &SourceFileKindRegistry::default(),
+        );
+        let table = index.module_identities();
+        let entry_id = table
+            .module_ids()
+            .find(|id| {
+                table
+                    .record(*id)
+                    .logical_module_path()
+                    .as_os_str()
+                    .is_empty()
+            })
+            .expect("entry root module should exist");
+
+        assert!(
+            owned_source_for_path(&index, entry_id, "drawing.wit").is_none(),
+            "files whose extension has no registered provider must not be indexed"
         );
 
         fs::remove_dir_all(&root).expect("should remove temp root");
@@ -2132,6 +2775,7 @@ mod project_module_graph_tests {
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
         .expect("source tree index should build");
@@ -2199,10 +2843,17 @@ mod project_module_graph_tests {
                 graph_node.direct_children(),
                 index.module_identities().direct_child_modules(table_id)
             );
-            assert_eq!(
-                graph_node.owned_source_set(),
-                index.owned_source_set(table_id)
-            );
+            // The graph node carries no source records: owned source data lives in the central
+            // index. Verify the index's owned source IDs for this module all resolve to records
+            // owned by this module, proving the graph delegates ownership to the index.
+            for source_id in index.owned_source_ids(table_id) {
+                let record = index.source(*source_id);
+                assert_eq!(
+                    record.ownership(),
+                    super::source_tree_index::SourceOwnership::Owned(table_id),
+                    "each owned source ID must resolve to a record owned by its module"
+                );
+            }
         }
 
         fs::remove_dir_all(&root).expect("should remove temp root");
@@ -2395,26 +3046,34 @@ mod project_module_graph_tests {
         fs::write(src.join("beta/#beta.moth"), "").expect("should write beta root");
 
         let (index, _project_root, _entry_root) = discover_index(&root, "src");
-        let mut graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let alpha_id = module_id_for(&index, ModuleRootRole::Normal, "alpha");
+        let beta_id = module_id_for(&index, ModuleRootRole::Normal, "beta");
 
-        // No edges: every module is independent and shares wave zero, ordered by ModuleId.
-        let waves = graph
+        // No edges: every module is independent and shares wave zero, ordered by ModuleId. The
+        // no-edge graph is completed before scheduling so wave scheduling reads only frozen
+        // adjacency.
+        let mut no_edge_graph = ProjectModuleGraph::from_source_tree_index(&index);
+        no_edge_graph
+            .complete()
+            .expect("no-edge graph should complete before scheduling");
+        let waves = no_edge_graph
             .compile_waves()
-            .expect("independent graph should produce one wave");
+            .expect("completed no-edge graph should produce one wave");
         assert_eq!(waves.len(), 1, "no edges means one ready wave");
         let wave_zero: Vec<ModuleId> = waves[0].clone();
         assert_eq!(
             wave_zero.len(),
-            graph.node_count(),
+            no_edge_graph.node_count(),
             "every module should be ready in wave zero"
         );
         let mut sorted = wave_zero.clone();
         sorted.sort_by_key(|id| id.index());
         assert_eq!(wave_zero, sorted, "wave zero must be in ModuleId order");
 
-        // Adding a provider-before-consumer edge splits the waves deterministically.
-        let alpha_id = module_id_for(&index, ModuleRootRole::Normal, "alpha");
-        let beta_id = module_id_for(&index, ModuleRootRole::Normal, "beta");
+        // Adding a provider-before-consumer edge splits the waves deterministically. Edge
+        // insertion happens while the graph is under construction; completion freezes the
+        // adjacency before scheduling reads it.
+        let mut graph = ProjectModuleGraph::from_source_tree_index(&index);
         assert_eq!(
             graph.add_dependency_edge(alpha_id, beta_id).unwrap(),
             DependencyEdgeOutcome::Inserted,
@@ -2425,6 +3084,10 @@ mod project_module_graph_tests {
             DependencyEdgeOutcome::AlreadyPresent,
             "inserting the same edge is idempotent"
         );
+        assert!(graph.has_dependency_edge(alpha_id, beta_id));
+        graph
+            .complete()
+            .expect("populated graph should complete before scheduling");
         assert!(graph.has_dependency_edge(alpha_id, beta_id));
 
         let waves = graph
@@ -2454,16 +3117,23 @@ mod project_module_graph_tests {
         fs::write(root.join("+package.moth"), "").expect("should write project facade");
 
         let (index, _project_root, _entry_root) = discover_index(&root, "src");
-        let mut graph = ProjectModuleGraph::from_source_tree_index(&index);
 
-        let facade_id = graph
+        let facade_id = ProjectModuleGraph::from_source_tree_index(&index)
             .facade()
             .expect("project package facade should be classified");
         let pages_id = module_id_for(&index, ModuleRootRole::Normal, "pages");
         let site_id = module_id_for(&index, ModuleRootRole::Normal, "");
 
         // Without edges the facade is independent and joins wave zero with the normal modules.
-        let waves = graph.compile_waves().expect("no-edge graph waves cleanly");
+        // The no-edge graph completes before scheduling so wave scheduling reads only frozen
+        // adjacency.
+        let mut no_edge_graph = ProjectModuleGraph::from_source_tree_index(&index);
+        no_edge_graph
+            .complete()
+            .expect("no-edge graph should complete before scheduling");
+        let waves = no_edge_graph
+            .compile_waves()
+            .expect("completed no-edge graph waves cleanly");
         assert_eq!(waves.len(), 1, "no edges means one wave");
         assert!(
             waves[0].contains(&facade_id),
@@ -2471,13 +3141,18 @@ mod project_module_graph_tests {
         );
 
         // Once a real edge targets the facade, it is ordered after its providers without any
-        // hard-coded fake dependency.
+        // hard-coded fake dependency. Edges are inserted while the graph is under construction,
+        // then completion freezes the adjacency before scheduling reads it.
+        let mut graph = ProjectModuleGraph::from_source_tree_index(&index);
         graph
             .add_dependency_edge(pages_id, facade_id)
             .expect("pages -> facade edge should insert");
         graph
             .add_dependency_edge(site_id, facade_id)
             .expect("site -> facade edge should insert");
+        graph
+            .complete()
+            .expect("populated graph should complete before scheduling");
 
         let waves = graph
             .compile_waves()
@@ -2525,6 +3200,9 @@ mod project_module_graph_tests {
         graph
             .add_dependency_edge(beta_id, alpha_id)
             .expect("beta -> alpha edge should insert");
+        graph
+            .complete()
+            .expect("cyclic graph should still complete before scheduling");
 
         let cycle_error = graph
             .compile_waves()
@@ -2573,11 +3251,156 @@ mod project_module_graph_tests {
             .expect_err("an out-of-range module id must be rejected");
         assert_eq!(invalid_error.error_type, ErrorType::Compiler);
 
-        // The graph remains usable for deterministic waves after rejected edges.
+        // The graph remains usable for deterministic waves after rejected edges. Rejected edges
+        // do not mutate the graph, so it still completes cleanly with no accepted edges.
+        graph
+            .complete()
+            .expect("graph should complete before scheduling after rejected edges");
         let waves = graph
             .compile_waves()
             .expect("rejected edges do not mutate the graph");
         assert_eq!(waves.len(), 1, "no accepted edges means one ready wave");
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn frozen_adjacency_orders_consumers_in_module_id_order() {
+        // Hidden invariant: completion freezes provider/consumer adjacency into sorted
+        // `Vec<ModuleId>` storage, so the consumer wave preserves `ModuleId` order regardless of
+        // edge insertion order. The frozen order is observable through the wave that follows the
+        // provider.
+        let root = temp_dir("graph_frozen_consumer_order");
+        let src = root.join("src");
+        fs::create_dir_all(src.join("alpha")).expect("should create alpha");
+        fs::create_dir_all(src.join("beta")).expect("should create beta");
+        fs::create_dir_all(src.join("gamma")).expect("should create gamma");
+
+        fs::write(src.join("#home.moth"), "").expect("should write entry root");
+        fs::write(src.join("alpha/#alpha.moth"), "").expect("should write alpha root");
+        fs::write(src.join("beta/#beta.moth"), "").expect("should write beta root");
+        fs::write(src.join("gamma/#gamma.moth"), "").expect("should write gamma root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let alpha_id = module_id_for(&index, ModuleRootRole::Normal, "alpha");
+        let beta_id = module_id_for(&index, ModuleRootRole::Normal, "beta");
+        let gamma_id = module_id_for(&index, ModuleRootRole::Normal, "gamma");
+
+        // alpha is the provider; beta and gamma are its consumers. Insert the higher-`ModuleId`
+        // consumer first so insertion order does not match the frozen `ModuleId` order the waves
+        // must preserve.
+        let (first_consumer, second_consumer) = if beta_id.index() < gamma_id.index() {
+            (gamma_id, beta_id)
+        } else {
+            (beta_id, gamma_id)
+        };
+        let mut graph = ProjectModuleGraph::from_source_tree_index(&index);
+        graph
+            .add_dependency_edge(alpha_id, first_consumer)
+            .expect("provider -> first-inserted consumer edge should insert");
+        graph
+            .add_dependency_edge(alpha_id, second_consumer)
+            .expect("provider -> second-inserted consumer edge should insert");
+        graph
+            .complete()
+            .expect("graph should complete before scheduling");
+
+        let waves = graph
+            .compile_waves()
+            .expect("provider-with-consumers graph should wave cleanly");
+        assert_eq!(waves.len(), 2, "provider then consumers is two waves");
+        assert!(
+            waves[0].contains(&alpha_id),
+            "provider is ready in wave zero"
+        );
+        let consumer_wave = &waves[1];
+        assert_eq!(
+            consumer_wave.len(),
+            2,
+            "both consumers are ready in the second wave"
+        );
+        // The frozen consumer adjacency is sorted by `ModuleId`, so the consumer wave preserves
+        // that order regardless of insertion order.
+        let mut sorted_consumers = consumer_wave.clone();
+        sorted_consumers.sort_by_key(|id| id.index());
+        assert_eq!(
+            consumer_wave, &sorted_consumers,
+            "frozen consumer adjacency must be in ModuleId order"
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn invalid_graph_phase_use_reports_internal_errors() {
+        // Hidden invariant: the construction-to-completion phase is an explicit boundary.
+        // Scheduling before completion, mutation after completion and double completion all
+        // surface as internal `CompilerError`s without panicking, and a completed graph still
+        // schedules cleanly from its frozen adjacency.
+        let root = temp_dir("graph_phase_validation");
+        let src = root.join("src");
+        fs::create_dir_all(src.join("alpha")).expect("should create alpha");
+        fs::create_dir_all(src.join("beta")).expect("should create beta");
+
+        fs::write(src.join("#home.moth"), "").expect("should write entry root");
+        fs::write(src.join("alpha/#alpha.moth"), "").expect("should write alpha root");
+        fs::write(src.join("beta/#beta.moth"), "").expect("should write beta root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let alpha_id = module_id_for(&index, ModuleRootRole::Normal, "alpha");
+        let beta_id = module_id_for(&index, ModuleRootRole::Normal, "beta");
+
+        // Scheduling before completion is an internal compiler failure.
+        let uncompleted = ProjectModuleGraph::from_source_tree_index(&index);
+        let scheduling_error = uncompleted
+            .compile_waves()
+            .expect_err("scheduling before completion must be rejected");
+        assert_eq!(scheduling_error.error_type, ErrorType::Compiler);
+        assert!(
+            scheduling_error.msg.contains("before completion"),
+            "scheduling error must name the phase violation: {}",
+            scheduling_error.msg
+        );
+
+        // Mutation after completion is an internal compiler failure. Edge insertion and double
+        // completion both surface as the same lifecycle violation.
+        let mut completed = ProjectModuleGraph::from_source_tree_index(&index);
+        completed
+            .add_dependency_edge(alpha_id, beta_id)
+            .expect("construction edge should insert");
+        completed.complete().expect("graph should complete once");
+
+        let mutation_error = completed
+            .add_dependency_edge(beta_id, alpha_id)
+            .expect_err("mutation after completion must be rejected");
+        assert_eq!(mutation_error.error_type, ErrorType::Compiler);
+        assert!(
+            mutation_error.msg.contains("after completion"),
+            "mutation error must name the phase violation: {}",
+            mutation_error.msg
+        );
+
+        let double_complete_error = completed
+            .complete()
+            .expect_err("double completion must be rejected as mutation after completion");
+        assert_eq!(double_complete_error.error_type, ErrorType::Compiler);
+        assert!(
+            double_complete_error.msg.contains("after completion"),
+            "double completion error must name the phase violation: {}",
+            double_complete_error.msg
+        );
+
+        // The completed graph still schedules cleanly from its frozen adjacency.
+        let waves = completed
+            .compile_waves()
+            .expect("completed graph should schedule from frozen adjacency");
+        assert_eq!(
+            waves.len(),
+            2,
+            "frozen adjacency preserves provider-then-consumer waves"
+        );
+        assert!(waves[0].contains(&alpha_id));
+        assert!(waves[1].contains(&beta_id));
 
         fs::remove_dir_all(&root).expect("should remove temp root");
     }

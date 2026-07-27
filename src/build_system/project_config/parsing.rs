@@ -9,8 +9,7 @@
 
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::create_project_modules::import_scanning::extract_import_provider_references;
-use crate::build_system::create_project_modules::root_validation::validate_source_package_roots;
-use crate::build_system::create_project_modules::source_package_discovery::prepare_source_package_roots;
+use crate::build_system::create_project_modules::source_package_discovery::build_source_package_boundary_indexes;
 use crate::build_system::project_config::ProjectConfigParseServices;
 use std::sync::Arc;
 
@@ -112,24 +111,22 @@ pub(super) fn parse_config_file(
     };
 
     let path_resolver_start = crate::timing::start_pipeline_timing();
-    let prepared_source_package_roots = match prepare_source_package_roots(
+    // Preserve the current config import surface while replacing its package-root preflight:
+    // package roots and collision facts now come from the same per-boundary indexes used by
+    // directory and single-file compilation, never from a second scanner.
+    let prepared_source_package_roots = match build_source_package_boundary_indexes(
         &services.frontend_surface.source_packages,
+        &services.frontend_surface.source_file_kinds,
+        &services.frontend_surface.external_import_providers,
         string_table,
     ) {
-        Ok(roots) => roots,
+        Ok(indexes) => indexes.prepared_source_package_roots(),
         Err(messages) => {
             log_config_stage_timing("config.parse.path_resolver", path_resolver_start);
             log_config_stage_timing("config.parse.total", parse_total_start);
             return Err(messages);
         }
     };
-    if let Err(messages) =
-        validate_source_package_roots(&prepared_source_package_roots, string_table)
-    {
-        log_config_stage_timing("config.parse.path_resolver", path_resolver_start);
-        log_config_stage_timing("config.parse.total", parse_total_start);
-        return Err(messages);
-    }
 
     let project_path_resolver = match ProjectPathResolver::new(
         canonical_dir.clone(),
@@ -324,6 +321,7 @@ pub(super) fn parse_config_file(
         prepared,
         &services.frontend_surface.binding_packages,
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         Some(&project_path_resolver),
         string_table,
     ) {
@@ -382,6 +380,7 @@ pub(super) fn parse_config_file(
             top_level_const_fragments: sorted.top_level_const_fragments,
         },
         AstBuildContext {
+            root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             external_package_registry,
             style_directives: services.style_directives,
             string_table,
@@ -396,7 +395,7 @@ pub(super) fn parse_config_file(
     log_config_stage_timing("config.parse.ast", ast_start);
 
     let ast = match ast_result {
-        Ok(ast) => ast,
+        Ok(build_result) => build_result.ast,
         Err(messages) => {
             log_config_stage_timing("config.parse.total", parse_total_start);
             return Err(messages);

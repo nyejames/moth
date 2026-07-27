@@ -67,7 +67,9 @@ pub(super) fn canonicalize_local_ordering_hints(
                     .get(&local_name)
                     .or_else(|| visibility.visible_type_alias_names.get(&local_name))
                 {
-                    canonical.insert(LocalDeclarationOrderingHint::new(resolved_path.clone()));
+                    canonical.insert(LocalDeclarationOrderingHint::new(
+                        resolved_path.local_path().clone(),
+                    ));
                 }
                 // External symbols and virtual or provider imports have no header graph
                 // participant, so the import-spelled hint is dropped here.

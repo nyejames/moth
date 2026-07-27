@@ -1,1 +1,1 @@
-import @./internal {identity_impl as identity}
+import @internal {identity_impl as identity}

@@ -7,6 +7,7 @@
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidPageMetadataReason};
 use crate::compiler_frontend::hir::constants::HirConstValue;
+use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -31,11 +32,12 @@ pub(crate) struct HtmlPageMetadata {
 
 pub(crate) fn extract_html_page_metadata(
     hir_module: &HirModule,
+    start_function: FunctionId,
     string_table: &mut StringTable,
 ) -> Result<HtmlPageMetadata, Box<CompilerDiagnostic>> {
     let entry_scope = hir_module
         .side_table
-        .function_name_path(hir_module.start_function)
+        .function_name_path(start_function)
         .and_then(|path| path.parent());
 
     let entry_scope_prefix = entry_scope

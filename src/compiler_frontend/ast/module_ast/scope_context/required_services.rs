@@ -72,7 +72,7 @@ impl ScopeContext {
         file_visibility
             .visible_trait_names
             .values()
-            .any(|path| path == &trait_definition.canonical_path)
+            .any(|target| target.local_path() == &trait_definition.canonical_path)
     }
 
     /// Build a [`TemplateFoldContext`] from the current scope's shared services.

@@ -9,8 +9,8 @@
 //! WHY: locked decision 10 in the canonical-module plan separates consumer-visible generic
 //! semantic identity (the draft's [`PublicGenericTemplateDescriptor`]) from the declaring
 //! module's retained template body. This store is one validated body-artefact checkpoint for the
-//! future build-owned generated sidecar worklist (R3), not public semantic identity and not a
-//! backend-consumed artefact yet.
+//! future build-owned generated-sidecar worklist (R5D-R5G), not public semantic identity and not
+//! a backend-consumed artefact yet.
 //!
 //! The retained [`GenericFunctionTemplate`] is the one existing body payload produced during
 //! signature resolution and body validation. It carries the body tokens, resolved signature,
@@ -21,17 +21,18 @@
 //! This is a body-artefact checkpoint only, not the complete materialisation context. Complete
 //! materialisation also needs declaration, file-visibility, generic/type and related frontend
 //! context that this slice intentionally does not retain; that context is deferred to a later
-//! bounded R2/R3 slice.
+//! bounded R5D-R5G slice.
 //!
 //! Boundary: the store lives on [`ModuleCompilerMetadata`] during compilation. The legacy
 //! flat-module handoff drops it before string-table remap because the retained
 //! [`FunctionSignature`] carries donor-local `StringId`s whose remap owner is not in scope for
-//! this slice. R3 will consume the store for the generated sidecar worklist before that drop.
+//! this slice. The drop is deliberate; R5D-R5G will replace this body-only checkpoint with the
+//! complete artefact store and worklist that own generated-sidecar materialisation.
 
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::defined_public_type_surface::PublicCallableOriginSeed;
-use crate::compiler_frontend::public_interface_draft::{
+use crate::compiler_frontend::public_interface::CallableSeed;
+use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics, PublicInterfaceDraft,
     PublicReceiverMethodSemantics,
 };
@@ -64,9 +65,9 @@ const _: () = {
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedGenericTemplateArtefact {
     pub(crate) origin: OriginFunctionId,
-    // The template body payload is retained as compiler metadata for the future generated
-    // sidecar worklist (R3). Production code moves the artefact into the store and drops it at
-    // the legacy handoff; test accessors read the field until R3 consumes it.
+    // The template body payload is retained as compiler metadata for the future R5D-R5G
+    // generated-sidecar worklist. Production code moves the artefact into the store and drops it
+    // at the legacy handoff; test accessors read the field until R5D-R5G replaces this checkpoint.
     #[allow(dead_code)]
     pub(crate) template: GenericFunctionTemplate,
 }
@@ -78,15 +79,15 @@ pub(crate) struct ValidatedGenericTemplateArtefact {
 /// for deterministic iteration independent of hash-map or declaration-scheduling order.
 ///
 /// WHY: gives [`crate::build_system::build::ModuleCompilerMetadata`] one owned lane for
-/// validated generic-template body artefacts. R3 will consume this checkpoint alongside the
-/// declaration, file-visibility, generic/type and related frontend context this slice
-/// intentionally does not retain, so concrete instances can be materialised without reopening
-/// donor AST state.
+/// validated generic-template body artefacts. R5D-R5G will replace this checkpoint with a
+/// complete artefact that retains the declaration, file-visibility, generic/type and related
+/// frontend context this slice intentionally omits, so concrete instances can be materialised
+/// without reopening donor AST state.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ValidatedGenericTemplateStore {
-    // The artefacts vector is retained as compiler metadata for the future generated sidecar
-    // worklist (R3). Production code constructs and drops the store at the legacy handoff;
-    // test accessors read the field until R3 consumes it.
+    // The artefacts vector is retained as compiler metadata for the future R5D-R5G
+    // generated-sidecar worklist. Production code constructs and drops the store at the legacy
+    // handoff; test accessors read the field until R5D-R5G replaces this checkpoint.
     #[allow(dead_code)]
     artefacts: Vec<ValidatedGenericTemplateArtefact>,
 }
@@ -147,14 +148,14 @@ impl ValidatedGenericTemplateStore {
 /// - A template whose exact path matches no public callable is a private generic function and
 ///   remains an intentional exclusion.
 ///
-/// [`PublicGenericTemplateDescriptor`]: crate::compiler_frontend::public_interface_draft::PublicGenericTemplateDescriptor
+/// [`PublicGenericTemplateDescriptor`]: crate::compiler_frontend::public_interface::PublicGenericTemplateDescriptor
 pub(crate) fn extract_validated_generic_template_artefacts(
     draft: &PublicInterfaceDraft,
-    public_callable_origin_seeds: &[PublicCallableOriginSeed],
+    callable_seeds: &[CallableSeed],
     templates: FxHashMap<InternedPath, GenericFunctionTemplate>,
 ) -> Result<ValidatedGenericTemplateStore, CompilerError> {
     let expected_callables = collect_public_callable_origins(draft)?;
-    validate_public_callable_origin_seeds(&expected_callables, public_callable_origin_seeds)?;
+    validate_callable_seeds(&expected_callables, callable_seeds)?;
 
     // Validate every donor-local map entry before consuming any body. The map key is the exact
     // transient declaration path; the template repeats it as its own identity.
@@ -180,10 +181,7 @@ pub(crate) fn extract_validated_generic_template_artefacts(
     let mut artefacts: Vec<ValidatedGenericTemplateArtefact> =
         Vec::with_capacity(expected_callables.len());
 
-    for seed in public_callable_origin_seeds
-        .iter()
-        .filter(|seed| seed.generic_template)
-    {
+    for seed in callable_seeds.iter().filter(|seed| seed.generic_template) {
         let template = templates_by_path.remove(&seed.path).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "validated generic-template extraction: exported generic callable origin {:?} \
@@ -202,10 +200,7 @@ pub(crate) fn extract_validated_generic_template_artefacts(
     // Any remaining template whose exact path matches an exported non-generic callable is a
     // generic/non-generic mismatch. A remaining template whose path does not match a public
     // callable is a private generic function and remains an intentional exclusion.
-    for seed in public_callable_origin_seeds
-        .iter()
-        .filter(|seed| !seed.generic_template)
-    {
+    for seed in callable_seeds.iter().filter(|seed| !seed.generic_template) {
         if templates_by_path.contains_key(&seed.path) {
             return Err(CompilerError::compiler_error(format!(
                 "validated generic-template extraction: exported non-generic callable origin \
@@ -245,7 +240,10 @@ fn collect_public_callable_origins(
                 insert_public_callable_origin(
                     &mut callables,
                     function_origin.clone(),
-                    function.generic_template.is_some(),
+                    matches!(
+                        function.category,
+                        crate::compiler_frontend::public_interface::PublicFunctionCategory::GenericTemplate(_)
+                    ),
                 )?;
             }
             PublicDeclarationSemantics::Struct(struct_semantics) => {
@@ -292,7 +290,10 @@ fn insert_receiver_callable_origins(
         insert_public_callable_origin(
             callables,
             method.method_origin.clone(),
-            method.generic_template,
+            matches!(
+                method.category,
+                crate::compiler_frontend::public_interface::PublicReceiverMethodCategory::GenericTemplate
+            ),
         )?;
     }
 
@@ -313,9 +314,9 @@ fn insert_public_callable_origin(
     Ok(())
 }
 
-fn validate_public_callable_origin_seeds(
+fn validate_callable_seeds(
     expected_callables: &FxHashMap<OriginFunctionId, bool>,
-    seeds: &[PublicCallableOriginSeed],
+    seeds: &[CallableSeed],
 ) -> Result<(), CompilerError> {
     let mut seen_paths: FxHashMap<InternedPath, bool> = FxHashMap::default();
     let mut seen_origins = FxHashSet::default();

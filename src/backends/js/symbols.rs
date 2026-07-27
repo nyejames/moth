@@ -1,14 +1,12 @@
 //! Symbol map construction for the JavaScript backend.
 //!
-//! Builds deterministic JS identifier names for every HIR function, local, and
-//! field before code emission begins.
+//! Builds deterministic JS identifier names for selected HIR functions, locals and fields before
+//! code emission begins.
 
 use crate::backends::js::JsEmitter;
 use crate::backends::js::identifiers::{is_js_reserved, sanitize_identifier};
 use crate::compiler_frontend::builtins::error_type::{ERROR_FIELD_CODE, ERROR_FIELD_MESSAGE};
-
-const BUILTIN_ERROR_MESSAGE_FIELD_ID: u32 = 0;
-const BUILTIN_ERROR_CODE_FIELD_ID: u32 = 1;
+use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 
 /// Deterministic JS field name for the builtin `Error.message` field.
 ///
@@ -16,29 +14,20 @@ const BUILTIN_ERROR_CODE_FIELD_ID: u32 = 1;
 /// WHY: backend-created `Error` values must use the same lowered field names as source-authored
 /// `Error(...)` structs, including compact release symbols.
 pub(crate) fn builtin_error_message_js_field_name(release_build: bool) -> String {
-    build_symbol_raw(
-        "fld",
-        BUILTIN_ERROR_MESSAGE_FIELD_ID,
-        ERROR_FIELD_MESSAGE,
-        release_build,
-    )
+    build_field_symbol_raw(ERROR_FIELD_MESSAGE, release_build)
 }
 
 /// Deterministic JS field name for the builtin `Error.code` field.
 pub(crate) fn builtin_error_code_js_field_name(release_build: bool) -> String {
-    build_symbol_raw(
-        "fld",
-        BUILTIN_ERROR_CODE_FIELD_ID,
-        ERROR_FIELD_CODE,
-        release_build,
-    )
+    build_field_symbol_raw(ERROR_FIELD_CODE, release_build)
 }
 
 impl<'hir> JsEmitter<'hir> {
-    pub(crate) fn build_symbol_maps(&mut self) {
+    pub(crate) fn build_symbol_maps(&mut self) -> Result<(), CompilerError> {
         self.build_function_symbols();
         self.build_local_symbols();
-        self.build_field_symbols();
+        self.build_field_symbols()?;
+        Ok(())
     }
 
     fn build_function_symbols(&mut self) {
@@ -46,11 +35,23 @@ impl<'hir> JsEmitter<'hir> {
             .hir
             .functions
             .iter()
+            .filter(|function| self.config.function_emission_policy.includes(function.id))
             .map(|function| function.id)
             .collect::<Vec<_>>();
         function_ids.sort_by_key(|function_id| function_id.0);
 
         for function_id in function_ids {
+            if let Some((origin, _)) = self
+                .hir
+                .function_ids_by_origin
+                .iter()
+                .find(|(_, local_function_id)| **local_function_id == function_id)
+                && let Some(name) = self.config.source_function_names.get(origin)
+            {
+                self.used_identifiers.insert(name.clone());
+                self.function_name_by_id.insert(function_id, name.clone());
+                continue;
+            }
             let leaf_name_hint = self
                 .hir
                 .side_table
@@ -88,18 +89,24 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn build_field_symbols(&mut self) {
+    fn build_field_symbols(&mut self) -> Result<(), CompilerError> {
         let mut field_specs = Vec::new();
+        let release_symbol_names = self.use_release_symbol_names();
 
         for hir_struct in &self.hir.structs {
             for field in &hir_struct.fields {
-                let raw_name = self
+                let leaf_name = self
                     .hir
                     .side_table
                     .field_name_path(field.id)
                     .and_then(|path| path.name_str(self.string_table))
-                    .map(|leaf_name| self.build_symbol_raw("fld", field.id.0, leaf_name))
-                    .unwrap_or_else(|| self.build_symbol_raw("fld", field.id.0, "field"));
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "JavaScript field symbol generation has no source name for FieldId({})",
+                            field.id.0
+                        ))
+                    })?;
+                let raw_name = build_field_symbol_raw(leaf_name, release_symbol_names);
 
                 field_specs.push((field.id, raw_name));
             }
@@ -109,9 +116,9 @@ impl<'hir> JsEmitter<'hir> {
         field_specs.dedup_by_key(|(field_id, _)| field_id.0);
 
         for (field_id, raw_name) in field_specs {
-            let js_name = self.assign_unique_identifier(&raw_name);
-            self.field_name_by_id.insert(field_id, js_name);
+            self.field_name_by_id.insert(field_id, raw_name);
         }
+        Ok(())
     }
 
     fn assign_unique_identifier(&mut self, raw: &str) -> String {
@@ -148,6 +155,23 @@ impl<'hir> JsEmitter<'hir> {
 
     fn use_release_symbol_names(&self) -> bool {
         !self.config.pretty
+    }
+}
+
+/// Field names form a cross-module ABI and therefore derive from source spelling, never a
+/// module-local `FieldId`. Reusing one property name across unrelated nominal types is harmless
+/// in JavaScript and keeps values readable by every independently compiled module.
+pub(super) fn build_field_symbol_raw(leaf_name: &str, release_build: bool) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(leaf_name.len().saturating_mul(2));
+    for byte in leaf_name.as_bytes() {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    if release_build {
+        format!("f_{encoded}")
+    } else {
+        format!("moth_field_{encoded}")
     }
 }
 

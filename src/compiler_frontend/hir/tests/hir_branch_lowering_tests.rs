@@ -47,7 +47,7 @@ fn blocks_with_user_function_call(module: &HirModule, function_id: FunctionId) -
                 matches!(
                     statement.kind,
                     HirStatementKind::Call {
-                        target: CallTarget::UserFunction(target_id),
+                        target: CallTarget::Local(target_id),
                         ..
                     } if target_id == function_id
                 )
@@ -221,7 +221,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
     let rhs_function_id = module
         .functions
         .iter()
-        .find(|function| function.id != module.start_function)
+        .find(|function| Some(function.id) != module.start_function)
         .expect("rhs function should be present")
         .id;
     let start_function = super::start_function(&module);
@@ -349,7 +349,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
     let rhs_function_id = module
         .functions
         .iter()
-        .find(|function| function.id != module.start_function)
+        .find(|function| Some(function.id) != module.start_function)
         .expect("rhs function should be present")
         .id;
     let start_function = super::start_function(&module);

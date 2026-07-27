@@ -35,7 +35,7 @@ pub(crate) fn lower_statement(
             }
 
             let callee = match target {
-                CallTarget::UserFunction(function_id) => {
+                CallTarget::Local(function_id) => {
                     // User calls stay function-id based after semantic lowering.
                     let function_id = context
                         .module_context
@@ -49,7 +49,12 @@ pub(crate) fn lower_statement(
                         })?;
                     WasmCalleeRef::Function(function_id)
                 }
-                CallTarget::ExternalFunction(_) => {
+                CallTarget::CrossModule(origin) => {
+                    return Err(lir_transformation_error(format!(
+                        "Wasm lowering received unresolved cross-module function target {origin:?}"
+                    )));
+                }
+                CallTarget::External(_) => {
                     // Host calls lower to deterministic import ids.
                     let import_id = resolve_host_call_import(context.module_context, target)?;
                     WasmCalleeRef::Import(import_id)

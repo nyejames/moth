@@ -128,6 +128,7 @@ fn file_import_remaps_all_fields_without_alias() {
         provider: StructuralProviderReference {
             path: header_path,
             path_location,
+            from_grouped: false,
         },
         alias: None,
         location,
@@ -165,6 +166,7 @@ fn file_import_remaps_all_fields_with_alias() {
         provider: StructuralProviderReference {
             path: header_path,
             path_location,
+            from_grouped: false,
         },
         alias: Some(alias_name),
         location,
@@ -206,6 +208,7 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
         provider: StructuralProviderReference {
             path: header_path,
             path_location,
+            from_grouped: false,
         },
         alias: Some(alias_name),
         location,
@@ -624,6 +627,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
         provider: StructuralProviderReference {
             path: InternedPath::from_single_str("@html/head", &mut local),
             path_location: make_location("test.moth", &mut local),
+            from_grouped: false,
         },
         alias: Some(local.intern("h")),
         location: make_location("test.moth", &mut local),

@@ -123,6 +123,7 @@ impl<'a> BorrowChecker<'a> {
         let transfer_context = BorrowTransferContext {
             external_package_registry: self.external_package_registry,
             public_call_summaries: &self.public_call_summaries,
+            imported_call_summaries: &self.module.imported_call_summaries,
             diagnostics: BorrowDiagnostics::new(self.module, self.string_table),
         };
 
@@ -343,8 +344,7 @@ impl<'a> BorrowChecker<'a> {
 
         Err(self.diagnostics.internal_error(
             "Borrow checker could not stabilize local mutation summaries",
-            self.diagnostics
-                .function_error_location(self.module.start_function),
+            self.diagnostics.module_error_location(),
         ))
     }
 

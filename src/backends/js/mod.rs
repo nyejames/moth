@@ -30,24 +30,33 @@ pub(crate) use symbols::{builtin_error_code_js_field_name, builtin_error_message
 
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::hir::reachability::HirBackendSelection;
+use crate::compiler_frontend::semantic_identity::OriginFunctionId;
 use std::collections::{HashMap, HashSet};
 
 /// Policy controlling which HIR functions are emitted in a JS bundle.
 ///
-/// WHAT: determines whether every HIR function is lowered or only those reachable from the
-///       module entry `start` function.
-/// WHY: HTML page bundles need reachable-only emission to avoid pulling in unused source-backed package
-///      wrappers that would request unavailable runtime glue or assets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// WHAT: determines whether every HIR function is lowered or only an explicit selected set.
+/// WHY: project builders need selected-only emission to avoid pulling unreachable source-backed
+/// package wrappers into runtime glue or asset planning.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsFunctionEmissionPolicy {
     /// Emit every HIR function. This is the direct JS backend contract and test default.
     AllFunctions,
 
-    /// Emit only functions syntactically reachable from the module entry `start` function.
+    /// Emit the exact function set selected by build-owned entry planning.
     ///
-    /// WHY: HTML page bundles execute from one entry point, and unreachable source-backed package
-    /// wrappers must not request runtime glue or assets.
-    ReachableFromStart,
+    /// WHY: lowerers consume build-owned selection instead of rediscovering entry roots.
+    Selected(HirBackendSelection),
+}
+
+impl JsFunctionEmissionPolicy {
+    fn includes(&self, function_id: FunctionId) -> bool {
+        match self {
+            Self::AllFunctions => true,
+            Self::Selected(selection) => selection.contains_function(function_id),
+        }
+    }
 }
 
 /// Configuration for JS lowering.
@@ -62,7 +71,7 @@ pub struct JsLoweringConfig {
     /// Automatically invoke the module start function.
     pub auto_invoke_start: bool,
 
-    /// Controls whether the bundle contains every HIR function or only entry-reachable code.
+    /// Controls whether the bundle contains every HIR function or a build-selected subset.
     pub function_emission_policy: JsFunctionEmissionPolicy,
 
     /// External package registry for resolving backend lowering metadata.
@@ -72,6 +81,8 @@ pub struct JsLoweringConfig {
     /// WHY: only the HTML builder can emit the matching ES module glue. Direct JS backend
     /// lowering must reject these exports unless that builder path explicitly opts in.
     pub external_module_export_glue_enabled: bool,
+    /// Build-owned stable source-call symbol plan shared by every module in one entry assembly.
+    pub source_function_names: Arc<HashMap<OriginFunctionId, String>>,
 }
 
 impl JsLoweringConfig {
@@ -89,29 +100,33 @@ impl JsLoweringConfig {
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_module_export_glue_enabled: false,
+            source_function_names: Arc::new(HashMap::new()),
         }
     }
 
     /// JS-only HTML page-bundle lowering config.
     ///
-    /// WHAT: emits only entry-reachable functions and enables ES module glue generation.
-    /// WHY: HTML page bundles execute from one entry point, so unreachable source-backed package
-    /// wrappers must not request runtime glue or assets. The supplied external package
-    /// registry is stored directly because the HTML builder already owns it.
+    /// WHAT: emits only build-selected functions and enables ES module glue generation.
+    /// WHY: unreachable source-backed package wrappers must not request runtime glue or assets.
+    /// The supplied external package registry is stored directly because the HTML builder already
+    /// owns it.
     pub fn html_page_bundle(
         release_build: bool,
         external_package_registry: Arc<ExternalPackageRegistry>,
+        selection: HirBackendSelection,
+        source_function_names: Arc<HashMap<OriginFunctionId, String>>,
     ) -> Self {
         let mut config = Self::direct_js(release_build);
-        config.function_emission_policy = JsFunctionEmissionPolicy::ReachableFromStart;
+        config.function_emission_policy = JsFunctionEmissionPolicy::Selected(selection);
         config.external_package_registry = external_package_registry;
         config.external_module_export_glue_enabled = true;
+        config.source_function_names = source_function_names;
         config
     }
 
     /// HTML-Wasm companion-JS lowering config.
     ///
-    /// WHAT: emits only entry-reachable JS used by the Wasm bootstrap while keeping generated
+    /// WHAT: emits only build-selected JS used by the Wasm bootstrap while keeping generated
     /// ES module glue disabled.
     /// WHY: this path emits bootstrap JS and Wasm artifacts, not generated glue modules.
     /// Reachable JS-backed external calls must be rejected by Wasm validation rather than
@@ -119,9 +134,10 @@ impl JsLoweringConfig {
     pub(crate) fn html_wasm_companion(
         release_build: bool,
         external_package_registry: Arc<ExternalPackageRegistry>,
+        selection: HirBackendSelection,
     ) -> Self {
         let mut config = Self::direct_js(release_build);
-        config.function_emission_policy = JsFunctionEmissionPolicy::ReachableFromStart;
+        config.function_emission_policy = JsFunctionEmissionPolicy::Selected(selection);
         config.external_package_registry = external_package_registry;
         config
     }

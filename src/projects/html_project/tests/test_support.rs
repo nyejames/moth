@@ -6,18 +6,24 @@
 //!      live in one place instead of being redefined in every test file.
 
 use crate::build_system::build::{
-    FileKind, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
-    ModuleRootActivity, OutputFile,
+    FileKind, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleExternalImport,
+    ModuleLinkFacts, ModuleRootActivity, OutputFile,
 };
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::{
+    CallTarget, ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering,
+    ExternalPackageRegistry,
+};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
 use crate::compiler_frontend::hir::regions::HirRegion;
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::compile_time_paths::{
     CompileTimePathBase, CompileTimePathKind,
@@ -56,7 +62,7 @@ pub(crate) fn create_test_hir_module() -> HirModule {
         return_type: unit_type,
         return_aliases: vec![],
     }];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
@@ -74,6 +80,8 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
         FunctionId(0),
         InternedPath::from_single_str("start_entry", string_table),
     );
+    let function_link_facts = collect_module_function_link_facts(&hir_module)
+        .expect("test HIR should produce function link facts");
 
     Module {
         executable: ModuleExecutable {
@@ -83,7 +91,8 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
         },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
-            module_external_imports: vec![],
+            external_import_candidates: vec![],
+            functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
             entry_point,
@@ -100,6 +109,64 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
             validated_generic_templates: ValidatedGenericTemplateStore::default(),
         },
     }
+}
+
+/// Attach one candidate import to a reachable external call in the test entry function.
+///
+/// WHY: runtime-asset tests exercise HTML emission rather than reachability policy, so their
+/// fixtures must model a package that entry assembly has legitimately selected.
+pub(crate) fn add_reachable_external_import(
+    module: &mut Module,
+    mut external_import: ModuleExternalImport,
+) {
+    let import_index = module.link_facts.external_import_candidates.len();
+    let registry = Arc::make_mut(&mut module.link_facts.external_package_registry);
+    let package_id = registry
+        .register_package(
+            format!("@test/runtime-{import_index}"),
+            PackageOrigin::ProjectLocal,
+        )
+        .expect("test runtime package should register");
+    let function_id = registry
+        .register_external_function(
+            package_id,
+            ExternalFunctionSpec {
+                name: format!("runtime_call_{import_index}"),
+                parameters: vec![],
+                returns: vec![],
+                error_return_type: None,
+                lowerings: ExternalFunctionLowerings {
+                    js: Some(ExternalJsLowering::InlineExpression("undefined".to_owned())),
+                    wasm: None,
+                },
+            },
+        )
+        .expect("test runtime function should register");
+
+    let start_block = module
+        .executable
+        .hir
+        .blocks
+        .iter_mut()
+        .find(|block| block.id == BlockId(0))
+        .expect("test entry block should exist");
+    start_block.statements.push(HirStatement {
+        id: HirNodeId(10_000 + import_index as u32),
+        kind: HirStatementKind::Call {
+            target: CallTarget::External(function_id),
+            args: vec![],
+            result: None,
+        },
+        location: SourceLocation::default(),
+    });
+
+    external_import.package_id = package_id;
+    module
+        .link_facts
+        .external_import_candidates
+        .push(external_import);
+    module.link_facts.functions = collect_module_function_link_facts(&module.executable.hir)
+        .expect("test HIR should refresh function link facts");
 }
 
 pub(crate) fn interned_path(string_table: &mut StringTable, components: &[&str]) -> InternedPath {

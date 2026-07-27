@@ -115,7 +115,12 @@ fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
 }
 
 fn start_entry_block_index(module: &HirModule) -> usize {
-    module.functions[module.start_function.0 as usize].entry.0 as usize
+    module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize
 }
 
 fn validation_error_for_injected_local_type(
@@ -706,7 +711,11 @@ fn validator_rejects_invalid_jump_target() {
     let ast = build_ast(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let entry_block = module.functions[module.start_function.0 as usize].entry;
+    let entry_block = module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry;
     module.blocks[entry_block.0 as usize].terminator = HirTerminator::Jump {
         target: crate::compiler_frontend::hir::ids::BlockId(999),
         args: vec![],
@@ -742,7 +751,10 @@ fn validator_rejects_non_literal_match_pattern() {
     let ast = build_ast(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let start = &module.functions[module.start_function.0 as usize];
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
     let entry_block = &mut module.blocks[start.entry.0 as usize];
     let local_id = start.params[0];
     let local_ty = entry_block.locals[0].ty;
@@ -843,8 +855,12 @@ fn validator_rejects_unresolved_generic_parameter_types() {
     let generic_type_id =
         type_environment.intern_generic_parameter(GenericParameterId(0), parameter_name);
 
-    let entry_block =
-        &mut module.blocks[module.functions[module.start_function.0 as usize].entry.0 as usize];
+    let entry_block = &mut module.blocks[module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize];
     entry_block.locals.push(HirLocal {
         id: LocalId(9000),
         ty: generic_type_id,
@@ -981,7 +997,10 @@ fn validator_rejects_function_return_type_containing_generic_parameter() {
     let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
 
-    let start_index = module.start_function.0 as usize;
+    let start_index = module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize;
     module.functions[start_index].return_type = generic_type_id;
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1016,8 +1035,12 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
 
-    let entry_block =
-        &mut module.blocks[module.functions[module.start_function.0 as usize].entry.0 as usize];
+    let entry_block = &mut module.blocks[module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize];
     entry_block.locals[0].ty = generic_type_id;
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1135,7 +1158,11 @@ fn validator_rejects_placeholder_terminator() {
     let ast = build_ast(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let entry = module.functions[module.start_function.0 as usize].entry;
+    let entry = module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry;
     module.blocks[entry.0 as usize].terminator = HirTerminator::Uninitialized;
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1230,7 +1257,10 @@ fn validator_rejects_out_of_range_return_alias_metadata() {
     let ast = build_ast(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let start_index = module.start_function.0 as usize;
+    let start_index = module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize;
     module.functions[start_index].return_aliases = vec![Some(vec![1])];
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1267,11 +1297,15 @@ fn validator_rejects_cross_function_cfg_edges() {
     let ast = build_ast(vec![helper, start], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let start_entry = module.functions[module.start_function.0 as usize].entry;
+    let start_entry = module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry;
     let helper_entry = module
         .functions
         .iter()
-        .find(|function| function.id != module.start_function)
+        .find(|function| Some(function.id) != module.start_function)
         .map(|function| function.entry)
         .expect("helper function should exist");
 
@@ -1355,8 +1389,12 @@ fn hir_variant_construct_option_invalid_index_rejected() {
     let ast = build_ast(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let entry_block =
-        &mut module.blocks[module.functions[module.start_function.0 as usize].entry.0 as usize];
+    let entry_block = &mut module.blocks[module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize];
     let region = entry_block.region;
 
     let mut type_env = type_environment.clone();
@@ -1422,8 +1460,12 @@ fn hir_variant_construct_result_invalid_index_rejected() {
     let ast = build_ast(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let entry_block =
-        &mut module.blocks[module.functions[module.start_function.0 as usize].entry.0 as usize];
+    let entry_block = &mut module.blocks[module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize];
     let region = entry_block.region;
 
     let mut type_env = type_environment.clone();
@@ -1527,8 +1569,12 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
     );
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let entry_block =
-        &mut module.blocks[module.functions[module.start_function.0 as usize].entry.0 as usize];
+    let entry_block = &mut module.blocks[module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize];
     let region = entry_block.region;
 
     let string_ty = builtin_type_ids::STRING;
@@ -1636,8 +1682,12 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     );
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let entry_block =
-        &mut module.blocks[module.functions[module.start_function.0 as usize].entry.0 as usize];
+    let entry_block = &mut module.blocks[module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize];
     let region = entry_block.region;
 
     let string_ty = builtin_type_ids::STRING;

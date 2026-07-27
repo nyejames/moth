@@ -72,7 +72,11 @@ fn no_runtime_fragments_still_emits_start_call() {
     let mut string_table = StringTable::new();
     let module = create_test_module(std::path::PathBuf::from("#page.moth"), &mut string_table);
     let function_names = HashMap::from([(
-        module.executable.hir.start_function,
+        module
+            .executable
+            .hir
+            .start_function
+            .expect("entry module should have start"),
         String::from("start_entry"),
     )]);
 
@@ -119,7 +123,12 @@ fn escape_inline_script_replaces_closing_tag_sequence() {
 #[test]
 fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     let hir_module = create_test_hir_module();
-    let function_names = HashMap::from([(hir_module.start_function, String::from("start_entry"))]);
+    let function_names = HashMap::from([(
+        hir_module
+            .start_function
+            .expect("entry module should have start"),
+        String::from("start_entry"),
+    )]);
 
     let mut string_table = crate::compiler_frontend::symbols::string_interning::StringTable::new();
     let html = render_html_document(

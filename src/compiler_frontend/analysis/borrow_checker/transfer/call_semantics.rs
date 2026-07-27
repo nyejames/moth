@@ -42,7 +42,7 @@ pub(super) fn resolve_call_semantics(
     location: SourceLocation,
 ) -> Result<CallSemantics, BorrowCheckError> {
     match target {
-        CallTarget::UserFunction(function_id) => {
+        CallTarget::Local(function_id) => {
             let function_id = *function_id;
             let Some(summary) = context.public_call_summaries.get(&function_id) else {
                 return Err(context.diagnostics.internal_error(
@@ -89,7 +89,46 @@ pub(super) fn resolve_call_semantics(
             })
         }
 
-        CallTarget::ExternalFunction(id) => {
+        CallTarget::CrossModule(origin) => {
+            let Some(summary) = context.imported_call_summaries.get(origin) else {
+                return Err(context.diagnostics.internal_error(
+                    format!(
+                        "Borrow checker is missing the provider call summary for imported function {origin:?}"
+                    ),
+                    location,
+                ));
+            };
+
+            if summary.parameters.len() != arg_len {
+                return Err(context.diagnostics.internal_error(
+                    format!(
+                        "Borrow checker found argument count mismatch for imported function {origin:?}: expected {}, got {}",
+                        summary.parameters.len(),
+                        arg_len
+                    ),
+                    location,
+                ));
+            }
+
+            validate_return_alias_summary(
+                context,
+                &summary.return_alias,
+                arg_len,
+                location,
+                &format!("imported function {origin:?}"),
+            )?;
+
+            Ok(CallSemantics {
+                arg_effects: summary
+                    .parameters
+                    .iter()
+                    .map(parameter_arg_effect)
+                    .collect(),
+                return_alias: summary.return_alias.clone(),
+            })
+        }
+
+        CallTarget::External(id) => {
             let host_def = resolve_host_definition(context, *id, location.clone())?;
             if host_def.parameters.len() != arg_len {
                 return Err(context.diagnostics.internal_error(

@@ -3,13 +3,16 @@
 //! WHAT: coordinates module output-path resolution, homepage checks, and backend selection.
 //! WHY: project builders own artifact assembly policy while compiler backends stay generic.
 use crate::backends::backend_feature_validation::{
-    BackendFeatureValidationError, BackendFeatureValidationInput, BackendFeatureValidationRoot,
+    BackendFeatureValidationError, BackendFeatureValidationInput,
     validate_hir_backend_feature_support,
 };
 use crate::backends::external_package_validation::{
-    BackendTarget, ExternalPackageValidationError, validate_hir_external_package_support,
+    BackendTarget, validate_hir_external_package_support,
 };
-use crate::build_system::build::{BackendBuilder, CleanupPolicy, Module, OutputFile, Project};
+use crate::build_system::build::{
+    BackendBuilder, CleanupPolicy, Module, ModuleExternalImport, OutputFile, Project,
+    ProjectCompilation, ProjectLinkedModule,
+};
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -35,7 +38,6 @@ use crate::projects::html_project::tracked_assets::{
 use crate::projects::html_project::wasm::artifacts::{
     CompiledHtmlWasmModule, compile_html_module_wasm,
 };
-use crate::projects::html_project::wasm::export_plan::build_html_wasm_export_plan;
 use crate::projects::routing::parse_html_site_config;
 use crate::projects::settings::{Config, ProjectConfigError};
 use std::collections::{HashMap, HashSet};
@@ -74,7 +76,7 @@ impl HtmlProjectBuilder {
 impl BackendBuilder for HtmlProjectBuilder {
     fn build_backend(
         &self,
-        modules: Vec<Module>,
+        project_compilation: ProjectCompilation,
         config: &Config,
         flags: &[Flag],
         string_table: &mut StringTable,
@@ -96,7 +98,7 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .map_err(|error| error.into_messages(string_table.clone()))?
         };
 
-        if modules.is_empty() {
+        if project_compilation.modules().is_empty() {
             return Err(CompilerMessages::from_error(
                 CompilerError::compiler_error(
                     "HTML builder expected at least one compiled module but got 0.",
@@ -118,17 +120,15 @@ impl BackendBuilder for HtmlProjectBuilder {
         let mut output_path_owners: HashMap<PathBuf, PathBuf> = HashMap::new();
         let mut entry_page_rel = None;
         let mut has_directory_homepage = false;
-        let artifact_modules: Vec<&Module> = modules
-            .iter()
-            .filter(|module| module.metadata.root_activity.has_html_artifact_activity())
-            .collect();
-        let mut compiled_html_output_paths = Vec::with_capacity(artifact_modules.len());
+        let artifact_entries = project_compilation.entries();
+        let mut compiled_html_output_paths = Vec::with_capacity(artifact_entries.len());
         let mut warnings = Vec::new();
 
         {
             let _module_compile_guard =
                 crate::timing::PipelineTimingGuard::new("backend.html.module_compile_total");
-            for module in artifact_modules.iter().copied() {
+            for entry in artifact_entries.iter().cloned() {
+                let module = entry.module;
                 // Derive the canonical page route once. Both JS-only and HTML+Wasm output modes
                 // consume this same path — downstream code must not re-derive route semantics.
                 let logical_html_output_path = html_output_path(
@@ -140,6 +140,10 @@ impl BackendBuilder for HtmlProjectBuilder {
 
                 let compiled_artifacts = self.compile_one_module(
                     module,
+                    entry.reachability,
+                    entry.external_imports,
+                    &entry.linked_modules,
+                    Arc::clone(&entry.source_function_names),
                     &logical_html_output_path,
                     config.project_name.as_str(),
                     &document_config,
@@ -181,8 +185,9 @@ impl BackendBuilder for HtmlProjectBuilder {
             string_table,
         )?;
 
-        let runtime_emission_plan =
-            HtmlExternalRuntimeEmissionPlan::from_modules(artifact_modules.iter().copied());
+        let runtime_emission_plan = HtmlExternalRuntimeEmissionPlan::from_import_sets(
+            artifact_entries.iter().map(|entry| entry.external_imports),
+        );
 
         {
             let _runtime_assets_guard =
@@ -347,6 +352,15 @@ impl HtmlProjectBuilder {
     fn compile_one_module(
         &self,
         module: &Module,
+        reachability: &crate::compiler_frontend::hir::reachability::HirReachability,
+        external_imports: &[ModuleExternalImport],
+        linked_modules: &[ProjectLinkedModule<'_>],
+        source_function_names: Arc<
+            std::collections::HashMap<
+                crate::compiler_frontend::semantic_identity::OriginFunctionId,
+                String,
+            >,
+        >,
         logical_html_output_path: &Path,
         project_name: &str,
         document_config: &crate::projects::html_project::document_config::HtmlDocumentConfig,
@@ -354,50 +368,27 @@ impl HtmlProjectBuilder {
         wasm_enabled: bool,
         string_table: &mut StringTable,
     ) -> Result<CompiledHtmlModuleArtifacts, CompilerMessages> {
-        // Validate that every external function call in the HIR has lowering metadata for the
-        // target backend. WHY: fail early with a structured Rule error at the call site rather
-        // than a vague backend-internal error during lowering.
+        // Validate that every selected external call has lowering metadata for the target.
+        // WHY: fail early with a structured Rule error at the call site rather than a vague
+        // backend-internal error during lowering.
         let backend_target = if wasm_enabled {
             BackendTarget::Wasm
         } else {
             BackendTarget::Js
         };
         validate_hir_external_package_support(
-            &module.executable.hir,
+            reachability,
             module.link_facts.external_package_registry.as_ref(),
             backend_target,
             string_table,
         )
-        .map_err(|error| match error {
-            ExternalPackageValidationError::Diagnostic(diagnostic) => {
-                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
-            }
-            ExternalPackageValidationError::Infrastructure(error) => {
-                CompilerMessages::from_error_ref(*error, string_table)
-            }
-        })?;
-
-        let backend_validation_root = if wasm_enabled {
-            // HTML-Wasm validates from the functions exported by the builder so dead helper bodies
-            // do not surface backend diagnostics for code the page never executes.
-            let export_plan = build_html_wasm_export_plan(&module.executable.hir)
-                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-            BackendFeatureValidationRoot::ExplicitRoots(
-                export_plan
-                    .function_exports
-                    .iter()
-                    .map(|function_export| function_export.function_id)
-                    .collect(),
-            )
-        } else {
-            BackendFeatureValidationRoot::StartFunction
-        };
+        .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, string_table))?;
 
         validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
                 hir: &module.executable.hir,
+                reachability,
                 target: backend_target,
-                root: backend_validation_root,
                 type_environment: Some(&module.executable.type_environment),
             },
             string_table,
@@ -414,8 +405,41 @@ impl HtmlProjectBuilder {
             }
         })?;
 
+        for linked in linked_modules {
+            validate_hir_external_package_support(
+                linked.reachability,
+                linked.module.link_facts.external_package_registry.as_ref(),
+                backend_target,
+                string_table,
+            )
+            .map_err(|diagnostic| {
+                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
+            })?;
+            validate_hir_backend_feature_support(
+                BackendFeatureValidationInput {
+                    hir: &linked.module.executable.hir,
+                    reachability: linked.reachability,
+                    target: backend_target,
+                    type_environment: Some(&linked.module.executable.type_environment),
+                },
+                string_table,
+            )
+            .map_err(|error| match error {
+                BackendFeatureValidationError::Diagnostic(diagnostic) => {
+                    CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
+                        .with_type_context_for_all_diagnostics(
+                            linked.module.executable.type_environment.clone(),
+                        )
+                }
+                BackendFeatureValidationError::Infrastructure(error) => {
+                    CompilerMessages::from_error_ref(*error, string_table)
+                }
+            })?;
+        }
+
         let compile_input = HtmlModuleCompileInput {
             hir_module: &module.executable.hir,
+            reachability,
             type_environment: &module.executable.type_environment,
             const_fragments: &module.metadata.const_top_level_fragments,
             borrow_analysis: &module.executable.borrow_analysis,
@@ -432,6 +456,9 @@ impl HtmlProjectBuilder {
         } else {
             let compiled_js = compile_html_module_js(
                 module,
+                external_imports,
+                linked_modules,
+                source_function_names,
                 &compile_input,
                 string_table,
                 logical_html_output_path.to_path_buf(),

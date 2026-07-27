@@ -202,8 +202,7 @@ impl<'a> BorrowChecker<'a> {
                     self.public_call_summaries.len(),
                     self.module.functions.len()
                 ),
-                self.diagnostics
-                    .function_error_location(self.module.start_function),
+                self.diagnostics.module_error_location(),
             ));
         }
 
@@ -284,8 +283,7 @@ impl<'a> BorrowChecker<'a> {
 
         Err(self.diagnostics.internal_error(
             "Borrow checker could not stabilize local return-alias summaries",
-            self.diagnostics
-                .function_error_location(self.module.start_function),
+            self.diagnostics.module_error_location(),
         ))
     }
 
@@ -331,7 +329,7 @@ impl<'a> BorrowChecker<'a> {
                     "Reactive template metadata references local '{}' that is not a function parameter",
                     self.diagnostics.local_name(parameter_local)
                 ),
-                self.diagnostics.function_error_location(self.module.start_function),
+                self.diagnostics.module_error_location(),
             ));
         };
 
@@ -401,7 +399,7 @@ impl<'a> BorrowChecker<'a> {
                     }
                     HirStatementKind::Call { target, args, .. } => {
                         for (argument_index, argument) in args.iter().enumerate() {
-                            if !self.call_argument_writes(target, argument_index)? {
+                            if !self.call_argument_writes(target, argument_index, statement)? {
                                 continue;
                             }
 
@@ -495,9 +493,10 @@ impl<'a> BorrowChecker<'a> {
         &self,
         target: &CallTarget,
         argument_index: usize,
+        statement: &HirStatement,
     ) -> Result<bool, BorrowCheckError> {
         match target {
-            CallTarget::UserFunction(function_id) => {
+            CallTarget::Local(function_id) => {
                 let Some(summary) = self.public_call_summaries.get(function_id) else {
                     return Err(self.diagnostics.internal_error(
                         format!(
@@ -519,7 +518,26 @@ impl<'a> BorrowChecker<'a> {
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
             }
-            CallTarget::ExternalFunction(function_id) => {
+            CallTarget::CrossModule(origin) => {
+                let Some(summary) = self.module.imported_call_summaries.get(origin) else {
+                    return Err(self.diagnostics.internal_error(
+                        format!(
+                            "Borrow checker is missing the provider call summary for imported function {origin:?}"
+                        ),
+                        self.diagnostics.statement_error_location(statement),
+                    ));
+                };
+                let Some(parameter) = summary.parameters.get(argument_index) else {
+                    return Err(self.diagnostics.internal_error(
+                        format!(
+                            "Borrow checker found out-of-range argument {argument_index} while finalizing imported call summary for {origin:?}"
+                        ),
+                        self.diagnostics.statement_error_location(statement),
+                    ));
+                };
+                Ok(parameter.mutation == PublicCallMutationEffect::Writes)
+            }
+            CallTarget::External(function_id) => {
                 let Some(definition) = self
                     .external_package_registry
                     .get_function_by_id(*function_id)
@@ -529,7 +547,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not resolve host call target '{}' while finalizing public call summary",
                             function_id.name()
                         ),
-                        self.diagnostics.function_error_location(FunctionId(0)),
+                        self.diagnostics.statement_error_location(statement),
                     ));
                 };
                 let Some(parameter) = definition.parameters.get(argument_index) else {
@@ -538,7 +556,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker found out-of-range argument {} while finalizing host call summary for '{}'",
                             argument_index, definition.name
                         ),
-                        self.diagnostics.function_error_location(FunctionId(0)),
+                        self.diagnostics.statement_error_location(statement),
                     ));
                 };
                 Ok(parameter.access_kind == ExternalAccessKind::Mutable)
@@ -961,14 +979,12 @@ impl<'a> BorrowChecker<'a> {
         visiting_locals: &mut FxHashSet<LocalId>,
     ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
         match target {
-            CallTarget::UserFunction(callee_id)
-                if self.function_returns_success_channel(callee_id)? =>
-            {
+            CallTarget::Local(callee_id) if self.function_returns_success_channel(callee_id)? => {
                 // The call local carries a fallible result object. Its success payload gets
                 // classified only by classify_call_success_payload after an explicit unwrap.
                 Ok(FunctionReturnAliasSummary::Fresh)
             }
-            CallTarget::UserFunction(callee_id) => self.project_local_call_return_alias(
+            CallTarget::Local(callee_id) => self.project_local_call_return_alias(
                 function,
                 callee_id,
                 args,
@@ -976,7 +992,15 @@ impl<'a> BorrowChecker<'a> {
                 reachable_blocks,
                 visiting_locals,
             ),
-            CallTarget::ExternalFunction(function_id) => {
+            CallTarget::CrossModule(origin) => self.project_imported_call_return_alias(
+                function,
+                &origin,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                visiting_locals,
+            ),
+            CallTarget::External(function_id) => {
                 let Some(definition) = self
                     .external_package_registry
                     .get_function_by_id(function_id)
@@ -1016,7 +1040,7 @@ impl<'a> BorrowChecker<'a> {
         visiting_locals: &mut FxHashSet<LocalId>,
     ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
         match target {
-            CallTarget::UserFunction(callee_id) => self.project_local_call_return_alias(
+            CallTarget::Local(callee_id) => self.project_local_call_return_alias(
                 function,
                 callee_id,
                 args,
@@ -1024,7 +1048,15 @@ impl<'a> BorrowChecker<'a> {
                 reachable_blocks,
                 visiting_locals,
             ),
-            CallTarget::ExternalFunction(function_id) => {
+            CallTarget::CrossModule(origin) => self.project_imported_call_return_alias(
+                function,
+                &origin,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                visiting_locals,
+            ),
+            CallTarget::External(function_id) => {
                 let Some(definition) = self
                     .external_package_registry
                     .get_function_by_id(function_id)
@@ -1086,6 +1118,37 @@ impl<'a> BorrowChecker<'a> {
                     "user function '{}'",
                     self.diagnostics.function_name(callee_id)
                 ),
+            },
+            visiting_locals,
+        )
+    }
+
+    fn project_imported_call_return_alias(
+        &self,
+        function: &HirFunction,
+        origin: &crate::compiler_frontend::semantic_identity::OriginFunctionId,
+        args: &[HirExpression],
+        param_index_by_local: &FxHashMap<LocalId, usize>,
+        reachable_blocks: &[BlockId],
+        visiting_locals: &mut FxHashSet<LocalId>,
+    ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
+        let Some(summary) = self.module.imported_call_summaries.get(origin) else {
+            return Err(self.diagnostics.internal_error(
+                format!(
+                    "Borrow checker is missing the provider call summary for imported function {origin:?} while classifying a forwarded return"
+                ),
+                self.diagnostics.function_error_location(function.id),
+            ));
+        };
+
+        self.project_alias_summary_through_arguments(
+            AliasProjectionContext {
+                function,
+                return_alias: &summary.return_alias,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                callee_description: "imported function",
             },
             visiting_locals,
         )

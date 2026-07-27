@@ -257,6 +257,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .get_by_canonical_path(&canonical_a)
             .map(|i| i.file_id),
         project_path_resolver: frontend.project_path_resolver.clone(),
+        active_root_role: ModuleRootRole::Normal,
     };
 
     // Helper to prepare one file using the local-table variant and merge its delta back
@@ -346,6 +347,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         prepared_syntax,
         &frontend.external_package_registry,
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         options.project_path_resolver.as_ref(),
         &mut frontend.string_table,
     )
@@ -514,7 +516,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
 
     let prepared = preparation_context
         .prepare_module(
-            super::ModuleOriginInput::Synthetic(stable_origin),
+            super::ModuleOriginInput::Synthetic(stable_origin.clone()),
             &input_files,
             &canonical_entry,
             local_table,
@@ -543,6 +545,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     // `FrontendModuleBuildContext` owns the provider interfaces, binds the retained
     // `PreparedHeaderSyntax`, then resolves dependencies, builds AST, lowers HIR and runs borrow
     // validation. It receives no `PreparedSourceInput`, source text or tokens.
+    let source_provider_imports = Default::default();
     let compile_context = super::FrontendModuleBuildContext {
         config: &Config::new(temp_dir.path().to_path_buf()),
         build_profile: FrontendBuildProfile::Dev,
@@ -550,35 +553,48 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         style_directives: &style_directives,
         external_packages: Arc::clone(&external_packages),
         external_import_resolution_table: &resolution_table,
+        source_provider_imports: &source_provider_imports,
         builder_runtime_packages: &[],
     };
 
-    let compiled = compile_context
+    let draft = compile_context
         .compile_module_semantic(prepared, &canonical_entry, module_label)
         .expect("semantic compilation should succeed");
 
-    let compiled = match compiled {
-        super::ModuleCompilationOutcome::Success(compiled) => compiled,
+    let draft = match draft {
+        super::ModuleCompilationOutcome::Success(draft) => draft,
         super::ModuleCompilationOutcome::Diagnosed(diagnostics) => panic!(
             "a generic free-function declaration should compile, not diagnose: {diagnostics:?}"
         ),
     };
 
     assert_eq!(
-        compiled.module.metadata.entry_point, canonical_entry,
+        draft.public_interface.draft.module_origin, stable_origin,
+        "the semantic draft should retain the module's stable origin"
+    );
+    assert!(
+        !draft.module.executable.hir.functions.is_empty(),
+        "the semantic draft should retain validated base HIR"
+    );
+    assert!(
+        draft.string_table.len() > 0,
+        "the semantic draft should retain its diagnostic render identities"
+    );
+    assert_eq!(
+        draft.module.metadata.entry_point, canonical_entry,
         "semantic compilation should preserve the module entry point"
     );
     assert!(
-        compiled.module.metadata.warnings.is_empty(),
+        draft.module.metadata.warnings.is_empty(),
         "semantic compilation should not introduce warnings for a clean generic free-function declaration"
     );
     assert_eq!(
-        compiled.module.metadata.validated_generic_templates.len(),
+        draft.module.metadata.validated_generic_templates.len(),
         1,
         "the production semantic path should retain one generic free-function template body"
     );
     assert_eq!(
-        compiled
+        draft
             .module
             .metadata
             .validated_generic_templates
@@ -589,7 +605,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         "generic template metadata should retain the exported function origin"
     );
     assert!(
-        compiled
+        draft
             .module
             .metadata
             .validated_generic_templates
@@ -597,6 +613,118 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
             .origin
             .receiver()
             .is_none()
+    );
+}
+
+#[test]
+fn api_only_root_roles_compile_public_interfaces_without_hir_start() {
+    for root_role in [
+        ModuleRootRole::Support,
+        ModuleRootRole::ProjectPackageFacade,
+    ] {
+        compile_api_only_root_and_assert_boundary(root_role);
+    }
+}
+
+fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
+    let temp_dir = tempfile::tempdir().expect("should create temp dir");
+    let entry_file = temp_dir.path().join("+package.moth");
+    let source = "export:\n    answer #= 42\n;\n";
+    fs::write(&entry_file, source).expect("test source should be written");
+    let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
+
+    let mut string_table = StringTable::new();
+    let source_files = SourceFileTable::build(
+        std::iter::once(canonical_entry.as_path()),
+        &canonical_entry,
+        None,
+        &mut string_table,
+    )
+    .expect("source file table should build");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let input_files = vec![tokenized_moth_prepared_input(
+        &source_files,
+        &style_directives,
+        &mut string_table,
+        canonical_entry.clone(),
+        source,
+    )];
+    let local_table = string_table.fork_source().fork_for_module().into_parts().0;
+
+    let project_root = canonical_entry
+        .parent()
+        .expect("entry file should have a parent")
+        .to_path_buf();
+    let project_path_resolver = ProjectPathResolver::new_with_module_roots(
+        project_root.clone(),
+        project_root.clone(),
+        PreparedSourcePackageRoots::empty(),
+        &SourceFileKindRegistry::new(),
+        ModuleRootTable::from_records(vec![ModuleRootRecord::new(
+            project_root,
+            canonical_entry.clone(),
+        )]),
+    )
+    .expect("project path resolver should build");
+    let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
+        StablePackageIdentity::project_local("test-project"),
+        std::path::Path::new("api"),
+        root_role,
+    )
+    .expect("API-only stable origin should construct");
+    let source_byte_count = source_byte_count(&input_files);
+    let prepared = super::ModulePreparationContext {
+        style_directives: &style_directives,
+        project_path_resolver: Some(project_path_resolver.clone()),
+    }
+    .prepare_module(
+        super::ModuleOriginInput::Synthetic(stable_origin.clone()),
+        &input_files,
+        &canonical_entry,
+        local_table,
+        source_byte_count,
+        None,
+    )
+    .expect("API-only module preparation should succeed");
+
+    let external_packages = Arc::new(ExternalPackageRegistry::new());
+    let resolution_table = ExternalImportResolutionTable::default();
+    let source_provider_imports = Default::default();
+    let compile_context = super::FrontendModuleBuildContext {
+        config: &Config::new(temp_dir.path().to_path_buf()),
+        build_profile: FrontendBuildProfile::Dev,
+        project_path_resolver: Some(project_path_resolver),
+        style_directives: &style_directives,
+        external_packages,
+        external_import_resolution_table: &resolution_table,
+        source_provider_imports: &source_provider_imports,
+        builder_runtime_packages: &[],
+    };
+    let outcome = compile_context
+        .compile_module_semantic(prepared, &canonical_entry, None)
+        .expect("API-only semantic compilation should not fail internally");
+    let draft = match outcome {
+        super::ModuleCompilationOutcome::Success(draft) => draft,
+        super::ModuleCompilationOutcome::Diagnosed(diagnostics) => {
+            panic!("API-only declarations should compile without diagnostics: {diagnostics:?}")
+        }
+    };
+
+    assert_eq!(draft.public_interface.draft.module_origin, stable_origin);
+    assert_eq!(draft.public_interface.draft.export_bindings.len(), 1);
+    assert_eq!(draft.module.executable.hir.start_function, None);
+    assert!(draft.module.executable.hir.functions.is_empty());
+    assert!(
+        draft
+            .module
+            .executable
+            .hir
+            .function_origins
+            .values()
+            .all(|origin| !matches!(
+                origin,
+                crate::compiler_frontend::hir::functions::HirFunctionOrigin::EntryStart
+            ))
     );
 }
 
@@ -763,6 +891,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
             &frontend.source_files,
             &input_files,
             &canonical_a,
+            ModuleRootRole::Normal,
             source_byte_count,
         )
         .expect("serial preparation should succeed");
@@ -970,6 +1099,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
             &frontend.source_files,
             &input_files,
             &entry_file_path,
+            ModuleRootRole::Normal,
             source_byte_count,
         )
         .expect("parallel preparation should succeed");
@@ -1029,6 +1159,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.file_id),
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
+        active_root_role: ModuleRootRole::Normal,
     };
     let fork_source = fixture.frontend.string_table.fork_source();
     let base_len = fork_source.base_len();
@@ -1102,6 +1233,7 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
             &fixture.frontend.source_files,
             &fixture.input_files,
             &fixture.entry_file_path,
+            ModuleRootRole::Normal,
             source_byte_count,
         )
         .expect("chunked preparation should succeed");
@@ -1153,6 +1285,7 @@ fn chunked_file_preparation_preserves_warning_source_order() {
             &fixture.frontend.source_files,
             &fixture.input_files,
             &fixture.entry_file_path,
+            ModuleRootRole::Normal,
             source_byte_count,
         )
         .expect("chunked preparation should succeed with warnings");
@@ -1408,6 +1541,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
             &fixture.frontend.source_files,
             &fixture.input_files,
             &fixture.entry_file_path,
+            ModuleRootRole::Normal,
             source_byte_count,
         )
         .expect("chunked preparation should succeed");

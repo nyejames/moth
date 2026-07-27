@@ -34,8 +34,9 @@ pub use crate::compiler_frontend::headers::types::{
 #[cfg(test)]
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_config_file, file_name_is_hash_root_file,
+    file_name_is_config_file, file_name_is_module_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
@@ -66,10 +67,14 @@ pub fn parse_file_headers_with_table(
         .as_deref()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| file_tokens.src_path.to_path_buf(string_table));
-    let is_hash_root_file = source_path
+    // Stage 0 keeps support (`+*.moth`) and facade roots out of `ModuleRootTable`, so the
+    // resolver-based check only recognises normal `#*.moth` roots. Fall back to the canonical
+    // filename policy so a `+*.moth` support-package root is export-capable when prepared as
+    // part of a consumer compilation.
+    let is_module_root_file_by_name = source_path
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(file_name_is_hash_root_file);
+        .is_some_and(file_name_is_module_root_file);
     let is_config_file = source_path
         .file_name()
         .and_then(|name| name.to_str())
@@ -80,8 +85,13 @@ pub fn parse_file_headers_with_table(
         .is_some_and(|resolver| resolver.is_module_root_file(&source_path));
 
     let file_role = if is_entry_file {
-        FileRole::ActiveModuleRoot
-    } else if is_prepared_module_root || is_hash_root_file {
+        match options.active_root_role {
+            ModuleRootRole::Normal => FileRole::ActiveModuleRoot,
+            ModuleRootRole::Support | ModuleRootRole::ProjectPackageFacade => {
+                FileRole::ActiveApiOnlyModuleRoot
+            }
+        }
+    } else if is_prepared_module_root || is_module_root_file_by_name {
         FileRole::ImportedModuleRoot
     } else {
         FileRole::Normal
@@ -199,6 +209,9 @@ pub fn bind_module_headers(
     prepared: PreparedHeaderSyntax,
     external_package_registry: &ExternalPackageRegistry,
     external_import_resolution_table: &ExternalImportResolutionTable,
+    source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<
+        '_,
+    >,
     project_path_resolver: Option<&ProjectPathResolver>,
     string_table: &mut StringTable,
 ) -> Result<BoundModuleHeaders, DiagnosticBag> {
@@ -234,6 +247,7 @@ pub fn bind_module_headers(
         module_symbols: &mut module_symbols,
         external_package_registry,
         external_import_resolution_table,
+        source_provider_imports,
         string_table,
     })
     .map_err(|messages| DiagnosticBag::from_diagnostics(messages.into_diagnostics()))?;

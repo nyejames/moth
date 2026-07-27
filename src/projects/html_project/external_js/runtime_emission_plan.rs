@@ -2,14 +2,14 @@
 //!
 //! WHAT: collects all JS runtime assets and required runtime module specifiers from
 //!       a compiled module slice in a single deterministic pass.
-//! WHY: avoids repeated scans of `Module::link_facts.module_external_imports` across separate
-//!      emission helpers, and gives `HtmlProjectBuilder` a named build-level plan step
+//! WHY: avoids repeated scans of entry-owned runtime import unions across separate emission
+//!      helpers, and gives `HtmlProjectBuilder` a named build-level plan step
 //!      that stays separate from per-module glue generation.
 //!
 //! This module must not decide per-module glue or import-map content. Those remain
 //! module-local concerns owned by `runtime_glue`.
 
-use crate::build_system::build::Module;
+use crate::build_system::build::ModuleExternalImport;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -31,18 +31,20 @@ pub(crate) struct HtmlExternalRuntimeEmissionPlan {
 }
 
 impl HtmlExternalRuntimeEmissionPlan {
-    /// Build an emission plan from the compiled modules selected for artifact emission.
+    /// Build an emission plan from the exact runtime import union of each selected entry.
     ///
-    /// WHAT: scans each module's link-facts `module_external_imports` once to collect:
+    /// WHAT: scans each entry import set once to collect:
     ///       - JS runtime assets by canonical source path;
     ///       - runtime module specifiers from `required_runtime_imports`.
     /// WHY: deterministic deduplication in one pass avoids redundant iteration later.
-    pub(crate) fn from_modules<'a>(modules: impl IntoIterator<Item = &'a Module>) -> Self {
+    pub(crate) fn from_import_sets<'a>(
+        import_sets: impl IntoIterator<Item = &'a [ModuleExternalImport]>,
+    ) -> Self {
         let mut js_assets = BTreeMap::new();
         let mut runtime_module_specifiers = BTreeSet::new();
 
-        for module in modules {
-            for external_import in &module.link_facts.module_external_imports {
+        for external_imports in import_sets {
+            for external_import in external_imports {
                 if let Some(asset) = &external_import.runtime_asset
                     && asset.asset_kind == "js"
                 {

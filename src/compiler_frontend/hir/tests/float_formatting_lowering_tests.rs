@@ -221,7 +221,7 @@ fn cast_float_to_string_flushes_source_prelude_before_formatting() {
         matches!(
             &statements[0].kind,
             HirStatementKind::Call {
-                target: CallTarget::UserFunction(FunctionId(7)),
+                target: CallTarget::Local(FunctionId(7)),
                 ..
             }
         ),

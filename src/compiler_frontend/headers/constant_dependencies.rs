@@ -245,7 +245,7 @@ fn classify_reference(
     // 2. Type aliases: valid to resolve but do not create value dependency edges.
     if let Some(path) = visibility.visible_type_alias_names.get(&reference.name) {
         return ConstantReferenceResolution::SourceTypeAlias {
-            _path: path.clone(),
+            _path: path.local_path().clone(),
         };
     }
 
@@ -272,7 +272,7 @@ fn classify_reference(
             record.type_members.get(&member_name)
         {
             return ConstantReferenceResolution::SourceTypeAlias {
-                _path: path.clone(),
+                _path: path.local_path().clone(),
             };
         }
 
@@ -287,7 +287,7 @@ fn classify_reference(
     };
 
     classify_source_declaration_reference(
-        target_path,
+        target_path.local_path(),
         constant_positions,
         struct_or_choice_paths,
         module_symbols,
@@ -305,7 +305,7 @@ fn classify_namespace_value_member(
     match member {
         NamespaceValueMember::SourceDeclaration(target_path) => {
             classify_source_declaration_reference(
-                target_path,
+                target_path.local_path(),
                 constant_positions,
                 struct_or_choice_paths,
                 module_symbols,

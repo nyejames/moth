@@ -85,7 +85,7 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
     let b_call = statement(
         3,
         HirStatementKind::Call {
-            target: CallTarget::UserFunction(FunctionId(0)),
+            target: CallTarget::Local(FunctionId(0)),
             args: vec![],
             result: Some(LocalId(0)),
         },
@@ -128,7 +128,7 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
     let a_call = statement(
         7,
         HirStatementKind::Call {
-            target: CallTarget::UserFunction(FunctionId(1)),
+            target: CallTarget::Local(FunctionId(1)),
             args: vec![],
             result: Some(LocalId(1)),
         },
@@ -172,7 +172,7 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         c_block, b_entry, b_success, b_error, a_entry, a_success, a_error,
     ];
     module.functions = vec![c_function, b_function, a_function];
-    module.start_function = FunctionId(2);
+    module.start_function = Some(FunctionId(2));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
 
     module.side_table.bind_function_name(
@@ -275,7 +275,7 @@ fn explicit_error_return_terminator_emits_err_carrier() {
     let mut module = HirModule::new();
     module.blocks = vec![block];
     module.functions = vec![function];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
@@ -333,7 +333,7 @@ fn explicit_success_return_terminator_emits_ok_carrier() {
     let mut module = HirModule::new();
     module.blocks = vec![block];
     module.functions = vec![function];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
@@ -415,7 +415,7 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
     let mut module = HirModule::new();
     module.blocks = vec![entry_block, success_block, error_block];
     module.functions = vec![function];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
@@ -480,7 +480,7 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
     let call_aliasing_fallible = statement(
         2,
         HirStatementKind::Call {
-            target: CallTarget::UserFunction(FunctionId(1)),
+            target: CallTarget::Local(FunctionId(1)),
             args: vec![expression(
                 3,
                 HirExpressionKind::Load(HirPlace::Local(LocalId(1))),
@@ -513,7 +513,7 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
     let mut module = HirModule::new();
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.regions = vec![HirRegion::lexical(region, None)];
     module.side_table.bind_function_name(
         FunctionId(0),

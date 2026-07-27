@@ -24,6 +24,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -49,6 +50,9 @@ pub struct AstBuildContext<'a> {
 
     /// Canonical path of the module entry directory.
     pub entry_dir: InternedPath,
+
+    /// Graph-owned semantic role of the active module root.
+    pub root_role: ModuleRootRole,
 
     /// Current build profile (dev/release) affecting optimization and diagnostic levels.
     pub build_profile: FrontendBuildProfile,
@@ -76,6 +80,7 @@ pub(crate) struct AstPhaseContext<'a> {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) entry_dir: InternedPath,
+    pub(crate) root_role: ModuleRootRole,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) path_format_config: PathStringFormatConfig,
@@ -99,6 +104,7 @@ impl<'a> AstPhaseContext<'a> {
             style_directives,
             string_table,
             entry_dir,
+            root_role,
             build_profile,
             project_path_resolver,
             path_format_config,
@@ -115,6 +121,7 @@ impl<'a> AstPhaseContext<'a> {
                 external_package_registry,
                 style_directives,
                 entry_dir,
+                root_role,
                 build_profile,
                 project_path_resolver,
                 path_format_config,

@@ -13,7 +13,7 @@
 //! - top-level declaration discovery
 //! - top-level declaration shell parsing
 //! - strict top-level dependency ordering
-//! - appending implicit `start` header last (outside dependency graph)
+//! - appending the normal root's implicit `start` header last (outside dependency graph)
 //!
 //! **AST owns:**
 //! - lowering sorted header payloads (no top-level shell reparsing)
@@ -154,6 +154,7 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::import_environment::HeaderImportEnvironment;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -161,11 +162,11 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use rustc_hash::FxHashMap;
-use std::rc::Rc;
 use std::time::Instant;
 
 /// Resolved choice definition carried from AST to HIR for pre-registration.
@@ -179,11 +180,18 @@ pub struct AstChoiceDefinition {
     pub nominal_path: InternedPath,
 }
 
+/// Consumer-local imported struct definition required by HIR declaration registration.
+#[derive(Clone, Debug)]
+pub(crate) struct AstImportedStructDefinition {
+    pub(crate) nominal_path: InternedPath,
+}
+
 /// Unified AST output for all source files in one compilation unit.
 ///
-/// WHAT: the fully resolved, typed AST produced by Stage 4, ready for HIR lowering.
+/// WHAT: the fully resolved, typed executable AST produced by Stage 4, ready for HIR lowering.
 /// WHY: one container keeps the pipeline contract explicit — HIR receives exactly this
-/// struct and nothing else from the AST stage.
+/// struct and nothing else from the AST stage. Semantic projection side results live on
+/// [`AstBuildResult`] and never reach HIR.
 pub struct Ast {
     pub nodes: Vec<AstNode>,
     pub module_constants: Vec<Declaration>,
@@ -191,6 +199,12 @@ pub struct Ast {
 
     /// The path to the original entry point file.
     pub entry_path: InternedPath,
+
+    /// Structural role of the active module root.
+    ///
+    /// HIR uses this to require `start` only for normal modules. API-only support and facade
+    /// modules carry executable function bodies but no implicit entry function.
+    pub root_role: ModuleRootRole,
 
     /// Const top-level fragments with their runtime insertion indices.
     /// Builders merge these with the runtime fragment list returned by entry `start()`.
@@ -203,6 +217,7 @@ pub struct Ast {
     /// WHAT: every choice declaration (local and imported) with fully resolved payload field types.
     /// WHY: HIR registers choices deterministically before function lowering.
     pub choice_definitions: Vec<AstChoiceDefinition>,
+    pub(crate) imported_struct_definitions: Vec<AstImportedStructDefinition>,
 
     /// Frontend type environment with all interned types and substituted generic instance views.
     ///
@@ -217,36 +232,43 @@ pub struct Ast {
     /// WHY: config validation and HIR metadata need one shared source of truth for
     ///      const-ness without re-walking the AST.
     pub const_facts: AstConstFacts,
+    pub(crate) imported_functions_by_local_path:
+        FxHashMap<InternedPath, AstImportedFunctionContract>,
+}
 
-    /// Consolidated transient AST-owned public-interface projection input.
-    ///
-    /// WHAT: one closed [`AstPublicInterfaceProjectionInput`] bundling the resolved public
-    ///       type-root table, the directly-defined active-root public trait-root vector and
-    ///       the validated receiver-method catalog. Production AST construction always
-    ///       populates this; synthetic AST fixtures use a default projection input.
-    /// WHY: replaces the previous public-root and receiver-catalog field family on `Ast`
-    ///      with one owned projection input so the semantic orchestration takes a single
-    ///      value before HIR lowering. Donor-local `TypeId`s stay inside this projection
-    ///      input and never enter a cross-module artefact. The orchestration consumes it
-    ///      through `std::mem::take` before HIR lowering, so HIR never receives or
-    ///      reconstructs it. This field is taken before HIR and may not gain unrelated
-    ///      future facts.
+/// Consumer-local semantic contract for one imported concrete source function.
+///
+/// Header binding owns the stable target and public summary. AST adds the locally projected
+/// function and fallible-carrier handles needed by HIR without leaking `TypeId` back into the
+/// provider interface or header-stage binding vocabulary.
+#[derive(Clone, Debug)]
+pub(crate) struct AstImportedFunctionContract {
+    pub(crate) target: crate::compiler_frontend::headers::import_environment::SourceFunctionTarget,
+    pub(crate) summary: crate::compiler_frontend::public_call_summary::PublicCallSummary,
+    pub(crate) fallible_carrier_type_id: Option<TypeId>,
+}
+
+/// Closed typed AST construction result carrying executable `Ast` and the two semantic
+/// side results consumed before HIR lowering.
+///
+/// WHAT: the single result of AST construction. `ast` holds executable state only.
+///       `public_interface_projection_input` feeds the public-interface draft projection and
+///       `generic_function_templates` feeds validated generic-template extraction, both before
+///       HIR receives the executable `Ast`. Config and direct Moth-template compilation discard
+///       the side results because they stop at folded AST data.
+/// WHY: separating the projection side results from executable `Ast` keeps HIR input
+///      executable only and removes the take-before-HIR extraction dance from semantic
+///      orchestration. The field list is closed: no `Rc`, `RefCell`, trait/evidence environment
+///      or generic-template map remains reachable from the `Ast` passed to HIR.
+pub struct AstBuildResult {
+    /// Executable AST state consumed by HIR lowering.
+    pub ast: Ast,
+
+    /// Direct public-interface projection input consumed by the public-interface draft builder.
     pub public_interface_projection_input: AstPublicInterfaceProjectionInput,
 
-    /// Validated generic callable templates carried past finalization to the extraction/join
-    /// owner.
-    ///
-    /// WHAT: the donor-local `generic_function_templates_by_path` map cloned from the completed
-    ///       AST environment lookups before they are dropped. Production AST construction always
-    ///       populates this; synthetic AST fixtures use an empty map. Each entry is the one
-    ///       existing [`GenericFunctionTemplate`] body payload produced during signature
-    ///       resolution and body validation, for either a free function or a receiver method.
-    /// WHY: the semantic orchestration takes this through `std::mem::take` before HIR lowering
-    ///      and runs the validated-generic-template extraction/join owner against the completed
-    ///      public-interface draft, moving the relevant templates into `ModuleCompilerMetadata`.
-    ///      Donor-local `InternedPath` keys and `TypeId`s stay inside this transient field and
-    ///      never enter a cross-module artefact directly. HIR never receives or reconstructs it.
-    pub generic_function_templates: Rc<FxHashMap<InternedPath, GenericFunctionTemplate>>,
+    /// Donor-local validated generic-template map consumed by the extraction/join owner.
+    pub generic_function_templates: FxHashMap<InternedPath, GenericFunctionTemplate>,
 }
 
 /// Complete header-stage output consumed by AST construction.
@@ -264,15 +286,20 @@ impl Ast {
     /// Constructs a complete typed AST from header-stage outputs and build services.
     ///
     /// WHAT: Orchestrates all AST construction passes in sequence, consuming sorted headers
-    /// and header-built visibility through finalization, then assembles the final [`Ast`] output.
+    /// and header-built visibility through finalization, then assembles the final
+    /// [`AstBuildResult`] carrying executable `Ast` and the two projection side results.
     ///
     /// WHY: Centralizes the pass sequence so the full compilation pipeline is readable in
     /// one place without implementation details. Symbol discovery and import visibility are
     /// owned by the header/dependency stages and passed in via `AstBuildInput`.
+    // The entry point keeps the obvious `new` name while returning the closed build result that
+    // bundles executable `Ast` with its projection side results; renaming would lose the canonical
+    // AST construction entry point expected by callers.
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(
         input: AstBuildInput,
         context: AstBuildContext<'_>,
-    ) -> Result<Ast, CompilerMessages> {
+    ) -> Result<AstBuildResult, CompilerMessages> {
         let AstBuildInput {
             headers,
             module_symbols,
@@ -309,7 +336,7 @@ impl Ast {
         let _ = node_emission_start;
 
         let finalization_start = Instant::now();
-        let ast = AstFinalizer::new(&phase_context, environment).finalize(
+        let build_result = AstFinalizer::new(&phase_context, environment).finalize(
             emitted,
             &top_level_const_fragments,
             string_table,
@@ -337,7 +364,7 @@ impl Ast {
 
         log_ast_counters();
 
-        Ok(ast)
+        Ok(build_result)
     }
 }
 

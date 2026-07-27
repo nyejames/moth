@@ -5,7 +5,7 @@
 //! WHY: provider-created JS assets and emitted runtime modules use bare imports like
 //!      `@moth/runtime`; the import map lets the browser resolve them.
 
-use crate::build_system::build::Module;
+use crate::build_system::build::ModuleExternalImport;
 use crate::projects::html_project::external_js::runtime_glue::paths::{
     relative_url_path, runtime_module_output_path,
 };
@@ -18,10 +18,13 @@ use std::path::Path;
 /// WHY: provider-created JS assets use bare imports like
 ///      `import {{ mothOk }} from "@moth/runtime";`;
 ///      the import map lets the browser resolve those without rewriting user files.
-pub(super) fn build_import_map_html(module: &Module, html_output_path: &Path) -> Option<String> {
+pub(super) fn build_import_map_html(
+    external_imports: &[ModuleExternalImport],
+    html_output_path: &Path,
+) -> Option<String> {
     let mut entries: Vec<(String, String)> = Vec::new();
 
-    for external_import in &module.link_facts.module_external_imports {
+    for external_import in external_imports {
         for runtime_import in &external_import.required_runtime_imports {
             let runtime_path = runtime_module_output_path(&runtime_import.module_name);
             let relative = relative_url_path(html_output_path, &runtime_path);

@@ -8,6 +8,20 @@ use crate::projects::html_project::tests::test_support::{create_test_module, exp
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+fn entry_reachability(
+    module: &crate::build_system::build::Module,
+) -> crate::compiler_frontend::hir::reachability::HirReachability {
+    crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts(
+        &module.link_facts.functions,
+        &[module
+            .executable
+            .hir
+            .start_function
+            .expect("entry module should have start")],
+    )
+    .expect("test module should produce entry reachability")
+}
+
 #[test]
 fn compile_html_module_wasm_exports_moth_start_directly() {
     // WHAT: verify that the export plan exports entry start() as "moth_start", not per-function
@@ -15,9 +29,11 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
     // WHY: entry start() is the sole runtime fragment producer; JS calls it directly.
     let mut string_table = StringTable::new();
     let module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let reachability = entry_reachability(&module);
 
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
+        reachability: &reachability,
         type_environment: &module.executable.type_environment,
         const_fragments: &[],
         borrow_analysis: &module.executable.borrow_analysis,
@@ -53,11 +69,12 @@ fn wasm_export_plan_contains_single_entry_start_export() {
     // WHAT: export plan must contain exactly one function export: moth_start for the start function.
     let mut string_table = StringTable::new();
     let module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let reachability = entry_reachability(&module);
 
-    let plan_a =
-        build_html_wasm_plan(&module.executable.hir, Vec::new()).expect("wasm plan should build");
-    let plan_b =
-        build_html_wasm_plan(&module.executable.hir, Vec::new()).expect("wasm plan should build");
+    let plan_a = build_html_wasm_plan(&module.executable.hir, &reachability, Vec::new())
+        .expect("wasm plan should build");
+    let plan_b = build_html_wasm_plan(&module.executable.hir, &reachability, Vec::new())
+        .expect("wasm plan should build");
 
     assert_eq!(
         plan_a.export_plan.function_exports.len(),
@@ -65,7 +82,12 @@ fn wasm_export_plan_contains_single_entry_start_export() {
         "export plan must have exactly one function export"
     );
     assert_eq!(
-        plan_a.export_plan.function_exports[0].function_id, module.executable.hir.start_function,
+        plan_a.export_plan.function_exports[0].function_id,
+        module
+            .executable
+            .hir
+            .start_function
+            .expect("entry module should have start"),
         "exported function must be the start function"
     );
     assert_eq!(
@@ -83,9 +105,10 @@ fn wasm_export_plan_contains_single_entry_start_export() {
 fn wasm_export_plan_wires_required_helper_exports() {
     let mut string_table = StringTable::new();
     let module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let reachability = entry_reachability(&module);
 
-    let plan =
-        build_html_wasm_plan(&module.executable.hir, Vec::new()).expect("wasm plan should build");
+    let plan = build_html_wasm_plan(&module.executable.hir, &reachability, Vec::new())
+        .expect("wasm plan should build");
     let helper = plan.wasm_request.export_policy.helper_exports;
 
     assert!(helper.export_memory);
@@ -102,9 +125,11 @@ fn wasm_export_plan_wires_required_helper_exports() {
 fn compile_html_module_wasm_preserves_nested_logical_html_route() {
     let mut string_table = StringTable::new();
     let module = create_test_module(PathBuf::from("docs/#page.moth"), &mut string_table);
+    let reachability = entry_reachability(&module);
 
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
+        reachability: &reachability,
         type_environment: &module.executable.type_environment,
         const_fragments: &[],
         borrow_analysis: &module.executable.borrow_analysis,

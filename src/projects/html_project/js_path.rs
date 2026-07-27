@@ -14,13 +14,13 @@
 //!      runtime fragment array and each element is hydrated into its slot in source order.
 
 use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
-use crate::build_system::build::{FileKind, Module, OutputFile, ResolvedConstFragment};
+use crate::build_system::build::{
+    FileKind, Module, ModuleExternalImport, OutputFile, ProjectLinkedModule, ResolvedConstFragment,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::{
-    ReachableReactiveSinkKind, collect_reachability_from_start,
-};
+use crate::compiler_frontend::hir::reachability::ReachableReactiveSinkKind;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
@@ -68,6 +68,14 @@ pub(crate) struct CompiledHtmlJsModule {
 /// WHY: this preserves existing builder behavior when `--html-wasm` is not enabled.
 pub(crate) fn compile_html_module_js(
     module: &Module,
+    external_imports: &[ModuleExternalImport],
+    linked_modules: &[ProjectLinkedModule<'_>],
+    source_function_names: Arc<
+        std::collections::HashMap<
+            crate::compiler_frontend::semantic_identity::OriginFunctionId,
+            String,
+        >,
+    >,
     input: &HtmlModuleCompileInput<'_>,
     string_table: &mut StringTable,
     output_path: PathBuf,
@@ -75,9 +83,11 @@ pub(crate) fn compile_html_module_js(
     let js_lowering_config = JsLoweringConfig::html_page_bundle(
         input.release_build,
         Arc::clone(&input.external_package_registry),
+        input.reachability.backend_selection().clone(),
+        Arc::clone(&source_function_names),
     );
 
-    let js_module = {
+    let mut js_module = {
         let _lower_hir_guard = crate::timing::PipelineTimingGuard::new("backend.js.lower_hir");
         lower_hir_to_js(
             input.hir_module,
@@ -89,9 +99,51 @@ pub(crate) fn compile_html_module_js(
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
     };
 
-    let uses_reactive_runtime_fragments =
-        html_module_uses_reactive_runtime_fragments(input.hir_module)
+    if !linked_modules.is_empty() {
+        let mut isolated_modules = Vec::with_capacity(linked_modules.len() + 1);
+        for linked in linked_modules {
+            let linked_config = JsLoweringConfig::html_page_bundle(
+                input.release_build,
+                Arc::clone(&linked.module.link_facts.external_package_registry),
+                linked.reachability.backend_selection().clone(),
+                Arc::clone(&source_function_names),
+            );
+            let linked_js = lower_hir_to_js(
+                &linked.module.executable.hir,
+                &linked.module.executable.borrow_analysis,
+                string_table,
+                linked_config,
+                &linked.module.executable.type_environment,
+            )
             .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+            let exported_names = linked
+                .module
+                .executable
+                .hir
+                .function_ids_by_origin
+                .values()
+                .filter_map(|function_id| linked_js.function_name_by_id.get(function_id).cloned())
+                .collect::<Vec<_>>();
+            isolated_modules.push((linked_js.source, exported_names));
+            js_module
+                .referenced_external_functions
+                .extend(linked_js.referenced_external_functions);
+        }
+        let entry_start_name = input
+            .hir_module
+            .start_function
+            .and_then(|function_id| js_module.function_name_by_id.get(&function_id).cloned())
+            .into_iter()
+            .collect();
+        isolated_modules.push((std::mem::take(&mut js_module.source), entry_start_name));
+        js_module.source = assemble_isolated_module_sources(
+            isolated_modules,
+            source_function_names.values().cloned(),
+        );
+    }
+
+    let uses_reactive_runtime_fragments =
+        html_module_uses_reactive_runtime_fragments(input.hir_module, input.reachability);
 
     // Generate glue modules and import preamble only for external module exports referenced by
     // emitted JS. In HTML page bundles, JS lowering has already filtered unreachable wrappers.
@@ -100,6 +152,7 @@ pub(crate) fn compile_html_module_js(
             crate::timing::PipelineTimingGuard::new("backend.js.generate_module_glue");
         generate_module_glue(
             module,
+            external_imports,
             &js_module.referenced_external_functions,
             input.external_package_registry.as_ref(),
             &output_path,
@@ -144,6 +197,48 @@ pub(crate) fn compile_html_module_js(
     })
 }
 
+fn assemble_isolated_module_sources(
+    modules: Vec<(String, Vec<String>)>,
+    source_function_names: impl Iterator<Item = String>,
+) -> String {
+    let mut shared_names = source_function_names.collect::<Vec<_>>();
+    shared_names.extend(
+        modules
+            .iter()
+            .flat_map(|(_, exported_names)| exported_names.iter().cloned()),
+    );
+    shared_names.sort();
+    shared_names.dedup();
+
+    let mut source = String::new();
+    if !shared_names.is_empty() {
+        source.push_str("let ");
+        source.push_str(&shared_names.join(", "));
+        source.push_str(";\n");
+    }
+
+    for (module_source, mut exported_names) in modules {
+        exported_names.sort();
+        exported_names.dedup();
+        if exported_names.is_empty() {
+            source.push_str("(() => {\n");
+            source.push_str(&module_source);
+            source.push_str("\n})();\n");
+            continue;
+        }
+
+        source.push_str("({ ");
+        source.push_str(&exported_names.join(", "));
+        source.push_str(" } = (() => {\n");
+        source.push_str(&module_source);
+        source.push_str("\nreturn { ");
+        source.push_str(&exported_names.join(", "));
+        source.push_str(" };\n})());\n");
+    }
+
+    source
+}
+
 /// Returns true when the JS bootstrap must route runtime fragments through the reactive mount
 /// helper.
 ///
@@ -155,12 +250,17 @@ pub(crate) fn compile_html_module_js(
 /// WHY: this mirrors JS helper gating and keeps ordinary pages on the plain insertion path.
 fn html_module_uses_reactive_runtime_fragments(
     hir_module: &HirModule,
-) -> Result<bool, CompilerError> {
-    let reachability = collect_reachability_from_start(hir_module)?;
+    reachability: &crate::compiler_frontend::hir::reachability::HirReachability,
+) -> bool {
     let reachable_reactive_sources = hir_module
         .blocks
         .iter()
-        .filter(|block| reachability.reachable_blocks.contains(&block.id))
+        .filter(|block| {
+            reachability
+                .backend_selection()
+                .blocks()
+                .contains(&block.id)
+        })
         .flat_map(|block| block.locals.iter())
         .any(|local| {
             hir_module
@@ -169,7 +269,7 @@ fn html_module_uses_reactive_runtime_fragments(
                 .is_some()
         });
 
-    Ok(reachability.reachable_reactive_sinks.iter().any(|sink| {
+    reachability.reachable_reactive_sinks.iter().any(|sink| {
         if !matches!(sink.kind, ReachableReactiveSinkKind::RuntimeFragment) {
             return false;
         }
@@ -184,7 +284,7 @@ fn html_module_uses_reactive_runtime_fragments(
 
         !template.dependencies.is_empty()
             || (reachable_reactive_sources && !template.template_value_parameters.is_empty())
-    }))
+    })
 }
 
 /// Renders entry-file start fragments into static HTML and an ordered list of slot IDs.
@@ -244,17 +344,19 @@ pub(crate) fn render_html_document(
 ) -> Result<String, CompilerMessages> {
     let (body_html, slot_ids) =
         render_entry_fragments(input.const_fragments, input.entry_runtime_fragment_count);
+    let start_function = input
+        .hir_module
+        .require_start_function("HTML document rendering")
+        .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))?;
     let page_metadata =
-        extract_html_page_metadata(input.hir_module, input.string_table).map_err(|diagnostic| {
-            CompilerMessages::from_diagnostic_ref(*diagnostic, input.string_table)
-        })?;
-
-    let Some(start_function_name) = input.function_names.get(&input.hir_module.start_function)
-    else {
+        extract_html_page_metadata(input.hir_module, start_function, input.string_table).map_err(
+            |diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, input.string_table),
+        )?;
+    let Some(start_function_name) = input.function_names.get(&start_function) else {
         return Err(CompilerMessages::from_error(
             CompilerError::compiler_error(format!(
                 "HTML builder could not resolve start function {:?}",
-                input.hir_module.start_function
+                start_function
             )),
             input.string_table.clone(),
         ));

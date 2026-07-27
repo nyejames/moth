@@ -6,6 +6,7 @@
 use crate::backends::wasm::request::{
     WasmBackendRequest, WasmExportPolicy, WasmFunctionEmissionPolicy, WasmHelperExportPolicy,
 };
+use crate::compiler_frontend::hir::reachability::HirReachability;
 use crate::projects::html_project::wasm::export_plan::HtmlWasmExportPlan;
 use rustc_hash::FxHashMap;
 
@@ -13,7 +14,10 @@ use rustc_hash::FxHashMap;
 ///
 /// WHAT: copies deterministic export IDs/names plus required helper exports.
 /// WHY: request-building stays centralized so builder policy is translated once.
-pub(crate) fn build_wasm_backend_request(export_plan: &HtmlWasmExportPlan) -> WasmBackendRequest {
+pub(crate) fn build_wasm_backend_request(
+    export_plan: &HtmlWasmExportPlan,
+    reachability: &HirReachability,
+) -> WasmBackendRequest {
     let mut export_names = FxHashMap::default();
     let mut exported_functions = Vec::with_capacity(export_plan.function_exports.len());
 
@@ -40,7 +44,9 @@ pub(crate) fn build_wasm_backend_request(export_plan: &HtmlWasmExportPlan) -> Wa
                 export_release: export_plan.helper_exports.export_release,
             },
         },
-        function_emission_policy: WasmFunctionEmissionPolicy::ReachableFromExports,
+        function_emission_policy: WasmFunctionEmissionPolicy::Selected(
+            reachability.backend_selection().clone(),
+        ),
         ..WasmBackendRequest::default()
     }
 }

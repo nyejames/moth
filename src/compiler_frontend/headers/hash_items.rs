@@ -79,6 +79,12 @@ fn handle_top_level_const_template(
         return Ok(());
     }
 
+    if context.file_role == FileRole::ActiveApiOnlyModuleRoot {
+        return Err(Box::new(
+            CompilerDiagnostic::invalid_top_level_runtime_statement(current_location),
+        ));
+    }
+
     let template_token = token_stream.current_token();
     token_stream.advance();
 

@@ -12,13 +12,14 @@ Use the [Progress Matrix](docs/src/docs/progress/#page.moth) as a reference for 
 ## Active implementation work
 
 - [Canonical module compilation and scoped packages](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
+- [Benchmark system follow up corrections](./plans/benchmark-correctness-follow-up-implementation-plan.md)
 
 ## Queued implementation chain
 
 - Add `--terse` flag to `tests` command for a very compact summary and terse error messages / warnings when running the tests suite.
-- [TIR follow up cleanup](docs/roadmap/plans/tir-corrections-and-simplification-plan.md)
+- [TIR follow up cleanup](./plans/tir-corrections-and-simplification-plan.md)
 - [Project config, imported build values and anonymous records](./plans/import_values_anonymous_records_plan.md)
-- [Diagnostics and tokens optimised memory layout plan](docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
+- [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
 - Improve the `tmp/test_brackets.mtf` error example.
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md)
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)

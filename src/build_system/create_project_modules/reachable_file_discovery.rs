@@ -27,14 +27,18 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::import_scanning::{ScannedImportSource, scan_imports_with_source};
+use super::module_identity::ModuleId;
+use super::module_namespace::{DirectoryImportResolution, NamespaceBoundary, ResolvedImport};
 use super::prepared_source::PreparedSourceInput;
+use super::prepared_source_store::{MothScanOrigin, PreparedSourceStore};
+use super::semantic_source_set::SemanticSourceSet;
 use super::source_discovery_error::SourceDiscoveryError;
 use super::source_loading::{extract_source_code, read_source_code, source_read_error};
 
@@ -78,75 +82,79 @@ pub(super) struct ReachableSourceFile {
 
 /// Stage 0 inventory produced by reachable-file discovery.
 ///
-/// WHAT: owns the deterministic input-file list plus the retained `ScannedImportSource` for every
-///       reachable `.moth` file read while scanning imports.
+/// WHAT: owns the deterministic input-file list, the retained `ScannedImportSource` for every
+///       reachable `.moth` file, and the optional project `SemanticSourceSet` built during
+///       per-entry directory traversal. The semantic set is the authority that selects and
+///       orders project semantic members; the file list is the reachable-file handle.
+///       For single-file synthetic compilation (no project `SourceId` store), `local_source_cache`
+///       retains the per-entry `ScannedImportSource` map. For directory projects, prepared source
+///       data lives in the shared `PreparedSourceStore` and `local_source_cache` is `None`.
 /// WHY: source loading policy belongs to Stage 0. `assemble_input_files_from_inventory` turns
 ///      this into `PreparedSourceInput` values, so header parsing and later frontend stages
 ///      receive the state-safe prepared type without knowing whether text came from the
-///      import-scan cache or a later raw file read.
+///      prepared-source store, import-scan cache or a later raw file read.
 pub(super) struct ReachableSourceInventory {
     pub(super) files: Vec<ReachableSourceFile>,
-    source_cache: FxHashMap<PathBuf, ScannedImportSource>,
+    local_source_cache: Option<FxHashMap<PathBuf, ScannedImportSource>>,
+    pub(super) semantic_source_set: Option<SemanticSourceSet>,
 }
 
-/// One resolved local structural dependency fact retained by Stage 0 reachable traversal.
+/// One resolved dependency edge ready for direct insertion into the project module graph.
 ///
-/// WHAT: records that an authored structural provider reference resolved from a canonical
-///       importer file in one project module root to a canonical source file in a different
-///       project module root, carrying the canonical consumer root, canonical provider root and
-///       the exact authored import-clause `SourceLocation`.
-/// WHY: the project module graph inserts a provider-before-consumer edge from each fact after
-///      discovery completes. The authored source location is retained so a later diagnostic
-///      owner can attribute the edge to the exact import clause without reparsing, but edge
-///      identity is the (consumer, provider) root pair and never the source location.
+/// WHAT: records that an authored structural provider reference resolved through the
+///       boundary-aware namespace from a consumer project module to a provider project
+///       module, carrying both `ModuleId` values and the exact authored import-clause
+///       `SourceLocation`.
+/// WHY: the namespace resolves to boundary-local `ModuleId`s directly, so the graph inserts
+///      a provider-before-consumer edge without a path-to-ID mapping step. The authored
+///      source location is retained in the graph side table so a later diagnostic owner can
+///      attribute the edge to the exact import clause without reparsing.
 #[derive(Clone, Debug)]
-pub(super) struct LocalStructuralDependencyFact {
-    pub(super) consumer_root: PathBuf,
-    pub(super) provider_root: PathBuf,
-    pub(super) authored_location: SourceLocation,
+pub(crate) struct ResolvedDependencyEdge {
+    pub(super) provider_module_id: ModuleId,
+    pub(super) consumer_module_id: ModuleId,
+    pub(super) provider: StructuralProviderReference,
 }
 
-/// Reachable discovery output pairing the file inventory with retained dependency facts.
+/// Reachable discovery output pairing the file inventory with direct dependency edges.
 ///
-/// WHAT: the complete retained inventory plus the local structural dependency facts observed
-///       during one traversal. Both the provider-capable serial path and the provider-free
+/// WHAT: the complete retained inventory plus the project-local `ModuleId` edges observed during
+///       one traversal. Both the provider-capable serial path and the provider-free
 ///       worker path return this so the inventory merge has one shape.
-/// WHY: dependency facts are collected at the same local-import resolution join as the file
+/// WHY: dependency edges are collected at the same local-import resolution join as the file
 ///      inventory, so they share the traversal owner and stay deterministic regardless of which
 ///      discovery path produced them.
 pub(super) struct ReachableDiscoveryResult {
     pub(super) inventory: ReachableSourceInventory,
-    pub(super) dependency_facts: Vec<LocalStructuralDependencyFact>,
+    pub(super) resolved_edges: Vec<ResolvedDependencyEdge>,
 }
 
-/// Collected reachable inputs for one entry plus the retained dependency facts.
+/// Collected reachable inputs for one entry plus the retained dependency edges.
 ///
 /// WHAT: `assemble_input_files_from_inventory` turns the inventory into `PreparedSourceInput`
-///       values; the dependency facts travel alongside so the directory-project inventory merge
-///       can insert graph edges after discovery.
-/// WHY: the single-file flow ignores the facts because it has no project module graph, while the
-///      directory-project serial flow threads them into the graph merge.
+///       values; direct edges travel alongside so the directory-project graph can record them
+///       after discovery.
+/// WHY: the single-file flow produces no edges because it has no project module graph, while the
+///      directory-project flow retains them for graph insertion.
 pub(super) struct CollectedReachableInputs {
     pub(super) input_files: Vec<PreparedSourceInput>,
-    pub(super) dependency_facts: Vec<LocalStructuralDependencyFact>,
+    pub(super) resolved_edges: Vec<ResolvedDependencyEdge>,
 }
 
 /// Retained Stage 0 source proven provider-free during the serial classification pass.
 ///
-/// WHAT: keeps the `ScannedImportSource` (source text, structural provider references, and the
-///       exact `FileTokens` from the single lexical pass) for every reachable `.moth` file.
-/// WHY: provider-free workers reuse this retained lexical data instead of re-reading or
-///      re-tokenizing each classified `.moth` file. The serial provider-capable fallback also
-///      reuses it when a worker fails, so the lexer never runs twice for the same source.
+/// WHAT: records whether the serial provider-capable owner must replay after classification
+///       found a provider-backed import or unsupported package condition.
+/// WHY: classification populates the shared `PreparedSourceStore`; the serial fallback reads
+///      from the store instead of re-tokenizing every already-scanned `.moth`.
 pub(super) struct ProviderFreeProjectInventory {
-    pub(super) source_cache: FxHashMap<PathBuf, ScannedImportSource>,
     /// Whether provider-capable serial replay is required.
     ///
     /// WHAT: set when classification traversed the complete reachable local `.moth` graph and
     ///       encountered a provider-backed import or unsupported package condition that only the
     ///       serial provider-capable owner can resolve.
-    /// WHY: the inventory is still returned with its complete retained scan cache so the serial
-    ///      fallback reuses it instead of re-tokenizing every already-scanned `.moth`.
+    /// WHY: the store retains every already-scanned `.moth` so the serial fallback reuses it
+    ///      instead of re-tokenizing.
     pub(super) provider_capable_required: bool,
 }
 
@@ -157,7 +165,6 @@ impl ProviderFreeProjectInventory {
     ///      serial provider-capable anyway.
     pub(super) fn provider_capable_required() -> Self {
         ProviderFreeProjectInventory {
-            source_cache: FxHashMap::default(),
             provider_capable_required: true,
         }
     }
@@ -172,6 +179,14 @@ struct LoadedMissingSourceFile {
     input_index: usize,
     source_file: ReachableSourceFile,
     source_code: String,
+}
+
+/// Mutable traversal outputs shared by the source-import queue helpers.
+struct ReachableQueue<'a> {
+    reachable: &'a BTreeSet<ReachableSourceFile>,
+    queue: &'a mut VecDeque<ReachableSourceFile>,
+    resolved_edges: &'a mut Vec<ResolvedDependencyEdge>,
+    semantic_source_set: Option<&'a mut SemanticSourceSet>,
 }
 
 /// Build a `PreparedSourceInput` from a cache-miss load.
@@ -216,23 +231,26 @@ struct SourceReadFailure {
 // -------------------------
 
 /// Collect all reachable source files for a given entry point and load their content.
+#[allow(clippy::needless_option_as_deref)]
 pub(super) fn collect_reachable_input_files(
     entry_path: &Path,
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
-    classification_cache: Option<&FxHashMap<PathBuf, ScannedImportSource>>,
+    mut prepared_source_store: Option<&mut PreparedSourceStore>,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
 ) -> Result<CollectedReachableInputs, CompilerMessages> {
     let total_start = crate::timing::start_pipeline_timing();
 
-    // 1. Traverse the import graph to find all paths and retained dependency facts.
+    // 1. Traverse the import graph to find all paths and retained resolved edges.
     let discovery = match discover_reachable_source_files(
         entry_path,
         project_path_resolver,
         style_directives,
         external_imports,
-        classification_cache,
+        prepared_source_store.as_deref_mut(),
+        directory_import_resolution,
         string_table,
     ) {
         Ok(discovery) => discovery,
@@ -244,56 +262,223 @@ pub(super) fn collect_reachable_input_files(
 
     let ReachableDiscoveryResult {
         inventory,
-        dependency_facts,
+        resolved_edges,
     } = discovery;
 
-    let input_files = assemble_input_files_from_inventory(inventory, string_table)?;
+    let input_files = assemble_input_files_from_inventory(
+        inventory,
+        prepared_source_store.as_deref_mut(),
+        directory_import_resolution,
+        string_table,
+    )?;
     log_stage_timing("stage0.reachable_discovery.total", total_start);
     Ok(CollectedReachableInputs {
         input_files,
-        dependency_facts,
+        resolved_edges,
     })
 }
 
 /// Assemble `PreparedSourceInput` values from a deterministic Stage 0 inventory.
 ///
-/// WHAT: reuses the retained `ScannedImportSource` cached during import scanning for Moth
-///       files and loads remaining Moth template/PlainMarkdown files through the serial/parallel
-///       cache-miss path.
+/// WHAT: for directory projects, projects from the shared `PreparedSourceStore` (preparing
+///       `.mtf`/`.md` slots lazily). For single-file synthetic compilation, uses the retained
+///       local source cache and loads remaining Moth template/PlainMarkdown files through the
+///       serial/parallel cache-miss path.
 /// WHY: inventory assembly is the same whether discovery was provider-capable or provider-free,
-///      so it is shared between both paths to keep ordering and loading policy in one place. The
-///      import-scan cache only holds Moth files, so cache hits always carry the retained
-///      Stage 0 `FileTokens`; cache misses are Moth template/PlainMarkdown, which never carry tokens.
+///      so it is shared between both paths to keep ordering and loading policy in one place.
 pub(super) fn assemble_input_files_from_inventory(
     inventory: ReachableSourceInventory,
+    prepared_source_store: Option<&mut PreparedSourceStore>,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
 ) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
-    let input_file_count = inventory.files.len();
+    let ReachableSourceInventory {
+        files,
+        local_source_cache,
+        semantic_source_set,
+    } = inventory;
+
+    match semantic_source_set {
+        Some(set) => {
+            let Some(resolution) = directory_import_resolution else {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "Project semantic source set reached input assembly without its project source index",
+                    ),
+                    string_table,
+                ));
+            };
+            let Some(store) = prepared_source_store else {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "Project semantic source set reached input assembly without its prepared source store",
+                    ),
+                    string_table,
+                ));
+            };
+            assemble_with_semantic_set(
+                files,
+                set,
+                store,
+                local_source_cache.unwrap_or_default(),
+                resolution.project_source_tree_index(),
+                string_table,
+            )
+        }
+        None => {
+            let local_cache = local_source_cache.unwrap_or_default();
+            assemble_reachable_files(files, local_cache, string_table)
+        }
+    }
+}
+
+/// Assemble `PreparedSourceInput` values using the `SemanticSourceSet` as the project semantic
+/// membership authority.
+///
+/// WHAT: project semantic members are selected and ordered by `SourceId` (portable logical
+///       identity order) from the set. Remaining reachable files are explicit interface/external
+///       inputs for the donor compiler and follow in `BTreeSet` (canonical path) order. The
+///       `PreparedSourceStore` is the single source-data owner: prepared `.moth` slots carry
+///       retained tokens; `.mtf`/`.md` slots are prepared lazily during assembly.
+/// WHY: the set is the authority that determines which reachable files are project semantic
+///      members; the store provides retained source text and tokens. Cross-module provider roots,
+///      source-package facades and binding-package inputs never enter the semantic set.
+fn assemble_with_semantic_set(
+    files: Vec<ReachableSourceFile>,
+    set: SemanticSourceSet,
+    store: &mut PreparedSourceStore,
+    mut non_project_source_cache: FxHashMap<PathBuf, ScannedImportSource>,
+    source_tree_index: &super::source_tree_index::SourceTreeIndex,
+    string_table: &mut StringTable,
+) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
+    let member_paths: FxHashSet<&Path> = set
+        .members()
+        .iter()
+        .map(|source_id| source_tree_index.source(*source_id).canonical_path())
+        .collect();
+
+    // Verify every semantic member was reached by the BFS. An unreached member is an impossible
+    // project source membership mismatch surfaced as an internal build-system error.
+    let reachable_paths: FxHashSet<&Path> = files.iter().map(|file| file.path.as_path()).collect();
+    for source_id in set.members() {
+        let record = source_tree_index.source(*source_id);
+        if !reachable_paths.contains(record.canonical_path()) {
+            let error = CompilerError::compiler_error(format!(
+                "Project semantic source set member {} (SourceId {}) was not reached by the reachable traversal; every project semantic member must be a reachable file",
+                record.canonical_path().display(),
+                source_id.index(),
+            ));
+            return Err(CompilerMessages::from_error_ref(error, string_table));
+        }
+    }
+
+    // Project sources owned by another module are structural provider references, not semantic
+    // inputs. Their completed interfaces are supplied by the graph scheduler to header binding.
+    // Non-project sources remain explicit inputs until their separate package graph is cut over.
+    let external_input_files: Vec<&ReachableSourceFile> = files
+        .iter()
+        .filter(|source_file| {
+            !member_paths.contains(source_file.path.as_path())
+                && source_tree_index
+                    .source_id_for_canonical_path(&source_file.path)
+                    .is_none()
+        })
+        .collect();
+
+    let mut input_slots: Vec<Option<PreparedSourceInput>> = (0..set.members().len()
+        + external_input_files.len())
+        .map(|_| None)
+        .collect();
+    let mut missing_sources = Vec::new();
+
+    // Semantic members in deterministic `SourceId` order.
+    for (input_index, source_id) in set.members().iter().enumerate() {
+        let prepared = store
+            .project_project_prepared_input(*source_id, source_tree_index, string_table)
+            .map_err(|error| error.into_messages(string_table))?;
+        input_slots[input_index] = Some(prepared);
+    }
+
+    // External inputs remain in canonical-path (BTreeSet) order. Cross-module project sources
+    // are deliberately absent: their provider interfaces replace donor syntax at binding.
+    // Package sources stay in the traversal-local cache until their own boundary store lands.
+    for (input_index, source_file) in (set.members().len()..).zip(external_input_files) {
+        fill_input_slot(
+            &mut non_project_source_cache,
+            &source_file.path,
+            source_file.kind,
+            input_index,
+            &mut input_slots,
+            &mut missing_sources,
+        );
+    }
+
+    load_and_join_input_slots(input_slots, missing_sources, string_table)
+}
+
+/// Assemble `PreparedSourceInput` values without a semantic set (single-file synthetic path).
+fn assemble_reachable_files(
+    files: Vec<ReachableSourceFile>,
+    mut source_cache: FxHashMap<PathBuf, ScannedImportSource>,
+    string_table: &mut StringTable,
+) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
+    let input_file_count = files.len();
     let mut input_slots: Vec<Option<PreparedSourceInput>> =
         (0..input_file_count).map(|_| None).collect();
     let mut missing_sources = Vec::new();
-    let mut source_cache = inventory.source_cache;
 
-    for (input_index, source_file) in inventory.files.into_iter().enumerate() {
-        if let Some(scanned_source) = source_cache.remove(&source_file.path) {
-            add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
-
-            // The import-scan cache only holds Moth files, so the retained token stream is
-            // always present here. Non-Moth files fall through to the cache-miss load path.
-            input_slots[input_index] = Some(PreparedSourceInput::Moth {
-                source_code: scanned_source.source_code,
-                source_path: source_file.path,
-                tokens: Box::new(scanned_source.tokens),
-            });
-        } else {
-            add_frontend_counter(FrontendCounter::Stage0SourceCacheMissCount, 1);
-
-            missing_sources.push(MissingSourceFile {
-                input_index,
-                source_file,
-            });
-        }
+    for (input_index, source_file) in files.into_iter().enumerate() {
+        fill_input_slot(
+            &mut source_cache,
+            &source_file.path,
+            source_file.kind,
+            input_index,
+            &mut input_slots,
+            &mut missing_sources,
+        );
     }
+
+    load_and_join_input_slots(input_slots, missing_sources, string_table)
+}
+
+/// Fill one input slot from the retained cache or queue it for disk loading.
+fn fill_input_slot(
+    source_cache: &mut FxHashMap<PathBuf, ScannedImportSource>,
+    canonical_path: &Path,
+    source_kind: SourceFileKind,
+    input_index: usize,
+    input_slots: &mut [Option<PreparedSourceInput>],
+    missing_sources: &mut Vec<MissingSourceFile>,
+) {
+    if let Some(scanned_source) = source_cache.remove(canonical_path) {
+        add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
+
+        input_slots[input_index] = Some(PreparedSourceInput::Moth {
+            source_code: scanned_source.source_code,
+            source_path: canonical_path.to_path_buf(),
+            tokens: Box::new(scanned_source.tokens),
+        });
+    } else {
+        add_frontend_counter(FrontendCounter::Stage0SourceCacheMissCount, 1);
+
+        missing_sources.push(MissingSourceFile {
+            input_index,
+            source_file: ReachableSourceFile {
+                path: canonical_path.to_path_buf(),
+                kind: source_kind,
+            },
+        });
+    }
+}
+
+/// Load missing sources from disk and join all slots into the final ordered `Vec`.
+fn load_and_join_input_slots(
+    input_slots: Vec<Option<PreparedSourceInput>>,
+    missing_sources: Vec<MissingSourceFile>,
+    string_table: &mut StringTable,
+) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
+    let input_file_count = input_slots.len();
+    let mut input_slots = input_slots;
 
     let source_load_start = crate::timing::start_pipeline_timing();
     let loaded_missing_sources = match load_missing_sources(missing_sources, string_table) {
@@ -314,8 +499,6 @@ pub(super) fn assemble_input_files_from_inventory(
         input_slots[input_index] = Some(prepared_input_from_loaded(loaded));
     }
 
-    // All slots are either cache hits or successful miss loads. Keep the join explicit so input
-    // order stays tied to the deterministic inventory order even when miss loading used Rayon.
     let mut input_files = Vec::with_capacity(input_file_count);
     for slot in input_slots {
         let Some(input_file) = slot else {
@@ -335,18 +518,6 @@ pub(super) fn assemble_input_files_from_inventory(
 //  Reachable Discovery
 // -------------------------
 
-/// Origin of source text used during shared reachable-file traversal.
-///
-/// WHAT: distinguishes Moth source read from disk from source reused from the provider-free
-///       classification cache.
-/// WHY: Stage 0 counters should only count bytes loaded during the current traversal; reused text
-///      was already counted when it was first read.
-#[derive(Debug, PartialEq)]
-enum SourceScanOrigin {
-    FreshRead,
-    ReusedFromCache,
-}
-
 /// Action a traversal policy wants the shared BFS to take for one import path.
 enum ImportPolicyAction {
     /// Do not follow this import.
@@ -365,92 +536,46 @@ enum ImportPolicyAction {
 /// Stage 0 import policy that customizes the shared reachable-file traversal.
 ///
 /// WHAT: the three discovery paths (provider-capable serial, provider-free classification,
-///       provider-free worker) differ only in how they react to external package imports and
-///       whether they can reuse classified source text. This enum keeps those differences explicit
-///       while letting the shared BFS own queue handling, canonicalization, and local queuing.
+///       provider-free worker) differ only in how they react to external package imports. This
+///       enum keeps those differences explicit while letting the shared BFS own queue handling,
+///       canonicalization, source preparation and local queuing.
+///
+/// Source preparation is owned by the [`TraversalSourceStorage`] parameter, not the policy. The
+/// policy only decides import actions; the storage decides where scanned source data is retained.
 enum ImportPolicy<'a, 'b> {
     /// Full provider-capable path. Mutates provider cache and resolution tables.
-    ///
-    /// `classification_cache` is `Some` when a provider-free classification pass already
-    /// tokenized every reachable `.moth` file and the provider-free worker path failed. The
-    /// serial fallback reuses those retained tokens instead of re-tokenizing.
     Capable {
         external_imports: &'a mut ExternalImportDiscoveryState<'b>,
-        classification_cache: Option<&'a FxHashMap<PathBuf, ScannedImportSource>>,
     },
     /// Conservative pre-scan that proves a directory build has no provider-backed imports.
     FreeClassification(&'a ExternalPackageRegistry),
     /// Provider-free worker path that reuses retained lexical data proved safe by classification.
     FreeWorker {
         external_packages: &'a ExternalPackageRegistry,
-        project_source_cache: &'a FxHashMap<PathBuf, ScannedImportSource>,
     },
 }
 
 impl<'a, 'b> ImportPolicy<'a, 'b> {
-    /// Scan imports for the current Moth file, reusing classified source text when available.
-    fn scan_imports(
-        &self,
-        canonical_file: &Path,
-        style_directives: &StyleDirectiveRegistry,
-        string_table: &mut StringTable,
-    ) -> Result<(ScannedImportSource, SourceScanOrigin), SourceDiscoveryError> {
-        match self {
-            ImportPolicy::Capable {
-                classification_cache,
-                ..
-            } => {
-                if let Some(cache) = classification_cache
-                    && let Some(cached) = cache.get(canonical_file)
-                {
-                    return Ok((cached.clone(), SourceScanOrigin::ReusedFromCache));
-                }
-
-                let scanned_source =
-                    scan_imports_with_source(canonical_file, style_directives, string_table)?;
-                Ok((scanned_source, SourceScanOrigin::FreshRead))
-            }
-            ImportPolicy::FreeWorker {
-                project_source_cache,
-                ..
-            } => {
-                if let Some(cached) = project_source_cache.get(canonical_file) {
-                    return Ok((cached.clone(), SourceScanOrigin::ReusedFromCache));
-                }
-
-                // Classification walks the full import graph from every entry point, so its
-                // cache covers every Moth file any single-module worker can reach. A miss
-                // here is an invariant violation; fail so the parent retries on the serial
-                // provider-capable path where the lexer can run safely.
-                Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-                    "Provider-free worker reached a Moth file absent from the classification cache",
-                )))
-            }
-            ImportPolicy::FreeClassification(_) => {
-                let scanned_source =
-                    scan_imports_with_source(canonical_file, style_directives, string_table)?;
-                Ok((scanned_source, SourceScanOrigin::FreshRead))
-            }
-        }
-    }
-
     /// Decide how to handle one import path.
     fn handle_import(
         &mut self,
         import_path: &InternedPath,
+        import_location: &SourceLocation,
         canonical_file: &Path,
         project_path_resolver: &ProjectPathResolver,
+        directory_import_resolution: Option<DirectoryImportResolution<'_>>,
         string_table: &mut StringTable,
     ) -> Result<ImportPolicyAction, SourceDiscoveryError> {
         match self {
             ImportPolicy::Capable {
                 external_imports: state,
-                ..
             } => handle_provider_capable_import(
                 import_path,
+                import_location,
                 canonical_file,
                 project_path_resolver,
                 state,
+                directory_import_resolution,
                 string_table,
             ),
             ImportPolicy::FreeClassification(external_packages) => {
@@ -458,18 +583,147 @@ impl<'a, 'b> ImportPolicy<'a, 'b> {
                     import_path,
                     canonical_file,
                     external_packages,
+                    directory_import_resolution,
                     string_table,
                 )
             }
-            ImportPolicy::FreeWorker {
-                external_packages, ..
-            } => handle_provider_free_worker_import(
+            ImportPolicy::FreeWorker { external_packages } => handle_provider_free_worker_import(
                 import_path,
                 canonical_file,
                 external_packages,
+                directory_import_resolution,
                 string_table,
             ),
         }
+    }
+}
+
+/// Source preparation strategy for one reachable-file traversal.
+///
+/// WHAT: abstracts where scanned `.moth` source data is retained so the shared BFS does not
+///       duplicate traversal logic. Directory projects use the shared `PreparedSourceStore`;
+///       single-file synthetic compilation uses a local path-keyed cache.
+enum TraversalSourceStorage<'a> {
+    /// Directory project: prepare sources lazily in the shared store (read-write).
+    Store { store: &'a mut PreparedSourceStore },
+    /// Provider-free worker: read from the already-populated store (read-only).
+    StoreReadOnly { store: &'a PreparedSourceStore },
+    /// Single-file synthetic compilation: local path-keyed cache.
+    Local,
+}
+
+/// Result of scanning one `.moth` file during traversal.
+struct ScannedMothSource {
+    imports: Vec<StructuralProviderReference>,
+    fresh_read: bool,
+    source_byte_count: usize,
+}
+
+fn scan_and_cache_local_moth_source(
+    canonical_file: &Path,
+    style_directives: &StyleDirectiveRegistry,
+    local_source_cache: &mut Option<FxHashMap<PathBuf, ScannedImportSource>>,
+    string_table: &mut StringTable,
+) -> Result<ScannedMothSource, SourceDiscoveryError> {
+    if let Some(scanned) = local_source_cache
+        .as_ref()
+        .and_then(|cache| cache.get(canonical_file))
+    {
+        return Ok(ScannedMothSource {
+            imports: scanned.imports.clone(),
+            fresh_read: false,
+            source_byte_count: 0,
+        });
+    }
+
+    let scanned = scan_imports_with_source(canonical_file, style_directives, string_table)?;
+    let imports = scanned.imports.clone();
+    let source_byte_count = scanned.source_code.len();
+    local_source_cache
+        .as_mut()
+        .expect("local source cache exists for mutable traversal storage")
+        .insert(canonical_file.to_path_buf(), scanned);
+
+    Ok(ScannedMothSource {
+        imports,
+        fresh_read: true,
+        source_byte_count,
+    })
+}
+
+/// Scan one `.moth` file for imports using the traversal's source storage strategy.
+///
+/// WHAT: for directory projects, prepares or reuses the source in the shared `PreparedSourceStore`.
+///       For single-file synthetic compilation, scans and caches in the local path-keyed cache.
+///       Workers read from the already-populated store without preparing.
+fn scan_moth_source(
+    canonical_file: &Path,
+    style_directives: &StyleDirectiveRegistry,
+    source_storage: &mut TraversalSourceStorage<'_>,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
+    local_source_cache: &mut Option<FxHashMap<PathBuf, ScannedImportSource>>,
+    string_table: &mut StringTable,
+) -> Result<ScannedMothSource, SourceDiscoveryError> {
+    match source_storage {
+        TraversalSourceStorage::Store { store } => {
+            let resolution = directory_import_resolution.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Store source storage requires directory import resolution",
+                )
+            })?;
+            let source_tree_index = resolution.project_source_tree_index();
+            let Some(source_id) = source_tree_index.source_id_for_canonical_path(canonical_file)
+            else {
+                return scan_and_cache_local_moth_source(
+                    canonical_file,
+                    style_directives,
+                    local_source_cache,
+                    string_table,
+                );
+            };
+            let (imports, origin) = store.prepare_or_get_project_moth_imports(
+                source_id,
+                canonical_file,
+                style_directives,
+                string_table,
+            )?;
+            let (fresh_read, source_byte_count) = match origin {
+                MothScanOrigin::FreshRead { source_byte_count } => (true, source_byte_count),
+                MothScanOrigin::ReusedFromStore => (false, 0),
+            };
+            Ok(ScannedMothSource {
+                imports,
+                fresh_read,
+                source_byte_count,
+            })
+        }
+        TraversalSourceStorage::StoreReadOnly { store } => {
+            let resolution = directory_import_resolution.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "StoreReadOnly source storage requires directory import resolution",
+                )
+            })?;
+            let source_id = resolution
+                .project_source_tree_index()
+                .source_id_for_canonical_path(canonical_file)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Provider-free worker reached a source outside the project prepared-source boundary",
+                    )
+                })?;
+            let imports = store.get_project_moth_imports(source_id)?;
+            Ok(ScannedMothSource {
+                imports,
+                fresh_read: false,
+                source_byte_count: 0,
+            })
+        }
+        TraversalSourceStorage::Local => scan_and_cache_local_moth_source(
+            canonical_file,
+            style_directives,
+            local_source_cache,
+            string_table,
+        ),
     }
 }
 
@@ -491,22 +745,72 @@ impl<'a, 'b> ImportPolicy<'a, 'b> {
 struct ReachableTraversalOutcome {
     inventory: ReachableSourceInventory,
     provider_capable_required: bool,
-    dependency_facts: Vec<LocalStructuralDependencyFact>,
+    resolved_edges: Vec<ResolvedDependencyEdge>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn traverse_reachable_source_files(
     entry_paths: &[PathBuf],
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     policy: &mut ImportPolicy<'_, '_>,
+    source_storage: &mut TraversalSourceStorage<'_>,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
+    build_semantic_source_set: bool,
     string_table: &mut StringTable,
 ) -> Result<ReachableTraversalOutcome, SourceDiscoveryError> {
     let mut reachable = BTreeSet::new();
     let mut queue = VecDeque::new();
-    let mut source_cache = FxHashMap::default();
+    let mut local_source_cache = match source_storage {
+        TraversalSourceStorage::StoreReadOnly { .. } => None,
+        TraversalSourceStorage::Store { .. } | TraversalSourceStorage::Local => {
+            Some(FxHashMap::default())
+        }
+    };
     let mut imports_scanned: usize = 0;
     let mut provider_capable_required = false;
-    let mut dependency_facts: Vec<LocalStructuralDependencyFact> = Vec::new();
+    let mut resolved_edges: Vec<ResolvedDependencyEdge> = Vec::new();
+
+    // Build the project semantic source set for one normal entry module when the traversal is a
+    // per-entry directory discovery. Classification passes multiple entries and does not build
+    // a set; single-file discovery has no directory index. The set is seeded from the entry root
+    // file's `SourceId` and grows as same-owner imports resolve through the project namespace.
+    let mut semantic_source_set = if build_semantic_source_set {
+        let resolution = directory_import_resolution.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Project semantic source-set traversal requires directory import resolution",
+            )
+        })?;
+        if entry_paths.len() != 1 {
+            return Err(CompilerError::compiler_error(
+                "Project semantic source-set traversal requires exactly one entry seed",
+            )
+            .into());
+        }
+        let entry_path = &entry_paths[0];
+
+        {
+            let (source_id, module_id) = resolution
+                .source_id_and_module_for_path(entry_path)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Project semantic source set could not resolve entry root file {} to an owned \
+                         project source; the entry root must be an indexed owned source",
+                        entry_path.display(),
+                    ))
+                })?;
+            Some(
+                SemanticSourceSet::from_entry_source(
+                    source_id,
+                    module_id,
+                    resolution.project_source_tree_index(),
+                )
+                .map_err(SourceDiscoveryError::from)?,
+            )
+        }
+    } else {
+        None
+    };
 
     // Seed with entry points in deterministic order.
     for entry_path in entry_paths {
@@ -566,29 +870,31 @@ fn traverse_reachable_source_files(
         }
 
         let import_scan_start = crate::timing::start_pipeline_timing();
-        let (scanned_source, scan_origin) =
-            match policy.scan_imports(&canonical_file, style_directives, string_table) {
-                Ok(scanned_source) => scanned_source,
-                Err(error) => {
-                    log_stage_timing("stage0.reachable_discovery.import_scan", import_scan_start);
-                    return Err(error);
-                }
-            };
+        let scanned = match scan_moth_source(
+            &canonical_file,
+            style_directives,
+            source_storage,
+            directory_import_resolution,
+            &mut local_source_cache,
+            string_table,
+        ) {
+            Ok(scanned) => scanned,
+            Err(error) => {
+                log_stage_timing("stage0.reachable_discovery.import_scan", import_scan_start);
+                return Err(error);
+            }
+        };
         log_stage_timing("stage0.reachable_discovery.import_scan", import_scan_start);
 
-        if scan_origin == SourceScanOrigin::FreshRead {
+        if scanned.fresh_read {
             add_frontend_counter(
                 FrontendCounter::Stage0SourceBytesLoaded,
-                scanned_source.source_code.len(),
+                scanned.source_byte_count,
             );
         }
 
-        // Clone the import references for the traversal loop so the full `ScannedImportSource`
-        // (source text plus retained tokens) can be cached for reuse by provider-free workers
-        // and the serial fallback without re-tokenizing.
-        let import_references = scanned_source.imports.clone();
+        let import_references = scanned.imports.clone();
         imports_scanned += import_references.len();
-        source_cache.insert(canonical_file.clone(), scanned_source);
 
         for provider in &import_references {
             // Stage 0 resolves reachability through the provider path today; the structural
@@ -596,8 +902,10 @@ fn traverse_reachable_source_files(
             let import_path = &provider.path;
             let action = policy.handle_import(
                 import_path,
+                &provider.path_location,
                 &canonical_file,
                 project_path_resolver,
+                directory_import_resolution,
                 string_table,
             )?;
 
@@ -605,14 +913,19 @@ fn traverse_reachable_source_files(
                 ImportPolicyAction::Skip => continue,
                 ImportPolicyAction::QueueLocal => {
                     let import_resolve_start = crate::timing::start_pipeline_timing();
+                    let mut reachable_queue = ReachableQueue {
+                        reachable: &reachable,
+                        queue: &mut queue,
+                        resolved_edges: &mut resolved_edges,
+                        semantic_source_set: semantic_source_set.as_mut(),
+                    };
                     let result = resolve_and_queue_local_import(
                         provider,
                         &canonical_file,
                         project_path_resolver,
+                        directory_import_resolution,
                         string_table,
-                        &reachable,
-                        &mut queue,
-                        &mut dependency_facts,
+                        &mut reachable_queue,
                     );
                     log_stage_timing(
                         "stage0.reachable_discovery.import_resolve",
@@ -640,13 +953,31 @@ fn traverse_reachable_source_files(
         imports_scanned as f64,
     );
 
+    // Finalize the semantic source set: sort by `SourceId`, deduplicate and verify every member
+    // is owned by the entry module. The set is consumed by `PreparedSourceInput` assembly as the
+    // project semantic membership authority.
+    let semantic_source_set = if let Some(set) = semantic_source_set {
+        let resolution = directory_import_resolution.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Project semantic source set lost directory import resolution before finalization",
+            )
+        })?;
+        Some(
+            set.finish(resolution.project_source_tree_index())
+                .map_err(SourceDiscoveryError::from)?,
+        )
+    } else {
+        None
+    };
+
     Ok(ReachableTraversalOutcome {
         inventory: ReachableSourceInventory {
             files: reachable.into_iter().collect(),
-            source_cache,
+            local_source_cache,
+            semantic_source_set,
         },
         provider_capable_required,
-        dependency_facts,
+        resolved_edges,
     })
 }
 
@@ -656,23 +987,34 @@ fn traverse_reachable_source_files(
 /// files, and returns the full ordered set of files reachable from the entry point.
 /// WHY: source kind belongs to Stage 0 input discovery. Builder-supported content assets can be
 ///      loaded and carried forward without being treated as Moth module roots.
+#[allow(clippy::needless_option_as_deref)]
 pub(super) fn discover_reachable_source_files(
     entry_point: &Path,
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
-    classification_cache: Option<&FxHashMap<PathBuf, ScannedImportSource>>,
+    mut prepared_source_store: Option<&mut PreparedSourceStore>,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
 ) -> Result<ReachableDiscoveryResult, SourceDiscoveryError> {
-    let mut policy = ImportPolicy::Capable {
-        external_imports,
-        classification_cache,
+    let mut policy = ImportPolicy::Capable { external_imports };
+
+    let mut source_storage = match (
+        prepared_source_store.as_deref_mut(),
+        directory_import_resolution,
+    ) {
+        (Some(store), Some(_)) => TraversalSourceStorage::Store { store },
+        _ => TraversalSourceStorage::Local,
     };
+
     let outcome = traverse_reachable_source_files(
         &[entry_point.to_path_buf()],
         project_path_resolver,
         style_directives,
         &mut policy,
+        &mut source_storage,
+        directory_import_resolution,
+        directory_import_resolution.is_some(),
         string_table,
     )?;
 
@@ -683,27 +1025,133 @@ pub(super) fn discover_reachable_source_files(
     );
     Ok(ReachableDiscoveryResult {
         inventory: outcome.inventory,
-        dependency_facts: outcome.dependency_facts,
+        resolved_edges: outcome.resolved_edges,
     })
 }
 
-/// Resolve a normal Moth import to a filesystem path and enqueue reachable files.
+/// Build the `TraversalSourceStorage` for one traversal from the optional store and resolution.
 ///
-/// WHAT: handles cross-module root queuing, implementation-file discovery and local structural
-///       dependency-fact retention for an import that is not provider-backed and not a
-///       virtual/unsupported package import.
+/// Directory projects pass `Some(store)` and `Some(resolution)` so the store owns source
+/// preparation. Single-file synthetic compilation passes `None` for both, using the local cache.
+/// Resolve a compiler-semantic Moth import and enqueue its indexed or synthetic-file target.
+///
+/// WHAT: handles cross-module root queuing, implementation-file discovery and direct dependency
+///       edge retention for an import that is not provider-backed or a virtual package import.
 /// WHY: this logic is identical between the provider-capable and provider-free discovery paths;
-///      extracting it prevents the two BFS implementations from drifting. The dependency fact is
-///      retained only when the resolution crosses project module roots; same-module imports,
-///      virtual, binding-backed and provider imports never reach this local join.
+///      extracting it prevents the two traversal policies from drifting. A graph edge is retained
+///      only when indexed resolution crosses project module roots.
 fn resolve_and_queue_local_import(
     provider: &StructuralProviderReference,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
-    reachable: &BTreeSet<ReachableSourceFile>,
-    queue: &mut VecDeque<ReachableSourceFile>,
-    dependency_facts: &mut Vec<LocalStructuralDependencyFact>,
+    reachable_queue: &mut ReachableQueue<'_>,
+) -> Result<(), SourceDiscoveryError> {
+    // Directory projects resolve compiler-semantic imports through the boundary-aware namespace
+    // using indexed facts, replacing filesystem candidate probing and public-surface fallback.
+    // Single-file synthetic compilation retains its filesystem-backed resolver path because it
+    // has no directory source index or project module graph.
+    if let Some(directory_import_resolution) = directory_import_resolution {
+        return resolve_and_queue_via_namespace(
+            provider,
+            canonical_file,
+            directory_import_resolution,
+            string_table,
+            reachable_queue,
+        );
+    }
+
+    resolve_and_queue_via_filesystem(
+        provider,
+        canonical_file,
+        project_path_resolver,
+        string_table,
+        reachable_queue,
+    )
+}
+
+/// Resolve a compiler-semantic import through the boundary-aware namespace and enqueue files.
+///
+/// WHAT: uses indexed facts to resolve the import to a tagged `ResolvedImport`, queues the
+///       canonical source file or module root file, and retains a `ResolvedDependencyEdge` for
+///       project-local cross-module imports. No filesystem candidate probing or
+///       public-surface fallback runs here.
+fn resolve_and_queue_via_namespace(
+    provider: &StructuralProviderReference,
+    canonical_file: &Path,
+    directory_import_resolution: DirectoryImportResolution<'_>,
+    string_table: &mut StringTable,
+    reachable_queue: &mut ReachableQueue<'_>,
+) -> Result<(), SourceDiscoveryError> {
+    let resolved = directory_import_resolution
+        .resolve_import(provider, canonical_file, string_table)
+        .map_err(SourceDiscoveryError::from)?;
+
+    match resolved {
+        ResolvedImport::SameModuleSource {
+            source_id,
+            canonical_path,
+            source_kind,
+            consumer_module_id,
+            boundary,
+        } => {
+            if boundary == NamespaceBoundary::Project
+                && let Some(set) = reachable_queue.semantic_source_set.as_deref_mut()
+                && consumer_module_id == set.entry_module_id()
+            {
+                set.add_same_owner_source(source_id);
+            }
+            let source_file = resolved_source_file(&canonical_path, source_kind);
+            if !reachable_queue.reachable.contains(&source_file) {
+                reachable_queue.queue.push_back(source_file);
+            }
+        }
+        ResolvedImport::CrossModuleProject {
+            provider_module_id,
+            consumer_module_id,
+            root_file,
+        } => {
+            reachable_queue.resolved_edges.push(ResolvedDependencyEdge {
+                provider_module_id,
+                consumer_module_id,
+                provider: provider.clone(),
+            });
+            let root_source = ReachableSourceFile {
+                path: root_file,
+                kind: SourceFileKind::Moth,
+            };
+            if !reachable_queue.reachable.contains(&root_source) {
+                reachable_queue.queue.push_back(root_source);
+            }
+        }
+        ResolvedImport::RootFile { root_file } => {
+            let root_source = ReachableSourceFile {
+                path: root_file,
+                kind: SourceFileKind::Moth,
+            };
+            if !reachable_queue.reachable.contains(&root_source) {
+                reachable_queue.queue.push_back(root_source);
+            }
+        }
+        ResolvedImport::BindingPackage => {}
+    }
+
+    Ok(())
+}
+
+/// Resolve a compiler-semantic import through the filesystem-backed resolver for single-file
+/// synthetic compilation.
+///
+/// Single-file compilation has no directory source index or project module graph, so it retains
+/// the original resolver path. No dependency edges are collected because there is no project
+/// module graph to populate.
+fn resolve_and_queue_via_filesystem(
+    provider: &StructuralProviderReference,
+    canonical_file: &Path,
+    project_path_resolver: &ProjectPathResolver,
+    string_table: &mut StringTable,
+    reachable_queue: &mut ReachableQueue<'_>,
 ) -> Result<(), SourceDiscoveryError> {
     let resolved = project_path_resolver
         .resolve_import_to_source_file_with_public_surface_fallback(
@@ -713,46 +1161,9 @@ fn resolve_and_queue_local_import(
         )
         .map_err(SourceDiscoveryError::from)?;
 
-    let importer_root = project_path_resolver.module_root_for_file(canonical_file);
-    let target_root = project_path_resolver.module_root_for_file(&resolved.path);
-
-    // Retain one local structural dependency fact when the resolved source file lives in a
-    // different project module root from the importer. The fact carries the exact authored
-    // import-clause location for later attribution; edge identity is the root pair, never the
-    // location. `module_root_for_file` returns project-normal roots only, so roots that belong
-    // to separate registered source packages never reach this join and create no project edge.
-    if let (Some(consumer_root), Some(provider_root)) = (&importer_root, &target_root)
-        && consumer_root != provider_root
-    {
-        dependency_facts.push(LocalStructuralDependencyFact {
-            consumer_root: consumer_root.clone(),
-            provider_root: provider_root.clone(),
-            authored_location: provider.path_location.clone(),
-        });
-    }
-
-    // Ensure target module root files are compiled for cross-module imports.
-    // WHY: when an import resolves to an implementation file in another module root,
-    //      the prepared root file must be available so AST can validate boundary enforcement.
-    if let Some(importer_root) = importer_root
-        && let Some(target_root) = target_root
-        && importer_root != target_root
-        && let Some(root_path) = project_path_resolver.module_root_file_for_directory(&target_root)
-        && !reachable.contains(&ReachableSourceFile {
-            path: root_path.clone(),
-            kind: SourceFileKind::Moth,
-        })
-    {
-        queue.push_back(ReachableSourceFile {
-            path: root_path,
-            kind: SourceFileKind::Moth,
-        });
-    }
-
-    // Queue the resolved implementation file if not already visited.
     let resolved_source_file = resolved_source_file(&resolved.path, resolved.kind);
-    if !reachable.contains(&resolved_source_file) {
-        queue.push_back(resolved_source_file);
+    if !reachable_queue.reachable.contains(&resolved_source_file) {
+        reachable_queue.queue.push_back(resolved_source_file);
     }
 
     Ok(())
@@ -760,9 +1171,11 @@ fn resolve_and_queue_local_import(
 
 fn handle_provider_capable_import(
     import_path: &InternedPath,
+    import_location: &SourceLocation,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
 ) -> Result<ImportPolicyAction, SourceDiscoveryError> {
     // Skip virtual package imports — AST resolution handles those.
@@ -770,6 +1183,11 @@ fn handle_provider_capable_import(
         .external_packages
         .is_virtual_package_import(import_path, string_table)
     {
+        if directory_import_resolution.is_some_and(|resolution| {
+            resolution.has_binding_package_import(import_path, string_table)
+        }) {
+            return Ok(ImportPolicyAction::QueueLocal);
+        }
         return Ok(ImportPolicyAction::Skip);
     }
 
@@ -790,16 +1208,18 @@ fn handle_provider_capable_import(
     if let Some((prefix_path, prefix_str, extension)) =
         provider_backed_import_prefix(import_path, string_table)
     {
-        if let Some(provider) = external_imports.providers.find_by_extension(extension) {
+        if let Some(provider) = external_imports.providers.find_by_extension(&extension) {
             let provider_imports_start = crate::timing::start_pipeline_timing();
             let result = resolve_provider_backed_import(
                 ProviderBackedImportRequest {
                     importer_canonical_path: canonical_file,
                     import_path,
+                    import_location,
                     prefix_path: &prefix_path,
                     raw_prefix: &prefix_str,
                     provider,
                     project_path_resolver,
+                    directory_import_resolution,
                 },
                 external_imports,
                 string_table,
@@ -814,12 +1234,11 @@ fn handle_provider_capable_import(
         }
 
         // No provider registered for this extension — report unsupported extension.
-        let extension_owned = extension.to_owned();
         return Err(SourceDiscoveryError::from(
             unsupported_external_extension_error(
                 canonical_file,
                 import_path,
-                &extension_owned,
+                &extension,
                 string_table,
             ),
         ));
@@ -848,15 +1267,25 @@ pub(super) fn classify_provider_free_project(
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_packages: &ExternalPackageRegistry,
+    prepared_source_store: &mut PreparedSourceStore,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
 ) -> Result<ProviderFreeProjectInventory, SourceDiscoveryError> {
     let total_start = crate::timing::start_pipeline_timing();
     let mut policy = ImportPolicy::FreeClassification(external_packages);
+
+    let mut source_storage = TraversalSourceStorage::Store {
+        store: prepared_source_store,
+    };
+
     let outcome = match traverse_reachable_source_files(
         entry_points,
         project_path_resolver,
         style_directives,
         &mut policy,
+        &mut source_storage,
+        directory_import_resolution,
+        false,
         string_table,
     ) {
         Ok(outcome) => outcome,
@@ -868,7 +1297,6 @@ pub(super) fn classify_provider_free_project(
 
     log_stage_timing("stage0.reachable_discovery.total", total_start);
     Ok(ProviderFreeProjectInventory {
-        source_cache: outcome.inventory.source_cache,
         provider_capable_required: outcome.provider_capable_required,
     })
 }
@@ -877,9 +1305,15 @@ fn handle_provider_free_classification_import(
     import_path: &InternedPath,
     _canonical_file: &Path,
     external_packages: &ExternalPackageRegistry,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
 ) -> Result<ImportPolicyAction, SourceDiscoveryError> {
     if external_packages.is_virtual_package_import(import_path, string_table) {
+        if directory_import_resolution.is_some_and(|resolution| {
+            resolution.has_binding_package_import(import_path, string_table)
+        }) {
+            return Ok(ImportPolicyAction::QueueLocal);
+        }
         return Ok(ImportPolicyAction::Skip);
     }
 
@@ -922,20 +1356,24 @@ pub(super) fn discover_reachable_source_files_provider_free(
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_packages: &ExternalPackageRegistry,
-    project_source_cache: &FxHashMap<PathBuf, ScannedImportSource>,
+    prepared_source_store: &PreparedSourceStore,
+    directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
 ) -> Result<ReachableDiscoveryResult, SourceDiscoveryError> {
     let total_start = crate::timing::start_pipeline_timing();
 
-    let mut policy = ImportPolicy::FreeWorker {
-        external_packages,
-        project_source_cache,
+    let mut policy = ImportPolicy::FreeWorker { external_packages };
+    let mut source_storage = TraversalSourceStorage::StoreReadOnly {
+        store: prepared_source_store,
     };
     let outcome = match traverse_reachable_source_files(
         &[entry_point.to_path_buf()],
         project_path_resolver,
         style_directives,
         &mut policy,
+        &mut source_storage,
+        Some(directory_import_resolution),
+        true,
         string_table,
     ) {
         Ok(outcome) => outcome,
@@ -955,7 +1393,7 @@ pub(super) fn discover_reachable_source_files_provider_free(
     log_stage_timing("stage0.reachable_discovery.total", total_start);
     Ok(ReachableDiscoveryResult {
         inventory: outcome.inventory,
-        dependency_facts: outcome.dependency_facts,
+        resolved_edges: outcome.resolved_edges,
     })
 }
 
@@ -963,9 +1401,15 @@ fn handle_provider_free_worker_import(
     import_path: &InternedPath,
     canonical_file: &Path,
     external_packages: &ExternalPackageRegistry,
+    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
 ) -> Result<ImportPolicyAction, SourceDiscoveryError> {
     if external_packages.is_virtual_package_import(import_path, string_table) {
+        if directory_import_resolution.is_some_and(|resolution| {
+            resolution.has_binding_package_import(import_path, string_table)
+        }) {
+            return Ok(ImportPolicyAction::QueueLocal);
+        }
         return Ok(ImportPolicyAction::Skip);
     }
 
@@ -1153,10 +1597,10 @@ fn queue_same_directory_root_for_moth_template(
 /// prefix is `./helper.js`.
 /// WHY: provider resolution must happen for the file prefix, while any remaining components are
 /// symbol names to be resolved inside the provider-created package.
-fn provider_backed_import_prefix<'a>(
+fn provider_backed_import_prefix(
     import_path: &InternedPath,
-    string_table: &'a StringTable,
-) -> Option<(InternedPath, String, &'a str)> {
+    string_table: &StringTable,
+) -> Option<(InternedPath, String, String)> {
     let components = import_path.as_components();
     if components.is_empty() {
         return None;
@@ -1178,7 +1622,7 @@ fn provider_backed_import_prefix<'a>(
         let prefix_components = components[..=index].to_vec();
         let prefix_path = InternedPath::from_components(prefix_components);
         let prefix_str = prefix_path.to_portable_string(string_table);
-        return Some((prefix_path, prefix_str, extension));
+        return Some((prefix_path, prefix_str, extension.to_owned()));
     }
 
     None
@@ -1187,10 +1631,12 @@ fn provider_backed_import_prefix<'a>(
 struct ProviderBackedImportRequest<'a> {
     importer_canonical_path: &'a Path,
     import_path: &'a InternedPath,
+    import_location: &'a SourceLocation,
     prefix_path: &'a InternedPath,
     raw_prefix: &'a str,
     provider: &'a std::sync::Arc<dyn ExternalImportProvider>,
     project_path_resolver: &'a ProjectPathResolver,
+    directory_import_resolution: Option<DirectoryImportResolution<'a>>,
 }
 
 /// Resolves a provider-backed import prefix to a canonical filesystem path, checks the build cache,
@@ -1200,7 +1646,38 @@ fn resolve_provider_backed_import(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
-    // Resolve the prefix to a canonical filesystem path without .moth extension or public-surface fallback.
+    // Directory projects resolve provider-owned targets through the same boundary-aware
+    // namespace as compiler-semantic imports. Single-file synthetic compilation retains its
+    // separate filesystem-backed resolver.
+    let canonical_source_path = match request.directory_import_resolution {
+        Some(resolution) => resolution
+            .resolve_provider_target(
+                request.prefix_path,
+                request.importer_canonical_path,
+                request.import_location,
+                string_table,
+            )
+            .map_err(SourceDiscoveryError::from)?,
+        None => resolve_provider_target_via_filesystem(&request, string_table)?,
+    };
+
+    invoke_provider_and_record_resolution(
+        canonical_source_path,
+        &request,
+        external_imports,
+        string_table,
+    )
+}
+
+/// Resolve a single-file provider import target through the filesystem.
+///
+/// WHAT: the single-file synthetic-module mode retains its filesystem-backed provider
+/// resolution, canonicalizing the normalized candidate and checking the module boundary from
+/// the resolver's root tables. This is deliberately separate from the directory index path.
+fn resolve_provider_target_via_filesystem(
+    request: &ProviderBackedImportRequest<'_>,
+    string_table: &mut StringTable,
+) -> Result<PathBuf, SourceDiscoveryError> {
     let canonical_source_path = resolve_provider_prefix_to_canonical_path(
         request.prefix_path,
         request.importer_canonical_path,
@@ -1209,8 +1686,6 @@ fn resolve_provider_backed_import(
     )?;
 
     // Enforce module/package boundaries for provider-backed imports.
-    // A file may only directly import a .js file that lives in the same module,
-    // source-backed package, or default entry-root area.
     check_provider_import_module_boundary(
         request.importer_canonical_path,
         &canonical_source_path,
@@ -1219,7 +1694,20 @@ fn resolve_provider_backed_import(
         string_table,
     )?;
 
-    // Build the cache key.
+    Ok(canonical_source_path)
+}
+
+/// Check the build cache, call the provider when needed, and record the result in the
+/// resolution table and package registry.
+///
+/// WHAT: shared between the directory index path and the single-file filesystem path. The
+/// `canonical_source_path` is the resolved target's IO handle from either path.
+fn invoke_provider_and_record_resolution(
+    canonical_source_path: PathBuf,
+    request: &ProviderBackedImportRequest<'_>,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    string_table: &mut StringTable,
+) -> Result<(), SourceDiscoveryError> {
     let cache_key = ExternalImportCacheKey {
         canonical_source_path: canonical_source_path.clone(),
         provider_kind: request.provider.kind(),
@@ -1247,7 +1735,6 @@ fn resolve_provider_backed_import(
         return Ok(());
     }
 
-    // Build the provider request.
     let provider_request = ExternalImportRequest {
         import_path: request.import_path.to_portable_string(string_table),
         canonical_source_path: canonical_source_path.clone(),
@@ -1465,4 +1952,29 @@ fn unsupported_external_extension_error(
             string_table,
         );
     CompilerDiagnostic::unsupported_external_extension(import_path.clone(), extension_id, location)
+}
+
+/// Test-only entry point that discovers reachable files and returns the `SemanticSourceSet`
+/// before it is consumed by `PreparedSourceInput` assembly.
+#[cfg(test)]
+pub(super) fn discover_semantic_source_set_for_test(
+    entry_path: &Path,
+    project_path_resolver: &ProjectPathResolver,
+    style_directives: &StyleDirectiveRegistry,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    directory_import_resolution: DirectoryImportResolution<'_>,
+    string_table: &mut StringTable,
+) -> Result<Option<SemanticSourceSet>, CompilerMessages> {
+    let discovery = discover_reachable_source_files(
+        entry_path,
+        project_path_resolver,
+        style_directives,
+        external_imports,
+        None,
+        Some(directory_import_resolution),
+        string_table,
+    )
+    .map_err(|error| error.into_messages(string_table))?;
+
+    Ok(discovery.inventory.semantic_source_set)
 }

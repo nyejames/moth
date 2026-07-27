@@ -9,6 +9,9 @@ use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
+use crate::compiler_frontend::hir::reachability::{
+    collect_module_function_link_facts, collect_reachability_from_function_link_facts,
+};
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -38,7 +41,7 @@ fn all_functions_is_default_for_direct_js_lowering() {
 }
 
 #[test]
-fn reachable_from_start_skips_unreachable_functions_and_external_references() {
+fn selected_functions_skip_unselected_functions_and_external_references() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let external_function = ExternalFunctionId::Synthetic(77);
@@ -46,7 +49,31 @@ fn reachable_from_start_skips_unreachable_functions_and_external_references() {
         module_with_unreachable_external_call(&mut string_table, types.unit, external_function);
 
     let mut config = default_config();
-    config.function_emission_policy = JsFunctionEmissionPolicy::ReachableFromStart;
+    let facts = collect_module_function_link_facts(&module)
+        .expect("test HIR should produce function link facts");
+    let reachability = collect_reachability_from_function_link_facts(
+        &facts,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("test HIR should produce entry reachability");
+    config.function_emission_policy =
+        JsFunctionEmissionPolicy::Selected(reachability.backend_selection().clone());
+
+    let borrow_analysis = BorrowCheckReport::default();
+    let mut emitter = crate::backends::js::JsEmitter::new(
+        &module,
+        &borrow_analysis,
+        &string_table,
+        config.clone(),
+        &type_environment,
+    );
+    emitter
+        .build_symbol_maps()
+        .expect("test HIR should build symbol maps");
+    assert!(emitter.function_name_by_id.contains_key(&FunctionId(0)));
+    assert!(!emitter.function_name_by_id.contains_key(&FunctionId(1)));
 
     let output = lower_hir_to_js(
         &module,
@@ -55,20 +82,20 @@ fn reachable_from_start_skips_unreachable_functions_and_external_references() {
         config,
         &type_environment,
     )
-    .expect("reachable-only JS lowering should ignore unreachable external calls");
+    .expect("selected-only JS lowering should ignore unselected external calls");
 
     let start_name = expected_dev_function_name("start_main", 0);
     let unused_name = expected_dev_function_name("unused_helper", 1);
     assert!(output.source.contains(&format!("function {start_name}(")));
     assert!(
         !output.source.contains(&format!("function {unused_name}(")),
-        "reachable-only JS lowering should not emit unreachable function bodies"
+        "selected-only JS lowering should not emit unselected function bodies"
     );
     assert!(
         !output
             .referenced_external_functions
             .contains(&external_function),
-        "unreachable external calls should not request generated glue or runtime assets"
+        "unselected external calls should not request generated glue or runtime assets"
     );
 }
 
@@ -145,7 +172,7 @@ fn external_call_block(
         statements: vec![statement(
             100 + block_id,
             HirStatementKind::Call {
-                target: CallTarget::ExternalFunction(external_function),
+                target: CallTarget::External(external_function),
                 args: vec![],
                 result: None,
             },

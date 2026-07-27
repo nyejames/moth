@@ -14,6 +14,7 @@
 //! must be emitted as `CompilerDiagnostic` from AST or earlier stages.
 
 use crate::compiler_frontend::ast::Ast;
+use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, SourceLocation};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -34,6 +35,7 @@ use crate::compiler_frontend::hir::validation::validate_hir_module;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, HirLoweringResult};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
+use crate::compiler_frontend::semantic_identity::OriginFunctionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::return_hir_transformation_error;
@@ -140,6 +142,8 @@ pub struct HirBuilder<'a> {
     // by full paths, never by scope-local leaf strings.
     pub(super) locals_by_name: FxHashMap<InternedPath, LocalId>,
     pub(super) functions_by_name: FxHashMap<InternedPath, FunctionId>,
+    pub(super) imported_functions_by_name: FxHashMap<InternedPath, AstImportedFunctionContract>,
+    pub(super) imported_fallible_carriers_by_origin: FxHashMap<OriginFunctionId, TypeId>,
     pub(super) structs_by_name: FxHashMap<InternedPath, StructId>,
     pub(super) choices_by_name: FxHashMap<InternedPath, ChoiceId>,
     /// Generic struct instantiations keyed by structured identity, not string paths.
@@ -253,6 +257,8 @@ impl<'a> HirBuilder<'a> {
 
             locals_by_name: FxHashMap::default(),
             functions_by_name: FxHashMap::default(),
+            imported_functions_by_name: FxHashMap::default(),
+            imported_fallible_carriers_by_origin: FxHashMap::default(),
             structs_by_name: FxHashMap::default(),
             choices_by_name: FxHashMap::default(),
             generic_structs_by_key: FxHashMap::default(),
@@ -320,6 +326,31 @@ impl<'a> HirBuilder<'a> {
         self.ast_warnings = ast.warnings.to_owned();
         self.extracted_metadata.rendered_path_usages = ast.rendered_path_usages.to_owned();
         self.module.const_facts = HirConstFacts::from(&ast.const_facts);
+        self.imported_functions_by_name = ast.imported_functions_by_local_path.clone();
+        self.imported_fallible_carriers_by_origin = self
+            .imported_functions_by_name
+            .values()
+            .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
+                (
+                    crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Imported {
+                        origin,
+                        ..
+                    },
+                    Some(carrier_type_id),
+                ) => Some((origin.clone(), carrier_type_id)),
+                _ => None,
+            })
+            .collect();
+        self.module.imported_call_summaries = self
+            .imported_functions_by_name
+            .values()
+            .filter_map(|contract| match &contract.target {
+                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Imported { origin, .. } => {
+                    Some((origin.clone(), contract.summary.clone()))
+                }
+                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Local(_) => None,
+            })
+            .collect();
 
         // 1. Prepare declarations (functions, structs, choices)
         if let Err(error) = self.prepare_hir_declarations(&ast) {

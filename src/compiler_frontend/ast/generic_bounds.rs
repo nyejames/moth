@@ -11,7 +11,9 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::headers::import_environment::FileVisibility;
+use crate::compiler_frontend::headers::import_environment::{
+    FileVisibility, SourceDeclarationTarget,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -27,7 +29,7 @@ pub(crate) struct GenericBoundEvidenceContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) trait_environment: Option<&'a TraitEnvironment>,
     pub(crate) trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
-    pub(crate) visible_trait_names: Option<&'a FxHashMap<StringId, InternedPath>>,
+    pub(crate) visible_trait_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
 }
 
 impl<'a> GenericBoundEvidenceContext<'a> {
@@ -221,7 +223,7 @@ fn generic_parameter_declares_bound(
 fn trait_is_visible(
     trait_id: TraitId,
     trait_environment: &TraitEnvironment,
-    visible_trait_names: Option<&FxHashMap<StringId, InternedPath>>,
+    visible_trait_names: Option<&FxHashMap<StringId, SourceDeclarationTarget>>,
 ) -> bool {
     let Some(trait_definition) = trait_environment.get(trait_id) else {
         return false;
@@ -237,5 +239,5 @@ fn trait_is_visible(
 
     visible_trait_names
         .values()
-        .any(|path| path == &trait_definition.canonical_path)
+        .any(|target| target.local_path() == &trait_definition.canonical_path)
 }

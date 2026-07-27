@@ -483,7 +483,11 @@ fn finish_file_output(
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareError> {
     // Ordinary source files have no semantic consumer for an implicit start. Imported roots are
     // intentionally parsed for declarations and exports only; their root body is discarded.
-    if context.file_role == FileRole::Normal && state.has_non_trivial_start_body() {
+    if matches!(
+        context.file_role,
+        FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot
+    ) && state.has_non_trivial_start_body()
+    {
         let location = state
             .first_executable_start_body_location()
             .unwrap_or_default();

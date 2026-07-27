@@ -48,7 +48,25 @@ pub(crate) fn validate_import_boundary(
     let canonical_base =
         fs::canonicalize(filesystem_base).unwrap_or_else(|_| filesystem_base.to_path_buf());
 
-    if !canonical_file.starts_with(&canonical_base) {
+    validate_import_boundary_against_base(
+        canonical_file,
+        base_kind,
+        &canonical_base,
+        import_path,
+        importer_file,
+        string_table,
+    )
+}
+
+fn validate_import_boundary_against_base(
+    target_path: &Path,
+    base_kind: &CompileTimePathBase,
+    canonical_base: &Path,
+    import_path: &InternedPath,
+    importer_file: &Path,
+    string_table: &mut StringTable,
+) -> Result<(), ImportPathResolutionError> {
+    if !target_path.starts_with(canonical_base) {
         let reason = match base_kind {
             CompileTimePathBase::SourcePackageRoot => {
                 InvalidImportPathReason::EscapesSourcePackageRoot

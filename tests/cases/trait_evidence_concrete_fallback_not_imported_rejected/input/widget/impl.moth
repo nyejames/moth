@@ -1,4 +1,4 @@
-import @./traits { DISPLAY_TEXT }
+import @traits { DISPLAY_TEXT }
 
 Label = |
     text String,

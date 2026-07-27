@@ -2274,7 +2274,12 @@ fn imported_const_template_context(
     visible_declarations.insert(declaration.id.clone());
 
     let mut visible_bindings = FxHashMap::default();
-    visible_bindings.insert(visible_name, declaration.id.clone());
+    visible_bindings.insert(
+        visible_name,
+        crate::compiler_frontend::headers::import_environment::SourceDeclarationTarget::Local(
+            declaration.id.clone(),
+        ),
+    );
 
     constant_template_context(scope, &[declaration])
         .with_visible_declarations(visible_declarations)

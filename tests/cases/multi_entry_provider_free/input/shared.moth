@@ -1,4 +1,5 @@
--- Shared compile-time metadata used by both directory entries.
+-- Module-local compile-time metadata for the root entry.
+-- Each entry directory owns its own shared.moth copy; no single physical source is shared across modules.
 -- This fixture exercises provider-free multi-entry discovery: only source imports,
 -- no provider-backed external imports, and no unsupported file extensions.
 site_name #= "Discovery Test"

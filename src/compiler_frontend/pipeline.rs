@@ -9,7 +9,7 @@ use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckReport, check_borrows as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
-use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
+use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput, AstBuildResult};
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, compiler_error_to_diagnostic,
 };
@@ -29,6 +29,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::module_dependencies::{SortedHeaders, resolve_module_dependencies};
 use crate::compiler_frontend::paths::path_format::{OutputPathStyle, PathStringFormatConfig};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -332,9 +333,10 @@ impl CompilerFrontend {
         &mut self,
         sorted: SortedHeaders,
         entry_file_path: &Path,
+        root_role: ModuleRootRole,
         build_profile: FrontendBuildProfile,
         capacity_estimate: FrontendArenaCapacityEstimate,
-    ) -> Result<Ast, CompilerMessages> {
+    ) -> Result<AstBuildResult, CompilerMessages> {
         let interned_entry_file = match self.source_files.get_by_canonical_path(entry_file_path) {
             Some(identity) => identity.logical_path.clone(),
             None => match InternedPath::try_from_filesystem_path(
@@ -367,6 +369,7 @@ impl CompilerFrontend {
                 style_directives: &self.style_directives,
                 string_table: &mut self.string_table,
                 entry_dir: interned_entry_file,
+                root_role,
                 build_profile,
                 project_path_resolver: self.project_path_resolver.clone(),
                 path_format_config: self.path_format_config.clone(),

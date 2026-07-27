@@ -783,6 +783,14 @@ impl ExternalPackageRegistry {
         self.package_id_by_path.contains_key(path)
     }
 
+    /// Iterate the registered package paths.
+    ///
+    /// Callers that require deterministic order must collect into an ordered set; the registry's
+    /// hash index remains optimized for lookup and is the sole owner of package registration.
+    pub(crate) fn package_paths(&self) -> impl Iterator<Item = &str> {
+        self.package_id_by_path.keys().map(String::as_str)
+    }
+
     /// Finds the longest registered external package prefix for an import path.
     ///
     /// WHAT: for an import such as `@core/math/sin`, checks `@core/math/sin`,

@@ -49,7 +49,7 @@ impl<'a> HirBuilder<'a> {
                 .function_origins
                 .insert(function.id, HirFunctionOrigin::Normal);
 
-            if function.id == self.module.start_function {
+            if Some(function.id) == self.module.start_function {
                 continue;
             }
 
@@ -63,11 +63,14 @@ impl<'a> HirBuilder<'a> {
                     ))
                 })?;
 
-            let Some(origin) = self.function_origin_lookup.origin_for(function_path) else {
+            let Some(origin) = self
+                .function_origin_lookup
+                .consume_origin_for(function_path)
+            else {
                 continue;
             };
 
-            if self.module.function_ids_by_origin.contains_key(origin) {
+            if self.module.function_ids_by_origin.contains_key(&origin) {
                 return Err(CompilerError::compiler_error(format!(
                     "HIR function-origin lowering received duplicate stable origin {:?}",
                     origin
@@ -79,9 +82,16 @@ impl<'a> HirBuilder<'a> {
                 .insert(origin.clone(), function.id);
         }
 
-        self.module
-            .function_origins
-            .insert(self.module.start_function, HirFunctionOrigin::EntryStart);
+        // Reject any concrete origin seed that no lowered function consumed. An unmatched seed
+        // means a public callable declaration did not lower to local HIR, which is an internal
+        // invariant failure rather than a silent deferral to public-interface finalization.
+        self.function_origin_lookup.validate_all_seeds_consumed()?;
+
+        if let Some(start_function) = self.module.start_function {
+            self.module
+                .function_origins
+                .insert(start_function, HirFunctionOrigin::EntryStart);
+        }
 
         Ok(())
     }

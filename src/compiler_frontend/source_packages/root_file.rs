@@ -8,47 +8,23 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::{CONFIG_FILE_NAME, LANGUAGE_SOURCE_SUFFIX};
 use std::collections::BTreeMap;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-/// The direct-child hash-root state for one source-backed package directory.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum HashRootFileDiscovery {
-    Missing,
-    Unique(PathBuf),
-    Multiple(Vec<PathBuf>),
-    Unreadable(String),
-}
-
-/// A typed failure from direct-child hash-root discovery.
+/// Immutable source-backed package roots and their prepared public-surface files.
 ///
-/// WHAT: distinguishes filesystem read failures from unrepresentable filenames so the owning
-///     Stage 0 boundary can map each kind to its correct error channel.
-/// WHY: a non-UTF-8 direct-child name cannot be classified as a hash-root candidate and must not
-///      be silently skipped. The offending `PathBuf` is preserved independently of
-///      `CompilerMessages` and `CompilerError` so the calling stage owns the diagnostic lane.
-#[derive(Debug)]
-pub(crate) enum HashRootDiscoveryError {
-    /// Filesystem `read_dir` or entry iteration failure.
-    Io(io::Error),
-    /// A direct-child filename that cannot be represented as UTF-8.
-    InvalidFileName(PathBuf),
-}
-
-/// Immutable source-backed package roots and their prepared public-surface states.
-///
-/// WHAT: carries the canonical filesystem roots and the typed direct-child hash-root discovery
-///     result from Stage 0 into path resolution and header preparation.
+/// WHAT: carries canonical filesystem roots and their validated direct-child hash-root files from
+/// Stage 0 into path resolution and header preparation. Missing, multiple and unreadable roots
+/// never enter this successful view.
 ///
 /// Both maps use `BTreeMap` so that every public iteration surface preserves one canonical
 /// import-prefix order. Callers never observe `HashMap` iteration order from roots or root-file
-/// discoveries.
+/// records.
 /// WHY: resolver construction must consume filesystem preparation rather than rediscovering
 ///     source-backed package roots or public surfaces.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PreparedSourcePackageRoots {
     roots: BTreeMap<String, PathBuf>,
-    root_files: BTreeMap<String, HashRootFileDiscovery>,
+    root_files: BTreeMap<String, PathBuf>,
 }
 
 impl PreparedSourcePackageRoots {
@@ -56,9 +32,9 @@ impl PreparedSourcePackageRoots {
         Self::default()
     }
 
-    /// Build one prepared contract from Stage 0's canonical roots and discoveries.
+    /// Build one prepared contract from Stage 0's validated canonical roots and root files.
     pub(crate) fn from_entries(
-        entries: impl IntoIterator<Item = (String, PathBuf, HashRootFileDiscovery)>,
+        entries: impl IntoIterator<Item = (String, PathBuf, PathBuf)>,
     ) -> Self {
         let mut prepared = Self::default();
 
@@ -74,7 +50,7 @@ impl PreparedSourcePackageRoots {
         &self.roots
     }
 
-    pub(crate) fn root_files(&self) -> &BTreeMap<String, HashRootFileDiscovery> {
+    pub(crate) fn root_files(&self) -> &BTreeMap<String, PathBuf> {
         &self.root_files
     }
 }
@@ -106,42 +82,6 @@ pub(crate) fn file_name_is_support_root_file(file_name: &str) -> bool {
 /// Whether a filesystem filename is any canonical Moth module root (`#*.moth` or `+*.moth`).
 pub(crate) fn file_name_is_module_root_file(file_name: &str) -> bool {
     file_name_is_hash_root_file(file_name) || file_name_is_support_root_file(file_name)
-}
-
-/// Discover direct-child Moth hash roots without assigning a semantic filename role.
-///
-/// WHAT: applies the generic `#*.moth` filename policy to one source-backed package directory.
-/// WHY: source-backed package preflight and path resolution must inspect the same filesystem candidates
-///      while keeping missing or ambiguous roots available for typed Stage 0 diagnostics.
-pub(crate) fn discover_hash_root_file(
-    directory: &Path,
-) -> Result<HashRootFileDiscovery, HashRootDiscoveryError> {
-    let mut root_files = Vec::new();
-
-    for entry in std::fs::read_dir(directory).map_err(HashRootDiscoveryError::Io)? {
-        let entry = entry.map_err(HashRootDiscoveryError::Io)?;
-        let path = entry.path();
-
-        // A direct-child filename that is not valid UTF-8 cannot be classified as a hash-root
-        // candidate. Fail immediately with the offending path instead of silently skipping it,
-        // which could misreport a valid root as missing.
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| HashRootDiscoveryError::InvalidFileName(path.clone()))?;
-
-        if file_name_is_hash_root_file(file_name) && path.is_file() {
-            root_files.push(path);
-        }
-    }
-
-    root_files.sort();
-
-    Ok(match root_files.as_slice() {
-        [] => HashRootFileDiscovery::Missing,
-        [root_file] => HashRootFileDiscovery::Unique(root_file.clone()),
-        _ => HashRootFileDiscovery::Multiple(root_files),
-    })
 }
 
 /// Whether a filesystem filename is the canonical project configuration file.

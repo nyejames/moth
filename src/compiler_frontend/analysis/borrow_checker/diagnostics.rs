@@ -123,6 +123,14 @@ impl<'a> BorrowDiagnostics<'a> {
             .unwrap_or_default()
     }
 
+    pub(super) fn module_error_location(&self) -> SourceLocation {
+        self.module
+            .start_function
+            .or_else(|| self.module.functions.first().map(|function| function.id))
+            .map(|function_id| self.function_error_location(function_id))
+            .unwrap_or_default()
+    }
+
     pub(super) fn value_error_location(
         &self,
         value_id: HirValueId,

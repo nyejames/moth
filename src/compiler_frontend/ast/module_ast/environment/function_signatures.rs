@@ -364,7 +364,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 for visible_method in visible_methods {
                     let Some(method_entry) = receiver_methods
                         .by_function_path
-                        .get(&visible_method.function_path)
+                        .get(visible_method.target.local_path())
                     else {
                         continue;
                     };
@@ -373,10 +373,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     // under the same local name. This should not happen for source methods
                     // because they travel with their type, but we keep the guard.
                     if let Some(_previous) = visible_methods.iter().find(|other| {
-                        other.function_path != visible_method.function_path
+                        other.target != visible_method.target
                             && receiver_methods
                                 .by_function_path
-                                .get(&other.function_path)
+                                .get(other.target.local_path())
                                 .is_some_and(|entry| entry.receiver == method_entry.receiver)
                     }) {
                         return Err(self.diagnostic_messages(

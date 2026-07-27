@@ -1,15 +1,60 @@
 //! Deterministic JavaScript symbol naming tests.
 
 use super::support::*;
+use crate::backends::js::JsEmitter;
+use crate::backends::js::symbols::build_field_symbol_raw;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, RegionId, StructId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::regions::HirRegion;
+use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 
 // Identifier sanitisation tests [names]
 // ---------------------------------------------------------------------------
+
+#[test]
+fn unicode_field_spellings_use_exact_utf8_hex_abi_names() {
+    assert_eq!(
+        build_field_symbol_raw("café", false),
+        "moth_field_636166c3a9"
+    );
+    assert_eq!(build_field_symbol_raw("café", true), "f_636166c3a9");
+    assert_eq!(
+        build_field_symbol_raw("cafè", false),
+        "moth_field_636166c3a8"
+    );
+}
+
+#[test]
+fn missing_field_name_metadata_is_an_internal_compiler_error() {
+    let string_table = StringTable::new();
+    let (type_environment, types) = build_type_environment();
+    let mut module = HirModule::new();
+    module.structs.push(HirStruct {
+        id: StructId(0),
+        frontend_type_id: types.int,
+        fields: vec![HirField {
+            id: FieldId(0),
+            ty: types.int,
+        }],
+    });
+
+    let borrow_analysis = BorrowCheckReport::default();
+    let mut emitter = JsEmitter::new(
+        &module,
+        &borrow_analysis,
+        &string_table,
+        default_config(),
+        &type_environment,
+    );
+    let error = emitter
+        .build_symbol_maps()
+        .expect_err("missing field metadata must reject malformed HIR");
+
+    assert!(error.msg.contains("no source name for FieldId(0)"));
+}
 
 /// Verifies that a function whose name is a JS reserved word gets an underscore prefix. [names]
 #[test]
@@ -66,7 +111,7 @@ fn exposes_function_name_map_for_runtime_fragments() {
 
     let mut module = HirModule::new();
     module.blocks = vec![block0, block1];
-    module.start_function = FunctionId(0);
+    module.start_function = Some(FunctionId(0));
     module.functions = vec![
         HirFunction {
             id: FunctionId(0),

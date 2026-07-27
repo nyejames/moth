@@ -7,8 +7,8 @@
 //! MUST NOT: register external package symbols or build namespace records.
 
 use super::{
-    FileVisibility, ImportEnvironmentBuilder, SourceImportAccess, VisibleNameBinding,
-    VisibleNameRegistry,
+    FileVisibility, ImportEnvironmentBuilder, SourceDeclarationTarget, SourceImportAccess,
+    VisibleNameBinding, VisibleNameRegistry,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason,
@@ -183,17 +183,20 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         registry.register(local_name, binding, Some(import.location.clone()))?;
 
         if is_type_alias {
-            file_visibility
-                .visible_type_alias_names
-                .insert(local_name, symbol_path.clone());
+            file_visibility.visible_type_alias_names.insert(
+                local_name,
+                SourceDeclarationTarget::Local(symbol_path.clone()),
+            );
         } else if is_trait {
-            file_visibility
-                .visible_trait_names
-                .insert(local_name, symbol_path.clone());
+            file_visibility.visible_trait_names.insert(
+                local_name,
+                SourceDeclarationTarget::Local(symbol_path.clone()),
+            );
         } else {
-            file_visibility
-                .visible_source_names
-                .insert(local_name, symbol_path.clone());
+            file_visibility.visible_source_names.insert(
+                local_name,
+                SourceDeclarationTarget::Local(symbol_path.clone()),
+            );
         }
 
         // Importing a nominal receiver type auto-imports visible receiver methods

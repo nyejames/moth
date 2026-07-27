@@ -297,7 +297,7 @@ impl ScopeContext {
                 let entry = self
                     .receiver_methods
                     .by_function_path
-                    .get(&visible_method.function_path)?;
+                    .get(visible_method.target.local_path())?;
                 if &entry.receiver == receiver {
                     return Some(entry);
                 }
@@ -332,7 +332,7 @@ impl ScopeContext {
                 if let Some(entry) = self
                     .receiver_methods
                     .by_function_path
-                    .get(&visible_method.function_path)
+                    .get(visible_method.target.local_path())
                 {
                     return Some(entry);
                 }

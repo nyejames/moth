@@ -1,18 +1,14 @@
 //! Pre-lowering validation that a HIR module only references external functions supported by the
 //! target backend.
 //!
-//! WHAT: validates external calls reachable from the module entry point and checks whether the
-//! referenced functions have backend-specific lowering metadata.
+//! WHAT: validates the external calls selected by build-owned reachability and checks whether
+//! the referenced functions have backend-specific lowering metadata.
 //! WHY: backends should fail early with a structured user-facing diagnostic rather than
 //! panicking or emitting a vague lowering error deep in backend code.
 
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalPackageRegistry};
-use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::{
-    ReachableExternalCall, collect_reachability_from_start,
-};
+use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableExternalCall};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Backend target for external-package support validation.
@@ -20,15 +16,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub enum BackendTarget {
     Js,
     Wasm,
-}
-
-/// Failure mode for external-package backend support validation.
-///
-/// WHAT: either a user-facing diagnostic for an unsupported external function call, or an
-///       infrastructure error if reachability collection itself fails.
-pub enum ExternalPackageValidationError {
-    Diagnostic(Box<CompilerDiagnostic>),
-    Infrastructure(Box<CompilerError>),
 }
 
 impl BackendTarget {
@@ -40,8 +27,7 @@ impl BackendTarget {
     }
 }
 
-/// Validates that every reachable external function call in `hir` has lowering metadata for
-/// `target`.
+/// Validates that every selected external function call has lowering metadata for `target`.
 ///
 /// WHAT: consumes backend-neutral HIR reachability, then checks each reachable external call
 /// against backend-specific lowering support.
@@ -50,22 +36,17 @@ impl BackendTarget {
 /// error. Unused source-backed package wrappers stay type-checked HIR, but they are not executable page
 /// code and must not fail backend support validation.
 pub fn validate_hir_external_package_support(
-    hir: &HirModule,
+    reachability: &HirReachability,
     registry: &ExternalPackageRegistry,
     target: BackendTarget,
     string_table: &mut StringTable,
-) -> Result<(), ExternalPackageValidationError> {
-    let reachability = collect_reachability_from_start(hir)
-        .map_err(|error| ExternalPackageValidationError::Infrastructure(Box::new(error)))?;
-
+) -> Result<(), Box<CompilerDiagnostic>> {
     for call in &reachability.reachable_external_calls {
         if !has_backend_lowering(registry, call.function_id, &target) {
             let diagnostic =
                 unsupported_external_function_diagnostic(registry, call, &target, string_table);
 
-            return Err(ExternalPackageValidationError::Diagnostic(Box::new(
-                diagnostic,
-            )));
+            return Err(Box::new(diagnostic));
         }
     }
 

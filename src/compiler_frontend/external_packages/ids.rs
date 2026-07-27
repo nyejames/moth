@@ -7,6 +7,7 @@
 //! repeating package-scoped name resolution.
 
 use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::semantic_identity::OriginFunctionId;
 
 pub const CORE_IO_PACKAGE_PATH: &str = "@core/io";
 pub const IO_NAMESPACE_NAME: &str = "io";
@@ -117,6 +118,7 @@ pub enum ExternalSymbolId {
 /// Call target for a function invocation in HIR.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CallTarget {
-    UserFunction(FunctionId),
-    ExternalFunction(ExternalFunctionId),
+    Local(FunctionId),
+    CrossModule(OriginFunctionId),
+    External(ExternalFunctionId),
 }

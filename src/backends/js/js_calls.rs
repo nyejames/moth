@@ -27,10 +27,21 @@ impl<'hir> JsEmitter<'hir> {
         target: &CallTarget,
     ) -> Result<LoweredCallTarget, CompilerError> {
         match target {
-            CallTarget::UserFunction(function_id) => Ok(LoweredCallTarget::FunctionName(
+            CallTarget::Local(function_id) => Ok(LoweredCallTarget::FunctionName(
                 self.function_name(*function_id)?.to_owned(),
             )),
-            CallTarget::ExternalFunction(id) => {
+            CallTarget::CrossModule(origin) => self
+                .config
+                .source_function_names
+                .get(origin)
+                .cloned()
+                .map(LoweredCallTarget::FunctionName)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "JavaScript backend received unresolved cross-module function target {origin:?}"
+                    ))
+                }),
+            CallTarget::External(id) => {
                 self.referenced_external_functions.insert(*id);
                 let function_def = self
                     .config
@@ -86,7 +97,7 @@ impl<'hir> JsEmitter<'hir> {
     ) -> Result<(), CompilerError> {
         let lowered_target = self.lower_call_target(target)?;
 
-        let args = if matches!(target, CallTarget::ExternalFunction(_)) {
+        let args = if matches!(target, CallTarget::External(_)) {
             args.iter()
                 .map(|arg| self.lower_expression_for_use(arg, JsValueUse::HostCallArgument))
                 .collect::<Result<Vec<_>, _>>()?
@@ -121,15 +132,13 @@ impl<'hir> JsEmitter<'hir> {
 
     /// Whether a call target returns an alias reference that should use borrow assignment.
     fn call_returns_alias_reference(&self, target: &CallTarget) -> bool {
-        let CallTarget::UserFunction(function_id) = target else {
-            return false;
-        };
-
-        self.hir
-            .functions
-            .iter()
-            .find(|function| function.id == *function_id)
-            .is_some_and(|function| {
+        match target {
+            CallTarget::Local(function_id) => self
+                .hir
+                .functions
+                .iter()
+                .find(|function| function.id == *function_id)
+                .is_some_and(|function| {
                 // Fallible calls return a fresh backend carrier. Any aliasing belongs to the
                 // success payload inside that carrier, not to the carrier local itself.
                 if self
@@ -139,9 +148,20 @@ impl<'hir> JsEmitter<'hir> {
                 {
                     return false;
                 }
-
-                function.return_aliases.len() == 1 && function.return_aliases[0].is_some()
-            })
+                    function.return_aliases.len() == 1 && function.return_aliases[0].is_some()
+                }),
+            CallTarget::CrossModule(origin) => self
+                .hir
+                .imported_call_summaries
+                .get(origin)
+                .is_some_and(|summary| {
+                    matches!(
+                        summary.return_alias,
+                        crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary::AliasParams(_)
+                    )
+                }),
+            CallTarget::External(_) => false,
+        }
     }
 }
 

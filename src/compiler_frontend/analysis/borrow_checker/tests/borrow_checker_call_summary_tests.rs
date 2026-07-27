@@ -252,7 +252,9 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         PublicCallReactiveEffect::None
     );
 
-    let start_id = hir.start_function;
+    let start_id = hir
+        .start_function
+        .expect("normal test module should have start");
     let start_summary = report
         .analysis
         .public_call_summaries

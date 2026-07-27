@@ -1,4 +1,6 @@
-A receiver method is a function called through a value.
+A receiver method is a function that lives inside a struct.
+
+You create a struct, then create a function that can only be called from instances of those structs.
 
 Its first parameter is named `this`:
 
@@ -20,3 +22,6 @@ The method is written as a normal top-level function in the same file as the
 type.
 
 Call it with `value.method()`, not `method(value)`.
+
+Methods exist as a helpful to organise code.
+They belong to the struct, so can only be called from instances of that type and are passed around with that type.

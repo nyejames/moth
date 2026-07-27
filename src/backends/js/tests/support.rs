@@ -269,7 +269,7 @@ pub(super) fn build_module(
     let mut module = HirModule::new();
     let function_id = function.id;
     module.blocks = blocks;
-    module.start_function = function_id;
+    module.start_function = Some(function_id);
     module.functions = vec![function];
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.choices = vec![HirChoice {
@@ -508,7 +508,7 @@ pub(super) fn lower_minimal_module_with_io_call(
     let call_statement = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(io_function_id),
+            target: CallTarget::External(io_function_id),
             args: vec![string_expression(2, "hello", types.string, region)],
             result: None,
         },
@@ -586,7 +586,7 @@ pub(super) fn lower_minimal_module_with_io_input_call(
     let call_statement = statement(
         1,
         HirStatementKind::Call {
-            target: CallTarget::ExternalFunction(io_function_id),
+            target: CallTarget::External(io_function_id),
             args,
             result: None,
         },

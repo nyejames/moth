@@ -1,6 +1,6 @@
 //! Directory-project module inventory assembly.
 //!
-//! WHAT: turns the canonical project module graph's normal entry modules into `DiscoveredModule`
+//! WHAT: turns every canonical project module graph node into a `DiscoveredModule`
 //! records carrying their graph-assigned stable module origin and all transitively reachable
 //! input files.
 //! WHY: module inventory is the Stage 0 bridge between the structural graph and parallel frontend
@@ -22,19 +22,19 @@ use crate::projects::settings::Config;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use super::import_scanning::ScannedImportSource;
 use super::module_identity::ModuleId;
+use super::module_namespace::DirectoryImportResolution;
 use super::prepared_source::PreparedSourceInput;
+use super::prepared_source_store::PreparedSourceStore;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
 use super::reachable_file_discovery::{
-    CollectedReachableInputs, ExternalImportDiscoveryState, LocalStructuralDependencyFact,
-    ProviderFreeDiscoveryFailed, ProviderFreeProjectInventory, ReachableSourceInventory,
-    assemble_input_files_from_inventory, classify_provider_free_project,
-    collect_reachable_input_files, discover_reachable_source_files_provider_free,
+    CollectedReachableInputs, ExternalImportDiscoveryState, ProviderFreeDiscoveryFailed,
+    ProviderFreeProjectInventory, ResolvedDependencyEdge, assemble_input_files_from_inventory,
+    classify_provider_free_project, collect_reachable_input_files,
+    discover_reachable_source_files_provider_free,
 };
 
 /// Minimum number of entry modules before the provider-free path uses Rayon.
@@ -70,11 +70,12 @@ struct DiscoveredModuleDraft {
 /// Entry point, graph-owned stable origin and all collected source files for one discovered
 /// module.
 ///
-/// Carries the graph-owned `StableModuleOriginIdentity` so semantic compilation receives a
-/// canonical module identity through the handoff instead of reconstructing one from an entry
-/// path. The dense `ModuleId` does not cross this boundary: the stable origin value is the
-/// semantic identity contract consumed by the `DefinedPublicExportOrigins` component.
+/// Carries both graph identities through the build-owned scheduling boundary. `ModuleId` remains
+/// the dense project-local job and merge-order key; `StableModuleOriginIdentity` is the portable
+/// semantic identity consumed by the frontend and public interface.
 pub(crate) struct DiscoveredModule {
+    /// Dense project-local identity used only by build-system scheduling and result storage.
+    pub(crate) module_id: ModuleId,
     /// The graph-assigned cross-build origin identity for this canonical module.
     pub(crate) stable_origin: StableModuleOriginIdentity,
     pub(crate) entry_point: PathBuf,
@@ -84,44 +85,43 @@ pub(crate) struct DiscoveredModule {
 /// Normal entry modules grouped by the populated graph's compile waves.
 ///
 /// WHAT: owns the wave-preserving data contract between module inventory and directory
-///       semantic compilation. Each wave holds the normal entry modules of one retained graph
+///       semantic compilation. Each wave holds every canonical module job in one retained graph
 ///       dependency wave, preserving the populated graph's dependency ordering and deterministic
-///       `ModuleId` order. Waves containing only non-entry modules (support roots, facade) are
-///       excluded so the inventory carries only modules the directory compiler will actually
-///       compile. This is the temporary normal-entry job inventory; current entry-closure payload
-///       semantics are unchanged, and no immutable provider interface is produced or consumed yet
-///       — that remains a Phase 5d concern.
+///       `ModuleId` order. This temporary discovered-job inventory feeds the provider-store
+///       scheduler; completed waves publish immutable interfaces before later consumers bind.
 /// WHY: preserving wave boundaries lets the directory compiler execute semantic compilation one
 ///      dependency wave at a time, with Rayon parallelism only within a ready wave. The graph
 ///      owns compile-wave order; this contract is the single owner of that order at the inventory
 ///      boundary so the compiler does not recompute waves or flatten them back into one batch.
 pub(crate) struct ModuleEntryCompileWaves {
     waves: Vec<Vec<DiscoveredModule>>,
+    provider_bindings: Vec<ResolvedDependencyEdge>,
 }
 
 impl ModuleEntryCompileWaves {
     /// Read-only access to the compile waves in deterministic graph order.
     ///
-    /// Each wave is non-empty and contains only normal entry modules.
+    /// Each wave is non-empty and contains every canonical module assigned to that graph wave.
+    #[cfg(test)]
     pub(crate) fn waves(&self) -> &[Vec<DiscoveredModule>] {
         &self.waves
     }
 
-    /// Consume the inventory into owned waves for sequential directory compilation.
-    pub(crate) fn into_waves(self) -> Vec<Vec<DiscoveredModule>> {
-        self.waves
+    pub(crate) fn into_parts(self) -> (Vec<Vec<DiscoveredModule>>, Vec<ResolvedDependencyEdge>) {
+        (self.waves, self.provider_bindings)
     }
 }
 
-/// Discovers every normal entry module in the directory project and its reachable dependencies.
+/// Discovers one compilation job for every canonical module in the directory project.
 ///
-/// Entry root files are seeded from the graph's normal entry modules in deterministic `ModuleId`
-/// order. Reachable-file discovery retains one local structural dependency fact per cross-module
-/// import resolution; after discovery completes the facts are merged into the graph as
-/// provider-before-consumer edges, and the returned modules are ordered by the populated
-/// graph's compile waves (filtered to normal entry modules, with empty waves excluded). The
+/// Root files are seeded from every graph node in deterministic `ModuleId`
+/// order. Reachable-file discovery retains direct `ModuleId` edges for cross-module imports;
+/// after discovery completes the edges enter the graph as provider-before-consumer order, and the
+/// returned modules are ordered by the populated
+/// graph's compile waves. The
 /// directory compiler consumes these waves sequentially, permitting Rayon parallelism only within
-/// a ready wave. Support roots and the project package facade are never entries. A defensive
+/// a ready wave. Only normal roots remain entry candidates, but support and facade roots now own
+/// API-only semantic jobs. A defensive
 /// graph cycle, a missing project-local root or a graph/inventory disagreement surfaces through
 /// the existing `CompilerMessages`/string-table boundary without panicking.
 pub(crate) fn discover_all_modules_in_project(
@@ -130,11 +130,12 @@ pub(crate) fn discover_all_modules_in_project(
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
+    directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
 ) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
-    let seeds = normal_entry_seeds_in_module_id_order(project_module_graph);
+    let seeds = module_seeds_in_module_id_order(project_module_graph);
 
-    if seeds.is_empty() {
+    if project_module_graph.entry_modules().is_empty() {
         return Err(config_diagnostic_messages(
             config,
             "entry_root",
@@ -145,16 +146,24 @@ pub(crate) fn discover_all_modules_in_project(
         ));
     }
 
+    // The shared project-boundary prepared-source store. Every reachable `.moth` source is
+    // read, tokenized and stored at most once across all entry traversals. The store replaces
+    // the per-entry path-keyed `ScannedImportSource` caches.
+    let mut prepared_source_store = PreparedSourceStore::new(
+        directory_import_resolution
+            .project_source_tree_index()
+            .source_count(),
+    );
+
     // Conservative gate: only take the provider-free parallel path when the entire reachable
     // import graph contains no provider-backed imports and no unsupported non-Moth
     // extensions. This keeps provider cache/resolution table mutations on the serial path.
-    // WHY: classification itself reads and tokenizes every reachable Moth source file and
-    //      retains the complete scan cache. It records `provider_capable_required` and skips the
-    //      external edge when a provider-backed or unsupported package import needs the serial
-    //      owner, but it never aborts and discards that cache. The serial fallback then reuses the
-    //      retained lexical data for every already-scanned `.moth` so the lexer never runs twice.
-    //      Skip classification for the common single-entry case because that path stays serial
-    //      provider-capable anyway.
+    // WHY: classification populates the shared `PreparedSourceStore`. It records
+    //      `provider_capable_required` and skips the external edge when a provider-backed or
+    //      unsupported package import needs the serial owner, but it never aborts and discards
+    //      the store. The serial fallback reuses the already-prepared store so the lexer never
+    //      runs twice for the same source. Skip classification for the common single-entry case
+    //      because that path stays serial provider-capable anyway.
     let provider_free_inventory = if seeds.len() >= PROVIDER_FREE_PARALLEL_MIN_MODULES {
         let entry_paths: Vec<PathBuf> = seeds.iter().map(|seed| seed.entry_path.clone()).collect();
         classify_provider_free_project(
@@ -162,6 +171,8 @@ pub(crate) fn discover_all_modules_in_project(
             project_path_resolver,
             style_directives,
             &*external_imports.external_packages,
+            &mut prepared_source_store,
+            Some(directory_import_resolution),
             string_table,
         )
         .map_err(|error| error.into_messages(string_table))?
@@ -169,27 +180,29 @@ pub(crate) fn discover_all_modules_in_project(
         ProviderFreeProjectInventory::provider_capable_required()
     };
 
-    let (drafts, dependency_facts) = if !provider_free_inventory.provider_capable_required {
+    let (drafts, resolved_edges) = if !provider_free_inventory.provider_capable_required {
         match discover_modules_provider_free_parallel(
             &seeds,
             project_path_resolver,
             style_directives,
             &*external_imports.external_packages,
-            &provider_free_inventory,
+            &mut prepared_source_store,
+            directory_import_resolution,
             string_table,
         ) {
             Ok(outcome) => outcome,
             Err(ProviderFreeDiscoveryFailed) => {
                 // Worker-local diagnostics cannot be rendered on the parent string table. Retry on
                 // the serial provider-capable path so the existing Stage 0 diagnostic owner reports
-                // the real filesystem/import failure with stable path identity. Reuse the complete
-                // classification cache so the lexer never runs twice for the same source.
+                // the real filesystem/import failure with stable path identity. The store retains
+                // every already-scanned `.moth` so the lexer never runs twice for the same source.
                 discover_modules_serial_provider_capable(
                     &seeds,
                     project_path_resolver,
                     style_directives,
                     external_imports,
-                    Some(&provider_free_inventory.source_cache),
+                    &mut prepared_source_store,
+                    directory_import_resolution,
                     string_table,
                 )?
             }
@@ -200,128 +213,98 @@ pub(crate) fn discover_all_modules_in_project(
             project_path_resolver,
             style_directives,
             external_imports,
-            Some(&provider_free_inventory.source_cache),
+            &mut prepared_source_store,
+            directory_import_resolution,
             string_table,
         )?
     };
 
-    // Merge the retained local structural dependency facts into the graph as
-    // provider-before-consumer edges before compile waves are computed. Edges are idempotent, so
-    // duplicate observations across entry closures collapse without changing the graph.
-    merge_local_structural_dependencies(project_module_graph, &dependency_facts, string_table)?;
+    // Insert the resolved dependency edges directly by ModuleId before the graph completes.
+    // Edges are idempotent, so duplicate observations across entry closures collapse without
+    // changing the graph.
+    insert_resolved_dependency_edges(project_module_graph, &resolved_edges, string_table)?;
 
-    // Order the discovered modules by the now-populated graph's compile waves so providers precede
+    // Freeze the graph's adjacency into sorted `Vec<ModuleId>` storage before compile waves are
+    // computed. The no-edge production graph also completes here so scheduling always reads one
+    // frozen adjacency. Mutation or scheduling in an invalid phase is an internal `CompilerError`.
+    project_module_graph
+        .complete()
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    // Order the discovered modules by the completed graph's compile waves so providers precede
     // consumers in the returned inventory waves. Discovery seeded entries in `ModuleId` order;
     // this groups the result into dependency-ordered compile waves without re-running discovery.
-    // Each wave contains only normal entry modules (empty waves are excluded), and the directory
-    // compiler consumes one wave at a time with parallelism only within a ready wave.
-    order_discovered_modules_by_compile_waves(project_module_graph, drafts, string_table)
+    // Every canonical module appears in exactly one wave, and the directory compiler consumes one
+    // wave at a time with parallelism only within a ready wave.
+    order_discovered_modules_by_compile_waves(
+        project_module_graph,
+        drafts,
+        resolved_edges,
+        string_table,
+    )
 }
 
-/// Deterministic normal entry module seeds in `ModuleId` order, for discovery seeding.
+/// Deterministic canonical module seeds in `ModuleId` order, for discovery seeding.
 ///
-/// Maps the graph's normal entry modules to their `ModuleId` and canonical root file in
-/// `ModuleId` order. Support roots and the project package facade are excluded because they
-/// never appear in `entry_modules`. Compile waves are not consulted here: dependency edges are
-/// inserted only after discovery completes, so seeding uses the stable identity order. The
+/// Maps every graph node to its `ModuleId` and canonical root file in `ModuleId` order. Compile
+/// waves are not consulted here: dependency edges are inserted only after discovery completes,
+/// so seeding uses the stable identity order. The
 /// `ModuleId` is carried through discovery so the compile-wave reorder matches by identity and
 /// the graph-owned `StableModuleOriginIdentity` is preserved without re-deriving it from a path.
-fn normal_entry_seeds_in_module_id_order(
+fn module_seeds_in_module_id_order(
     project_module_graph: &ProjectModuleGraph,
 ) -> Vec<ModuleEntrySeed> {
     project_module_graph
-        .entry_modules()
+        .nodes()
         .iter()
-        .map(|module_id| ModuleEntrySeed {
-            module_id: *module_id,
-            entry_path: project_module_graph
-                .node(*module_id)
-                .root_file()
-                .to_path_buf(),
+        .map(|node| ModuleEntrySeed {
+            module_id: node.module_id(),
+            entry_path: node.root_file().to_path_buf(),
         })
         .collect()
 }
 
-/// Merge retained local structural dependency facts into the graph as provider-before-consumer
-/// edges.
+/// Insert resolved dependency edges directly by `ModuleId` into the project module graph.
 ///
-/// WHAT: maps each fact's canonical consumer and provider roots to `ModuleId` through the graph,
-///       then inserts a provider-before-consumer edge that also retains the authored source
-///       location. Duplicate observations are idempotent for the edge and never overwrite the
-///       retained location; source locations are never used for edge identity.
-/// WHY: the graph owns the canonical-root-to-`ModuleId` mapping and the edge adjacency, so the
-///      merge has one owner. Facts are sorted by canonical root pair before insertion so the
-///      retained location and merge order are deterministic and independent of Rayon completion
-///      order. A fact root is derived from `ProjectPathResolver::module_root_for_file`, whose
-///      table holds normal project roots only, so every fact root must already be a graph node.
-///      Any absent root is therefore an internal invariant failure surfaced as a `CompilerError`
-///      rather than a panic or a silent skip; there is no source-package alternate policy.
-fn merge_local_structural_dependencies(
+/// WHAT: the namespace already resolved each edge to boundary-local `ModuleId` pairs, so this
+///       function inserts provider-before-consumer edges with authored locations without a
+///       path-to-ID mapping step. Edges are sorted by (provider, consumer) `ModuleId` pair before
+///       insertion so the retained location and insertion order are deterministic and independent
+///       of Rayon completion order.
+/// WHY: the graph owns edge adjacency and the retained location side table, while the namespace
+///      resolves structural references to `ModuleId`s before they reach this insertion boundary.
+fn insert_resolved_dependency_edges(
     project_module_graph: &mut ProjectModuleGraph,
-    dependency_facts: &[LocalStructuralDependencyFact],
+    resolved_edges: &[ResolvedDependencyEdge],
     string_table: &mut StringTable,
 ) -> Result<(), CompilerMessages> {
-    if dependency_facts.is_empty() {
+    if resolved_edges.is_empty() {
         return Ok(());
     }
 
-    let mut ordered_facts = dependency_facts.to_vec();
-    ordered_facts.sort_by(|left, right| {
-        left.consumer_root
-            .cmp(&right.consumer_root)
-            .then_with(|| left.provider_root.cmp(&right.provider_root))
+    let mut ordered_edges = resolved_edges.to_vec();
+    ordered_edges.sort_by(|left, right| {
+        left.provider_module_id
+            .index()
+            .cmp(&right.provider_module_id.index())
+            .then_with(|| {
+                left.consumer_module_id
+                    .index()
+                    .cmp(&right.consumer_module_id.index())
+            })
     });
 
-    for fact in ordered_facts {
-        // Fact roots come from `ProjectPathResolver::module_root_for_file`, whose table holds
-        // normal project roots only, so each root must resolve to a graph node. An absent root is
-        // a proven internal invariant failure, not a user-facing condition.
-        let consumer_id = project_module_graph
-            .module_id_for_root_directory(&fact.consumer_root)
-            .ok_or_else(|| {
-                missing_dependency_root_error(
-                    &fact.consumer_root,
-                    &fact.provider_root,
-                    &fact.consumer_root,
-                    string_table,
-                )
-            })?;
-        let provider_id = project_module_graph
-            .module_id_for_root_directory(&fact.provider_root)
-            .ok_or_else(|| {
-                missing_dependency_root_error(
-                    &fact.consumer_root,
-                    &fact.provider_root,
-                    &fact.provider_root,
-                    string_table,
-                )
-            })?;
-
+    for edge in ordered_edges {
         project_module_graph
-            .add_local_structural_dependency_edge(provider_id, consumer_id, fact.authored_location)
+            .add_resolved_dependency_edge(
+                edge.provider_module_id,
+                edge.consumer_module_id,
+                edge.provider.path_location,
+            )
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     }
 
     Ok(())
-}
-
-/// Build the internal `CompilerError` for a project-local dependency-fact root that is absent
-/// from the project module graph.
-///
-/// Reaching this helper means a project-local root was expected in the graph but is missing,
-/// which is a proven invariant violation rather than a user-facing failure.
-fn missing_dependency_root_error(
-    consumer_root: &Path,
-    provider_root: &Path,
-    missing_root: &Path,
-    string_table: &mut StringTable,
-) -> CompilerMessages {
-    CompilerMessages::from_error_ref(
-        CompilerError::compiler_error(format!(
-            "Local structural dependency fact references module root {missing_root:?} (consumer {consumer_root:?}, provider {provider_root:?}) absent from the project module graph"
-        )),
-        string_table,
-    )
 }
 
 /// Build the internal `CompilerError` for a disagreement between the project module graph's
@@ -339,33 +322,27 @@ fn graph_inventory_mismatch_error(
 /// Group discovered module drafts by the populated graph's compile waves and lift each draft to
 /// a `DiscoveredModule` carrying its graph-owned stable origin.
 ///
-/// WHAT: iterates the graph's compile waves, keeps only normal entry modules, and groups the
-///       discovered drafts into waves so providers precede consumers. Drafts are keyed by their
+/// WHAT: iterates the graph's compile waves and groups every discovered job so providers precede
+///       consumers. Drafts are keyed by their
 ///       graph-assigned `ModuleId`, so the grouping matches by identity rather than re-deriving
 ///       identity from a root path. Each lifted `DiscoveredModule` carries the exact
-///       `StableModuleOriginIdentity` the graph assigned to that module. Waves containing no
-///       entry modules are excluded from the returned inventory.
-/// WHY: discovery seeds entries in `ModuleId` order and collects dependency facts; the graph
-///      inserts edges from those facts, so the dependency-ordered wave order is only known after
-///      the merge. The graph and discovery must agree exactly on the normal entry set: every
-///      graph entry needs one matching discovered draft and vice versa. Duplicate entry modules,
+///       `StableModuleOriginIdentity` the graph assigned to that module.
+/// WHY: discovery seeds entries in `ModuleId` order and resolves direct dependency edges. The
+///      dependency-ordered wave order is known after those edges enter the graph. The graph and
+///      discovery must agree exactly on the graph node set: every
+///      graph node needs one matching discovered draft and vice versa. Duplicate jobs,
 ///      missing graph entries and leftover inventories are all internal invariant failures
 ///      surfaced through the `CompilerMessages`/string-table boundary. A graph cycle is the same
 ///      kind of internal failure reported by `compile_waves`.
 fn order_discovered_modules_by_compile_waves(
     project_module_graph: &ProjectModuleGraph,
     drafts: Vec<DiscoveredModuleDraft>,
+    provider_bindings: Vec<ResolvedDependencyEdge>,
     string_table: &mut StringTable,
 ) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
     let waves = project_module_graph
         .compile_waves()
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
-    let entry_modules: BTreeSet<ModuleId> = project_module_graph
-        .entry_modules()
-        .iter()
-        .copied()
-        .collect();
 
     // Index discovered drafts by their graph-assigned `ModuleId`. A duplicate `ModuleId` means
     // two inventories claim the same graph node, which breaks the one-to-one correspondence the
@@ -376,7 +353,7 @@ fn order_discovered_modules_by_compile_waves(
         if draft_by_module_id.insert(module_id, draft).is_some() {
             return Err(graph_inventory_mismatch_error(
                 format!(
-                    "Module discovery produced duplicate inventories for ModuleId {}; the project module graph expects one discovered module per normal entry",
+                    "Module discovery produced duplicate inventories for ModuleId {}; the project module graph expects one discovered job per canonical module",
                     module_id.index()
                 ),
                 string_table,
@@ -384,22 +361,18 @@ fn order_discovered_modules_by_compile_waves(
         }
     }
 
-    // Group drafts by compile wave, keeping only normal entry modules. Each wave preserves
-    // deterministic `ModuleId` order from the graph. Waves with no entry modules are skipped so
-    // the inventory carries only modules the directory compiler will compile.
+    // Group every canonical module job by compile wave. Each wave preserves deterministic
+    // `ModuleId` order from the graph.
     let mut grouped_waves = Vec::new();
     for wave in &waves {
         let mut wave_modules = Vec::new();
         for module_id in wave {
-            if !entry_modules.contains(module_id) {
-                continue;
-            }
             let draft = match draft_by_module_id.remove(module_id) {
                 Some(draft) => draft,
                 None => {
                     return Err(graph_inventory_mismatch_error(
                         format!(
-                            "The project module graph lists normal entry ModuleId {} that has no matching discovered module inventory",
+                            "The project module graph lists ModuleId {} that has no matching discovered module job",
                             module_id.index()
                         ),
                         string_table,
@@ -411,6 +384,7 @@ fn order_discovered_modules_by_compile_waves(
                 .stable_origin()
                 .clone();
             wave_modules.push(DiscoveredModule {
+                module_id: *module_id,
                 stable_origin,
                 entry_point: draft.entry_point,
                 input_files: draft.input_files,
@@ -421,12 +395,11 @@ fn order_discovered_modules_by_compile_waves(
         }
     }
 
-    // Any remaining inventory has no graph entry, so discovery returned a module the graph
-    // does not classify as a normal entry.
+    // Any remaining inventory has no graph node.
     if let Some(leftover) = draft_by_module_id.keys().next() {
         return Err(graph_inventory_mismatch_error(
             format!(
-                "Module discovery returned an inventory for ModuleId {} that the project module graph does not classify as a normal entry",
+                "Module discovery returned a job for ModuleId {} that has no project module graph node",
                 leftover.index()
             ),
             string_table,
@@ -435,6 +408,7 @@ fn order_discovered_modules_by_compile_waves(
 
     Ok(ModuleEntryCompileWaves {
         waves: grouped_waves,
+        provider_bindings,
     })
 }
 
@@ -442,36 +416,31 @@ fn order_discovered_modules_by_compile_waves(
 ///
 /// WHAT: the original Stage 0 module loop. It mutates `ExternalImportDiscoveryState` and the
 ///       shared `StringTable`, so it is kept serial and is used whenever the project is not
-///       proven provider-free. It also retains the local structural dependency facts observed
-///       during each entry's traversal so the graph merge can insert provider-before-consumer
-///       edges after discovery.
+///       proven provider-free. It also retains direct dependency edges observed during each
+///       entry's traversal so the graph can record provider-before-consumer order.
 fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
-    classification_cache: Option<&FxHashMap<PathBuf, ScannedImportSource>>,
+    prepared_source_store: &mut PreparedSourceStore,
+    directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
-) -> Result<
-    (
-        Vec<DiscoveredModuleDraft>,
-        Vec<LocalStructuralDependencyFact>,
-    ),
-    CompilerMessages,
-> {
+) -> Result<(Vec<DiscoveredModuleDraft>, Vec<ResolvedDependencyEdge>), CompilerMessages> {
     let mut drafts = Vec::with_capacity(seeds.len());
-    let mut dependency_facts = Vec::new();
+    let mut resolved_edges = Vec::new();
 
     for seed in seeds {
         let CollectedReachableInputs {
             input_files,
-            dependency_facts: entry_facts,
+            resolved_edges: entry_edges,
         } = collect_reachable_input_files(
             &seed.entry_path,
             project_path_resolver,
             style_directives,
             external_imports,
-            classification_cache,
+            Some(prepared_source_store),
+            Some(directory_import_resolution),
             string_table,
         )?;
 
@@ -480,19 +449,18 @@ fn discover_modules_serial_provider_capable(
             entry_point: seed.entry_path.clone(),
             input_files,
         });
-        dependency_facts.extend(entry_facts);
+        resolved_edges.extend(entry_edges);
     }
 
-    Ok((drafts, dependency_facts))
+    Ok((drafts, resolved_edges))
 }
 
 /// Parallel provider-free module discovery.
 ///
 /// WHAT: discovers each module's reachable files in a separate Rayon worker using a worker-local
 ///       `StringTable`; the shared `StringTable` is only used again when assembling
-///       `PreparedSourceInput` values on the main thread. Workers also return the local
-///       structural dependency facts they observe; the facts carry parent-valid string IDs and
-///       canonical `PathBuf` roots, so they cross threads without remapping.
+///       `PreparedSourceInput` values on the main thread. Workers also return direct dependency
+///       edges whose boundary-local IDs and parent-valid source locations need no remapping.
 /// WHY: provider-free BFS is embarrassingly parallel across entry points and does not need the
 ///      mutable provider state that makes provider-capable discovery serial.
 fn discover_modules_provider_free_parallel(
@@ -500,25 +468,21 @@ fn discover_modules_provider_free_parallel(
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_packages: &crate::compiler_frontend::external_packages::ExternalPackageRegistry,
-    provider_free_inventory: &ProviderFreeProjectInventory,
+    prepared_source_store: &mut PreparedSourceStore,
+    directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
-) -> Result<
-    (
-        Vec<DiscoveredModuleDraft>,
-        Vec<LocalStructuralDependencyFact>,
-    ),
-    ProviderFreeDiscoveryFailed,
-> {
-    // Run provider-free BFS for each entry seed in parallel. Each worker forks a local
+) -> Result<(Vec<DiscoveredModuleDraft>, Vec<ResolvedDependencyEdge>), ProviderFreeDiscoveryFailed>
+{
+    // Phase 1: Run provider-free BFS for each entry seed in parallel. Each worker forks a local
     // `StringTable` from the parent so classification's retained tokens (parent-valid StringIds)
-    // stay interpretable without re-tokenizing. Workers only return the inventory and dependency
-    // facts carrying source text plus retained tokens whose StringIds are parent-valid, so no
-    // worker-local IDs need cross-thread interpretation or remapping.
+    // stay interpretable without re-tokenizing. Workers read from the shared `PreparedSourceStore`
+    // (populated by classification) without mutating it.
+    let store_ref: &PreparedSourceStore = &*prepared_source_store;
     let fork_source = string_table.fork_source();
     let mut indexed_outcomes: Vec<(
         usize,
-        ReachableSourceInventory,
-        Vec<LocalStructuralDependencyFact>,
+        super::reachable_file_discovery::ReachableSourceInventory,
+        Vec<ResolvedDependencyEdge>,
     )> = seeds
         .par_iter()
         .enumerate()
@@ -529,32 +493,41 @@ fn discover_modules_provider_free_parallel(
                 project_path_resolver,
                 style_directives,
                 external_packages,
-                &provider_free_inventory.source_cache,
+                store_ref,
+                directory_import_resolution,
                 &mut local_string_table,
             )
             .map_err(|_| ProviderFreeDiscoveryFailed)?;
 
-            Ok((index, discovery.inventory, discovery.dependency_facts))
+            Ok((index, discovery.inventory, discovery.resolved_edges))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Deterministic ordering: sort by the original seed index regardless of completion order,
-    // preserving module order by entry path and a deterministic fact merge order.
+    // Deterministic ordering: seeds are created in graph-assigned ModuleId order, so restoring
+    // their original indexes restores ModuleId order regardless of worker completion order.
     indexed_outcomes.sort_by_key(|(index, _, _)| *index);
 
+    // Phase 2: Assemble `PreparedSourceInput` values serially on the main thread from the shared
+    // store. The immutable worker borrows have ended, so the store can be mutably reborrowed for
+    // lazy `.mtf`/`.md` preparation during assembly.
     let mut drafts = Vec::with_capacity(seeds.len());
-    let mut dependency_facts = Vec::new();
-    for (index, inventory, entry_facts) in indexed_outcomes {
-        let input_files = assemble_input_files_from_inventory(inventory, string_table)
-            .map_err(|_| ProviderFreeDiscoveryFailed)?;
+    let mut resolved_edges = Vec::new();
+    for (index, inventory, entry_edges) in indexed_outcomes {
+        let input_files = assemble_input_files_from_inventory(
+            inventory,
+            Some(prepared_source_store),
+            Some(directory_import_resolution),
+            string_table,
+        )
+        .map_err(|_| ProviderFreeDiscoveryFailed)?;
         let seed = &seeds[index];
         drafts.push(DiscoveredModuleDraft {
             module_id: seed.module_id,
             entry_point: seed.entry_path.clone(),
             input_files,
         });
-        dependency_facts.extend(entry_facts);
+        resolved_edges.extend(entry_edges);
     }
 
-    Ok((drafts, dependency_facts))
+    Ok((drafts, resolved_edges))
 }

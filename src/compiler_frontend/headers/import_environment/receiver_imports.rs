@@ -5,7 +5,9 @@
 //! their visibility rules need dedicated helpers.
 //! MUST NOT: register ordinary value/type imports or parse executable bodies.
 
-use super::{FileVisibility, ImportEnvironmentBuilder, ReceiverMethodVisibility};
+use super::{
+    FileVisibility, ImportEnvironmentBuilder, ReceiverMethodVisibility, SourceFunctionTarget,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -24,13 +26,13 @@ impl<'a> ImportEnvironmentBuilder<'a> {
 
         if methods
             .iter()
-            .any(|method| method.function_path == *function_path)
+            .any(|method| method.target.local_path() == function_path)
         {
             return;
         }
 
         methods.push(ReceiverMethodVisibility {
-            function_path: function_path.clone(),
+            target: SourceFunctionTarget::Local(function_path.clone()),
             location,
         });
     }

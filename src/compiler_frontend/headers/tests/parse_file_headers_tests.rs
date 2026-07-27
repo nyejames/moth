@@ -25,6 +25,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -107,6 +108,27 @@ fn prepare_test_source_file(
     )
 }
 
+fn prepare_active_root_with_role(
+    source: &str,
+    file_path: &Path,
+    active_root_role: ModuleRootRole,
+    string_table: &mut StringTable,
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareError> {
+    let options = HeaderParseOptions {
+        entry_file_id: None,
+        project_path_resolver: None,
+        active_root_role,
+    };
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let context = HeaderTestPrepareContext {
+        entry_file_path: file_path,
+        options: &options,
+        style_directives: &style_directives,
+    };
+
+    prepare_test_source_file(source, file_path, &context, string_table, 0, 0)
+}
+
 /// Test helper: run both header preparation and binding, returning the raw result.
 fn prepare_and_bind_headers_result(
     prepared_outputs: Vec<FileFrontendPrepareOutput>,
@@ -120,6 +142,7 @@ fn prepare_and_bind_headers_result(
         prepared,
         external_package_registry,
         external_import_resolution_table,
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         project_path_resolver,
         string_table,
     )
@@ -359,6 +382,7 @@ fn bind_module_headers_consumes_prepared_syntax_and_produces_import_environment(
         prepared,
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
         None,
         &mut string_table,
     )
@@ -2559,6 +2583,112 @@ fn entry_hash_root_file_is_assigned_active_module_root_role() {
     );
 
     assert_eq!(output.file_role, FileRole::ActiveModuleRoot);
+}
+
+#[test]
+fn api_only_active_roots_export_declarations_without_synthesizing_start() {
+    for root_role in [
+        ModuleRootRole::Support,
+        ModuleRootRole::ProjectPackageFacade,
+    ] {
+        let mut string_table = StringTable::new();
+        let file_path = PathBuf::from("src/styles/+package.moth");
+        let output = prepare_active_root_with_role(
+            "export:\n    theme #= \"dark\"\n;\n",
+            &file_path,
+            root_role,
+            &mut string_table,
+        )
+        .expect("API-only roots should accept public declarations");
+
+        assert_eq!(output.file_role, FileRole::ActiveApiOnlyModuleRoot);
+        assert!(output.headers.iter().any(|header| {
+            matches!(header.kind, HeaderKind::Constant { .. })
+                && header.export_mode == HeaderExportMode::Public
+        }));
+        assert!(
+            output
+                .headers
+                .iter()
+                .all(|header| !matches!(header.kind, HeaderKind::StartFunction)),
+            "API-only roots must not synthesize start"
+        );
+        assert_eq!(output.runtime_fragment_count, 0);
+        assert_eq!(output.const_template_count, 0);
+        assert!(!output.has_non_trivial_root_body);
+    }
+}
+
+#[test]
+fn api_only_active_roots_reject_every_root_activity_form() {
+    for root_role in [
+        ModuleRootRole::Support,
+        ModuleRootRole::ProjectPackageFacade,
+    ] {
+        for source in ["value = 1\n", "[3]\n", "#[3]\n"] {
+            let mut string_table = StringTable::new();
+            let file_path = PathBuf::from("src/styles/+package.moth");
+            let error = match prepare_active_root_with_role(
+                source,
+                &file_path,
+                root_role,
+                &mut string_table,
+            ) {
+                Ok(_) => panic!("API-only root activity should be rejected"),
+                Err(error) => error,
+            };
+
+            assert_eq!(
+                error.diagnostic.kind,
+                DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTopLevelRuntimeStatement)
+            );
+        }
+    }
+}
+
+#[test]
+fn support_package_root_file_is_assigned_imported_module_root_role() {
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/styles/+package.moth");
+    let entry_file_path = PathBuf::from("src/#page.moth");
+    let output = prepare_single_file(
+        "theme #= \"dark\"\n",
+        &file_path,
+        &entry_file_path,
+        &mut string_table,
+    );
+
+    assert_eq!(output.file_role, FileRole::ImportedModuleRoot);
+}
+
+#[test]
+fn ordinary_source_file_is_assigned_normal_role() {
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/helper.moth");
+    let entry_file_path = PathBuf::from("src/#page.moth");
+    let output = prepare_single_file(
+        "value #= 1\n",
+        &file_path,
+        &entry_file_path,
+        &mut string_table,
+    );
+
+    assert_eq!(output.file_role, FileRole::Normal);
+}
+
+#[test]
+fn support_package_root_file_accepts_an_export_block() {
+    let headers = parse_single_file_headers_with_entry(
+        "export:\n    Button = | label String |\n;\n",
+        "src/styles/+package.moth",
+        "src/#page.moth",
+    )
+    .expect("a `+*.moth` support-package root should be export-capable");
+
+    assert!(headers.headers.iter().any(|header| {
+        matches!(header.kind, HeaderKind::Struct { .. })
+            && header.export_mode == HeaderExportMode::Public
+    }));
 }
 
 // ------------------------------

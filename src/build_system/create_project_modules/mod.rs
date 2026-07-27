@@ -3,15 +3,19 @@
 //! Dispatches to single-file or directory-project flows, then delegates to focused submodules:
 //! - `frontend_orchestration`   — per-module pipeline (tokenization through borrow checking)
 //! - `project_roots`            — config root interpretation and path-resolver setup
-//! - `source_package_discovery` — project-local source-backed package scanning and prefix-merge checks
-//! - `root_validation`          — source-backed package generic hash-root preflight
-//! - `source_tree_index`        — one directory-project source-tree traversal with collision checks
+//! - `source_package_discovery` — source-package registration, boundary indexes and prefix checks
+//! - `source_tree_index`        — project and source-package boundary source-tree indexing with
+//!   root discovery and collision checks
 //! - `module_identity`          — Stage 0 durable module identity and structural topology
+//! - `module_namespace`         — boundary-aware indexed module namespaces for source-import resolution
 //! - `project_module_graph`      — canonical structural project module graph and compile order
 //! - `module_inventory`         — project-level module assembly
 //! - `prepared_source`          — state-safe retained source and token inputs
+//! - `prepared_source_store`    — project-boundary prepare-once store indexed by `SourceId`
 //! - `prepared_module`          — retained module-preparation payload handed to semantic compilation
+//! - `provider_store`           — completed immutable artefacts and per-module publication state
 //! - `reachable_file_discovery` — BFS traversal over import graphs
+//! - `semantic_source_set`      — project-boundary semantic source set per entry module
 //! - `import_scanning`          — per-file import path extraction
 //! - `project_structure_diagnostics` — typed Stage 0 project diagnostics
 //! - `source_discovery_error`   — Stage 0 boundary between diagnostics and file/tooling errors
@@ -20,19 +24,21 @@
 //! Stage 0 config loading lives in `project_config`. This module begins after config has been
 //! applied to `Config`.
 
-mod collision_detection;
 mod compilation;
 mod frontend_orchestration;
 pub(crate) mod import_scanning;
 mod module_identity;
 mod module_inventory;
+mod module_namespace;
 mod prepared_module;
 mod prepared_source;
+mod prepared_source_store;
 mod project_module_graph;
 mod project_roots;
 mod project_structure_diagnostics;
+mod provider_store;
 mod reachable_file_discovery;
-pub(crate) mod root_validation;
+mod semantic_source_set;
 pub(crate) mod source_discovery_error;
 pub(crate) mod source_loading;
 pub(crate) mod source_package_discovery;

@@ -86,7 +86,7 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
     let start_function = module
         .functions
         .iter()
-        .find(|function| function.id == module.start_function)
+        .find(|function| Some(function.id) == module.start_function)
         .expect("start function should exist");
     let start_entry = module
         .blocks
@@ -855,7 +855,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
 
     let entry_calls_consume = forward_entry.statements.iter().any(|statement| {
         let HirStatementKind::Call {
-            target: CallTarget::UserFunction(function_id),
+            target: CallTarget::Local(function_id),
             ..
         } = statement.kind
         else {
@@ -869,7 +869,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
     });
     let success_calls_consume = success_block.statements.iter().any(|statement| {
         let HirStatementKind::Call {
-            target: CallTarget::UserFunction(function_id),
+            target: CallTarget::Local(function_id),
             ..
         } = statement.kind
         else {
@@ -1073,7 +1073,7 @@ fn return_bang_lowers_to_explicit_error_terminator() {
     let can_fail_function = module
         .functions
         .iter()
-        .find(|function| function.id != module.start_function)
+        .find(|function| Some(function.id) != module.start_function)
         .expect("fallible function should exist");
     let can_fail_entry = module
         .blocks
@@ -1133,7 +1133,7 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
     let can_succeed_function = module
         .functions
         .iter()
-        .find(|function| function.id != module.start_function)
+        .find(|function| Some(function.id) != module.start_function)
         .expect("fallible function should exist");
     let can_succeed_entry = module
         .blocks

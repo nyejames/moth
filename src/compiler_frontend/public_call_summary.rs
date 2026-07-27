@@ -5,6 +5,8 @@
 //! WHY: both stages consume the same semantic contract. Keeping the vocabulary at the frontend
 //! boundary prevents either stage from becoming the source of a second interpretation.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
+
 /// The source-level access contract for one function parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PublicCallParameterAccess {
@@ -93,15 +95,104 @@ pub(crate) struct PublicCallSummary {
     pub return_alias: FunctionReturnAliasSummary,
 }
 
-/// State of one declaration's public call contract during direct-interface finalization.
+/// Validates one concrete call summary against its declaration-owned parameter access contract.
 ///
-/// `PendingLocal` exists only between AST draft construction and local HIR/borrow joining.
-/// `PendingGenerated` intentionally applies to exported generic templates whose concrete
-/// functions belong to the R3 sidecar worklist and therefore have no base local `FunctionId`.
-/// Only `Finalized` may represent a non-generic local callable in a completed module result.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PublicCallSummaryState {
-    PendingLocal,
-    PendingGenerated,
-    Finalized(PublicCallSummary),
+/// WHAT: checks the AST signature and borrow-summary join plus the canonical shape of mutation,
+/// transfer and return-alias facts before the summary crosses the public-interface boundary.
+/// WHY: declared access remains stable for generic and concrete callables, while borrow validation
+/// owns executable effects, including reactive propagation. This boundary rejects impossible
+/// access/transfer combinations without making either producer inspect the other's source
+/// representation.
+pub(crate) fn validate_public_call_summary(
+    declared_parameter_access: &[PublicCallParameterAccess],
+    summary: &PublicCallSummary,
+) -> Result<(), CompilerError> {
+    if summary.parameters.len() != declared_parameter_access.len() {
+        return Err(CompilerError::compiler_error(format!(
+            "public call summary has {} parameter(s), but its declaration has {} parameter(s)",
+            summary.parameters.len(),
+            declared_parameter_access.len()
+        )));
+    }
+
+    for (parameter_index, (declared_access, parameter)) in declared_parameter_access
+        .iter()
+        .zip(&summary.parameters)
+        .enumerate()
+    {
+        validate_parameter_summary(parameter_index, *declared_access, parameter)?;
+    }
+
+    validate_return_alias_summary(declared_parameter_access.len(), &summary.return_alias)
+}
+
+fn validate_parameter_summary(
+    parameter_index: usize,
+    declared_access: PublicCallParameterAccess,
+    parameter: &PublicCallParameterSummary,
+) -> Result<(), CompilerError> {
+    if parameter.access != declared_access {
+        return Err(CompilerError::compiler_error(format!(
+            "public call summary parameter {parameter_index} has {:?} access, but its declaration has {:?} access",
+            parameter.access, declared_access
+        )));
+    }
+
+    let valid = match declared_access {
+        PublicCallParameterAccess::Shared => {
+            parameter.mutation == PublicCallMutationEffect::NoWrite
+                && parameter.transfer_eligibility == PublicCallTransferEligibility::Eligible
+                && parameter.transfer_effect == PublicCallTransferEffect::MayConsume
+        }
+        PublicCallParameterAccess::Mutable => {
+            parameter.transfer_eligibility == PublicCallTransferEligibility::Eligible
+                && parameter.transfer_effect == PublicCallTransferEffect::MayConsume
+        }
+        PublicCallParameterAccess::Reactive => {
+            parameter.mutation == PublicCallMutationEffect::NoWrite
+                && parameter.transfer_eligibility == PublicCallTransferEligibility::Ineligible
+                && parameter.transfer_effect == PublicCallTransferEffect::NeverConsumes
+        }
+    };
+
+    if !valid {
+        return Err(CompilerError::compiler_error(format!(
+            "public call summary parameter {parameter_index} has an invalid effect combination for {:?} access: {parameter:?}",
+            declared_access,
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_return_alias_summary(
+    parameter_count: usize,
+    return_alias: &FunctionReturnAliasSummary,
+) -> Result<(), CompilerError> {
+    let FunctionReturnAliasSummary::AliasParams(parameter_indices) = return_alias else {
+        return Ok(());
+    };
+
+    if parameter_indices.is_empty() {
+        return Err(CompilerError::compiler_error(
+            "public call summary uses an empty AliasParams return; use Fresh instead",
+        ));
+    }
+
+    let mut previous_index = None;
+    for parameter_index in parameter_indices {
+        if *parameter_index >= parameter_count {
+            return Err(CompilerError::compiler_error(format!(
+                "public call summary return alias references parameter index {parameter_index}, but the declaration has {parameter_count} parameter(s)"
+            )));
+        }
+        if previous_index.is_some_and(|previous| previous >= *parameter_index) {
+            return Err(CompilerError::compiler_error(format!(
+                "public call summary return alias parameter indices must be strictly increasing; found {parameter_indices:?}"
+            )));
+        }
+        previous_index = Some(*parameter_index);
+    }
+
+    Ok(())
 }

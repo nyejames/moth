@@ -145,6 +145,79 @@ fn build_project_calls_validate_project_config() {
 }
 
 #[test]
+fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
+    let root = temp_dir("project_compilation_entries");
+    let src = root.join("src");
+    fs::create_dir_all(src.join("api")).expect("should create module directories");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\noutput_folder #= \"release\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("#page.moth"), "value = 1\n").expect("should write active root");
+    fs::write(src.join("api/#api.moth"), "value #= 1\n").expect("should write API-only root");
+
+    let module_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let entry_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let builder = ProjectBuilder::new(Box::new(EntryTrackingBuilder {
+        module_count: module_count.clone(),
+        entry_count: entry_count.clone(),
+    }));
+
+    build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    )
+    .expect("directory frontend and test backend should succeed");
+
+    assert_eq!(module_count.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(entry_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
+    let root = temp_dir("diagnosed_project_compilation");
+    let src = root.join("src");
+    fs::create_dir_all(src.join("broken")).expect("should create module directories");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\noutput_folder #= \"release\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("#page.moth"), "value = 1\n").expect("should write valid root");
+    fs::write(src.join("broken/#broken.moth"), "value = missing_name\n")
+        .expect("should write diagnosed root");
+
+    let validated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let built = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let builder = ProjectBuilder::new(Box::new(ValidationTrackingBuilder {
+        validated: validated.clone(),
+        built: built.clone(),
+    }));
+
+    let result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    );
+
+    assert!(
+        result.is_err(),
+        "diagnosed module should fail project compilation"
+    );
+    assert!(validated.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(
+        !built.load(std::sync::atomic::Ordering::SeqCst),
+        "backend must not receive a partial project compilation"
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
 fn write_project_outputs_writes_all_supported_artifacts_and_skips_not_built() {
     let root = temp_dir("writer_success");
     fs::create_dir_all(&root).expect("should create temp root");

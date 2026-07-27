@@ -1,9 +1,9 @@
 //! Backend-neutral HIR reachability analysis.
 //!
-//! WHAT: walks the explicit HIR call graph and CFG from one or more root functions, reporting
-//! reachable user functions, blocks, and stable external function IDs.
-//! WHY: build-system and backend phases need one shared view of which runtime calls can execute
-//! without re-scanning import syntax or inventing target-specific reachability rules.
+//! WHAT: records direct CFG and call facts per HIR function, then builds exact unions from roots
+//! selected by build-owned link planning.
+//! WHY: later phases need one retained view of executable runtime facts without re-scanning HIR,
+//! import syntax, or inventing target-specific reachability rules.
 //!
 //! This is intentionally a syntactic HIR analysis. It does not fold constants, eliminate dead
 //! branches, inspect borrow facts, or perform backend lowering.
@@ -20,6 +20,8 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
@@ -30,8 +32,7 @@ use std::collections::VecDeque;
 /// actually reachable, but ownership of artifact planning stays outside HIR.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HirReachability {
-    pub(crate) reachable_functions: FxHashSet<FunctionId>,
-    pub(crate) reachable_blocks: FxHashSet<BlockId>,
+    pub(crate) reachable_cross_module_functions: FxHashSet<OriginFunctionId>,
     pub(crate) reachable_external_functions: FxHashSet<ExternalFunctionId>,
     pub(crate) reachable_external_calls: Vec<ReachableExternalCall>,
     pub(crate) reachable_map_uses: Vec<ReachableMapUse>,
@@ -40,6 +41,188 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     pub(crate) reachable_numeric_ops: Vec<ReachableNumericOpUse>,
     pub(crate) reachable_float_statements: Vec<ReachableFloatStatementUse>,
+    backend_selection: HirBackendSelection,
+}
+
+/// Deterministic direct link facts for one base HIR function.
+#[derive(Clone, Debug)]
+pub(crate) struct HirFunctionLinkFacts {
+    pub(crate) function_id: FunctionId,
+    entry_block: BlockId,
+}
+
+/// Deterministic direct link facts for one reachable block inside a base HIR function.
+#[derive(Clone, Debug)]
+struct HirBlockLinkFacts {
+    block_id: BlockId,
+    function_id: FunctionId,
+    successor_blocks: Vec<BlockId>,
+    direct_facts: HirBlockRuntimeFacts,
+}
+
+/// Module-local per-function linking authority produced once after HIR validation.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct HirModuleLinkFacts {
+    functions: Vec<HirFunctionLinkFacts>,
+    blocks: Vec<HirBlockLinkFacts>,
+}
+
+/// Closed function/block selection derived by build-owned link planning.
+///
+/// WHY: selected backend modes consume one coherent value, so callers cannot independently alter
+/// function and block sets or detach them from the retained per-function facts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct HirBackendSelection {
+    functions: FxHashSet<FunctionId>,
+    blocks: FxHashSet<BlockId>,
+    blocks_by_function: Vec<HirSelectedFunctionBlocks>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HirSelectedFunctionBlocks {
+    function_id: FunctionId,
+    blocks: Vec<BlockId>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct HirBlockRuntimeFacts {
+    direct_user_calls: Vec<FunctionId>,
+    direct_cross_module_calls: Vec<OriginFunctionId>,
+    reachable_external_functions: FxHashSet<ExternalFunctionId>,
+    reachable_external_calls: Vec<ReachableExternalCall>,
+    reachable_map_uses: Vec<ReachableMapUse>,
+    reachable_reactive_templates: Vec<ReachableReactiveTemplateUse>,
+    reachable_reactive_sinks: Vec<ReachableReactiveSinkUse>,
+    reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
+    reachable_numeric_ops: Vec<ReachableNumericOpUse>,
+    reachable_float_statements: Vec<ReachableFloatStatementUse>,
+}
+
+impl HirModuleLinkFacts {
+    fn facts_for(&self, function_id: FunctionId) -> Option<&HirFunctionLinkFacts> {
+        self.functions
+            .binary_search_by_key(&function_id.0, |facts| facts.function_id.0)
+            .ok()
+            .map(|index| &self.functions[index])
+    }
+
+    fn facts_for_block(&self, block_id: BlockId) -> Option<&HirBlockLinkFacts> {
+        self.blocks
+            .binary_search_by_key(&block_id.0, |facts| facts.block_id.0)
+            .ok()
+            .map(|index| &self.blocks[index])
+    }
+
+    /// Remap source locations retained for later target diagnostics.
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for block in &mut self.blocks {
+            block.direct_facts.remap_string_ids(remap);
+        }
+    }
+}
+
+impl HirBackendSelection {
+    pub(crate) fn contains_function(&self, function_id: FunctionId) -> bool {
+        self.functions.contains(&function_id)
+    }
+
+    pub(crate) fn blocks(&self) -> &FxHashSet<BlockId> {
+        &self.blocks
+    }
+
+    pub(crate) fn functions(&self) -> &FxHashSet<FunctionId> {
+        &self.functions
+    }
+
+    pub(crate) fn function_count(&self) -> usize {
+        self.functions().len()
+    }
+
+    pub(crate) fn blocks_for_function(&self, function_id: FunctionId) -> Option<&[BlockId]> {
+        self.blocks_by_function
+            .iter()
+            .find(|selection| selection.function_id == function_id)
+            .map(|selection| selection.blocks.as_slice())
+    }
+
+    /// Validate that this closed selection belongs to the supplied validated HIR module.
+    ///
+    /// WHY: physical variants may reuse dense IDs, so backends must reject a selection detached
+    /// from its owning module before lowering or host-import planning begins.
+    pub(crate) fn validate_for_hir(&self, hir: &HirModule) -> Result<(), CompilerError> {
+        let index = HirReachabilityIndex::new(hir)?;
+        let selected_functions = hir
+            .functions
+            .iter()
+            .filter(|function| self.contains_function(function.id))
+            .collect::<Vec<_>>();
+        if selected_functions.len() != self.function_count() {
+            return Err(hir_reachability_error(
+                "Backend selection contains an unknown HIR function",
+            ));
+        }
+
+        let mut assigned_blocks = FxHashSet::default();
+        for function in selected_functions {
+            let Some(function_blocks) = self.blocks_for_function(function.id) else {
+                return Err(hir_reachability_error(format!(
+                    "Backend selection has no block assignment for {:?}",
+                    function.id
+                )));
+            };
+            let mut actual_blocks = crate::compiler_frontend::hir::utils::collect_reachable_blocks(
+                function.entry,
+                |block_id| {
+                    let block = index.block_by_id.get(&block_id).copied().ok_or_else(|| {
+                        hir_reachability_error(format!(
+                            "Backend selection could not resolve HIR block {block_id:?}"
+                        ))
+                    })?;
+                    Ok::<_, CompilerError>(
+                        crate::compiler_frontend::hir::utils::terminator_targets(&block.terminator),
+                    )
+                },
+            )?;
+            actual_blocks.sort_by_key(|block_id| block_id.0);
+            if actual_blocks != function_blocks {
+                return Err(hir_reachability_error(format!(
+                    "Backend block selection does not match the CFG for function {:?}",
+                    function.id
+                )));
+            }
+
+            for block_id in function_blocks {
+                if !assigned_blocks.insert(*block_id) {
+                    return Err(hir_reachability_error(format!(
+                        "Backend selection assigns HIR block {block_id:?} more than once"
+                    )));
+                }
+
+                let block = index.block_by_id[block_id];
+                for statement in &block.statements {
+                    if let HirStatementKind::Call {
+                        target: CallTarget::Local(callee),
+                        ..
+                    } = &statement.kind
+                        && !self.contains_function(*callee)
+                    {
+                        return Err(hir_reachability_error(format!(
+                            "Backend selection omits callee {callee:?} reached from function {:?}",
+                            function.id
+                        )));
+                    }
+                }
+            }
+        }
+
+        if assigned_blocks != self.blocks {
+            return Err(hir_reachability_error(
+                "Backend selection contains an unassigned HIR block",
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 /// A reachable map construction or use at the HIR statement or expression that produces it.
@@ -132,91 +315,241 @@ pub(crate) enum ReachableFloatStatementKind {
     ValidateFloat,
 }
 
-pub(crate) struct HirReachabilityInput<'a> {
-    pub(crate) hir: &'a HirModule,
-    pub(crate) root_functions: Vec<FunctionId>,
+struct HirReachabilityIndex<'hir> {
+    hir: &'hir HirModule,
+    function_by_id: FxHashMap<FunctionId, &'hir HirFunction>,
+    block_by_id: FxHashMap<BlockId, &'hir HirBlock>,
 }
 
-struct HirReachabilityContext<'a> {
-    hir: &'a HirModule,
-    function_by_id: FxHashMap<FunctionId, &'a HirFunction>,
-    block_by_id: FxHashMap<BlockId, &'a HirBlock>,
-    function_worklist: VecDeque<FunctionId>,
+struct HirReachabilityContext<'index, 'hir> {
+    index: &'index HirReachabilityIndex<'hir>,
+    owner_function: FunctionId,
     block_worklist: VecDeque<BlockId>,
-    reachability: HirReachability,
+    visited_blocks: FxHashSet<BlockId>,
+    seen_user_calls: FxHashSet<FunctionId>,
+    direct_facts: HirBlockRuntimeFacts,
+    block_facts: Vec<HirBlockLinkFacts>,
 }
 
-pub(crate) fn collect_reachability_from_start(
+/// Record direct CFG and call facts for every function without selecting an entry root.
+pub(crate) fn collect_module_function_link_facts(
     hir: &HirModule,
-) -> Result<HirReachability, CompilerError> {
-    collect_hir_reachability(HirReachabilityInput {
-        hir,
-        root_functions: vec![hir.start_function],
-    })
-}
+) -> Result<HirModuleLinkFacts, CompilerError> {
+    let index = HirReachabilityIndex::new(hir)?;
+    let mut function_ids = hir
+        .functions
+        .iter()
+        .map(|function| function.id)
+        .collect::<Vec<_>>();
+    function_ids.sort_by_key(|function_id| function_id.0);
 
-pub(crate) fn collect_hir_reachability(
-    input: HirReachabilityInput<'_>,
-) -> Result<HirReachability, CompilerError> {
-    let mut context = HirReachabilityContext::new(input.hir)?;
-
-    for root_function in input.root_functions {
-        context.enqueue_function(root_function);
+    let mut functions = Vec::with_capacity(function_ids.len());
+    let mut blocks = Vec::new();
+    for function_id in function_ids {
+        let function = index
+            .function_by_id
+            .get(&function_id)
+            .copied()
+            .ok_or_else(|| {
+                hir_reachability_error(format!(
+                    "Unknown HIR function id {function_id:?} reached HIR reachability analysis"
+                ))
+            })?;
+        let context = HirReachabilityContext::new(&index, function_id, function.entry);
+        let function_block_facts = context.collect()?;
+        functions.push(HirFunctionLinkFacts {
+            function_id,
+            entry_block: function.entry,
+        });
+        blocks.extend(function_block_facts);
     }
 
-    context.collect()
+    blocks.sort_by_key(|facts| facts.block_id.0);
+
+    Ok(HirModuleLinkFacts { functions, blocks })
 }
 
-impl<'a> HirReachabilityContext<'a> {
-    fn new(hir: &'a HirModule) -> Result<Self, CompilerError> {
-        let function_by_id = build_function_map(hir)?;
-        let block_by_id = build_block_map(hir)?;
+/// Build an exact reachable union from retained per-function facts.
+pub(crate) fn collect_reachability_from_function_link_facts(
+    function_facts: &HirModuleLinkFacts,
+    root_functions: &[FunctionId],
+) -> Result<HirReachability, CompilerError> {
+    let mut function_worklist = VecDeque::from(root_functions.to_vec());
+    let mut block_worklist = VecDeque::new();
+    let mut visited_functions = FxHashSet::default();
+    let mut visited_function_order = Vec::new();
+    let mut visited_blocks = FxHashSet::default();
+    let mut blocks_by_function = FxHashMap::<FunctionId, Vec<BlockId>>::default();
+    let mut reachability = HirReachability::default();
 
+    while !function_worklist.is_empty() || !block_worklist.is_empty() {
+        while let Some(function_id) = function_worklist.pop_front() {
+            if !visited_functions.insert(function_id) {
+                continue;
+            }
+
+            let Some(function) = function_facts.facts_for(function_id) else {
+                return Err(hir_reachability_error(format!(
+                    "Function link facts are missing HIR function id {function_id:?}"
+                )));
+            };
+
+            visited_function_order.push(function_id);
+            block_worklist.push_back(function.entry_block);
+        }
+
+        while let Some(block_id) = block_worklist.pop_front() {
+            if !visited_blocks.insert(block_id) {
+                continue;
+            }
+
+            let Some(block) = function_facts.facts_for_block(block_id) else {
+                return Err(hir_reachability_error(format!(
+                    "Block link facts are missing HIR block id {block_id:?}"
+                )));
+            };
+            if !visited_functions.contains(&block.function_id) {
+                return Err(hir_reachability_error(format!(
+                    "Block link facts for {block_id:?} were reached before owner {:?}",
+                    block.function_id
+                )));
+            }
+
+            blocks_by_function
+                .entry(block.function_id)
+                .or_default()
+                .push(block_id);
+            reachability.merge(&block.direct_facts);
+
+            for called_function in &block.direct_facts.direct_user_calls {
+                if !visited_functions.contains(called_function) {
+                    function_worklist.push_back(*called_function);
+                }
+            }
+            for successor in &block.successor_blocks {
+                if !visited_blocks.contains(successor) {
+                    block_worklist.push_back(*successor);
+                }
+            }
+        }
+    }
+
+    reachability.backend_selection = HirBackendSelection {
+        functions: visited_functions,
+        blocks: visited_blocks,
+        blocks_by_function: visited_function_order
+            .into_iter()
+            .map(|function_id| {
+                let mut blocks = blocks_by_function.remove(&function_id).unwrap_or_default();
+                blocks.sort_by_key(|block_id| block_id.0);
+                HirSelectedFunctionBlocks {
+                    function_id,
+                    blocks,
+                }
+            })
+            .collect(),
+    };
+
+    Ok(reachability)
+}
+
+impl HirReachability {
+    pub(crate) fn backend_selection(&self) -> &HirBackendSelection {
+        &self.backend_selection
+    }
+
+    fn merge(&mut self, direct: &HirBlockRuntimeFacts) {
+        self.reachable_cross_module_functions
+            .extend(direct.direct_cross_module_calls.iter().cloned());
+        self.reachable_external_functions
+            .extend(direct.reachable_external_functions.iter().copied());
+        self.reachable_external_calls
+            .extend(direct.reachable_external_calls.iter().cloned());
+        self.reachable_map_uses
+            .extend(direct.reachable_map_uses.iter().cloned());
+        self.reachable_reactive_templates
+            .extend(direct.reachable_reactive_templates.iter().cloned());
+        self.reachable_reactive_sinks
+            .extend(direct.reachable_reactive_sinks.iter().cloned());
+        self.reachable_runtime_casts
+            .extend(direct.reachable_runtime_casts.iter().cloned());
+        self.reachable_numeric_ops
+            .extend(direct.reachable_numeric_ops.iter().cloned());
+        self.reachable_float_statements
+            .extend(direct.reachable_float_statements.iter().cloned());
+    }
+}
+
+impl HirBlockRuntimeFacts {
+    fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for call in &mut self.reachable_external_calls {
+            call.location.remap_string_ids(remap);
+        }
+        for map_use in &mut self.reachable_map_uses {
+            map_use.location.remap_string_ids(remap);
+        }
+        for template in &mut self.reachable_reactive_templates {
+            template.location.remap_string_ids(remap);
+        }
+        for sink in &mut self.reachable_reactive_sinks {
+            sink.location.remap_string_ids(remap);
+        }
+        for runtime_cast in &mut self.reachable_runtime_casts {
+            runtime_cast.location.remap_string_ids(remap);
+        }
+        for numeric_op in &mut self.reachable_numeric_ops {
+            numeric_op.location.remap_string_ids(remap);
+        }
+        for float_statement in &mut self.reachable_float_statements {
+            float_statement.location.remap_string_ids(remap);
+        }
+    }
+}
+
+impl<'hir> HirReachabilityIndex<'hir> {
+    fn new(hir: &'hir HirModule) -> Result<Self, CompilerError> {
         Ok(Self {
             hir,
-            function_by_id,
-            block_by_id,
-            function_worklist: VecDeque::new(),
-            block_worklist: VecDeque::new(),
-            reachability: HirReachability::default(),
+            function_by_id: build_function_map(hir)?,
+            block_by_id: build_block_map(hir)?,
         })
     }
+}
 
-    fn collect(mut self) -> Result<HirReachability, CompilerError> {
-        while !self.function_worklist.is_empty() || !self.block_worklist.is_empty() {
-            while let Some(function_id) = self.function_worklist.pop_front() {
-                self.visit_function(function_id)?;
-            }
+impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
+    fn new(
+        index: &'index HirReachabilityIndex<'hir>,
+        owner_function: FunctionId,
+        entry_block: BlockId,
+    ) -> Self {
+        let mut block_worklist = VecDeque::new();
+        block_worklist.push_back(entry_block);
 
-            while let Some(block_id) = self.block_worklist.pop_front() {
-                self.visit_block(block_id)?;
-            }
+        Self {
+            index,
+            owner_function,
+            block_worklist,
+            visited_blocks: FxHashSet::default(),
+            seen_user_calls: FxHashSet::default(),
+            direct_facts: HirBlockRuntimeFacts::default(),
+            block_facts: Vec::new(),
         }
-
-        Ok(self.reachability)
     }
 
-    fn visit_function(&mut self, function_id: FunctionId) -> Result<(), CompilerError> {
-        if !self.reachability.reachable_functions.insert(function_id) {
-            return Ok(());
+    fn collect(mut self) -> Result<Vec<HirBlockLinkFacts>, CompilerError> {
+        while let Some(block_id) = self.block_worklist.pop_front() {
+            self.visit_block(block_id)?;
         }
 
-        let Some(function) = self.function_by_id.get(&function_id).copied() else {
-            return Err(hir_reachability_error(format!(
-                "Unknown HIR function id {function_id:?} reached HIR reachability analysis"
-            )));
-        };
-
-        self.enqueue_block(function.entry);
-        Ok(())
+        Ok(self.block_facts)
     }
 
     fn visit_block(&mut self, block_id: BlockId) -> Result<(), CompilerError> {
-        if !self.reachability.reachable_blocks.insert(block_id) {
+        if !self.visited_blocks.insert(block_id) {
             return Ok(());
         }
 
-        let Some(block) = self.block_by_id.get(&block_id).copied() else {
+        let Some(block) = self.index.block_by_id.get(&block_id).copied() else {
             return Err(hir_reachability_error(format!(
                 "Unknown HIR block id {block_id:?} reached HIR reachability analysis"
             )));
@@ -224,7 +557,20 @@ impl<'a> HirReachabilityContext<'a> {
 
         self.visit_block_statements(block);
         self.collect_runtime_feature_uses_from_terminator(block);
-        self.enqueue_terminator_successors(&block.terminator)
+        let successor_blocks = terminator_successors(&block.terminator)?;
+        let direct_facts = std::mem::take(&mut self.direct_facts);
+        self.block_facts.push(HirBlockLinkFacts {
+            block_id,
+            function_id: self.owner_function,
+            successor_blocks: successor_blocks.clone(),
+            direct_facts,
+        });
+
+        for successor in successor_blocks {
+            self.enqueue_block(successor);
+        }
+
+        Ok(())
     }
 
     fn visit_block_statements(&mut self, block: &HirBlock) {
@@ -239,12 +585,23 @@ impl<'a> HirReachabilityContext<'a> {
             };
 
             match target {
-                CallTarget::UserFunction(function_id) => self.enqueue_function(*function_id),
-                CallTarget::ExternalFunction(function_id) => {
-                    self.reachability
+                CallTarget::Local(function_id) => {
+                    if self.seen_user_calls.insert(*function_id) {
+                        self.direct_facts.direct_user_calls.push(*function_id);
+                    }
+                }
+                CallTarget::CrossModule(origin) => {
+                    if !self.direct_facts.direct_cross_module_calls.contains(origin) {
+                        self.direct_facts
+                            .direct_cross_module_calls
+                            .push(origin.clone());
+                    }
+                }
+                CallTarget::External(function_id) => {
+                    self.direct_facts
                         .reachable_external_functions
                         .insert(*function_id);
-                    self.reachability
+                    self.direct_facts
                         .reachable_external_calls
                         .push(ReachableExternalCall {
                             function_id: *function_id,
@@ -265,7 +622,7 @@ impl<'a> HirReachabilityContext<'a> {
 
             HirStatementKind::Call { target, args, .. } => {
                 for (argument_index, arg) in args.iter().enumerate() {
-                    if let CallTarget::ExternalFunction(function_id) = target {
+                    if let CallTarget::External(function_id) = target {
                         self.collect_reactive_sink_from_expression(
                             ReachableReactiveSinkKind::ExternalCallArgument {
                                 function_id: *function_id,
@@ -292,7 +649,7 @@ impl<'a> HirReachabilityContext<'a> {
             HirStatementKind::MapOp {
                 op, receiver, args, ..
             } => {
-                self.reachability.reachable_map_uses.push(ReachableMapUse {
+                self.direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Operation(*op),
                     location: statement.location.clone(),
                 });
@@ -305,7 +662,7 @@ impl<'a> HirReachabilityContext<'a> {
             HirStatementKind::Drop(_) => {}
 
             HirStatementKind::NumericOp { operands, .. } => {
-                self.reachability
+                self.direct_facts
                     .reachable_numeric_ops
                     .push(ReachableNumericOpUse {
                         location: statement.location.clone(),
@@ -332,7 +689,7 @@ impl<'a> HirReachabilityContext<'a> {
             }
 
             HirStatementKind::CastOp { source, .. } => {
-                self.reachability
+                self.direct_facts
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
                         location: statement.location.clone(),
@@ -341,7 +698,7 @@ impl<'a> HirReachabilityContext<'a> {
             }
 
             HirStatementKind::FormatFloat { source, .. } => {
-                self.reachability
+                self.direct_facts
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::FormatFloat,
@@ -351,7 +708,7 @@ impl<'a> HirReachabilityContext<'a> {
             }
 
             HirStatementKind::ValidateFloat { source, .. } => {
-                self.reachability
+                self.direct_facts
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::ValidateFloat,
@@ -364,6 +721,7 @@ impl<'a> HirReachabilityContext<'a> {
 
     fn collect_runtime_feature_uses_from_terminator(&mut self, block: &HirBlock) {
         let fallback_location = self
+            .index
             .hir
             .side_table
             .hir_source_location_for_hir(HirLocation::Terminator(block.id))
@@ -407,6 +765,7 @@ impl<'a> HirReachabilityContext<'a> {
         fallback_location: &SourceLocation,
     ) {
         let expression_location = self
+            .index
             .hir
             .side_table
             .value_source_location(expression.id)
@@ -417,12 +776,13 @@ impl<'a> HirReachabilityContext<'a> {
         // features. Plain runtime templates with variable interpolations are snapshots, not live
         // reactive values, and are rejected by other backend-specific checks if needed.
         if let Some(template) = self
+            .index
             .hir
             .side_table
             .reactive_template_for_value(expression.id)
             && !template.dependencies.is_empty()
         {
-            self.reachability
+            self.direct_facts
                 .reachable_reactive_templates
                 .push(ReachableReactiveTemplateUse {
                     template_id: template.id,
@@ -433,7 +793,7 @@ impl<'a> HirReachabilityContext<'a> {
         match &expression.kind {
             // Map literals.
             HirExpressionKind::MapLiteral(entries) => {
-                self.reachability.reachable_map_uses.push(ReachableMapUse {
+                self.direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Literal,
                     location: expression_location.clone(),
                 });
@@ -458,7 +818,7 @@ impl<'a> HirReachabilityContext<'a> {
             HirExpressionKind::Cast {
                 source: operand, ..
             } => {
-                self.reachability
+                self.direct_facts
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
                         location: expression_location.clone(),
@@ -527,6 +887,7 @@ impl<'a> HirReachabilityContext<'a> {
         fallback_location: &SourceLocation,
     ) {
         let Some(template) = self
+            .index
             .hir
             .side_table
             .reactive_template_for_value(expression.id)
@@ -536,13 +897,14 @@ impl<'a> HirReachabilityContext<'a> {
         };
 
         let location = self
+            .index
             .hir
             .side_table
             .value_source_location(expression.id)
             .unwrap_or(fallback_location)
             .clone();
 
-        self.reachability
+        self.direct_facts
             .reachable_reactive_sinks
             .push(ReachableReactiveSinkUse {
                 kind,
@@ -551,68 +913,41 @@ impl<'a> HirReachabilityContext<'a> {
             });
     }
 
-    fn enqueue_terminator_successors(
-        &mut self,
-        terminator: &HirTerminator,
-    ) -> Result<(), CompilerError> {
-        match terminator {
-            HirTerminator::Jump { target, .. } => self.enqueue_block(*target),
-
-            HirTerminator::If {
-                then_block,
-                else_block,
-                ..
-            } => {
-                self.enqueue_block(*then_block);
-                self.enqueue_block(*else_block);
-            }
-
-            HirTerminator::FallibleBranch {
-                success_block,
-                error_block,
-                ..
-            } => {
-                self.enqueue_block(*success_block);
-                self.enqueue_block(*error_block);
-            }
-
-            HirTerminator::Match { arms, .. } => {
-                for arm in arms {
-                    self.enqueue_block(arm.body);
-                }
-            }
-
-            HirTerminator::Break { target } | HirTerminator::Continue { target } => {
-                self.enqueue_block(*target);
-            }
-
-            HirTerminator::Return(_)
-            | HirTerminator::ReturnSuccess(_)
-            | HirTerminator::ReturnError(_)
-            | HirTerminator::RuntimeFailure { .. }
-            | HirTerminator::AssertFailure { .. } => {}
-
-            HirTerminator::Uninitialized => {
-                return Err(hir_reachability_error(
-                    "Uninitialized HIR terminator reached HIR reachability analysis",
-                ));
-            }
-        }
-
-        Ok(())
-    }
-
-    fn enqueue_function(&mut self, function_id: FunctionId) {
-        if !self.reachability.reachable_functions.contains(&function_id) {
-            self.function_worklist.push_back(function_id);
-        }
-    }
-
     fn enqueue_block(&mut self, block_id: BlockId) {
-        if !self.reachability.reachable_blocks.contains(&block_id) {
+        if !self.visited_blocks.contains(&block_id) {
             self.block_worklist.push_back(block_id);
         }
     }
+}
+
+fn terminator_successors(terminator: &HirTerminator) -> Result<Vec<BlockId>, CompilerError> {
+    let successors = match terminator {
+        HirTerminator::Jump { target, .. } => vec![*target],
+        HirTerminator::If {
+            then_block,
+            else_block,
+            ..
+        } => vec![*then_block, *else_block],
+        HirTerminator::FallibleBranch {
+            success_block,
+            error_block,
+            ..
+        } => vec![*success_block, *error_block],
+        HirTerminator::Match { arms, .. } => arms.iter().map(|arm| arm.body).collect(),
+        HirTerminator::Break { target } | HirTerminator::Continue { target } => vec![*target],
+        HirTerminator::Return(_)
+        | HirTerminator::ReturnSuccess(_)
+        | HirTerminator::ReturnError(_)
+        | HirTerminator::RuntimeFailure { .. }
+        | HirTerminator::AssertFailure { .. } => Vec::new(),
+        HirTerminator::Uninitialized => {
+            return Err(hir_reachability_error(
+                "Uninitialized HIR terminator reached HIR reachability analysis",
+            ));
+        }
+    };
+
+    Ok(successors)
 }
 
 fn build_function_map(

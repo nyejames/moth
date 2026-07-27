@@ -560,7 +560,12 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new()));
     let mut type_environment = TypeEnvironment::new();
     let mut visible_type_aliases = FxHashMap::default();
-    visible_type_aliases.insert(maybe_name, maybe_path.to_owned());
+    visible_type_aliases.insert(
+        maybe_name,
+        crate::compiler_frontend::headers::import_environment::SourceDeclarationTarget::Local(
+            maybe_path.to_owned(),
+        ),
+    );
 
     let mut resolved_type_aliases = FxHashMap::default();
     resolved_type_aliases.insert(

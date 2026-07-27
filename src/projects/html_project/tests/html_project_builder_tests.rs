@@ -4,7 +4,9 @@ use super::*;
 use crate::backends::js::test_symbol_helpers::expected_dev_function_name;
 use crate::build_system::build::ModuleExternalImport;
 use crate::build_system::build::ResolvedConstFragment;
-use crate::build_system::build::{FileKind, ModuleRootActivity, Project};
+use crate::build_system::build::{
+    FileKind, Module, ModuleRootActivity, Project, ProjectCompilation,
+};
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
@@ -16,8 +18,9 @@ use crate::compiler_frontend::paths::compile_time_paths::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::html_project::tests::test_support::{
-    RenderedPathUsageInput, collect_output_paths, create_test_module, expect_bytes_output,
-    expect_html_output, expect_js_output, rendered_path_usage,
+    RenderedPathUsageInput, add_reachable_external_import, collect_output_paths,
+    create_test_module, expect_bytes_output, expect_html_output, expect_js_output,
+    rendered_path_usage,
 };
 use crate::projects::settings::Config;
 use std::fs;
@@ -30,11 +33,18 @@ fn build_with_test_modules(
     flags: &[Flag],
 ) -> Result<Project, CompilerMessages> {
     let mut string_table = StringTable::new();
-    let modules = entry_points
+    let modules: Vec<Module> = entry_points
         .into_iter()
         .map(|entry_point| create_test_module(entry_point, &mut string_table))
         .collect();
-    builder.build_backend(modules, config, flags, &mut string_table)
+    let project_compilation = ProjectCompilation::from_successful_modules(modules)
+        .expect("test modules should assemble entries");
+    builder.build_backend(project_compilation, config, flags, &mut string_table)
+}
+
+fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
+    ProjectCompilation::from_successful_modules(modules)
+        .expect("test modules should assemble entries")
 }
 
 fn first_invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
@@ -226,7 +236,7 @@ fn emits_const_fragment_and_calls_start() {
 
     let project = builder
         .build_backend(
-            vec![module],
+            project_compilation(vec![module]),
             &Config::new(entry_path),
             &[],
             &mut string_table,
@@ -290,17 +300,25 @@ fn js_runtime_asset_emitted_verbatim() {
     let mut string_table = StringTable::new();
 
     let mut module = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports = vec![ModuleExternalImport {
-        package_id: ExternalPackageId(1),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: canonical_root.join("src/lib.js"),
-            asset_kind: "js".to_owned(),
-        }),
-        required_runtime_imports: vec![],
-    }];
+    add_reachable_external_import(
+        &mut module,
+        ModuleExternalImport {
+            package_id: ExternalPackageId(1),
+            runtime_asset: Some(RuntimeAssetIdentity {
+                canonical_source_path: canonical_root.join("src/lib.js"),
+                asset_kind: "js".to_owned(),
+            }),
+            required_runtime_imports: vec![],
+        },
+    );
 
     let project = builder
-        .build_backend(vec![module], &config, &[], &mut string_table)
+        .build_backend(
+            project_compilation(vec![module]),
+            &config,
+            &[],
+            &mut string_table,
+        )
         .expect("build with JS asset should succeed");
 
     let js_paths: Vec<_> = collect_output_paths(&project.output_files)
@@ -332,28 +350,39 @@ fn js_runtime_asset_deduped_across_modules() {
     let mut string_table = StringTable::new();
 
     let mut module_a = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
-    module_a.link_facts.module_external_imports = vec![ModuleExternalImport {
-        package_id: ExternalPackageId(1),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: canonical_root.join("src/lib.js"),
-            asset_kind: "js".to_owned(),
-        }),
-        required_runtime_imports: vec![],
-    }];
+    add_reachable_external_import(
+        &mut module_a,
+        ModuleExternalImport {
+            package_id: ExternalPackageId(1),
+            runtime_asset: Some(RuntimeAssetIdentity {
+                canonical_source_path: canonical_root.join("src/lib.js"),
+                asset_kind: "js".to_owned(),
+            }),
+            required_runtime_imports: vec![],
+        },
+    );
 
     let mut module_b =
         create_test_module(canonical_root.join("docs/#page.moth"), &mut string_table);
-    module_b.link_facts.module_external_imports = vec![ModuleExternalImport {
-        package_id: ExternalPackageId(1),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: canonical_root.join("src/lib.js"),
-            asset_kind: "js".to_owned(),
-        }),
-        required_runtime_imports: vec![],
-    }];
+    add_reachable_external_import(
+        &mut module_b,
+        ModuleExternalImport {
+            package_id: ExternalPackageId(1),
+            runtime_asset: Some(RuntimeAssetIdentity {
+                canonical_source_path: canonical_root.join("src/lib.js"),
+                asset_kind: "js".to_owned(),
+            }),
+            required_runtime_imports: vec![],
+        },
+    );
 
     let project = builder
-        .build_backend(vec![module_a, module_b], &config, &[], &mut string_table)
+        .build_backend(
+            project_compilation(vec![module_a, module_b]),
+            &config,
+            &[],
+            &mut string_table,
+        )
         .expect("build should succeed");
 
     let js_count = collect_output_paths(&project.output_files)
@@ -382,7 +411,8 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
     let mut string_table = StringTable::new();
 
     let mut module = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports = vec![
+    add_reachable_external_import(
+        &mut module,
         ModuleExternalImport {
             package_id: ExternalPackageId(1),
             runtime_asset: Some(RuntimeAssetIdentity {
@@ -391,6 +421,9 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
             }),
             required_runtime_imports: vec![],
         },
+    );
+    add_reachable_external_import(
+        &mut module,
         ModuleExternalImport {
             package_id: ExternalPackageId(2),
             runtime_asset: Some(RuntimeAssetIdentity {
@@ -399,10 +432,15 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
             }),
             required_runtime_imports: vec![],
         },
-    ];
+    );
 
     let project = builder
-        .build_backend(vec![module], &config, &[], &mut string_table)
+        .build_backend(
+            project_compilation(vec![module]),
+            &config,
+            &[],
+            &mut string_table,
+        )
         .expect("build should succeed");
 
     let js_paths: Vec<_> = collect_output_paths(&project.output_files)
@@ -431,17 +469,25 @@ fn non_js_runtime_asset_is_ignored() {
     let mut string_table = StringTable::new();
 
     let mut module = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
-    module.link_facts.module_external_imports = vec![ModuleExternalImport {
-        package_id: ExternalPackageId(1),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: canonical_root.join("src/lib.css"),
-            asset_kind: "css".to_owned(),
-        }),
-        required_runtime_imports: vec![],
-    }];
+    add_reachable_external_import(
+        &mut module,
+        ModuleExternalImport {
+            package_id: ExternalPackageId(1),
+            runtime_asset: Some(RuntimeAssetIdentity {
+                canonical_source_path: canonical_root.join("src/lib.css"),
+                asset_kind: "css".to_owned(),
+            }),
+            required_runtime_imports: vec![],
+        },
+    );
 
     let project = builder
-        .build_backend(vec![module], &config, &[], &mut string_table)
+        .build_backend(
+            project_compilation(vec![module]),
+            &config,
+            &[],
+            &mut string_table,
+        )
         .expect("build should succeed");
 
     let has_js_assets = collect_output_paths(&project.output_files)
@@ -534,7 +580,7 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
     let homepage = create_test_module(entry_root.join("#home.moth"), &mut string_table);
     let mut api_only = create_test_module(entry_root.join("api/#api.moth"), &mut string_table);
     api_only.metadata.root_activity = ModuleRootActivity::default();
-    api_only.link_facts.module_external_imports = vec![ModuleExternalImport {
+    api_only.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
         runtime_asset: Some(RuntimeAssetIdentity {
             canonical_source_path: entry_root.join("missing-runtime.js"),
@@ -559,7 +605,12 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
         ));
 
     let project = builder
-        .build_backend(vec![homepage, api_only], &config, &[], &mut string_table)
+        .build_backend(
+            project_compilation(vec![homepage, api_only]),
+            &config,
+            &[],
+            &mut string_table,
+        )
         .expect("API-only modules should not enter artifact planning");
 
     let output_paths = collect_output_paths(&project.output_files);
@@ -579,7 +630,7 @@ fn single_file_api_only_build_can_emit_no_artifacts() {
 
     let project = builder
         .build_backend(
-            vec![api_only],
+            project_compilation(vec![api_only]),
             &Config::new(entry_path),
             &[],
             &mut string_table,
@@ -756,7 +807,12 @@ fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
         ));
 
     let project = builder
-        .build_backend(vec![homepage, docs_page], &config, &[], &mut string_table)
+        .build_backend(
+            project_compilation(vec![homepage, docs_page]),
+            &config,
+            &[],
+            &mut string_table,
+        )
         .expect("tracked-asset build should succeed");
 
     let output_paths = collect_output_paths(&project.output_files);
@@ -828,7 +884,12 @@ fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
         ));
 
     let project = builder
-        .build_backend(vec![homepage, blog_page], &config, &[], &mut string_table)
+        .build_backend(
+            project_compilation(vec![homepage, blog_page]),
+            &config,
+            &[],
+            &mut string_table,
+        )
         .expect("tracked-asset build should succeed");
 
     assert_eq!(
@@ -891,11 +952,15 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
             },
         ));
 
-    let error =
-        match builder.build_backend(vec![homepage, docs_page], &config, &[], &mut string_table) {
-            Err(messages) => messages,
-            Ok(_) => panic!("conflicting tracked assets should fail"),
-        };
+    let error = match builder.build_backend(
+        project_compilation(vec![homepage, docs_page]),
+        &config,
+        &[],
+        &mut string_table,
+    ) {
+        Err(messages) => messages,
+        Ok(_) => panic!("conflicting tracked assets should fail"),
+    };
 
     let reason = first_invalid_config_reason(&error);
     let InvalidConfigReason::TrackedAssetOutputConflict { output_path, .. } = reason else {
@@ -934,7 +999,12 @@ fn build_backend_rejects_tracked_asset_output_that_matches_generated_html() {
             },
         ));
 
-    let error = match builder.build_backend(vec![homepage], &config, &[], &mut string_table) {
+    let error = match builder.build_backend(
+        project_compilation(vec![homepage]),
+        &config,
+        &[],
+        &mut string_table,
+    ) {
         Err(messages) => messages,
         Ok(_) => panic!("tracked asset should not overwrite generated HTML output"),
     };

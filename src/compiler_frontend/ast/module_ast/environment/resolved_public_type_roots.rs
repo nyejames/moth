@@ -6,7 +6,7 @@
 //! already-resolved facts consumed by public-surface validation.
 //! WHY: canonical type projection needs resolved roots available immediately before HIR
 //! lowering without reconstructing public semantics from HIR or source. This is transient
-//! donor-local AST data consumed before HIR; it never enters `CompiledModuleResult`,
+//! donor-local AST data consumed before HIR; it never enters `ModuleSemanticDraft`,
 //! `Module`, or a cross-module interface.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
@@ -22,7 +22,7 @@ use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
-use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
+use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
@@ -284,7 +284,7 @@ pub(crate) fn build_resolved_public_type_roots(
     // nominal paths are not in the directly-defined public nominal set.
     let mut receiver_method_entries = Vec::new();
     for header in sorted_headers {
-        if header.file_role != FileRole::ActiveModuleRoot {
+        if !header.file_role.is_active_module_root() {
             continue;
         }
         if !matches!(&header.kind, HeaderKind::Function { .. }) {
@@ -508,7 +508,7 @@ fn nominal_generic_parameter_list_id(
 /// are excluded.
 /// WHY: the retained table covers only roots directly defined by the module being compiled.
 fn is_active_root_public_declaration(header: &Header) -> bool {
-    header.file_role == FileRole::ActiveModuleRoot
+    header.file_role.is_active_module_root()
         && header.export_mode.is_public()
         && header.kind.is_authored_public_export_declaration()
 }

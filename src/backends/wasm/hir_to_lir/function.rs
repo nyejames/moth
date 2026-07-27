@@ -18,6 +18,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) fn lower_function(
     module_context: &mut WasmLirLoweringContext<'_>,
     hir_function: &HirFunction,
+    selected_blocks: Option<&[BlockId]>,
 ) -> Result<WasmLirFunction, CompilerError> {
     // WHAT: resolve stable function id assigned during module pre-pass.
     // WHY: preserves deterministic cross-function references.
@@ -43,7 +44,13 @@ pub(crate) fn lower_function(
                 ))
             })?,
     );
-    let signature = lower_function_signature(module_context, hir_function)?;
+    // Selected HTML-Wasm lowering consumes the already validated build-owned CFG assignment.
+    // Standalone all-function lowering retains local discovery because it has no link plan.
+    let reachable_blocks = match selected_blocks {
+        Some(blocks) => blocks.to_vec(),
+        None => collect_reachable_blocks(module_context, hir_function)?,
+    };
+    let signature = lower_function_signature(module_context, hir_function, &reachable_blocks)?;
     let mut function_context = WasmFunctionLoweringContext::new(
         module_context,
         hir_function,
@@ -53,9 +60,6 @@ pub(crate) fn lower_function(
         signature,
     );
 
-    // WHAT: discover and pre-allocate every reachable block/local map entry.
-    // WHY: terminator lowering needs block ids available up-front.
-    let reachable_blocks = collect_reachable_blocks(function_context.module_context, hir_function)?;
     let local_type_map = collect_local_type_map(
         function_context.module_context,
         &reachable_blocks,
@@ -102,14 +106,11 @@ pub(crate) fn lower_function(
 fn lower_function_signature(
     context: &WasmLirLoweringContext<'_>,
     function: &HirFunction,
+    reachable_blocks: &[BlockId],
 ) -> Result<WasmLirSignature, CompilerError> {
     // Multi-value lowering is intentionally incomplete. We only support zero/one result here and
     // keep explicit error paths for unsupported shapes.
-    let local_type_map = collect_local_type_map(
-        context,
-        &collect_reachable_blocks(context, function)?,
-        function.id,
-    )?;
+    let local_type_map = collect_local_type_map(context, reachable_blocks, function.id)?;
 
     let mut params = Vec::with_capacity(function.params.len());
     for local_id in &function.params {

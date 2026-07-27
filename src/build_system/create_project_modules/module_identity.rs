@@ -254,8 +254,7 @@ impl ModuleIdentityTable {
     /// is its filesystem ancestor.
     /// WHY: Stage 0 owned-source classification needs one nearest-module lookup shared with the
     /// existing non-facade ancestry map. Returns `None` for a directory with no enclosing
-    /// non-facade module root, which makes unrooted supported candidates explicit.
-    #[allow(dead_code)]
+    /// non-facade module root, which makes unrooted recognized candidates explicit.
     pub(crate) fn nearest_module_for_directory(&self, directory: &Path) -> Option<ModuleId> {
         let mut current = Some(directory);
         while let Some(candidate) = current {

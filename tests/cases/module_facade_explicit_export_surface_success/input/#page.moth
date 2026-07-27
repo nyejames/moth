@@ -5,10 +5,17 @@ import @widget {
     make_state,
     public_title,
     render_card,
+    render_card_or_error,
 }
 
 card = PublicCard(public_title)
 state PublicState = make_state()
 text PublicText = render_card(card)
+checked_text PublicText = render_card_or_error(card, false) catch |error|:
+    then error.message
+;
+error_text String = render_card_or_error(card, true) catch |render_error|:
+    then render_error.message
+;
 
-[:module_facade_explicit_export_surface_success [text]]
+[:module_facade_explicit_export_surface_success [text] [checked_text] [error_text]]

@@ -6,7 +6,9 @@
 //! instead of depending on pass-order-specific accumulator fields.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression::{
+    Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
+};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::{
@@ -21,19 +23,32 @@ use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
     resolve_diagnostic_type_to_type_id_checked,
 };
+use crate::compiler_frontend::ast::{
+    AstChoiceDefinition, AstImportedFunctionContract, AstImportedStructDefinition,
+};
 use crate::compiler_frontend::builtins::error_type::builtin_error_type_path;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
+use crate::compiler_frontend::datatypes::definitions::{
+    ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
+    StructTypeDefinition,
+};
 use crate::compiler_frontend::datatypes::environment::{
     RegisteredGenericParameterList, TypeEnvironment,
 };
 use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameterList, GenericParameterScope, TypeParameterId,
+    GenericParameter, GenericParameterList, GenericParameterScope, TypeParameterId,
 };
-use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
+use crate::compiler_frontend::datatypes::ids::{
+    FunctionTypeKey, NominalTypeId, TypeId, builtin_type_ids,
+};
+use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
+use crate::compiler_frontend::folded_value::{PublicFoldedField, PublicFoldedValue};
 use crate::compiler_frontend::headers::import_environment::{
     FileVisibility, HeaderImportEnvironment,
 };
@@ -43,6 +58,12 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::Header;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
+use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
+use crate::compiler_frontend::public_interface::{
+    PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationSemantics,
+    PublicFunctionCategory, PublicFunctionSemantics, PublicStructSemantics,
+};
+use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -53,11 +74,16 @@ use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::traits::syntax::TraitReferenceSyntax;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::{benchmark_timer_log, timer_log};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
+
+mod import_projection;
+
+#[cfg(test)]
+pub(crate) use import_projection::imported_nominal_path;
 
 /// Combined transient resolved public-surface outputs built during environment construction.
 ///
@@ -100,6 +126,15 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
 
     // Canonical TypeId for each nominal struct/choice registered in type_environment.
     pub(crate) nominal_type_ids_by_path: FxHashMap<InternedPath, TypeId>,
+    imported_type_ids_by_origin: FxHashMap<OriginTypeId, TypeId>,
+    imported_generic_parameter_type_ids: FxHashMap<
+        crate::compiler_frontend::canonical_type_identity::ExportedGenericParameterIdentity,
+        TypeId,
+    >,
+    projected_imported_functions_by_local_path:
+        FxHashMap<InternedPath, AstImportedFunctionContract>,
+    imported_struct_definitions: Vec<AstImportedStructDefinition>,
+    imported_choice_definitions: Vec<AstChoiceDefinition>,
 }
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
@@ -123,6 +158,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             generic_parameter_lists_by_path: FxHashMap::default(),
             type_environment: TypeEnvironment::new(),
             nominal_type_ids_by_path: FxHashMap::default(),
+            imported_type_ids_by_origin: FxHashMap::default(),
+            imported_generic_parameter_type_ids: FxHashMap::default(),
+            projected_imported_functions_by_local_path: FxHashMap::default(),
+            imported_struct_definitions: Vec::new(),
+            imported_choice_definitions: Vec::new(),
         }
     }
 
@@ -158,6 +198,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Register builtin semantic types
         // ------------------------------------
         self.register_builtin_structs_in_type_environment(string_table)?;
+        self.project_imported_nominal_declarations(string_table)
+            .map_err(|error| self.error_messages(error, string_table))?;
+        self.project_imported_alias_declarations()
+            .map_err(|error| self.error_messages(error, string_table))?;
+        self.project_imported_constant_declarations(string_table)
+            .map_err(|error| self.error_messages(error, string_table))?;
+        self.project_imported_function_declarations(string_table)?;
 
         // ----------------------
         //  Resolve type aliases
@@ -409,6 +456,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 import_environment: self.import_environment,
                 warnings: self.warnings,
                 declaration_table: self.declaration_table,
+                imported_functions_by_local_path: self.projected_imported_functions_by_local_path,
+                imported_struct_definitions: self.imported_struct_definitions,
+                imported_choice_definitions: self.imported_choice_definitions,
                 module_constants: self.module_constants,
                 rendered_path_usages: self.rendered_path_usages,
                 builtin_struct_ast_nodes: self.builtin_struct_ast_nodes,
@@ -417,9 +467,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 resolved_function_signatures_by_path: Rc::new(
                     self.resolved_function_signatures_by_path,
                 ),
-                generic_function_templates_by_path: Rc::new(
-                    self.generic_function_templates_by_path,
-                ),
+                generic_function_templates_by_path: self.generic_function_templates_by_path,
                 resolved_type_aliases_by_path: Rc::new(self.resolved_type_aliases_by_path),
                 choice_variant_shells_by_path: Rc::new(self.choice_variant_shells_by_path),
                 declaration_semantics: Rc::new(declaration_semantics),
@@ -502,6 +550,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 const_record: false,
             };
             let (_, struct_type_id) = self.type_environment.register_nominal_struct(struct_def);
+            self.type_environment
+                .register_canonical_identity(
+                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+                    struct_type_id,
+                )
+                .map_err(|error| self.error_messages(error, string_table))?;
             self.nominal_type_ids_by_path
                 .insert(path.clone(), struct_type_id);
 
