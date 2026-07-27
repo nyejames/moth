@@ -1,0 +1,2664 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Moth Frontend Speed Test</title>
+    <style>
+/*!
+  MOTH CSS CORE (absolute basics CSS reset)
+  This is inspired by Pico.css, but is an even more minimal reset.
+
+  Actual style systems are intended to be built on top of this easily.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --moth-font-size: 100%;
+
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
+
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
+
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
+
+  /* Code block colours */
+  --comment: #8e8e8e;
+  --keyword: #fdbe82;
+  --string: #64d721;
+  --number: #c09eea;
+  --operator: #a6a9fd;
+  --struct: #fca1e7;
+  --type: #46ceff;
+  --parenthesis: #dece74;
+}
+
+/* where: is used here for less specificity, allowing easier overriding */
+:where(:root) {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+  -moz-tab-size: 4;
+  -o-tab-size: 4;
+  tab-size: 4;
+
+}
+
+@media (min-width: 576px) {
+  :root {
+    --moth-font-size: 106.25%;
+  }
+}
+@media (min-width: 768px) {
+  :root {
+    --moth-font-size: 112.5%;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --moth-font-size: 118.75%;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --moth-font-size: 125%;
+  }
+}
+@media (min-width: 1536px) {
+  :root {
+    --moth-font-size: 131.25%;
+  }
+}
+
+body {
+  width: 100%;
+  margin: 0;
+}
+
+/* Code Style */
+.codeblock {
+  color: hsla(0, 0%, 100%, 0.982);
+  font-family: var(--moth-font-family-monospace);
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+.moth-code-comment {
+  color: var(--comment);
+}
+.moth-code-keyword {
+  color: var(--keyword);
+}
+.moth-code-string {
+  color: var(--string);
+}
+.moth-code-number {
+  color: var(--number);
+}
+.moth-code-operator {
+  color: var(--operator);
+}
+.moth-code-struct {
+  color: var(--struct);
+}
+.moth-code-type {
+  color: var(--type);
+}
+.moth-code-parenthesis {
+  color: var(--parenthesis);
+}
+
+/* BASIC CSS RESET STUFF */
+
+/**
+ * Document
+ * Content-box & Responsive typography
+*/
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  background-repeat: no-repeat;
+}
+
+::before,
+::after {
+  text-decoration: inherit;
+  vertical-align: inherit;
+}
+    </style>
+  </head>
+  <body style="">
+    <div id="moth-slot-0"></div>
+    <div id="moth-slot-1"></div>
+     random comptile time top level template
+     random comptile time top level template 2
+    <div id="moth-slot-2"></div>
+    random comptile time top level template  3
+    <div id="moth-slot-3"></div>
+    <script>
+    function __moth_is_ref(value) {
+        return value !== null && typeof value === "object" && value.__moth_ref === true;
+    }
+
+    function __moth_binding(value) {
+        return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+    }
+
+    function __moth_param_binding(value) {
+        if (!__moth_is_ref(value)) {
+            return __moth_binding(value);
+        }
+        if (value.__moth_kind === "binding") {
+            return value;
+        }
+        const binding = __moth_binding(undefined);
+        binding.__moth_mode = "alias";
+        binding.__moth_target = value;
+        return binding;
+    }
+
+    function __moth_resolve(ref) {
+        while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+            ref = ref.__moth_target;
+        }
+        return ref;
+    }
+
+    function __moth_read(ref) {
+        const resolved = __moth_resolve(ref);
+        return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+    }
+
+    function __moth_write(ref, value) {
+        const resolved = __moth_resolve(ref);
+        if (resolved.__moth_kind === "binding") {
+            resolved.__moth_slot.value = value;
+        } else {
+            resolved.__moth_set(value);
+        }
+        return value;
+    }
+
+    function __moth_assign_borrow(binding, ref) {
+        if (binding.__moth_mode === "alias") {
+            return __moth_write(binding, __moth_read(ref));
+        }
+        binding.__moth_mode = "alias";
+        binding.__moth_target = ref;
+        return binding;
+    }
+
+    function __moth_assign_value(binding, value) {
+        if (binding.__moth_mode === "alias") {
+            return __moth_write(binding, value);
+        }
+        binding.__moth_mode = "slot";
+        binding.__moth_target = null;
+        binding.__moth_slot.value = value;
+        return binding;
+    }
+
+    function __moth_field(baseRef, field) {
+        return {
+            __moth_ref: true,
+            __moth_kind: "computed",
+            __moth_get() {
+                return __moth_read(baseRef)[field];
+            },
+            __moth_set(value) {
+                __moth_read(baseRef)[field] = value;
+            }
+        };
+    }
+
+    function __moth_index(baseRef, index) {
+        return {
+            __moth_ref: true,
+            __moth_kind: "computed",
+            __moth_get() {
+                return __moth_read(baseRef)[index];
+            },
+            __moth_set(value) {
+                __moth_read(baseRef)[index] = value;
+            }
+        };
+    }
+
+    function __moth_clone_value(value) {
+        if (Array.isArray(value)) {
+            return value.map(__moth_clone_value);
+        }
+        if (value !== null && typeof value === "object") {
+            const result = {};
+            for (const key of Object.keys(value)) {
+                result[key] = __moth_clone_value(value[key]);
+            }
+            return result;
+        }
+        return value;
+    }
+
+    function __moth_error_normalize_file(file) {
+        if (typeof file !== "string") {
+            return "";
+        }
+        if (file.startsWith("/")) {
+            const parts = file.split(/[\\/]/).filter(Boolean);
+            return parts.length > 0 ? parts[parts.length - 1] : file;
+        }
+        if (/^[A-Za-z]:[\\/]/.test(file)) {
+            const parts = file.split(/[\\/]/).filter(Boolean);
+            return parts.length > 0 ? parts[parts.length - 1] : file;
+        }
+        return file;
+    }
+
+    function __moth_make_error(message, code, location, trace) {
+        return {
+            moth_message_fld0: message,
+            moth_code_fld1: code,
+            __moth_location: location ?? null,
+            __moth_trace: trace ?? null
+        };
+    }
+
+    function __moth_error_result(message, code) {
+        return { tag: "err", value: __moth_make_error(message, code, null, null) };
+    }
+
+    function __moth_error_message(error) {
+        const message = error && error["moth_message_fld0"] !== undefined ? error["moth_message_fld0"] : error && error.message;
+        return typeof message === "string" ? message : String(message ?? "Unknown error");
+    }
+
+    function __moth_error_code(error) {
+        const code = error && error["moth_code_fld1"] !== undefined ? error["moth_code_fld1"] : error && error.code;
+        return typeof code === "number" ? code : 0;
+    }
+
+    function __moth_error_with_location(error, location) {
+        return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+    }
+
+    function __moth_error_push_trace(error, frame) {
+        const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+        return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+    }
+
+    function __moth_error_bubble(error, file, line, column, functionName) {
+        const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+        const location = {
+            file: __moth_error_normalize_file(file),
+            line,
+            column,
+            function: safeFunction === "<unknown>" ? null : safeFunction
+        };
+        const frame = { function: safeFunction, location };
+        const nextLocation = error.__moth_location ?? location;
+        const located = __moth_error_with_location(error, nextLocation);
+        return __moth_error_push_trace(located, frame);
+    }
+
+    function __moth_result_propagate(result) {
+        if (result && result.tag === "ok") {
+            return result.value;
+        }
+        if (result && result.tag === "err") {
+            throw { __moth_result_propagate: true, value: result.value };
+        }
+        throw new Error("Expected internal Result carrier during propagation");
+    }
+
+    function __moth_result_fallback(result, fallback) {
+        if (result && result.tag === "ok") {
+            return result.value;
+        }
+        if (result && result.tag === "err") {
+            return fallback();
+        }
+        throw new Error("Expected internal Result carrier during fallback handling");
+    }
+
+    function __moth_fixed_collection(items, fixedCapacity) {
+        return {
+            __moth_kind: "fixed_collection",
+            items: items,
+            fixedCapacity: fixedCapacity,
+        };
+    }
+
+    function __moth_collection_items(collection) {
+        if (Array.isArray(collection)) {
+            return collection;
+        }
+        return collection.items;
+    }
+
+    function __moth_collection_fixed_capacity(collection) {
+        if (Array.isArray(collection)) {
+            return null;
+        }
+        return collection.fixedCapacity;
+    }
+
+    function __moth_collection_is_valid(collection) {
+        if (Array.isArray(collection)) {
+            return true;
+        }
+        if (collection === null || typeof collection !== "object") {
+            return false;
+        }
+        if (collection.__moth_kind !== "fixed_collection") {
+            return false;
+        }
+        if (!Array.isArray(collection.items)) {
+            return false;
+        }
+        return (
+            Number.isInteger(collection.fixedCapacity)
+            && collection.fixedCapacity > 0
+            && collection.items.length <= collection.fixedCapacity
+        );
+    }
+
+    function __moth_collection_index_is_valid(collection, index) {
+        const items = __moth_collection_items(collection);
+        return Number.isInteger(index) && index >= 0 && index < items.length;
+    }
+
+    function __moth_collection_get(collection, index) {
+        if (!__moth_collection_is_valid(collection)) {
+            return __moth_error_result("Collection operation expects an ordered collection", 100);
+        }
+        if (!__moth_collection_index_is_valid(collection, index)) {
+            return __moth_error_result("Collection index out of bounds", 101);
+        }
+        const items = __moth_collection_items(collection);
+        return { tag: "ok", value: items[index] };
+    }
+
+    function __moth_collection_set(collection, index, value) {
+        if (!__moth_collection_is_valid(collection)) {
+            return __moth_error_result("Collection operation expects an ordered collection", 100);
+        }
+        if (!__moth_collection_index_is_valid(collection, index)) {
+            return __moth_error_result("Collection index out of bounds", 101);
+        }
+        const items = __moth_collection_items(collection);
+        items[index] = value;
+        return { tag: "ok", value: null };
+    }
+
+    function __moth_collection_push(collection, value) {
+        if (!__moth_collection_is_valid(collection)) {
+            return __moth_error_result("Collection operation expects an ordered collection", 100);
+        }
+        const items = __moth_collection_items(collection);
+        const fixedCapacity = __moth_collection_fixed_capacity(collection);
+        if (fixedCapacity !== null && items.length >= fixedCapacity) {
+            return __moth_error_result("Fixed collection capacity exceeded", 102);
+        }
+        items.push(value);
+        return { tag: "ok", value: null };
+    }
+
+    function __moth_collection_remove(collection, index) {
+        if (!__moth_collection_is_valid(collection)) {
+            return __moth_error_result("Collection operation expects an ordered collection", 100);
+        }
+        if (!__moth_collection_index_is_valid(collection, index)) {
+            return __moth_error_result("Collection index out of bounds", 101);
+        }
+        const items = __moth_collection_items(collection);
+        const removed = items.splice(index, 1)[0];
+        return { tag: "ok", value: removed };
+    }
+
+    function __moth_collection_length(collection) {
+        const items = __moth_collection_items(collection);
+        return items.length;
+    }
+
+    function __moth_value_to_string(value) {
+        if (value === undefined || value === null) {
+            return "";
+        }
+        return String(value);
+    }
+
+    const __BS_INT_MIN = -2147483648;
+    const __BS_INT_MAX = 2147483647;
+
+    function __moth_numeric_trap(carrier) {
+        if (carrier && carrier.tag === "ok") {
+            return carrier.value;
+        }
+        if (carrier && carrier.tag === "err") {
+            throw new Error(__moth_error_message(carrier.value));
+        }
+        throw new Error("Expected internal numeric result carrier during trap lowering");
+    }
+
+    function __moth_int_ok(value) {
+        return { tag: "ok", value: Object.is(value, -0) ? 0 : value };
+    }
+
+    function __moth_int_check(value) {
+        if (!Number.isInteger(value) || value < __BS_INT_MIN || value > __BS_INT_MAX) {
+            return __moth_error_result("Int operation overflowed", 301);
+        }
+        return __moth_int_ok(value);
+    }
+
+    function __moth_int_add(a, b) {
+        const result = a + b;
+        return __moth_int_check(result);
+    }
+
+    function __moth_int_sub(a, b) {
+        const result = a - b;
+        return __moth_int_check(result);
+    }
+
+    function __moth_int_mul(a, b) {
+        const result = a * b;
+        return __moth_int_check(result);
+    }
+
+    function __moth_int_div(a, b) {
+        if (b === 0) {
+            return __moth_error_result("Division by zero", 300);
+        }
+        if (a === __BS_INT_MIN && b === -1) {
+            return __moth_error_result("Int operation overflowed", 301);
+        }
+        return __moth_int_check(Math.trunc(a / b));
+    }
+
+    function __moth_int_mod(a, b) {
+        if (b === 0) {
+            return __moth_error_result("Division by zero", 300);
+        }
+        if (a === __BS_INT_MIN && b === -1) {
+            return __moth_error_result("Int operation overflowed", 301);
+        }
+        return __moth_int_check(a % b);
+    }
+
+    function __moth_int_pow(a, b) {
+        if (!Number.isInteger(b) || b < 0) {
+            return __moth_error_result("Invalid exponent", 302);
+        }
+        const result = Math.pow(a, b);
+        return __moth_int_check(result);
+    }
+
+    function __moth_int_neg(a) {
+        if (a === __BS_INT_MIN) {
+            return __moth_error_result("Int operation overflowed", 301);
+        }
+        return __moth_int_check(-a);
+    }
+
+    function __moth_float_add(a, b) {
+        const result = a + b;
+        if (!Number.isFinite(result)) {
+            return __moth_error_result("Float operation produced a non-finite value", 303);
+        }
+        return { tag: "ok", value: result };
+    }
+
+    function __moth_float_sub(a, b) {
+        const result = a - b;
+        if (!Number.isFinite(result)) {
+            return __moth_error_result("Float operation produced a non-finite value", 303);
+        }
+        return { tag: "ok", value: result };
+    }
+
+    function __moth_float_mul(a, b) {
+        const result = a * b;
+        if (!Number.isFinite(result)) {
+            return __moth_error_result("Float operation produced a non-finite value", 303);
+        }
+        return { tag: "ok", value: result };
+    }
+
+    function __moth_float_div(a, b) {
+        if (b === 0) {
+            return __moth_error_result("Division by zero", 300);
+        }
+        const result = a / b;
+        if (!Number.isFinite(result)) {
+            return __moth_error_result("Float operation produced a non-finite value", 303);
+        }
+        return { tag: "ok", value: result };
+    }
+
+    function __moth_float_mod(a, b) {
+        if (b === 0) {
+            return __moth_error_result("Division by zero", 300);
+        }
+        const result = a % b;
+        if (!Number.isFinite(result)) {
+            return __moth_error_result("Float operation produced a non-finite value", 303);
+        }
+        return { tag: "ok", value: result };
+    }
+
+    function __moth_float_pow(a, b) {
+        const result = Math.pow(a, b);
+        if (!Number.isFinite(result)) {
+            return __moth_error_result("Float operation produced a non-finite value", 303);
+        }
+        return { tag: "ok", value: result };
+    }
+
+    function __moth_float_neg(a) {
+        const result = -a;
+        if (!Number.isFinite(result)) {
+            return __moth_error_result("Float operation produced a non-finite value", 303);
+        }
+        return { tag: "ok", value: result };
+    }
+
+    function moth_compute_score_fn0(moth_this_l0, moth_index_l1) {
+        let moth___hir_tmp_0_l2 = __moth_binding(undefined);
+        let moth___hir_tmp_1_l3 = __moth_binding(undefined);
+        let moth___hir_tmp_2_l4 = __moth_binding(undefined);
+        let moth___hir_tmp_3_l5 = __moth_binding(undefined);
+        let moth___hir_tmp_4_l6 = __moth_binding(undefined);
+        
+        moth_this_l0 = __moth_param_binding(moth_this_l0);
+        moth_index_l1 = __moth_param_binding(moth_index_l1);
+        
+        __moth_assign_value(moth___hir_tmp_0_l2, __moth_numeric_trap(__moth_int_add(__moth_read(moth_index_l1), 3)));
+        __moth_assign_value(moth___hir_tmp_1_l3, __moth_numeric_trap(__moth_int_mul(__moth_read(__moth_field(moth_this_l0, "moth_seed_fld4")), __moth_read(moth___hir_tmp_0_l2))));
+        __moth_assign_value(moth___hir_tmp_2_l4, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_index_l1), __moth_read(moth_index_l1))));
+        __moth_assign_value(moth___hir_tmp_3_l5, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_1_l3), __moth_read(moth___hir_tmp_2_l4))));
+        __moth_assign_value(moth___hir_tmp_4_l6, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_3_l5), 17)));
+        return __moth_clone_value(__moth_read(moth___hir_tmp_4_l6));
+    }
+
+    function moth_render_fn1(moth_this_l7, moth_index_l8) {
+        let moth_tone_l9 = __moth_binding(undefined);
+        let moth_residue_l10 = __moth_binding(undefined);
+        let moth___hir_tmp_5_l11 = __moth_binding(undefined);
+        let moth___hir_tmp_6_l12 = __moth_binding(undefined);
+        let moth_composite_l13 = __moth_binding(undefined);
+        let moth___hir_tmp_7_l14 = __moth_binding(undefined);
+        let moth_emphasis_l15 = __moth_binding(undefined);
+        let moth___hir_tmp_8_l16 = __moth_binding(undefined);
+        let moth___hir_tmp_9_l17 = __moth_binding(undefined);
+        
+        moth_this_l7 = __moth_param_binding(moth_this_l7);
+        moth_index_l8 = __moth_param_binding(moth_index_l8);
+        
+        __moth_assign_value(moth_tone_l9, "even");
+        __moth_assign_value(moth___hir_tmp_5_l11, moth_compute_score_fn0(moth_this_l7, moth_index_l8));
+        __moth_assign_value(moth___hir_tmp_6_l12, __moth_numeric_trap(__moth_int_mod(__moth_read(moth___hir_tmp_5_l11), 3)));
+        __moth_assign_borrow(moth_residue_l10, moth___hir_tmp_6_l12);
+        if ((__moth_read(moth_residue_l10) === 1)) {
+            __moth_assign_value(moth_tone_l9, "odd");
+        } else {
+        }
+        if ((__moth_read(moth_residue_l10) === 2)) {
+            __moth_assign_value(moth_tone_l9, "alt");
+        } else {
+        }
+        __moth_assign_value(moth___hir_tmp_7_l14, moth_compute_score_fn0(moth_this_l7, moth_index_l8));
+        __moth_assign_borrow(moth_composite_l13, moth___hir_tmp_7_l14);
+        __moth_assign_value(moth___hir_tmp_8_l16, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_composite_l13), 97)));
+        __moth_assign_borrow(moth_emphasis_l15, moth___hir_tmp_8_l16);
+        __moth_assign_value(moth___hir_tmp_9_l17, "");
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "<article class=\"runtime-card "));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + __moth_read(moth_tone_l9)));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "\">\n    <h3>"));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + __moth_read(__moth_field(moth_this_l7, "moth_title_fld2"))));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "<\/h3>\n    <p class=\"muted\">"));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + __moth_read(__moth_field(moth_this_l7, "moth_body_fld3"))));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "<\/p>\n    <div>group "));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + __moth_read(__moth_field(moth_this_l7, "moth_group_fld5"))));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "<\/div>\n    <div>seed "));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + ("" + __moth_read(__moth_field(moth_this_l7, "moth_seed_fld4")))));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "<\/div>\n    <div>index "));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + ("" + __moth_read(moth_index_l8))));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "<\/div>\n    <div>composite "));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + ("" + __moth_read(moth_composite_l13))));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "<\/div>\n    <div>emphasis "));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + ("" + __moth_read(moth_emphasis_l15))));
+        __moth_assign_value(moth___hir_tmp_9_l17, (__moth_read(moth___hir_tmp_9_l17) + "<\/div>\n<\/article>"));
+        return __moth_clone_value(__moth_read(moth___hir_tmp_9_l17));
+    }
+
+    function moth_bump_fn2(moth_this_l18, moth_amount_l19) {
+        let moth___hir_tmp_10_l20 = __moth_binding(undefined);
+        let moth___hir_tmp_11_l21 = __moth_binding(undefined);
+        
+        moth_this_l18 = __moth_param_binding(moth_this_l18);
+        moth_amount_l19 = __moth_param_binding(moth_amount_l19);
+        
+        __moth_assign_value(moth___hir_tmp_10_l20, __moth_numeric_trap(__moth_int_add(__moth_read(__moth_field(moth_this_l18, "moth_base_fld7")), __moth_read(moth_amount_l19))));
+        __moth_write(__moth_field(moth_this_l18, "moth_base_fld7"), __moth_read(moth___hir_tmp_10_l20));
+        __moth_assign_value(moth___hir_tmp_11_l21, __moth_numeric_trap(__moth_int_add(__moth_read(__moth_field(moth_this_l18, "moth_stride_fld8")), 1)));
+        __moth_write(__moth_field(moth_this_l18, "moth_stride_fld8"), __moth_read(moth___hir_tmp_11_l21));
+        return;
+    }
+
+    function moth_value_at_fn3(moth_this_l22, moth_index_l23) {
+        let moth___hir_tmp_12_l24 = __moth_binding(undefined);
+        let moth___hir_tmp_13_l25 = __moth_binding(undefined);
+        let moth___hir_tmp_14_l26 = __moth_binding(undefined);
+        let moth___hir_tmp_15_l27 = __moth_binding(undefined);
+        let moth___hir_tmp_16_l28 = __moth_binding(undefined);
+        
+        moth_this_l22 = __moth_param_binding(moth_this_l22);
+        moth_index_l23 = __moth_param_binding(moth_index_l23);
+        
+        __moth_assign_value(moth___hir_tmp_12_l24, __moth_numeric_trap(__moth_int_add(__moth_read(moth_index_l23), 1)));
+        __moth_assign_value(moth___hir_tmp_13_l25, __moth_numeric_trap(__moth_int_mul(__moth_read(moth___hir_tmp_12_l24), __moth_read(__moth_field(moth_this_l22, "moth_stride_fld8")))));
+        __moth_assign_value(moth___hir_tmp_14_l26, __moth_numeric_trap(__moth_int_add(__moth_read(__moth_field(moth_this_l22, "moth_base_fld7")), __moth_read(moth___hir_tmp_13_l25))));
+        __moth_assign_value(moth___hir_tmp_15_l27, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_index_l23), __moth_read(moth_index_l23))));
+        __moth_assign_value(moth___hir_tmp_16_l28, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_14_l26), __moth_read(moth___hir_tmp_15_l27))));
+        return __moth_clone_value(__moth_read(moth___hir_tmp_16_l28));
+    }
+
+    function moth_render_row_fn4(moth_this_l29, moth_index_l30) {
+        let moth_row_class_l31 = __moth_binding(undefined);
+        let moth___hir_tmp_17_l32 = __moth_binding(undefined);
+        let moth___hir_tmp_18_l33 = __moth_binding(undefined);
+        let moth_value_l34 = __moth_binding(undefined);
+        let moth___hir_tmp_19_l35 = __moth_binding(undefined);
+        let moth_residue_l36 = __moth_binding(undefined);
+        let moth___hir_tmp_20_l37 = __moth_binding(undefined);
+        let moth___hir_tmp_21_l38 = __moth_binding(undefined);
+        
+        moth_this_l29 = __moth_param_binding(moth_this_l29);
+        moth_index_l30 = __moth_param_binding(moth_index_l30);
+        
+        __moth_assign_value(moth_row_class_l31, "even");
+        __moth_assign_value(moth___hir_tmp_17_l32, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_index_l30), 2)));
+        if ((__moth_read(moth___hir_tmp_17_l32) !== 0)) {
+            __moth_assign_value(moth_row_class_l31, "odd");
+        } else {
+        }
+        __moth_assign_value(moth___hir_tmp_18_l33, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_index_l30), 5)));
+        if ((__moth_read(moth___hir_tmp_18_l33) === 0)) {
+            __moth_assign_value(moth_row_class_l31, "alt");
+        } else {
+        }
+        __moth_assign_value(moth___hir_tmp_19_l35, moth_value_at_fn3(moth_this_l29, moth_index_l30));
+        __moth_assign_borrow(moth_value_l34, moth___hir_tmp_19_l35);
+        __moth_assign_value(moth___hir_tmp_20_l37, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_value_l34), 89)));
+        __moth_assign_borrow(moth_residue_l36, moth___hir_tmp_20_l37);
+        __moth_assign_value(moth___hir_tmp_21_l38, "");
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + "<div class=\"runtime-row "));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + __moth_read(moth_row_class_l31)));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + "\">\n    <span>"));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + __moth_read(__moth_field(moth_this_l29, "moth_label_fld6"))));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + "<\/span>\n    <span>value "));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + ("" + __moth_read(moth_value_l34))));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + "<\/span>\n    <span>residue "));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + ("" + __moth_read(moth_residue_l36))));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + "<\/span>\n    <span>index "));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + ("" + __moth_read(moth_index_l30))));
+        __moth_assign_value(moth___hir_tmp_21_l38, (__moth_read(moth___hir_tmp_21_l38) + "<\/span>\n<\/div>"));
+        return __moth_clone_value(__moth_read(moth___hir_tmp_21_l38));
+    }
+
+    function moth_render_matrix_fn5(moth_this_l39) {
+        let moth_matrix_l40 = __moth_binding(undefined);
+        let moth___hir_tmp_22_l41 = __moth_binding(undefined);
+        let moth___hir_tmp_23_l42 = __moth_binding(undefined);
+        let moth___hir_tmp_24_l43 = __moth_binding(undefined);
+        let moth___hir_tmp_25_l44 = __moth_binding(undefined);
+        let moth___hir_tmp_26_l45 = __moth_binding(undefined);
+        let moth_outer_l46 = __moth_binding(undefined);
+        let moth_row_template_l47 = __moth_binding(undefined);
+        let moth___hir_tmp_27_l48 = __moth_binding(undefined);
+        let moth___hir_tmp_28_l49 = __moth_binding(undefined);
+        let moth___hir_tmp_29_l50 = __moth_binding(undefined);
+        let moth___hir_tmp_30_l51 = __moth_binding(undefined);
+        let moth___hir_tmp_31_l52 = __moth_binding(undefined);
+        let moth_inner_l53 = __moth_binding(undefined);
+        let moth_value_l54 = __moth_binding(undefined);
+        let moth___hir_tmp_32_l55 = __moth_binding(undefined);
+        let moth___hir_tmp_33_l56 = __moth_binding(undefined);
+        let moth___hir_tmp_34_l57 = __moth_binding(undefined);
+        let moth___hir_tmp_35_l58 = __moth_binding(undefined);
+        let moth___hir_tmp_36_l59 = __moth_binding(undefined);
+        let moth___hir_tmp_37_l60 = __moth_binding(undefined);
+        let moth_cell_class_l61 = __moth_binding(undefined);
+        let moth___hir_tmp_38_l62 = __moth_binding(undefined);
+        let moth___hir_tmp_39_l63 = __moth_binding(undefined);
+        let moth___hir_tmp_40_l64 = __moth_binding(undefined);
+        let moth___hir_tmp_41_l65 = __moth_binding(undefined);
+        let moth___hir_tmp_42_l66 = __moth_binding(undefined);
+        
+        moth_this_l39 = __moth_param_binding(moth_this_l39);
+        
+        let __bb_0 = 5;
+        while (true) {
+            switch (__bb_0) {
+                case 5: {
+                    __moth_assign_value(moth_matrix_l40, "<div class=\"matrix\">");
+                    __moth_assign_value(moth___hir_tmp_22_l41, 0);
+                    __moth_assign_borrow(moth___hir_tmp_23_l42, __moth_field(moth_this_l39, "moth_height_fld10"));
+                    __moth_assign_value(moth___hir_tmp_26_l45, 0);
+                    __moth_assign_value(moth___hir_tmp_24_l43, 1);
+                    __moth_assign_value(moth___hir_tmp_25_l44, (__moth_read(moth___hir_tmp_22_l41) <= __moth_read(moth___hir_tmp_23_l42)));
+                    __bb_0 = 33;
+                    continue;
+                }
+                case 33: {
+                    if ((__moth_read(moth___hir_tmp_24_l43) === 0)) {
+                        __bb_0 = 34;
+                    } else {
+                        __bb_0 = 35;
+                    }
+                    continue;
+                }
+                case 34: {
+                    throw new Error("Loop step cannot be zero");
+                }
+                case 35: {
+                    if ((__moth_read(moth___hir_tmp_24_l43) < 0)) {
+                        __bb_0 = 36;
+                    } else {
+                        __bb_0 = 37;
+                    }
+                    continue;
+                }
+                case 36: {
+                    __moth_assign_value(moth___hir_tmp_24_l43, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_24_l43))));
+                    __bb_0 = 37;
+                    continue;
+                }
+                case 37: {
+                    if (__moth_read(moth___hir_tmp_25_l44)) {
+                        __bb_0 = 39;
+                    } else {
+                        __bb_0 = 38;
+                    }
+                    continue;
+                }
+                case 38: {
+                    __moth_assign_value(moth___hir_tmp_24_l43, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_24_l43))));
+                    __bb_0 = 39;
+                    continue;
+                }
+                case 39: {
+                    if (__moth_read(moth___hir_tmp_25_l44)) {
+                        __bb_0 = 40;
+                    } else {
+                        __bb_0 = 41;
+                    }
+                    continue;
+                }
+                case 40: {
+                    if ((__moth_read(moth___hir_tmp_22_l41) < __moth_read(moth___hir_tmp_23_l42))) {
+                        __bb_0 = 42;
+                    } else {
+                        __bb_0 = 44;
+                    }
+                    continue;
+                }
+                case 41: {
+                    if ((__moth_read(moth___hir_tmp_22_l41) > __moth_read(moth___hir_tmp_23_l42))) {
+                        __bb_0 = 42;
+                    } else {
+                        __bb_0 = 44;
+                    }
+                    continue;
+                }
+                case 42: {
+                    __moth_assign_borrow(moth_outer_l46, moth___hir_tmp_22_l41);
+                    __moth_assign_value(moth_row_template_l47, "<div class=\"matrix-row\">");
+                    __moth_assign_value(moth___hir_tmp_27_l48, 0);
+                    __moth_assign_borrow(moth___hir_tmp_28_l49, __moth_field(moth_this_l39, "moth_width_fld9"));
+                    __moth_assign_value(moth___hir_tmp_31_l52, 0);
+                    __moth_assign_value(moth___hir_tmp_29_l50, 1);
+                    __moth_assign_value(moth___hir_tmp_30_l51, (__moth_read(moth___hir_tmp_27_l48) <= __moth_read(moth___hir_tmp_28_l49)));
+                    __bb_0 = 45;
+                    continue;
+                }
+                case 43: {
+                    __moth_assign_value(moth___hir_tmp_22_l41, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_22_l41), __moth_read(moth___hir_tmp_24_l43))));
+                    __moth_assign_value(moth___hir_tmp_26_l45, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_26_l45), 1)));
+                    __bb_0 = 39;
+                    continue;
+                }
+                case 44: {
+                    __moth_assign_value(moth___hir_tmp_42_l66, "");
+                    __moth_assign_value(moth___hir_tmp_42_l66, (__moth_read(moth___hir_tmp_42_l66) + __moth_read(moth_matrix_l40)));
+                    __moth_assign_value(moth___hir_tmp_42_l66, (__moth_read(moth___hir_tmp_42_l66) + "\n<\/div>"));
+                    __moth_assign_value(moth_matrix_l40, __moth_clone_value(__moth_read(moth___hir_tmp_42_l66)));
+                    return __moth_clone_value(__moth_read(moth_matrix_l40));
+                }
+                case 45: {
+                    if ((__moth_read(moth___hir_tmp_29_l50) === 0)) {
+                        __bb_0 = 46;
+                    } else {
+                        __bb_0 = 47;
+                    }
+                    continue;
+                }
+                case 46: {
+                    throw new Error("Loop step cannot be zero");
+                }
+                case 47: {
+                    if ((__moth_read(moth___hir_tmp_29_l50) < 0)) {
+                        __bb_0 = 48;
+                    } else {
+                        __bb_0 = 49;
+                    }
+                    continue;
+                }
+                case 48: {
+                    __moth_assign_value(moth___hir_tmp_29_l50, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_29_l50))));
+                    __bb_0 = 49;
+                    continue;
+                }
+                case 49: {
+                    if (__moth_read(moth___hir_tmp_30_l51)) {
+                        __bb_0 = 51;
+                    } else {
+                        __bb_0 = 50;
+                    }
+                    continue;
+                }
+                case 50: {
+                    __moth_assign_value(moth___hir_tmp_29_l50, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_29_l50))));
+                    __bb_0 = 51;
+                    continue;
+                }
+                case 51: {
+                    if (__moth_read(moth___hir_tmp_30_l51)) {
+                        __bb_0 = 52;
+                    } else {
+                        __bb_0 = 53;
+                    }
+                    continue;
+                }
+                case 52: {
+                    if ((__moth_read(moth___hir_tmp_27_l48) < __moth_read(moth___hir_tmp_28_l49))) {
+                        __bb_0 = 54;
+                    } else {
+                        __bb_0 = 56;
+                    }
+                    continue;
+                }
+                case 53: {
+                    if ((__moth_read(moth___hir_tmp_27_l48) > __moth_read(moth___hir_tmp_28_l49))) {
+                        __bb_0 = 54;
+                    } else {
+                        __bb_0 = 56;
+                    }
+                    continue;
+                }
+                case 54: {
+                    __moth_assign_borrow(moth_inner_l53, moth___hir_tmp_27_l48);
+                    __moth_assign_value(moth___hir_tmp_32_l55, __moth_numeric_trap(__moth_int_add(__moth_read(moth_outer_l46), 1)));
+                    __moth_assign_value(moth___hir_tmp_33_l56, __moth_numeric_trap(__moth_int_add(__moth_read(moth_inner_l53), 2)));
+                    __moth_assign_value(moth___hir_tmp_34_l57, __moth_numeric_trap(__moth_int_mul(__moth_read(moth___hir_tmp_32_l55), __moth_read(moth___hir_tmp_33_l56))));
+                    __moth_assign_value(moth___hir_tmp_35_l58, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_outer_l46), __moth_read(moth_inner_l53))));
+                    __moth_assign_value(moth___hir_tmp_36_l59, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_34_l57), __moth_read(moth___hir_tmp_35_l58))));
+                    __moth_assign_value(moth___hir_tmp_37_l60, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_36_l59), __moth_read(__moth_field(moth_this_l39, "moth_offset_fld11")))));
+                    __moth_assign_borrow(moth_value_l54, moth___hir_tmp_37_l60);
+                    __moth_assign_value(moth_cell_class_l61, "cell cool");
+                    __moth_assign_value(moth___hir_tmp_38_l62, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_value_l54), 4)));
+                    if ((__moth_read(moth___hir_tmp_38_l62) === 0)) {
+                        __bb_0 = 57;
+                    } else {
+                        __bb_0 = 58;
+                    }
+                    continue;
+                }
+                case 55: {
+                    __moth_assign_value(moth___hir_tmp_27_l48, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_27_l48), __moth_read(moth___hir_tmp_29_l50))));
+                    __moth_assign_value(moth___hir_tmp_31_l52, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_31_l52), 1)));
+                    __bb_0 = 51;
+                    continue;
+                }
+                case 56: {
+                    __moth_assign_value(moth___hir_tmp_40_l64, "");
+                    __moth_assign_value(moth___hir_tmp_40_l64, (__moth_read(moth___hir_tmp_40_l64) + __moth_read(moth_row_template_l47)));
+                    __moth_assign_value(moth___hir_tmp_40_l64, (__moth_read(moth___hir_tmp_40_l64) + "\n<\/div>"));
+                    __moth_assign_value(moth_row_template_l47, __moth_clone_value(__moth_read(moth___hir_tmp_40_l64)));
+                    __moth_assign_value(moth___hir_tmp_41_l65, "");
+                    __moth_assign_value(moth___hir_tmp_41_l65, (__moth_read(moth___hir_tmp_41_l65) + __moth_read(moth_matrix_l40)));
+                    __moth_assign_value(moth___hir_tmp_41_l65, (__moth_read(moth___hir_tmp_41_l65) + "\n"));
+                    __moth_assign_value(moth___hir_tmp_41_l65, (__moth_read(moth___hir_tmp_41_l65) + __moth_read(moth_row_template_l47)));
+                    __moth_assign_value(moth_matrix_l40, __moth_clone_value(__moth_read(moth___hir_tmp_41_l65)));
+                    __bb_0 = 43;
+                    continue;
+                }
+                case 57: {
+                    __moth_assign_value(moth_cell_class_l61, "cell hot");
+                    __bb_0 = 59;
+                    continue;
+                }
+                case 58: {
+                    __bb_0 = 59;
+                    continue;
+                }
+                case 59: {
+                    __moth_assign_value(moth___hir_tmp_39_l63, "");
+                    __moth_assign_value(moth___hir_tmp_39_l63, (__moth_read(moth___hir_tmp_39_l63) + __moth_read(moth_row_template_l47)));
+                    __moth_assign_value(moth___hir_tmp_39_l63, (__moth_read(moth___hir_tmp_39_l63) + "\n<span class=\""));
+                    __moth_assign_value(moth___hir_tmp_39_l63, (__moth_read(moth___hir_tmp_39_l63) + __moth_read(moth_cell_class_l61)));
+                    __moth_assign_value(moth___hir_tmp_39_l63, (__moth_read(moth___hir_tmp_39_l63) + "\">"));
+                    __moth_assign_value(moth___hir_tmp_39_l63, (__moth_read(moth___hir_tmp_39_l63) + ("" + __moth_read(moth_value_l54))));
+                    __moth_assign_value(moth___hir_tmp_39_l63, (__moth_read(moth___hir_tmp_39_l63) + "<\/span>"));
+                    __moth_assign_value(moth_row_template_l47, __moth_clone_value(__moth_read(moth___hir_tmp_39_l63)));
+                    __bb_0 = 55;
+                    continue;
+                }
+                default: {
+                    throw new Error("Invalid control-flow block: " + __bb_0);
+                }
+            }
+        }
+    }
+
+    function moth_pair_values_fn6(moth_seed_l67) {
+        let moth_left_l68 = __moth_binding(undefined);
+        let moth___hir_tmp_43_l69 = __moth_binding(undefined);
+        let moth___hir_tmp_44_l70 = __moth_binding(undefined);
+        let moth_right_l71 = __moth_binding(undefined);
+        let moth___hir_tmp_45_l72 = __moth_binding(undefined);
+        let moth___hir_tmp_46_l73 = __moth_binding(undefined);
+        
+        moth_seed_l67 = __moth_param_binding(moth_seed_l67);
+        
+        __moth_assign_value(moth___hir_tmp_43_l69, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_seed_l67), 3)));
+        __moth_assign_value(moth___hir_tmp_44_l70, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_43_l69), 7)));
+        __moth_assign_borrow(moth_left_l68, moth___hir_tmp_44_l70);
+        __moth_assign_value(moth___hir_tmp_45_l72, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_seed_l67), __moth_read(moth_seed_l67))));
+        __moth_assign_value(moth___hir_tmp_46_l73, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_45_l72), 11)));
+        __moth_assign_borrow(moth_right_l71, moth___hir_tmp_46_l73);
+        return [__moth_clone_value(__moth_read(moth_left_l68)), __moth_clone_value(__moth_read(moth_right_l71))];
+    }
+
+    function moth_build_runtime_grid_fn7() {
+        let moth_items_l74 = __moth_binding(undefined);
+        let moth_grid_l75 = __moth_binding(undefined);
+        let moth___hir_tmp_47_l76 = __moth_binding(undefined);
+        let moth___hir_tmp_48_l77 = __moth_binding(undefined);
+        let moth___hir_tmp_49_l78 = __moth_binding(undefined);
+        let moth_item_l79 = __moth_binding(undefined);
+        let moth_index_l80 = __moth_binding(undefined);
+        let moth___hir_tmp_50_l81 = __moth_binding(undefined);
+        let moth___hir_tmp_51_l82 = __moth_binding(undefined);
+        let moth___hir_tmp_52_l83 = __moth_binding(undefined);
+        
+        let __bb_1 = 7;
+        while (true) {
+            switch (__bb_1) {
+                case 7: {
+                    __moth_assign_value(moth_items_l74, [{ moth_title_fld2: "Runtime alpha", moth_body_fld3: "Exercises collections, loops, receiver methods, and template construction.", moth_seed_fld4: 17, moth_group_fld5: "core" }, { moth_title_fld2: "Runtime beta", moth_body_fld3: "Builds up runtime strings by repeatedly wrapping previous content.", moth_seed_fld4: 23, moth_group_fld5: "core" }, { moth_title_fld2: "Runtime gamma", moth_body_fld3: "Adds more method-call and interpolation work.", moth_seed_fld4: 31, moth_group_fld5: "fold" }, { moth_title_fld2: "Runtime delta", moth_body_fld3: "Uses the same receiver path but different data.", moth_seed_fld4: 43, moth_group_fld5: "fold" }, { moth_title_fld2: "Runtime epsilon", moth_body_fld3: "Keeps AST parsing busy in function bodies.", moth_seed_fld4: 59, moth_group_fld5: "body" }, { moth_title_fld2: "Runtime zeta", moth_body_fld3: "Good for comparing node emission and template normalization.", moth_seed_fld4: 71, moth_group_fld5: "body" }, { moth_title_fld2: "Runtime eta", moth_body_fld3: "Another block to keep collection iteration non-trivial.", moth_seed_fld4: 83, moth_group_fld5: "layout" }, { moth_title_fld2: "Runtime theta", moth_body_fld3: "Large enough to make the collection loop visible.", moth_seed_fld4: 97, moth_group_fld5: "layout" }, { moth_title_fld2: "Runtime iota", moth_body_fld3: "Additional body parsing and runtime template churn.", moth_seed_fld4: 109, moth_group_fld5: "result" }, { moth_title_fld2: "Runtime kappa", moth_body_fld3: "Keeps more struct constructor and method calls active.", moth_seed_fld4: 127, moth_group_fld5: "result" }, { moth_title_fld2: "Runtime lambda", moth_body_fld3: "A larger panel set makes repeated runtime wrapping clearer.", moth_seed_fld4: 149, moth_group_fld5: "panel" }, { moth_title_fld2: "Runtime mu", moth_body_fld3: "More realistic content volume for frontend-style builds.", moth_seed_fld4: 163, moth_group_fld5: "panel" }]);
+                    __moth_assign_value(moth_grid_l75, "<div class=\"runtime-grid\">");
+                    __moth_assign_borrow(moth___hir_tmp_47_l76, moth_items_l74);
+                    __moth_assign_value(moth___hir_tmp_49_l78, 0);
+                    __moth_assign_value(moth___hir_tmp_48_l77, __moth_collection_length(__moth_read(moth___hir_tmp_47_l76)));
+                    __bb_1 = 60;
+                    continue;
+                }
+                case 60: {
+                    if ((__moth_read(moth___hir_tmp_49_l78) < __moth_read(moth___hir_tmp_48_l77))) {
+                        __bb_1 = 61;
+                    } else {
+                        __bb_1 = 63;
+                    }
+                    continue;
+                }
+                case 61: {
+                    __moth_assign_borrow(moth_item_l79, __moth_index(moth___hir_tmp_47_l76, __moth_read(moth___hir_tmp_49_l78)));
+                    __moth_assign_borrow(moth_index_l80, moth___hir_tmp_49_l78);
+                    __moth_assign_value(moth___hir_tmp_50_l81, "");
+                    __moth_assign_value(moth___hir_tmp_50_l81, (__moth_read(moth___hir_tmp_50_l81) + __moth_read(moth_grid_l75)));
+                    __moth_assign_value(moth___hir_tmp_50_l81, (__moth_read(moth___hir_tmp_50_l81) + "\n"));
+                    __moth_assign_value(moth___hir_tmp_51_l82, moth_render_fn1(moth_item_l79, moth_index_l80));
+                    __moth_assign_value(moth___hir_tmp_50_l81, (__moth_read(moth___hir_tmp_50_l81) + __moth_read(moth___hir_tmp_51_l82)));
+                    __moth_assign_value(moth_grid_l75, __moth_clone_value(__moth_read(moth___hir_tmp_50_l81)));
+                    __bb_1 = 62;
+                    continue;
+                }
+                case 62: {
+                    __moth_assign_value(moth___hir_tmp_49_l78, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_49_l78), 1)));
+                    __bb_1 = 60;
+                    continue;
+                }
+                case 63: {
+                    __moth_assign_value(moth___hir_tmp_52_l83, "");
+                    __moth_assign_value(moth___hir_tmp_52_l83, (__moth_read(moth___hir_tmp_52_l83) + __moth_read(moth_grid_l75)));
+                    __moth_assign_value(moth___hir_tmp_52_l83, (__moth_read(moth___hir_tmp_52_l83) + "\n<\/div>"));
+                    __moth_assign_value(moth_grid_l75, __moth_clone_value(__moth_read(moth___hir_tmp_52_l83)));
+                    return __moth_clone_value(__moth_read(moth_grid_l75));
+                }
+                default: {
+                    throw new Error("Invalid control-flow block: " + __bb_1);
+                }
+            }
+        }
+    }
+
+    function moth_build_runtime_rows_fn8() {
+        let moth_latency_l84 = __moth_binding(undefined);
+        let moth_throughput_l85 = __moth_binding(undefined);
+        let moth_cache_hit_l86 = __moth_binding(undefined);
+        let moth_render_cost_l87 = __moth_binding(undefined);
+        let moth_node_count_l88 = __moth_binding(undefined);
+        let moth_fold_cost_l89 = __moth_binding(undefined);
+        let moth_metrics_l90 = __moth_binding(undefined);
+        let moth___hir_tmp_53_l91 = __moth_binding(undefined);
+        let moth___hir_tmp_54_l92 = __moth_binding(undefined);
+        let moth___hir_tmp_55_l93 = __moth_binding(undefined);
+        let moth___hir_tmp_56_l94 = __moth_binding(undefined);
+        let moth___hir_tmp_57_l95 = __moth_binding(undefined);
+        let moth___hir_tmp_58_l96 = __moth_binding(undefined);
+        let moth___hir_tmp_59_l97 = __moth_binding(undefined);
+        let moth___hir_tmp_60_l98 = __moth_binding(undefined);
+        let moth___hir_tmp_61_l99 = __moth_binding(undefined);
+        let moth___hir_tmp_62_l100 = __moth_binding(undefined);
+        let moth_rows_l101 = __moth_binding(undefined);
+        let moth___hir_tmp_63_l102 = __moth_binding(undefined);
+        let moth___hir_tmp_64_l103 = __moth_binding(undefined);
+        let moth___hir_tmp_65_l104 = __moth_binding(undefined);
+        let moth_metric_l105 = __moth_binding(undefined);
+        let moth_index_l106 = __moth_binding(undefined);
+        let moth___hir_tmp_66_l107 = __moth_binding(undefined);
+        let moth___hir_tmp_67_l108 = __moth_binding(undefined);
+        let moth___hir_tmp_68_l109 = __moth_binding(undefined);
+        
+        let __bb_2 = 8;
+        while (true) {
+            switch (__bb_2) {
+                case 8: {
+                    __moth_assign_value(moth_latency_l84, { moth_label_fld6: "latency", moth_base_fld7: 13, moth_stride_fld8: 5 });
+                    __moth_assign_value(moth_throughput_l85, { moth_label_fld6: "throughput", moth_base_fld7: 21, moth_stride_fld8: 7 });
+                    __moth_assign_value(moth_cache_hit_l86, { moth_label_fld6: "cache-hit", moth_base_fld7: 34, moth_stride_fld8: 4 });
+                    __moth_assign_value(moth_render_cost_l87, { moth_label_fld6: "render-cost", moth_base_fld7: 55, moth_stride_fld8: 6 });
+                    __moth_assign_value(moth_node_count_l88, { moth_label_fld6: "node-count", moth_base_fld7: 89, moth_stride_fld8: 9 });
+                    __moth_assign_value(moth_fold_cost_l89, { moth_label_fld6: "fold-cost", moth_base_fld7: 144, moth_stride_fld8: 11 });
+                    moth_bump_fn2(moth_latency_l84, __moth_binding(3));
+                    moth_bump_fn2(moth_throughput_l85, __moth_binding(5));
+                    moth_bump_fn2(moth_cache_hit_l86, __moth_binding(2));
+                    moth_bump_fn2(moth_render_cost_l87, __moth_binding(4));
+                    moth_bump_fn2(moth_node_count_l88, __moth_binding(6));
+                    moth_bump_fn2(moth_fold_cost_l89, __moth_binding(8));
+                    __moth_assign_value(moth_metrics_l90, [__moth_read(moth_latency_l84)]);
+                    __moth_assign_value(moth___hir_tmp_53_l91, __moth_collection_push(__moth_read(moth_metrics_l90), __moth_read(moth_throughput_l85)));
+                    __moth_assign_borrow(moth___hir_tmp_54_l92, moth___hir_tmp_53_l91);
+                    if (((__moth_read(moth___hir_tmp_54_l92)).tag === "ok")) {
+                        __bb_2 = 64;
+                    } else {
+                        __bb_2 = 65;
+                    }
+                    continue;
+                }
+                case 64: {
+                    __bb_2 = 66;
+                    continue;
+                }
+                case 65: {
+                    __bb_2 = 66;
+                    continue;
+                }
+                case 66: {
+                    __moth_assign_value(moth___hir_tmp_55_l93, __moth_collection_push(__moth_read(moth_metrics_l90), __moth_read(moth_cache_hit_l86)));
+                    __moth_assign_borrow(moth___hir_tmp_56_l94, moth___hir_tmp_55_l93);
+                    if (((__moth_read(moth___hir_tmp_56_l94)).tag === "ok")) {
+                        __bb_2 = 67;
+                    } else {
+                        __bb_2 = 68;
+                    }
+                    continue;
+                }
+                case 67: {
+                    __bb_2 = 69;
+                    continue;
+                }
+                case 68: {
+                    __bb_2 = 69;
+                    continue;
+                }
+                case 69: {
+                    __moth_assign_value(moth___hir_tmp_57_l95, __moth_collection_push(__moth_read(moth_metrics_l90), __moth_read(moth_render_cost_l87)));
+                    __moth_assign_borrow(moth___hir_tmp_58_l96, moth___hir_tmp_57_l95);
+                    if (((__moth_read(moth___hir_tmp_58_l96)).tag === "ok")) {
+                        __bb_2 = 70;
+                    } else {
+                        __bb_2 = 71;
+                    }
+                    continue;
+                }
+                case 70: {
+                    __bb_2 = 72;
+                    continue;
+                }
+                case 71: {
+                    __bb_2 = 72;
+                    continue;
+                }
+                case 72: {
+                    __moth_assign_value(moth___hir_tmp_59_l97, __moth_collection_push(__moth_read(moth_metrics_l90), __moth_read(moth_node_count_l88)));
+                    __moth_assign_borrow(moth___hir_tmp_60_l98, moth___hir_tmp_59_l97);
+                    if (((__moth_read(moth___hir_tmp_60_l98)).tag === "ok")) {
+                        __bb_2 = 73;
+                    } else {
+                        __bb_2 = 74;
+                    }
+                    continue;
+                }
+                case 73: {
+                    __bb_2 = 75;
+                    continue;
+                }
+                case 74: {
+                    __bb_2 = 75;
+                    continue;
+                }
+                case 75: {
+                    __moth_assign_value(moth___hir_tmp_61_l99, __moth_collection_push(__moth_read(moth_metrics_l90), __moth_read(moth_fold_cost_l89)));
+                    __moth_assign_borrow(moth___hir_tmp_62_l100, moth___hir_tmp_61_l99);
+                    if (((__moth_read(moth___hir_tmp_62_l100)).tag === "ok")) {
+                        __bb_2 = 76;
+                    } else {
+                        __bb_2 = 77;
+                    }
+                    continue;
+                }
+                case 76: {
+                    __bb_2 = 78;
+                    continue;
+                }
+                case 77: {
+                    __bb_2 = 78;
+                    continue;
+                }
+                case 78: {
+                    __moth_assign_value(moth_rows_l101, "<div class=\"runtime-table\">");
+                    __moth_assign_borrow(moth___hir_tmp_63_l102, moth_metrics_l90);
+                    __moth_assign_value(moth___hir_tmp_65_l104, 0);
+                    __moth_assign_value(moth___hir_tmp_64_l103, __moth_collection_length(__moth_read(moth___hir_tmp_63_l102)));
+                    __bb_2 = 79;
+                    continue;
+                }
+                case 79: {
+                    if ((__moth_read(moth___hir_tmp_65_l104) < __moth_read(moth___hir_tmp_64_l103))) {
+                        __bb_2 = 80;
+                    } else {
+                        __bb_2 = 82;
+                    }
+                    continue;
+                }
+                case 80: {
+                    __moth_assign_borrow(moth_metric_l105, __moth_index(moth___hir_tmp_63_l102, __moth_read(moth___hir_tmp_65_l104)));
+                    __moth_assign_borrow(moth_index_l106, moth___hir_tmp_65_l104);
+                    __moth_assign_value(moth___hir_tmp_66_l107, "");
+                    __moth_assign_value(moth___hir_tmp_66_l107, (__moth_read(moth___hir_tmp_66_l107) + __moth_read(moth_rows_l101)));
+                    __moth_assign_value(moth___hir_tmp_66_l107, (__moth_read(moth___hir_tmp_66_l107) + "\n"));
+                    __moth_assign_value(moth___hir_tmp_67_l108, moth_render_row_fn4(moth_metric_l105, moth_index_l106));
+                    __moth_assign_value(moth___hir_tmp_66_l107, (__moth_read(moth___hir_tmp_66_l107) + __moth_read(moth___hir_tmp_67_l108)));
+                    __moth_assign_value(moth_rows_l101, __moth_clone_value(__moth_read(moth___hir_tmp_66_l107)));
+                    __bb_2 = 81;
+                    continue;
+                }
+                case 81: {
+                    __moth_assign_value(moth___hir_tmp_65_l104, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_65_l104), 1)));
+                    __bb_2 = 79;
+                    continue;
+                }
+                case 82: {
+                    __moth_assign_value(moth___hir_tmp_68_l109, "");
+                    __moth_assign_value(moth___hir_tmp_68_l109, (__moth_read(moth___hir_tmp_68_l109) + __moth_read(moth_rows_l101)));
+                    __moth_assign_value(moth___hir_tmp_68_l109, (__moth_read(moth___hir_tmp_68_l109) + "\n<\/div>"));
+                    __moth_assign_value(moth_rows_l101, __moth_clone_value(__moth_read(moth___hir_tmp_68_l109)));
+                    return __moth_clone_value(__moth_read(moth_rows_l101));
+                }
+                default: {
+                    throw new Error("Invalid control-flow block: " + __bb_2);
+                }
+            }
+        }
+    }
+
+    function moth_build_runtime_matrix_fn9() {
+        let moth_spec_l110 = __moth_binding(undefined);
+        let moth___hir_tmp_69_l111 = __moth_binding(undefined);
+        
+        __moth_assign_value(moth_spec_l110, { moth_width_fld9: 16, moth_height_fld10: 12, moth_offset_fld11: 13 });
+        __moth_assign_value(moth___hir_tmp_69_l111, moth_render_matrix_fn5(moth_spec_l110));
+        return __moth_clone_value(__moth_read(moth___hir_tmp_69_l111));
+    }
+
+    function moth_build_runtime_summary_fn10() {
+        let moth_summary_l112 = __moth_binding(undefined);
+        let moth___hir_tmp_70_l113 = __moth_binding(undefined);
+        let moth___hir_tmp_71_l114 = __moth_binding(undefined);
+        let moth___hir_tmp_72_l115 = __moth_binding(undefined);
+        let moth___hir_tmp_73_l116 = __moth_binding(undefined);
+        let moth___hir_tmp_74_l117 = __moth_binding(undefined);
+        let moth_index_l118 = __moth_binding(undefined);
+        let moth_metric_l119 = __moth_binding(undefined);
+        let moth___hir_tmp_75_l120 = __moth_binding(undefined);
+        let moth___hir_tmp_76_l121 = __moth_binding(undefined);
+        let moth___hir_tmp_77_l122 = __moth_binding(undefined);
+        let moth___hir_tmp_78_l123 = __moth_binding(undefined);
+        let moth___hir_tmp_79_l124 = __moth_binding(undefined);
+        let moth___hir_tmp_80_l125 = __moth_binding(undefined);
+        let moth_residue_l126 = __moth_binding(undefined);
+        let moth___hir_tmp_81_l127 = __moth_binding(undefined);
+        let moth___hir_tmp_82_l128 = __moth_binding(undefined);
+        let moth___hir_tmp_83_l129 = __moth_binding(undefined);
+        
+        let __bb_3 = 10;
+        while (true) {
+            switch (__bb_3) {
+                case 10: {
+                    __moth_assign_value(moth_summary_l112, "<div class=\"summary-grid\">");
+                    __moth_assign_value(moth___hir_tmp_70_l113, 0);
+                    __moth_assign_value(moth___hir_tmp_71_l114, 16);
+                    __moth_assign_value(moth___hir_tmp_74_l117, 0);
+                    __moth_assign_value(moth___hir_tmp_72_l115, 1);
+                    __moth_assign_value(moth___hir_tmp_73_l116, (__moth_read(moth___hir_tmp_70_l113) <= __moth_read(moth___hir_tmp_71_l114)));
+                    __bb_3 = 83;
+                    continue;
+                }
+                case 83: {
+                    if ((__moth_read(moth___hir_tmp_72_l115) === 0)) {
+                        __bb_3 = 84;
+                    } else {
+                        __bb_3 = 85;
+                    }
+                    continue;
+                }
+                case 84: {
+                    throw new Error("Loop step cannot be zero");
+                }
+                case 85: {
+                    if ((__moth_read(moth___hir_tmp_72_l115) < 0)) {
+                        __bb_3 = 86;
+                    } else {
+                        __bb_3 = 87;
+                    }
+                    continue;
+                }
+                case 86: {
+                    __moth_assign_value(moth___hir_tmp_72_l115, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_72_l115))));
+                    __bb_3 = 87;
+                    continue;
+                }
+                case 87: {
+                    if (__moth_read(moth___hir_tmp_73_l116)) {
+                        __bb_3 = 89;
+                    } else {
+                        __bb_3 = 88;
+                    }
+                    continue;
+                }
+                case 88: {
+                    __moth_assign_value(moth___hir_tmp_72_l115, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_72_l115))));
+                    __bb_3 = 89;
+                    continue;
+                }
+                case 89: {
+                    if (__moth_read(moth___hir_tmp_73_l116)) {
+                        __bb_3 = 90;
+                    } else {
+                        __bb_3 = 91;
+                    }
+                    continue;
+                }
+                case 90: {
+                    if ((__moth_read(moth___hir_tmp_70_l113) < __moth_read(moth___hir_tmp_71_l114))) {
+                        __bb_3 = 92;
+                    } else {
+                        __bb_3 = 94;
+                    }
+                    continue;
+                }
+                case 91: {
+                    if ((__moth_read(moth___hir_tmp_70_l113) > __moth_read(moth___hir_tmp_71_l114))) {
+                        __bb_3 = 92;
+                    } else {
+                        __bb_3 = 94;
+                    }
+                    continue;
+                }
+                case 92: {
+                    __moth_assign_borrow(moth_index_l118, moth___hir_tmp_70_l113);
+                    __moth_assign_value(moth___hir_tmp_75_l120, __moth_numeric_trap(__moth_int_add(__moth_read(moth_index_l118), 5)));
+                    __moth_assign_value(moth___hir_tmp_76_l121, __moth_numeric_trap(__moth_int_add(__moth_read(moth_index_l118), 9)));
+                    __moth_assign_value(moth___hir_tmp_77_l122, __moth_numeric_trap(__moth_int_mul(__moth_read(moth___hir_tmp_75_l120), __moth_read(moth___hir_tmp_76_l121))));
+                    __moth_assign_value(moth___hir_tmp_78_l123, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_index_l118), 3)));
+                    __moth_assign_value(moth___hir_tmp_79_l124, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_77_l122), __moth_read(moth___hir_tmp_78_l123))));
+                    __moth_assign_value(moth___hir_tmp_80_l125, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_79_l124), 41)));
+                    __moth_assign_borrow(moth_metric_l119, moth___hir_tmp_80_l125);
+                    __moth_assign_value(moth___hir_tmp_81_l127, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_metric_l119), 37)));
+                    __moth_assign_borrow(moth_residue_l126, moth___hir_tmp_81_l127);
+                    __moth_assign_value(moth___hir_tmp_82_l128, "");
+                    __moth_assign_value(moth___hir_tmp_82_l128, (__moth_read(moth___hir_tmp_82_l128) + __moth_read(moth_summary_l112)));
+                    __moth_assign_value(moth___hir_tmp_82_l128, (__moth_read(moth___hir_tmp_82_l128) + "\n<div class=\"summary-item\">\n    <div>summary "));
+                    __moth_assign_value(moth___hir_tmp_82_l128, (__moth_read(moth___hir_tmp_82_l128) + ("" + __moth_read(moth_index_l118))));
+                    __moth_assign_value(moth___hir_tmp_82_l128, (__moth_read(moth___hir_tmp_82_l128) + "<\/div>\n    <div class=\"muted\">metric "));
+                    __moth_assign_value(moth___hir_tmp_82_l128, (__moth_read(moth___hir_tmp_82_l128) + ("" + __moth_read(moth_metric_l119))));
+                    __moth_assign_value(moth___hir_tmp_82_l128, (__moth_read(moth___hir_tmp_82_l128) + "<\/div>\n    <div class=\"muted\">residue "));
+                    __moth_assign_value(moth___hir_tmp_82_l128, (__moth_read(moth___hir_tmp_82_l128) + ("" + __moth_read(moth_residue_l126))));
+                    __moth_assign_value(moth___hir_tmp_82_l128, (__moth_read(moth___hir_tmp_82_l128) + "<\/div>\n<\/div>"));
+                    __moth_assign_value(moth_summary_l112, __moth_clone_value(__moth_read(moth___hir_tmp_82_l128)));
+                    __bb_3 = 93;
+                    continue;
+                }
+                case 93: {
+                    __moth_assign_value(moth___hir_tmp_70_l113, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_70_l113), __moth_read(moth___hir_tmp_72_l115))));
+                    __moth_assign_value(moth___hir_tmp_74_l117, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_74_l117), 1)));
+                    __bb_3 = 89;
+                    continue;
+                }
+                case 94: {
+                    __moth_assign_value(moth___hir_tmp_83_l129, "");
+                    __moth_assign_value(moth___hir_tmp_83_l129, (__moth_read(moth___hir_tmp_83_l129) + __moth_read(moth_summary_l112)));
+                    __moth_assign_value(moth___hir_tmp_83_l129, (__moth_read(moth___hir_tmp_83_l129) + "\n<\/div>"));
+                    __moth_assign_value(moth_summary_l112, __moth_clone_value(__moth_read(moth___hir_tmp_83_l129)));
+                    return __moth_clone_value(__moth_read(moth_summary_l112));
+                }
+                default: {
+                    throw new Error("Invalid control-flow block: " + __bb_3);
+                }
+            }
+        }
+    }
+
+    function moth_build_mutation_probe_fn11() {
+        let moth_numbers_l130 = __moth_binding(undefined);
+        let moth___hir_tmp_84_l131 = __moth_binding(undefined);
+        let moth___hir_tmp_85_l132 = __moth_binding(undefined);
+        let moth___hir_tmp_86_l133 = __moth_binding(undefined);
+        let moth___hir_tmp_87_l134 = __moth_binding(undefined);
+        let moth___hir_tmp_88_l135 = __moth_binding(undefined);
+        let moth___hir_tmp_89_l136 = __moth_binding(undefined);
+        let moth_removed_l137 = __moth_binding(undefined);
+        let moth___hir_tmp_90_l138 = __moth_binding(undefined);
+        let moth___hir_tmp_91_l139 = __moth_binding(undefined);
+        let moth___hir_tmp_92_l140 = __moth_binding(undefined);
+        let moth_first_l141 = __moth_binding(undefined);
+        let moth___hir_tmp_93_l142 = __moth_binding(undefined);
+        let moth___hir_tmp_94_l143 = __moth_binding(undefined);
+        let moth___hir_tmp_95_l144 = __moth_binding(undefined);
+        let moth_third_l145 = __moth_binding(undefined);
+        let moth___hir_tmp_96_l146 = __moth_binding(undefined);
+        let moth___hir_tmp_97_l147 = __moth_binding(undefined);
+        let moth___hir_tmp_98_l148 = __moth_binding(undefined);
+        let moth_missing_l149 = __moth_binding(undefined);
+        let moth___hir_tmp_99_l150 = __moth_binding(undefined);
+        let moth___hir_tmp_100_l151 = __moth_binding(undefined);
+        let moth___hir_tmp_101_l152 = __moth_binding(undefined);
+        let moth_probe_l153 = __moth_binding(undefined);
+        let moth___hir_tmp_102_l154 = __moth_binding(undefined);
+        let moth___hir_tmp_103_l155 = __moth_binding(undefined);
+        let moth___hir_tmp_104_l156 = __moth_binding(undefined);
+        let moth___hir_tmp_105_l157 = __moth_binding(undefined);
+        let moth_value_l158 = __moth_binding(undefined);
+        let moth_index_l159 = __moth_binding(undefined);
+        let moth_class_name_l160 = __moth_binding(undefined);
+        let moth___hir_tmp_106_l161 = __moth_binding(undefined);
+        let moth___hir_tmp_107_l162 = __moth_binding(undefined);
+        let moth___hir_tmp_108_l163 = __moth_binding(undefined);
+        let moth___hir_tmp_109_l164 = __moth_binding(undefined);
+        
+        let __bb_4 = 11;
+        while (true) {
+            switch (__bb_4) {
+                case 11: {
+                    __moth_assign_value(moth_numbers_l130, [3, 5, 8, 13, 21]);
+                    __moth_assign_value(moth___hir_tmp_84_l131, __moth_collection_push(__moth_read(moth_numbers_l130), 34));
+                    __moth_assign_borrow(moth___hir_tmp_85_l132, moth___hir_tmp_84_l131);
+                    if (((__moth_read(moth___hir_tmp_85_l132)).tag === "ok")) {
+                        __bb_4 = 95;
+                    } else {
+                        __bb_4 = 96;
+                    }
+                    continue;
+                }
+                case 95: {
+                    __bb_4 = 97;
+                    continue;
+                }
+                case 96: {
+                    __bb_4 = 97;
+                    continue;
+                }
+                case 97: {
+                    __moth_assign_value(moth___hir_tmp_86_l133, __moth_collection_push(__moth_read(moth_numbers_l130), 55));
+                    __moth_assign_borrow(moth___hir_tmp_87_l134, moth___hir_tmp_86_l133);
+                    if (((__moth_read(moth___hir_tmp_87_l134)).tag === "ok")) {
+                        __bb_4 = 98;
+                    } else {
+                        __bb_4 = 99;
+                    }
+                    continue;
+                }
+                case 98: {
+                    __bb_4 = 100;
+                    continue;
+                }
+                case 99: {
+                    __bb_4 = 100;
+                    continue;
+                }
+                case 100: {
+                    __moth_assign_value(moth___hir_tmp_88_l135, __moth_collection_set(__moth_read(moth_numbers_l130), 1, 7));
+                    __moth_assign_borrow(moth___hir_tmp_89_l136, moth___hir_tmp_88_l135);
+                    if (((__moth_read(moth___hir_tmp_89_l136)).tag === "ok")) {
+                        __bb_4 = 101;
+                    } else {
+                        __bb_4 = 102;
+                    }
+                    continue;
+                }
+                case 101: {
+                    __bb_4 = 103;
+                    continue;
+                }
+                case 102: {
+                    __bb_4 = 103;
+                    continue;
+                }
+                case 103: {
+                    __moth_assign_value(moth___hir_tmp_90_l138, __moth_collection_remove(__moth_read(moth_numbers_l130), 3));
+                    __moth_assign_borrow(moth___hir_tmp_91_l139, moth___hir_tmp_90_l138);
+                    if (((__moth_read(moth___hir_tmp_91_l139)).tag === "ok")) {
+                        __bb_4 = 104;
+                    } else {
+                        __bb_4 = 105;
+                    }
+                    continue;
+                }
+                case 104: {
+                    __moth_assign_value(moth___hir_tmp_92_l140, ((__moth_read(moth___hir_tmp_91_l139)).value));
+                    __bb_4 = 106;
+                    continue;
+                }
+                case 105: {
+                    __moth_assign_value(moth___hir_tmp_92_l140, 0);
+                    __bb_4 = 106;
+                    continue;
+                }
+                case 106: {
+                    __moth_assign_borrow(moth_removed_l137, moth___hir_tmp_92_l140);
+                    __moth_assign_value(moth___hir_tmp_93_l142, __moth_collection_get(__moth_read(moth_numbers_l130), 0));
+                    __moth_assign_borrow(moth___hir_tmp_94_l143, moth___hir_tmp_93_l142);
+                    if (((__moth_read(moth___hir_tmp_94_l143)).tag === "ok")) {
+                        __bb_4 = 107;
+                    } else {
+                        __bb_4 = 108;
+                    }
+                    continue;
+                }
+                case 107: {
+                    __moth_assign_value(moth___hir_tmp_95_l144, ((__moth_read(moth___hir_tmp_94_l143)).value));
+                    __bb_4 = 109;
+                    continue;
+                }
+                case 108: {
+                    __moth_assign_value(moth___hir_tmp_95_l144, 0);
+                    __bb_4 = 109;
+                    continue;
+                }
+                case 109: {
+                    __moth_assign_borrow(moth_first_l141, moth___hir_tmp_95_l144);
+                    __moth_assign_value(moth___hir_tmp_96_l146, __moth_collection_get(__moth_read(moth_numbers_l130), 2));
+                    __moth_assign_borrow(moth___hir_tmp_97_l147, moth___hir_tmp_96_l146);
+                    if (((__moth_read(moth___hir_tmp_97_l147)).tag === "ok")) {
+                        __bb_4 = 110;
+                    } else {
+                        __bb_4 = 111;
+                    }
+                    continue;
+                }
+                case 110: {
+                    __moth_assign_value(moth___hir_tmp_98_l148, ((__moth_read(moth___hir_tmp_97_l147)).value));
+                    __bb_4 = 112;
+                    continue;
+                }
+                case 111: {
+                    __moth_assign_value(moth___hir_tmp_98_l148, 0);
+                    __bb_4 = 112;
+                    continue;
+                }
+                case 112: {
+                    __moth_assign_borrow(moth_third_l145, moth___hir_tmp_98_l148);
+                    __moth_assign_value(moth___hir_tmp_99_l150, __moth_collection_get(__moth_read(moth_numbers_l130), 99));
+                    __moth_assign_borrow(moth___hir_tmp_100_l151, moth___hir_tmp_99_l150);
+                    if (((__moth_read(moth___hir_tmp_100_l151)).tag === "ok")) {
+                        __bb_4 = 113;
+                    } else {
+                        __bb_4 = 114;
+                    }
+                    continue;
+                }
+                case 113: {
+                    __moth_assign_value(moth___hir_tmp_101_l152, ((__moth_read(moth___hir_tmp_100_l151)).value));
+                    __bb_4 = 115;
+                    continue;
+                }
+                case 114: {
+                    __moth_assign_value(moth___hir_tmp_101_l152, 0);
+                    __bb_4 = 115;
+                    continue;
+                }
+                case 115: {
+                    __moth_assign_borrow(moth_missing_l149, moth___hir_tmp_101_l152);
+                    __moth_assign_value(moth___hir_tmp_102_l154, "");
+                    __moth_assign_value(moth___hir_tmp_102_l154, (__moth_read(moth___hir_tmp_102_l154) + "<div class=\"runtime-table\">\n    <div class=\"runtime-row even\">\n        <span>first<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_102_l154, (__moth_read(moth___hir_tmp_102_l154) + ("" + __moth_read(moth_first_l141))));
+                    __moth_assign_value(moth___hir_tmp_102_l154, (__moth_read(moth___hir_tmp_102_l154) + "<\/span>\n        <span>third<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_102_l154, (__moth_read(moth___hir_tmp_102_l154) + ("" + __moth_read(moth_third_l145))));
+                    __moth_assign_value(moth___hir_tmp_102_l154, (__moth_read(moth___hir_tmp_102_l154) + "<\/span>\n    <\/div>\n    <div class=\"runtime-row odd\">\n        <span>missing<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_102_l154, (__moth_read(moth___hir_tmp_102_l154) + ("" + __moth_read(moth_missing_l149))));
+                    __moth_assign_value(moth___hir_tmp_102_l154, (__moth_read(moth___hir_tmp_102_l154) + "<\/span>\n        <span>state<\/span>\n        <span>mutated<\/span>\n    <\/div>"));
+                    __moth_assign_value(moth_probe_l153, __moth_clone_value(__moth_read(moth___hir_tmp_102_l154)));
+                    __moth_assign_borrow(moth___hir_tmp_103_l155, moth_numbers_l130);
+                    __moth_assign_value(moth___hir_tmp_105_l157, 0);
+                    __moth_assign_value(moth___hir_tmp_104_l156, __moth_collection_length(__moth_read(moth___hir_tmp_103_l155)));
+                    __bb_4 = 116;
+                    continue;
+                }
+                case 116: {
+                    if ((__moth_read(moth___hir_tmp_105_l157) < __moth_read(moth___hir_tmp_104_l156))) {
+                        __bb_4 = 117;
+                    } else {
+                        __bb_4 = 119;
+                    }
+                    continue;
+                }
+                case 117: {
+                    __moth_assign_borrow(moth_value_l158, __moth_index(moth___hir_tmp_103_l155, __moth_read(moth___hir_tmp_105_l157)));
+                    __moth_assign_borrow(moth_index_l159, moth___hir_tmp_105_l157);
+                    __moth_assign_value(moth_class_name_l160, "even");
+                    __moth_assign_value(moth___hir_tmp_106_l161, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_index_l159), 2)));
+                    if ((__moth_read(moth___hir_tmp_106_l161) !== 0)) {
+                        __bb_4 = 120;
+                    } else {
+                        __bb_4 = 121;
+                    }
+                    continue;
+                }
+                case 118: {
+                    __moth_assign_value(moth___hir_tmp_105_l157, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_105_l157), 1)));
+                    __bb_4 = 116;
+                    continue;
+                }
+                case 119: {
+                    __moth_assign_value(moth___hir_tmp_109_l164, "");
+                    __moth_assign_value(moth___hir_tmp_109_l164, (__moth_read(moth___hir_tmp_109_l164) + "<div class=\"runtime-table\">\n    <div class=\"runtime-row even\">\n        <span>first<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_109_l164, (__moth_read(moth___hir_tmp_109_l164) + ("" + __moth_read(moth_first_l141))));
+                    __moth_assign_value(moth___hir_tmp_109_l164, (__moth_read(moth___hir_tmp_109_l164) + "<\/span>\n        <span>third<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_109_l164, (__moth_read(moth___hir_tmp_109_l164) + ("" + __moth_read(moth_third_l145))));
+                    __moth_assign_value(moth___hir_tmp_109_l164, (__moth_read(moth___hir_tmp_109_l164) + "<\/span>\n    <\/div>\n    <div class=\"runtime-row odd\">\n        <span>missing<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_109_l164, (__moth_read(moth___hir_tmp_109_l164) + ("" + __moth_read(moth_missing_l149))));
+                    __moth_assign_value(moth___hir_tmp_109_l164, (__moth_read(moth___hir_tmp_109_l164) + "<\/span>\n        <span>state<\/span>\n        <span>mutated<\/span>\n    <\/div>"));
+                    __moth_assign_value(moth___hir_tmp_109_l164, (__moth_read(moth___hir_tmp_109_l164) + "\n<\/div>"));
+                    __moth_assign_value(moth_probe_l153, __moth_clone_value(__moth_read(moth___hir_tmp_109_l164)));
+                    return __moth_clone_value(__moth_read(moth_probe_l153));
+                }
+                case 120: {
+                    __moth_assign_value(moth_class_name_l160, "odd");
+                    __bb_4 = 122;
+                    continue;
+                }
+                case 121: {
+                    __bb_4 = 122;
+                    continue;
+                }
+                case 122: {
+                    __moth_assign_value(moth___hir_tmp_107_l162, "");
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "<div class=\"runtime-table\">\n    <div class=\"runtime-row even\">\n        <span>first<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + ("" + __moth_read(moth_first_l141))));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "<\/span>\n        <span>third<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + ("" + __moth_read(moth_third_l145))));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "<\/span>\n    <\/div>\n    <div class=\"runtime-row odd\">\n        <span>missing<\/span>\n        <span>"));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + ("" + __moth_read(moth_missing_l149))));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "<\/span>\n        <span>state<\/span>\n        <span>mutated<\/span>\n    <\/div>"));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "\n<div class=\"runtime-row "));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + __moth_read(moth_class_name_l160)));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "\">\n    <span>index "));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + ("" + __moth_read(moth_index_l159))));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "<\/span>\n    <span>value "));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + ("" + __moth_read(moth_value_l158))));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "<\/span>\n    <span>triple<\/span>\n    <span>"));
+                    __moth_assign_value(moth___hir_tmp_108_l163, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_value_l158), 3)));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + ("" + __moth_read(moth___hir_tmp_108_l163))));
+                    __moth_assign_value(moth___hir_tmp_107_l162, (__moth_read(moth___hir_tmp_107_l162) + "<\/span>\n<\/div>"));
+                    __moth_assign_value(moth_probe_l153, __moth_clone_value(__moth_read(moth___hir_tmp_107_l162)));
+                    __bb_4 = 118;
+                    continue;
+                }
+                default: {
+                    throw new Error("Invalid control-flow block: " + __bb_4);
+                }
+            }
+        }
+    }
+
+    function moth_build_descending_series_fn12() {
+        let moth_series_l165 = __moth_binding(undefined);
+        let moth___hir_tmp_110_l166 = __moth_binding(undefined);
+        let moth___hir_tmp_111_l167 = __moth_binding(undefined);
+        let moth___hir_tmp_112_l168 = __moth_binding(undefined);
+        let moth___hir_tmp_113_l169 = __moth_binding(undefined);
+        let moth___hir_tmp_114_l170 = __moth_binding(undefined);
+        let moth_value_l171 = __moth_binding(undefined);
+        let moth_folded_l172 = __moth_binding(undefined);
+        let moth___hir_tmp_115_l173 = __moth_binding(undefined);
+        let moth___hir_tmp_116_l174 = __moth_binding(undefined);
+        let moth___hir_tmp_117_l175 = __moth_binding(undefined);
+        let moth___hir_tmp_118_l176 = __moth_binding(undefined);
+        let moth_residue_l177 = __moth_binding(undefined);
+        let moth___hir_tmp_119_l178 = __moth_binding(undefined);
+        let moth_class_name_l179 = __moth_binding(undefined);
+        let moth___hir_tmp_120_l180 = __moth_binding(undefined);
+        let moth___hir_tmp_121_l181 = __moth_binding(undefined);
+        let moth___hir_tmp_122_l182 = __moth_binding(undefined);
+        
+        let __bb_5 = 12;
+        while (true) {
+            switch (__bb_5) {
+                case 12: {
+                    __moth_assign_value(moth_series_l165, "<div class=\"runtime-table\">");
+                    __moth_assign_value(moth___hir_tmp_110_l166, 30);
+                    __moth_assign_value(moth___hir_tmp_111_l167, 0);
+                    __moth_assign_value(moth___hir_tmp_114_l170, 0);
+                    __moth_assign_value(moth___hir_tmp_112_l168, 3);
+                    __moth_assign_value(moth___hir_tmp_113_l169, (__moth_read(moth___hir_tmp_110_l166) <= __moth_read(moth___hir_tmp_111_l167)));
+                    __bb_5 = 123;
+                    continue;
+                }
+                case 123: {
+                    if ((__moth_read(moth___hir_tmp_112_l168) === 0)) {
+                        __bb_5 = 124;
+                    } else {
+                        __bb_5 = 125;
+                    }
+                    continue;
+                }
+                case 124: {
+                    throw new Error("Loop step cannot be zero");
+                }
+                case 125: {
+                    if ((__moth_read(moth___hir_tmp_112_l168) < 0)) {
+                        __bb_5 = 126;
+                    } else {
+                        __bb_5 = 127;
+                    }
+                    continue;
+                }
+                case 126: {
+                    __moth_assign_value(moth___hir_tmp_112_l168, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_112_l168))));
+                    __bb_5 = 127;
+                    continue;
+                }
+                case 127: {
+                    if (__moth_read(moth___hir_tmp_113_l169)) {
+                        __bb_5 = 129;
+                    } else {
+                        __bb_5 = 128;
+                    }
+                    continue;
+                }
+                case 128: {
+                    __moth_assign_value(moth___hir_tmp_112_l168, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_112_l168))));
+                    __bb_5 = 129;
+                    continue;
+                }
+                case 129: {
+                    if (__moth_read(moth___hir_tmp_113_l169)) {
+                        __bb_5 = 130;
+                    } else {
+                        __bb_5 = 131;
+                    }
+                    continue;
+                }
+                case 130: {
+                    if ((__moth_read(moth___hir_tmp_110_l166) < __moth_read(moth___hir_tmp_111_l167))) {
+                        __bb_5 = 132;
+                    } else {
+                        __bb_5 = 134;
+                    }
+                    continue;
+                }
+                case 131: {
+                    if ((__moth_read(moth___hir_tmp_110_l166) > __moth_read(moth___hir_tmp_111_l167))) {
+                        __bb_5 = 132;
+                    } else {
+                        __bb_5 = 134;
+                    }
+                    continue;
+                }
+                case 132: {
+                    __moth_assign_borrow(moth_value_l171, moth___hir_tmp_110_l166);
+                    __moth_assign_value(moth___hir_tmp_115_l173, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_value_l171), __moth_read(moth_value_l171))));
+                    __moth_assign_value(moth___hir_tmp_116_l174, __moth_numeric_trap(__moth_int_mul(__moth_read(moth_value_l171), 2)));
+                    __moth_assign_value(moth___hir_tmp_117_l175, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_115_l173), __moth_read(moth___hir_tmp_116_l174))));
+                    __moth_assign_value(moth___hir_tmp_118_l176, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_117_l175), 9)));
+                    __moth_assign_borrow(moth_folded_l172, moth___hir_tmp_118_l176);
+                    __moth_assign_value(moth___hir_tmp_119_l178, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_folded_l172), 11)));
+                    __moth_assign_borrow(moth_residue_l177, moth___hir_tmp_119_l178);
+                    __moth_assign_value(moth_class_name_l179, "even");
+                    __moth_assign_value(moth___hir_tmp_120_l180, __moth_numeric_trap(__moth_int_mod(__moth_read(moth_value_l171), 2)));
+                    if ((__moth_read(moth___hir_tmp_120_l180) !== 0)) {
+                        __bb_5 = 135;
+                    } else {
+                        __bb_5 = 136;
+                    }
+                    continue;
+                }
+                case 133: {
+                    __moth_assign_value(moth___hir_tmp_110_l166, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_110_l166), __moth_read(moth___hir_tmp_112_l168))));
+                    __moth_assign_value(moth___hir_tmp_114_l170, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_114_l170), 1)));
+                    __bb_5 = 129;
+                    continue;
+                }
+                case 134: {
+                    __moth_assign_value(moth___hir_tmp_122_l182, "");
+                    __moth_assign_value(moth___hir_tmp_122_l182, (__moth_read(moth___hir_tmp_122_l182) + __moth_read(moth_series_l165)));
+                    __moth_assign_value(moth___hir_tmp_122_l182, (__moth_read(moth___hir_tmp_122_l182) + "\n<\/div>"));
+                    __moth_assign_value(moth_series_l165, __moth_clone_value(__moth_read(moth___hir_tmp_122_l182)));
+                    return __moth_clone_value(__moth_read(moth_series_l165));
+                }
+                case 135: {
+                    __moth_assign_value(moth_class_name_l179, "odd");
+                    __bb_5 = 137;
+                    continue;
+                }
+                case 136: {
+                    __bb_5 = 137;
+                    continue;
+                }
+                case 137: {
+                    __moth_assign_value(moth___hir_tmp_121_l181, "");
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + __moth_read(moth_series_l165)));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + "\n<div class=\"runtime-row "));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + __moth_read(moth_class_name_l179)));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + "\">\n    <span>descending "));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + ("" + __moth_read(moth_value_l171))));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + "<\/span>\n    <span>folded "));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + ("" + __moth_read(moth_folded_l172))));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + "<\/span>\n    <span>residue "));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + ("" + __moth_read(moth_residue_l177))));
+                    __moth_assign_value(moth___hir_tmp_121_l181, (__moth_read(moth___hir_tmp_121_l181) + "<\/span>\n    <span>step 3<\/span>\n<\/div>"));
+                    __moth_assign_value(moth_series_l165, __moth_clone_value(__moth_read(moth___hir_tmp_121_l181)));
+                    __bb_5 = 133;
+                    continue;
+                }
+                default: {
+                    throw new Error("Invalid control-flow block: " + __bb_5);
+                }
+            }
+        }
+    }
+
+    function moth_build_pair_panels_fn13() {
+        let moth_pairs_l183 = __moth_binding(undefined);
+        let moth___hir_tmp_123_l184 = __moth_binding(undefined);
+        let moth___hir_tmp_124_l185 = __moth_binding(undefined);
+        let moth___hir_tmp_125_l186 = __moth_binding(undefined);
+        let moth___hir_tmp_126_l187 = __moth_binding(undefined);
+        let moth___hir_tmp_127_l188 = __moth_binding(undefined);
+        let moth_seed_l189 = __moth_binding(undefined);
+        let moth___hir_tmp_128_l190 = __moth_binding(undefined);
+        let moth___hir_tmp_129_l191 = __moth_binding(undefined);
+        let moth_left_l192 = __moth_binding(undefined);
+        let moth_right_l193 = __moth_binding(undefined);
+        let moth___hir_tmp_130_l194 = __moth_binding(undefined);
+        let moth___hir_tmp_131_l195 = __moth_binding(undefined);
+        let moth___hir_tmp_132_l196 = __moth_binding(undefined);
+        
+        let __bb_6 = 13;
+        while (true) {
+            switch (__bb_6) {
+                case 13: {
+                    __moth_assign_value(moth_pairs_l183, "<div class=\"pair-grid\">");
+                    __moth_assign_value(moth___hir_tmp_123_l184, 4);
+                    __moth_assign_value(moth___hir_tmp_124_l185, 13);
+                    __moth_assign_value(moth___hir_tmp_127_l188, 0);
+                    __moth_assign_value(moth___hir_tmp_125_l186, 1);
+                    __moth_assign_value(moth___hir_tmp_126_l187, (__moth_read(moth___hir_tmp_123_l184) <= __moth_read(moth___hir_tmp_124_l185)));
+                    __bb_6 = 138;
+                    continue;
+                }
+                case 138: {
+                    if ((__moth_read(moth___hir_tmp_125_l186) === 0)) {
+                        __bb_6 = 139;
+                    } else {
+                        __bb_6 = 140;
+                    }
+                    continue;
+                }
+                case 139: {
+                    throw new Error("Loop step cannot be zero");
+                }
+                case 140: {
+                    if ((__moth_read(moth___hir_tmp_125_l186) < 0)) {
+                        __bb_6 = 141;
+                    } else {
+                        __bb_6 = 142;
+                    }
+                    continue;
+                }
+                case 141: {
+                    __moth_assign_value(moth___hir_tmp_125_l186, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_125_l186))));
+                    __bb_6 = 142;
+                    continue;
+                }
+                case 142: {
+                    if (__moth_read(moth___hir_tmp_126_l187)) {
+                        __bb_6 = 144;
+                    } else {
+                        __bb_6 = 143;
+                    }
+                    continue;
+                }
+                case 143: {
+                    __moth_assign_value(moth___hir_tmp_125_l186, __moth_numeric_trap(__moth_int_sub(0, __moth_read(moth___hir_tmp_125_l186))));
+                    __bb_6 = 144;
+                    continue;
+                }
+                case 144: {
+                    if (__moth_read(moth___hir_tmp_126_l187)) {
+                        __bb_6 = 145;
+                    } else {
+                        __bb_6 = 146;
+                    }
+                    continue;
+                }
+                case 145: {
+                    if ((__moth_read(moth___hir_tmp_123_l184) < __moth_read(moth___hir_tmp_124_l185))) {
+                        __bb_6 = 147;
+                    } else {
+                        __bb_6 = 149;
+                    }
+                    continue;
+                }
+                case 146: {
+                    if ((__moth_read(moth___hir_tmp_123_l184) > __moth_read(moth___hir_tmp_124_l185))) {
+                        __bb_6 = 147;
+                    } else {
+                        __bb_6 = 149;
+                    }
+                    continue;
+                }
+                case 147: {
+                    __moth_assign_borrow(moth_seed_l189, moth___hir_tmp_123_l184);
+                    __moth_assign_value(moth___hir_tmp_128_l190, moth_pair_values_fn6(moth_seed_l189));
+                    __moth_assign_borrow(moth___hir_tmp_129_l191, moth___hir_tmp_128_l190);
+                    __moth_assign_value(moth_left_l192, (__moth_read(moth___hir_tmp_129_l191))[0]);
+                    __moth_assign_value(moth_right_l193, (__moth_read(moth___hir_tmp_129_l191))[1]);
+                    __moth_assign_value(moth___hir_tmp_130_l194, "");
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + __moth_read(moth_pairs_l183)));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + "\n<div class=\"pair-card\">\n    <div>seed "));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + ("" + __moth_read(moth_seed_l189))));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + "<\/div>\n    <div class=\"muted\">left "));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + ("" + __moth_read(moth_left_l192))));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + "<\/div>\n    <div class=\"muted\">right "));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + ("" + __moth_read(moth_right_l193))));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + "<\/div>\n    <div class=\"muted\">delta "));
+                    __moth_assign_value(moth___hir_tmp_131_l195, __moth_numeric_trap(__moth_int_sub(__moth_read(moth_right_l193), __moth_read(moth_left_l192))));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + ("" + __moth_read(moth___hir_tmp_131_l195))));
+                    __moth_assign_value(moth___hir_tmp_130_l194, (__moth_read(moth___hir_tmp_130_l194) + "<\/div>\n<\/div>"));
+                    __moth_assign_value(moth_pairs_l183, __moth_clone_value(__moth_read(moth___hir_tmp_130_l194)));
+                    __bb_6 = 148;
+                    continue;
+                }
+                case 148: {
+                    __moth_assign_value(moth___hir_tmp_123_l184, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_123_l184), __moth_read(moth___hir_tmp_125_l186))));
+                    __moth_assign_value(moth___hir_tmp_127_l188, __moth_numeric_trap(__moth_int_add(__moth_read(moth___hir_tmp_127_l188), 1)));
+                    __bb_6 = 144;
+                    continue;
+                }
+                case 149: {
+                    __moth_assign_value(moth___hir_tmp_132_l196, "");
+                    __moth_assign_value(moth___hir_tmp_132_l196, (__moth_read(moth___hir_tmp_132_l196) + __moth_read(moth_pairs_l183)));
+                    __moth_assign_value(moth___hir_tmp_132_l196, (__moth_read(moth___hir_tmp_132_l196) + "\n<\/div>"));
+                    __moth_assign_value(moth_pairs_l183, __moth_clone_value(__moth_read(moth___hir_tmp_132_l196)));
+                    return __moth_clone_value(__moth_read(moth_pairs_l183));
+                }
+                default: {
+                    throw new Error("Invalid control-flow block: " + __bb_6);
+                }
+            }
+        }
+    }
+
+    function moth_start_fn20() {
+        let moth___hir_tmp_136_l221 = __moth_binding(undefined);
+        let moth_thing_l222 = __moth_binding(undefined);
+        let moth_runtime_grid_l223 = __moth_binding(undefined);
+        let moth___hir_tmp_137_l224 = __moth_binding(undefined);
+        let moth_runtime_rows_l225 = __moth_binding(undefined);
+        let moth___hir_tmp_138_l226 = __moth_binding(undefined);
+        let moth_runtime_matrix_l227 = __moth_binding(undefined);
+        let moth___hir_tmp_139_l228 = __moth_binding(undefined);
+        let moth_runtime_summary_l229 = __moth_binding(undefined);
+        let moth___hir_tmp_140_l230 = __moth_binding(undefined);
+        let moth_runtime_mutation_probe_l231 = __moth_binding(undefined);
+        let moth___hir_tmp_141_l232 = __moth_binding(undefined);
+        let moth_runtime_descending_series_l233 = __moth_binding(undefined);
+        let moth___hir_tmp_142_l234 = __moth_binding(undefined);
+        let moth_runtime_pair_panels_l235 = __moth_binding(undefined);
+        let moth___hir_tmp_143_l236 = __moth_binding(undefined);
+        let moth___hir_tmp_144_l237 = __moth_binding(undefined);
+        let moth___hir_tmp_145_l238 = __moth_binding(undefined);
+        let moth___hir_tmp_146_l239 = __moth_binding(undefined);
+        let moth___hir_tmp_147_l240 = __moth_binding(undefined);
+        let moth___hir_tmp_148_l241 = __moth_binding(undefined);
+        let moth___hir_tmp_149_l242 = __moth_binding(undefined);
+        let moth___hir_tmp_150_l243 = __moth_binding(undefined);
+        let moth___hir_tmp_151_l244 = __moth_binding(undefined);
+        let moth___hir_tmp_152_l245 = __moth_binding(undefined);
+        let moth___hir_tmp_153_l246 = __moth_binding(undefined);
+        let moth___hir_tmp_154_l247 = __moth_binding(undefined);
+        let moth___hir_tmp_155_l248 = __moth_binding(undefined);
+        let moth___hir_tmp_156_l249 = __moth_binding(undefined);
+        let moth___hir_tmp_157_l250 = __moth_binding(undefined);
+        let moth___hir_tmp_158_l251 = __moth_binding(undefined);
+        let moth___hir_tmp_159_l252 = __moth_binding(undefined);
+        let moth___hir_tmp_160_l253 = __moth_binding(undefined);
+        let moth___hir_tmp_161_l254 = __moth_binding(undefined);
+        let moth___hir_tmp_162_l255 = __moth_binding(undefined);
+        let moth___hir_tmp_163_l256 = __moth_binding(undefined);
+        let moth___hir_tmp_164_l257 = __moth_binding(undefined);
+        let moth___hir_tmp_165_l258 = __moth_binding(undefined);
+        let moth___hir_tmp_166_l259 = __moth_binding(undefined);
+        let moth___hir_tmp_167_l260 = __moth_binding(undefined);
+        let moth___hir_tmp_168_l261 = __moth_binding(undefined);
+        let moth___hir_tmp_169_l262 = __moth_binding(undefined);
+        let moth___hir_tmp_170_l263 = __moth_binding(undefined);
+        let moth___hir_tmp_171_l264 = __moth_binding(undefined);
+        let moth___hir_tmp_172_l265 = __moth_binding(undefined);
+        let moth___hir_tmp_173_l266 = __moth_binding(undefined);
+        let moth___hir_tmp_174_l267 = __moth_binding(undefined);
+        let moth___hir_tmp_175_l268 = __moth_binding(undefined);
+        let moth___hir_tmp_176_l269 = __moth_binding(undefined);
+        let moth___hir_tmp_177_l270 = __moth_binding(undefined);
+        let moth___hir_tmp_178_l271 = __moth_binding(undefined);
+        let moth___hir_tmp_179_l272 = __moth_binding(undefined);
+        let moth___hir_tmp_180_l273 = __moth_binding(undefined);
+        let moth___hir_tmp_181_l274 = __moth_binding(undefined);
+        let moth___hir_tmp_182_l275 = __moth_binding(undefined);
+        let moth___hir_tmp_183_l276 = __moth_binding(undefined);
+        let moth___hir_tmp_184_l277 = __moth_binding(undefined);
+        let moth___hir_tmp_185_l278 = __moth_binding(undefined);
+        let moth___hir_tmp_186_l279 = __moth_binding(undefined);
+        let moth___hir_tmp_187_l280 = __moth_binding(undefined);
+        let moth___hir_tmp_188_l281 = __moth_binding(undefined);
+        let moth___hir_tmp_189_l282 = __moth_binding(undefined);
+        let moth___hir_tmp_190_l283 = __moth_binding(undefined);
+        let moth___hir_tmp_191_l284 = __moth_binding(undefined);
+        let moth___hir_tmp_192_l285 = __moth_binding(undefined);
+        let moth___hir_tmp_193_l286 = __moth_binding(undefined);
+        let moth___hir_tmp_194_l287 = __moth_binding(undefined);
+        let moth___hir_tmp_195_l288 = __moth_binding(undefined);
+        let moth___hir_tmp_196_l289 = __moth_binding(undefined);
+        let moth___hir_tmp_197_l290 = __moth_binding(undefined);
+        let moth___hir_tmp_198_l291 = __moth_binding(undefined);
+        let moth___hir_tmp_199_l292 = __moth_binding(undefined);
+        let moth___hir_tmp_200_l293 = __moth_binding(undefined);
+        let moth___hir_tmp_201_l294 = __moth_binding(undefined);
+        let moth___hir_tmp_202_l295 = __moth_binding(undefined);
+        let moth___hir_tmp_203_l296 = __moth_binding(undefined);
+        let moth___hir_tmp_204_l297 = __moth_binding(undefined);
+        let moth___hir_tmp_205_l298 = __moth_binding(undefined);
+        let moth___hir_tmp_206_l299 = __moth_binding(undefined);
+        let moth___hir_tmp_207_l300 = __moth_binding(undefined);
+        let moth___hir_tmp_208_l301 = __moth_binding(undefined);
+        let moth___hir_tmp_209_l302 = __moth_binding(undefined);
+        let moth___hir_tmp_210_l303 = __moth_binding(undefined);
+        let moth___hir_tmp_211_l304 = __moth_binding(undefined);
+        let moth___hir_tmp_212_l305 = __moth_binding(undefined);
+        let moth___hir_tmp_213_l306 = __moth_binding(undefined);
+        let moth___hir_tmp_214_l307 = __moth_binding(undefined);
+        let moth___hir_tmp_215_l308 = __moth_binding(undefined);
+        let moth___hir_tmp_216_l309 = __moth_binding(undefined);
+        let moth___hir_tmp_217_l310 = __moth_binding(undefined);
+        let moth___hir_tmp_218_l311 = __moth_binding(undefined);
+        let moth___hir_tmp_219_l312 = __moth_binding(undefined);
+        let moth___hir_tmp_220_l313 = __moth_binding(undefined);
+        let moth___hir_tmp_221_l314 = __moth_binding(undefined);
+        let moth___hir_tmp_222_l315 = __moth_binding(undefined);
+        let moth___hir_tmp_223_l316 = __moth_binding(undefined);
+        let moth___hir_tmp_224_l317 = __moth_binding(undefined);
+        let moth___hir_tmp_225_l318 = __moth_binding(undefined);
+        let moth___hir_tmp_226_l319 = __moth_binding(undefined);
+        let moth___hir_tmp_227_l320 = __moth_binding(undefined);
+        let moth___hir_tmp_228_l321 = __moth_binding(undefined);
+        let moth___hir_tmp_229_l322 = __moth_binding(undefined);
+        let moth___hir_tmp_230_l323 = __moth_binding(undefined);
+        let moth___hir_tmp_231_l324 = __moth_binding(undefined);
+        let moth___hir_tmp_232_l325 = __moth_binding(undefined);
+        let moth___hir_tmp_233_l326 = __moth_binding(undefined);
+        let moth___hir_tmp_234_l327 = __moth_binding(undefined);
+        let moth___hir_tmp_235_l328 = __moth_binding(undefined);
+        let moth___hir_tmp_236_l329 = __moth_binding(undefined);
+        let moth___hir_tmp_237_l330 = __moth_binding(undefined);
+        
+        __moth_assign_value(moth___hir_tmp_136_l221, []);
+        __moth_assign_value(moth_thing_l222, 69);
+        const __match_value_7 = __moth_read(moth_thing_l222);
+        if (__match_value_7 === 0) {
+            __moth_io_line("zero");
+        }
+        else if (__match_value_7 === -1) {
+            __moth_io_line("negative");
+        }
+        else if (__match_value_7 === 1) {
+            __moth_io_line(" 1");
+        }
+        else if (__match_value_7 === 2) {
+            __moth_io_line("two");
+        }
+        else if (__match_value_7 === 3) {
+            __moth_io_line("three");
+        }
+        else if (__match_value_7 === 4) {
+            __moth_io_line("four");
+        }
+        else if (__match_value_7 === 5) {
+            __moth_io_line("5");
+        }
+        else if (__match_value_7 === 6) {
+            __moth_io_line("six");
+        }
+        else if (__match_value_7 === 7) {
+            __moth_io_line("seven");
+        }
+        else if (__match_value_7 === 8) {
+            __moth_io_line("eight");
+        }
+        else if (__match_value_7 === 9) {
+            __moth_io_line("nine");
+        }
+        else if (__match_value_7 === 10) {
+            __moth_io_line("ten");
+        }
+        else if (true) {
+            __moth_io_line("only one");
+        }
+        __moth_assign_value(moth___hir_tmp_137_l224, moth_build_runtime_grid_fn7());
+        __moth_assign_borrow(moth_runtime_grid_l223, moth___hir_tmp_137_l224);
+        __moth_assign_value(moth___hir_tmp_138_l226, moth_build_runtime_rows_fn8());
+        __moth_assign_borrow(moth_runtime_rows_l225, moth___hir_tmp_138_l226);
+        __moth_assign_value(moth___hir_tmp_139_l228, moth_build_runtime_matrix_fn9());
+        __moth_assign_borrow(moth_runtime_matrix_l227, moth___hir_tmp_139_l228);
+        __moth_assign_value(moth___hir_tmp_140_l230, moth_build_runtime_summary_fn10());
+        __moth_assign_borrow(moth_runtime_summary_l229, moth___hir_tmp_140_l230);
+        __moth_assign_value(moth___hir_tmp_141_l232, moth_build_mutation_probe_fn11());
+        __moth_assign_borrow(moth_runtime_mutation_probe_l231, moth___hir_tmp_141_l232);
+        __moth_assign_value(moth___hir_tmp_142_l234, moth_build_descending_series_fn12());
+        __moth_assign_borrow(moth_runtime_descending_series_l233, moth___hir_tmp_142_l234);
+        __moth_assign_value(moth___hir_tmp_143_l236, moth_build_pair_panels_fn13());
+        __moth_assign_borrow(moth_runtime_pair_panels_l235, moth___hir_tmp_143_l236);
+        __moth_assign_value(moth___hir_tmp_144_l237, "");
+        __moth_assign_value(moth___hir_tmp_145_l238, "");
+        __moth_assign_value(moth___hir_tmp_146_l239, "");
+        __moth_assign_value(moth___hir_tmp_147_l240, "");
+        __moth_assign_value(moth___hir_tmp_148_l241, "");
+        __moth_assign_value(moth___hir_tmp_149_l242, "");
+        __moth_assign_value(moth___hir_tmp_150_l243, "");
+        __moth_assign_value(moth___hir_tmp_151_l244, "");
+        __moth_assign_value(moth___hir_tmp_152_l245, "");
+        __moth_assign_value(moth___hir_tmp_153_l246, false);
+        __moth_assign_value(moth___hir_tmp_146_l239, (__moth_read(moth___hir_tmp_146_l239) + "Moth Frontend Speed Test"));
+        __moth_assign_value(moth___hir_tmp_153_l246, true);
+        __moth_assign_value(moth___hir_tmp_153_l246, true);
+        __moth_assign_value(moth___hir_tmp_147_l240, (__moth_read(moth___hir_tmp_147_l240) + "\n\n"));
+        __moth_assign_value(moth___hir_tmp_154_l247, "");
+        __moth_assign_value(moth___hir_tmp_155_l248, "");
+        __moth_assign_value(moth___hir_tmp_156_l249, "");
+        __moth_assign_value(moth___hir_tmp_157_l250, "");
+        __moth_assign_value(moth___hir_tmp_158_l251, "");
+        __moth_assign_value(moth___hir_tmp_159_l252, "");
+        __moth_assign_value(moth___hir_tmp_160_l253, "");
+        __moth_assign_value(moth___hir_tmp_161_l254, "");
+        __moth_assign_value(moth___hir_tmp_162_l255, "");
+        __moth_assign_value(moth___hir_tmp_163_l256, "");
+        __moth_assign_value(moth___hir_tmp_164_l257, "");
+        __moth_assign_value(moth___hir_tmp_165_l258, "");
+        __moth_assign_value(moth___hir_tmp_166_l259, "");
+        __moth_assign_value(moth___hir_tmp_167_l260, "");
+        __moth_assign_value(moth___hir_tmp_168_l261, "");
+        __moth_assign_value(moth___hir_tmp_169_l262, "");
+        __moth_assign_value(moth___hir_tmp_170_l263, "");
+        __moth_assign_value(moth___hir_tmp_171_l264, "");
+        __moth_assign_value(moth___hir_tmp_172_l265, "");
+        __moth_assign_value(moth___hir_tmp_173_l266, "");
+        __moth_assign_value(moth___hir_tmp_174_l267, "");
+        __moth_assign_value(moth___hir_tmp_175_l268, "");
+        __moth_assign_value(moth___hir_tmp_176_l269, "");
+        __moth_assign_value(moth___hir_tmp_177_l270, "");
+        __moth_assign_value(moth___hir_tmp_178_l271, "");
+        __moth_assign_value(moth___hir_tmp_179_l272, "");
+        __moth_assign_value(moth___hir_tmp_180_l273, "");
+        __moth_assign_value(moth___hir_tmp_181_l274, false);
+        __moth_assign_value(moth___hir_tmp_155_l248, (__moth_read(moth___hir_tmp_155_l248) + "<article class=\"card\">\n    <div class=\"card-head\">\n        <h2 class=\"heading\" style=\"color: hsl(273, 92%, 63%);\">\n    Frontend benchmark overview\n<\/h2>\n<\/div>\n<div class=\"card-body\">\n    <h1 class=\"hero-title\">\n    Moth <span class=\"hero-accent\">speed test<\/span>\n    <span class=\"hero-accent-2\">plus<\/span>\n    <span class=\"hero-accent-3\">surface<\/span>\n    <span class=\"hero-accent-4\">coverage<\/span>\n<\/h1>\n<div class=\"hero-note\">\n    This file deliberately mixes heavy constant folding, larger CSS, many nested templates,\n    named and positional slots, repeated slot replay, <code>$fresh<\/code>, markdown, raw and\n    escaped-html paths, structs, receiver methods, collection mutation, fallible fallbacks,\n    nested loops, descending loops, and repeated runtime string rebuilding.\n<\/div>\n\n\n<div class=\"chip-row\">\n    <span class=\"chip\">\n    <span>•<\/span>\n    <strong>  digest 265387 <\/strong>\n    <span>•<\/span>\n<\/span>\n<span class=\"chip\">\n    <span>•<\/span>\n    <strong> alt 784714<\/strong>\n    <span>•<\/span>\n<\/span>\n<span class=\"chip\">\n    <span>•<\/span>\n    <strong> folds 20<\/strong>\n    <span>•<\/span>\n<\/span>\n<span class=\"chip\">\n    <span>•<\/span>\n    <strong> runtime panels 6<\/strong>\n    <span>•<\/span>\n<\/span>\n<\/div>\n\n<\/div>\n<div class=\"card-foot\">\n     A 42684 / B 143989 / C 47785 / D 30929 \n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_156_l249, (__moth_read(moth___hir_tmp_156_l249) + "\n"));
+        __moth_assign_value(moth___hir_tmp_157_l250, (__moth_read(moth___hir_tmp_157_l250) + "<article class=\"card\">\n    <div class=\"card-head\">\n        <h2 class=\"heading\" style=\"color: hsl(273, 92%, 63%);\">\n    Compile-time block A\n<\/h2>\n<\/div>\n<div class=\"card-body\">\n    <h3>Fold cluster expansion<\/h3><p>This block is fully compile-time and deliberately dense.<\/p><p>It exercises:<\/p><ul><li>larger arithmetic clusters<\/li><li>chained constant references<\/li><li>markdown parsing<\/li><li>wrapper composition<\/li><li>named slot insertion<\/li><li>repeated interpolation of large digests<\/li><\/ul><p>Snapshot values:<\/p><ul><li>fold_01 = 4513<\/li><li>fold_02 = 8128<\/li><li>fold_03 = 7060<\/li><li>fold_04 = 8558<\/li><li>fold_05 = 14425<\/li><li>digest_a = 42684<\/li><\/ul>\n\n\n<ul class=\"tight-list\">\n    <li> compile-time interpolation <\/li>\n<li> markdown rendering <\/li>\n<li> const-only captures <\/li>\n<li> nested helper composition <\/li>\n<li> checksum 42684 <\/li>\n<\/ul>\n\n<\/div>\n<div class=\"card-foot\">\n    fold_01 4513 / fold_05 14425 / digest_a 42684\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_158_l251, (__moth_read(moth___hir_tmp_158_l251) + "\n"));
+        __moth_assign_value(moth___hir_tmp_159_l252, (__moth_read(moth___hir_tmp_159_l252) + "<article class=\"card\">\n    <div class=\"card-head\">\n        <h2 class=\"heading\" style=\"color: hsl(196, 91%, 58%);\">\n    Slot and wrapper stress\n<\/h2>\n<\/div>\n<div class=\"card-body\">\n    <h3>Slots and wrapper edge cases<\/h3><p>This block keeps template composition busy with:<\/p><ul><li>repeated positional slot replay<\/li><li>named slot helpers<\/li><li>direct-child wrappers<\/li><li>one child opting out with <code>$fresh<\/code><\/li><\/ul>\n\n\n<div class=\"chip-row\">\n    <span class=\"chip\">\n    <span>↔<\/span>\n    <strong> positional replay<\/strong>\n    <span>↔<\/span>\n<\/span>\n<span class=\"chip\">\n    <span>↔<\/span>\n    <strong> grand 265387<\/strong>\n    <span>↔<\/span>\n<\/span>\n<span class=\"chip\">\n    <span>↔<\/span>\n    <strong> alt 784714<\/strong>\n    <span>↔<\/span>\n<\/span>\n<\/div>\n\n\n\n<ul class=\"tight-list\">\n    <li> wrapped item one <\/li>\n  fresh item bypasses li wrapper \n<li> wrapped item two <\/li>\n<li> wrapped item three <\/li>\n<\/ul>\n\n<\/div>\n<div class=\"card-foot\">\n    repeated positional slots, named inserts, and $fresh sibling escape\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_160_l253, (__moth_read(moth___hir_tmp_160_l253) + "\n"));
+        __moth_assign_value(moth___hir_tmp_161_l254, (__moth_read(moth___hir_tmp_161_l254) + "<article class=\"card\">\n    <div class=\"card-head\">\n        <h2 class=\"heading\" style=\"color: hsl(22, 96%, 60%);\">\n    Formatter and escaping stress\n<\/h2>\n<\/div>\n<div class=\"card-body\">\n    <h3>Formatter paths<\/h3><p>This block mixes formatter-like directives in one compile-time card.<\/p>\n\n<div class=\"code-box dense\">\n    <strong>raw html path active<\/strong><br>\n    <span class=\"muted\">This block was parsed with $html.<\/span>\n<\/div>\n\n\n<pre class=\"code-box\">function benchmark(seed) {\n    return (seed * 7) + 13;\n}<\/pre>\n\n\n\n&lt;div class=&quot;code-box&quot;&gt;\n    &lt;script&gt;console.log(&quot;escaped content&quot;)&lt;/script&gt;\n    &lt;strong&gt;This should display as text, not render as HTML.&lt;/strong&gt;\n&lt;/div&gt;\n\n<\/div>\n<div class=\"card-foot\">\n    markdown + raw + html + escape_html all active in one section\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_162_l255, (__moth_read(moth___hir_tmp_162_l255) + "\n"));
+        __moth_assign_value(moth___hir_tmp_163_l256, (__moth_read(moth___hir_tmp_163_l256) + "<article class=\"card\">\n    <div class=\"card-head\">\n        <h2 class=\"heading\" style=\"color: hsl(142, 78%, 54%);\">\n    Nested child wrapper stress\n<\/h2>\n<\/div>\n<div class=\"card-body\">\n    <h3>Nested direct-child wrappers<\/h3><p>The table below uses one <code>$children(..)<\/code> wrapper for rows and another nested one for cells.<\/p>\n\n\n<div class=\"compare-table\">\n    <div class=\"compare-row\"><div class=\"compare-cell\">  Surface   Purpose   Example stress  <\/div><\/div>\n<div class=\"compare-row\"><div class=\"compare-cell\">  slots   composition paths   named + positional + replay  <\/div><\/div>\n<div class=\"compare-row\"><div class=\"compare-cell\">  wrappers   helper elimination   direct-child and `$fresh` mixing  <\/div><\/div>\n<div class=\"compare-row\"><div class=\"compare-cell\">  loops   runtime body churn   collection + range + descending + nested  <\/div><\/div>\n<div class=\"compare-row\"><div class=\"compare-cell\">  collections   builtin mutation   push + set + remove + get fallback  <\/div><\/div>\n<\/div>\n\n<\/div>\n<div class=\"card-foot\">\n    table rows and cells are wrapped by separate direct-child scopes\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_164_l257, (__moth_read(moth___hir_tmp_164_l257) + "\n"));
+        __moth_assign_value(moth___hir_tmp_165_l258, (__moth_read(moth___hir_tmp_165_l258) + "<article class=\"card\">\n    <div class=\"card-head\">\n        <h2 class=\"heading\" style=\"color: hsl(273, 92%, 63%);\">\n    Compile-time digest pressure\n<\/h2>\n<\/div>\n<div class=\"card-body\">\n    <h3>Digest pressure<\/h3><p>Additional values keep constant resolution and interpolation noisy:<\/p><ul><li>fold_11 = 15957<\/li><li>fold_12 = 6787<\/li><li>fold_13 = 10237<\/li><li>fold_14 = 6725<\/li><li>fold_15 = 8079<\/li><li>fold_16 = 12111<\/li><li>fold_17 = 3515<\/li><li>fold_18 = 2756<\/li><li>fold_19 = 4897<\/li><li>fold_20 = 7650<\/li><\/ul>\n\n\n<div class=\"chip-row\">\n    <span class=\"chip\">\n    <span>•<\/span>\n    <strong> B 143989<\/strong>\n    <span>•<\/span>\n<\/span>\n<span class=\"chip\">\n    <span>•<\/span>\n    <strong> C 47785<\/strong>\n    <span>•<\/span>\n<\/span>\n<span class=\"chip\">\n    <span>•<\/span>\n    <strong> D 30929<\/strong>\n    <span>•<\/span>\n<\/span>\n<span class=\"chip\">\n    <span>•<\/span>\n    <strong> grand 265387<\/strong>\n    <span>•<\/span>\n<\/span>\n<\/div>\n\n<\/div>\n<div class=\"card-foot\">\n    grand 265387 / alt 784714\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_166_l259, (__moth_read(moth___hir_tmp_166_l259) + "\n\n"));
+        __moth_assign_value(moth___hir_tmp_182_l275, "");
+        __moth_assign_value(moth___hir_tmp_183_l276, "");
+        __moth_assign_value(moth___hir_tmp_184_l277, "");
+        __moth_assign_value(moth___hir_tmp_185_l278, "");
+        __moth_assign_value(moth___hir_tmp_186_l279, "");
+        __moth_assign_value(moth___hir_tmp_187_l280, "");
+        __moth_assign_value(moth___hir_tmp_188_l281, "");
+        __moth_assign_value(moth___hir_tmp_189_l282, false);
+        __moth_assign_value(moth___hir_tmp_183_l276, (__moth_read(moth___hir_tmp_183_l276) + __moth_read(moth_runtime_summary_l229)));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_185_l278, (__moth_read(moth___hir_tmp_185_l278) + "repeated runtime template rebuilding from a numeric range"));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_187_l280, (__moth_read(moth___hir_tmp_187_l280) + "<h2 class=\"heading\" style=\""));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_187_l280, (__moth_read(moth___hir_tmp_187_l280) + "color: "));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_187_l280, (__moth_read(moth___hir_tmp_187_l280) + "hsl(142, 78%, 54%)"));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_187_l280, (__moth_read(moth___hir_tmp_187_l280) + ";"));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_187_l280, (__moth_read(moth___hir_tmp_187_l280) + "\">\n    "));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_187_l280, (__moth_read(moth___hir_tmp_187_l280) + "Runtime summary grid"));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_187_l280, (__moth_read(moth___hir_tmp_187_l280) + "\n<\/h2>"));
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_189_l282, true);
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + "<article class=\"card\">\n    <div class=\"card-head\">\n        "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + __moth_read(moth___hir_tmp_186_l279)));
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + __moth_read(moth___hir_tmp_187_l280)));
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + __moth_read(moth___hir_tmp_188_l281)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + "\n<\/div>\n<div class=\"card-body\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + __moth_read(moth___hir_tmp_182_l275)));
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + __moth_read(moth___hir_tmp_183_l276)));
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + __moth_read(moth___hir_tmp_184_l277)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + "\n<\/div>\n<div class=\"card-foot\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + __moth_read(moth___hir_tmp_185_l278)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_167_l260, (__moth_read(moth___hir_tmp_167_l260) + "\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_168_l261, (__moth_read(moth___hir_tmp_168_l261) + "\n\n"));
+        __moth_assign_value(moth___hir_tmp_190_l283, "");
+        __moth_assign_value(moth___hir_tmp_191_l284, "");
+        __moth_assign_value(moth___hir_tmp_192_l285, "");
+        __moth_assign_value(moth___hir_tmp_193_l286, "");
+        __moth_assign_value(moth___hir_tmp_194_l287, "");
+        __moth_assign_value(moth___hir_tmp_195_l288, "");
+        __moth_assign_value(moth___hir_tmp_196_l289, "");
+        __moth_assign_value(moth___hir_tmp_197_l290, false);
+        __moth_assign_value(moth___hir_tmp_191_l284, (__moth_read(moth___hir_tmp_191_l284) + __moth_read(moth_runtime_grid_l223)));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_193_l286, (__moth_read(moth___hir_tmp_193_l286) + "built from a collection of structs and an immutable receiver method loop"));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_195_l288, (__moth_read(moth___hir_tmp_195_l288) + "<h2 class=\"heading\" style=\""));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_195_l288, (__moth_read(moth___hir_tmp_195_l288) + "color: "));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_195_l288, (__moth_read(moth___hir_tmp_195_l288) + "hsl(22, 96%, 60%)"));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_195_l288, (__moth_read(moth___hir_tmp_195_l288) + ";"));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_195_l288, (__moth_read(moth___hir_tmp_195_l288) + "\">\n    "));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_195_l288, (__moth_read(moth___hir_tmp_195_l288) + "Runtime grid output"));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_195_l288, (__moth_read(moth___hir_tmp_195_l288) + "\n<\/h2>"));
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_197_l290, true);
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + "<article class=\"card\">\n    <div class=\"card-head\">\n        "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + __moth_read(moth___hir_tmp_194_l287)));
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + __moth_read(moth___hir_tmp_195_l288)));
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + __moth_read(moth___hir_tmp_196_l289)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + "\n<\/div>\n<div class=\"card-body\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + __moth_read(moth___hir_tmp_190_l283)));
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + __moth_read(moth___hir_tmp_191_l284)));
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + __moth_read(moth___hir_tmp_192_l285)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + "\n<\/div>\n<div class=\"card-foot\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + __moth_read(moth___hir_tmp_193_l286)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_169_l262, (__moth_read(moth___hir_tmp_169_l262) + "\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_170_l263, (__moth_read(moth___hir_tmp_170_l263) + "\n\n"));
+        __moth_assign_value(moth___hir_tmp_198_l291, "");
+        __moth_assign_value(moth___hir_tmp_199_l292, "");
+        __moth_assign_value(moth___hir_tmp_200_l293, "");
+        __moth_assign_value(moth___hir_tmp_201_l294, "");
+        __moth_assign_value(moth___hir_tmp_202_l295, "");
+        __moth_assign_value(moth___hir_tmp_203_l296, "");
+        __moth_assign_value(moth___hir_tmp_204_l297, "");
+        __moth_assign_value(moth___hir_tmp_205_l298, false);
+        __moth_assign_value(moth___hir_tmp_199_l292, (__moth_read(moth___hir_tmp_199_l292) + __moth_read(moth_runtime_rows_l225)));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_201_l294, (__moth_read(moth___hir_tmp_201_l294) + "mutable receiver method bump() followed by collection push and row rendering"));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_203_l296, (__moth_read(moth___hir_tmp_203_l296) + "<h2 class=\"heading\" style=\""));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_203_l296, (__moth_read(moth___hir_tmp_203_l296) + "color: "));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_203_l296, (__moth_read(moth___hir_tmp_203_l296) + "hsl(273, 92%, 63%)"));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_203_l296, (__moth_read(moth___hir_tmp_203_l296) + ";"));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_203_l296, (__moth_read(moth___hir_tmp_203_l296) + "\">\n    "));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_203_l296, (__moth_read(moth___hir_tmp_203_l296) + "Runtime metric rows"));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_203_l296, (__moth_read(moth___hir_tmp_203_l296) + "\n<\/h2>"));
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_205_l298, true);
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + "<article class=\"card\">\n    <div class=\"card-head\">\n        "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + __moth_read(moth___hir_tmp_202_l295)));
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + __moth_read(moth___hir_tmp_203_l296)));
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + __moth_read(moth___hir_tmp_204_l297)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + "\n<\/div>\n<div class=\"card-body\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + __moth_read(moth___hir_tmp_198_l291)));
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + __moth_read(moth___hir_tmp_199_l292)));
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + __moth_read(moth___hir_tmp_200_l293)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + "\n<\/div>\n<div class=\"card-foot\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + __moth_read(moth___hir_tmp_201_l294)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_171_l264, (__moth_read(moth___hir_tmp_171_l264) + "\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_172_l265, (__moth_read(moth___hir_tmp_172_l265) + "\n\n"));
+        __moth_assign_value(moth___hir_tmp_206_l299, "");
+        __moth_assign_value(moth___hir_tmp_207_l300, "");
+        __moth_assign_value(moth___hir_tmp_208_l301, "");
+        __moth_assign_value(moth___hir_tmp_209_l302, "");
+        __moth_assign_value(moth___hir_tmp_210_l303, "");
+        __moth_assign_value(moth___hir_tmp_211_l304, "");
+        __moth_assign_value(moth___hir_tmp_212_l305, "");
+        __moth_assign_value(moth___hir_tmp_213_l306, false);
+        __moth_assign_value(moth___hir_tmp_207_l300, (__moth_read(moth___hir_tmp_207_l300) + __moth_read(moth_runtime_matrix_l227)));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_209_l302, (__moth_read(moth___hir_tmp_209_l302) + "nested loops and per-cell class branching inside a receiver method"));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_211_l304, (__moth_read(moth___hir_tmp_211_l304) + "<h2 class=\"heading\" style=\""));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_211_l304, (__moth_read(moth___hir_tmp_211_l304) + "color: "));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_211_l304, (__moth_read(moth___hir_tmp_211_l304) + "hsl(196, 91%, 58%)"));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_211_l304, (__moth_read(moth___hir_tmp_211_l304) + ";"));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_211_l304, (__moth_read(moth___hir_tmp_211_l304) + "\">\n    "));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_211_l304, (__moth_read(moth___hir_tmp_211_l304) + "Runtime matrix output"));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_211_l304, (__moth_read(moth___hir_tmp_211_l304) + "\n<\/h2>"));
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_213_l306, true);
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + "<article class=\"card\">\n    <div class=\"card-head\">\n        "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + __moth_read(moth___hir_tmp_210_l303)));
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + __moth_read(moth___hir_tmp_211_l304)));
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + __moth_read(moth___hir_tmp_212_l305)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + "\n<\/div>\n<div class=\"card-body\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + __moth_read(moth___hir_tmp_206_l299)));
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + __moth_read(moth___hir_tmp_207_l300)));
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + __moth_read(moth___hir_tmp_208_l301)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + "\n<\/div>\n<div class=\"card-foot\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + __moth_read(moth___hir_tmp_209_l302)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_173_l266, (__moth_read(moth___hir_tmp_173_l266) + "\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_174_l267, (__moth_read(moth___hir_tmp_174_l267) + "\n\n"));
+        __moth_assign_value(moth___hir_tmp_214_l307, "");
+        __moth_assign_value(moth___hir_tmp_215_l308, "");
+        __moth_assign_value(moth___hir_tmp_216_l309, "");
+        __moth_assign_value(moth___hir_tmp_217_l310, "");
+        __moth_assign_value(moth___hir_tmp_218_l311, "");
+        __moth_assign_value(moth___hir_tmp_219_l312, "");
+        __moth_assign_value(moth___hir_tmp_220_l313, "");
+        __moth_assign_value(moth___hir_tmp_221_l314, false);
+        __moth_assign_value(moth___hir_tmp_215_l308, (__moth_read(moth___hir_tmp_215_l308) + __moth_read(moth_runtime_mutation_probe_l231)));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_217_l310, (__moth_read(moth___hir_tmp_217_l310) + "uses push, set, remove and catch fallback"));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_219_l312, (__moth_read(moth___hir_tmp_219_l312) + "<h2 class=\"heading\" style=\""));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_219_l312, (__moth_read(moth___hir_tmp_219_l312) + "color: "));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_219_l312, (__moth_read(moth___hir_tmp_219_l312) + "hsl(196, 91%, 58%)"));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_219_l312, (__moth_read(moth___hir_tmp_219_l312) + ";"));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_219_l312, (__moth_read(moth___hir_tmp_219_l312) + "\">\n    "));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_219_l312, (__moth_read(moth___hir_tmp_219_l312) + "Collection mutation probe"));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_219_l312, (__moth_read(moth___hir_tmp_219_l312) + "\n<\/h2>"));
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_221_l314, true);
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + "<article class=\"card\">\n    <div class=\"card-head\">\n        "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + __moth_read(moth___hir_tmp_218_l311)));
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + __moth_read(moth___hir_tmp_219_l312)));
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + __moth_read(moth___hir_tmp_220_l313)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + "\n<\/div>\n<div class=\"card-body\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + __moth_read(moth___hir_tmp_214_l307)));
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + __moth_read(moth___hir_tmp_215_l308)));
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + __moth_read(moth___hir_tmp_216_l309)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + "\n<\/div>\n<div class=\"card-foot\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + __moth_read(moth___hir_tmp_217_l310)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_175_l268, (__moth_read(moth___hir_tmp_175_l268) + "\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_176_l269, (__moth_read(moth___hir_tmp_176_l269) + "\n\n"));
+        __moth_assign_value(moth___hir_tmp_222_l315, "");
+        __moth_assign_value(moth___hir_tmp_223_l316, "");
+        __moth_assign_value(moth___hir_tmp_224_l317, "");
+        __moth_assign_value(moth___hir_tmp_225_l318, "");
+        __moth_assign_value(moth___hir_tmp_226_l319, "");
+        __moth_assign_value(moth___hir_tmp_227_l320, "");
+        __moth_assign_value(moth___hir_tmp_228_l321, "");
+        __moth_assign_value(moth___hir_tmp_229_l322, false);
+        __moth_assign_value(moth___hir_tmp_223_l316, (__moth_read(moth___hir_tmp_223_l316) + __moth_read(moth_runtime_descending_series_l233)));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_225_l318, (__moth_read(moth___hir_tmp_225_l318) + "descending range with by 3 to keep loop direction inference active"));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_227_l320, (__moth_read(moth___hir_tmp_227_l320) + "<h2 class=\"heading\" style=\""));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_227_l320, (__moth_read(moth___hir_tmp_227_l320) + "color: "));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_227_l320, (__moth_read(moth___hir_tmp_227_l320) + "hsl(22, 96%, 60%)"));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_227_l320, (__moth_read(moth___hir_tmp_227_l320) + ";"));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_227_l320, (__moth_read(moth___hir_tmp_227_l320) + "\">\n    "));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_227_l320, (__moth_read(moth___hir_tmp_227_l320) + "Descending range loop"));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_227_l320, (__moth_read(moth___hir_tmp_227_l320) + "\n<\/h2>"));
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_229_l322, true);
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + "<article class=\"card\">\n    <div class=\"card-head\">\n        "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + __moth_read(moth___hir_tmp_226_l319)));
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + __moth_read(moth___hir_tmp_227_l320)));
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + __moth_read(moth___hir_tmp_228_l321)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + "\n<\/div>\n<div class=\"card-body\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + __moth_read(moth___hir_tmp_222_l315)));
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + __moth_read(moth___hir_tmp_223_l316)));
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + __moth_read(moth___hir_tmp_224_l317)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + "\n<\/div>\n<div class=\"card-foot\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + __moth_read(moth___hir_tmp_225_l318)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_177_l270, (__moth_read(moth___hir_tmp_177_l270) + "\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_178_l271, (__moth_read(moth___hir_tmp_178_l271) + "\n\n"));
+        __moth_assign_value(moth___hir_tmp_230_l323, "");
+        __moth_assign_value(moth___hir_tmp_231_l324, "");
+        __moth_assign_value(moth___hir_tmp_232_l325, "");
+        __moth_assign_value(moth___hir_tmp_233_l326, "");
+        __moth_assign_value(moth___hir_tmp_234_l327, "");
+        __moth_assign_value(moth___hir_tmp_235_l328, "");
+        __moth_assign_value(moth___hir_tmp_236_l329, "");
+        __moth_assign_value(moth___hir_tmp_237_l330, false);
+        __moth_assign_value(moth___hir_tmp_231_l324, (__moth_read(moth___hir_tmp_231_l324) + __moth_read(moth_runtime_pair_panels_l235)));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_233_l326, (__moth_read(moth___hir_tmp_233_l326) + "one helper function returns two values which are unpacked in a loop"));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_235_l328, (__moth_read(moth___hir_tmp_235_l328) + "<h2 class=\"heading\" style=\""));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_235_l328, (__moth_read(moth___hir_tmp_235_l328) + "color: "));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_235_l328, (__moth_read(moth___hir_tmp_235_l328) + "hsl(273, 92%, 63%)"));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_235_l328, (__moth_read(moth___hir_tmp_235_l328) + ";"));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_235_l328, (__moth_read(moth___hir_tmp_235_l328) + "\">\n    "));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_235_l328, (__moth_read(moth___hir_tmp_235_l328) + "Multiple return pair panels"));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_235_l328, (__moth_read(moth___hir_tmp_235_l328) + "\n<\/h2>"));
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_237_l330, true);
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + "<article class=\"card\">\n    <div class=\"card-head\">\n        "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + __moth_read(moth___hir_tmp_234_l327)));
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + __moth_read(moth___hir_tmp_235_l328)));
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + __moth_read(moth___hir_tmp_236_l329)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + "\n<\/div>\n<div class=\"card-body\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + __moth_read(moth___hir_tmp_230_l323)));
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + __moth_read(moth___hir_tmp_231_l324)));
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + __moth_read(moth___hir_tmp_232_l325)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + "\n<\/div>\n<div class=\"card-foot\">\n    "));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + __moth_read(moth___hir_tmp_233_l326)));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        __moth_assign_value(moth___hir_tmp_179_l272, (__moth_read(moth___hir_tmp_179_l272) + "\n<\/div>\n<\/article>"));
+        __moth_assign_value(moth___hir_tmp_181_l274, true);
+        if (__moth_read(moth___hir_tmp_181_l274)) {
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "\n    <main class=\"page\">\n        "));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_154_l247)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_155_l248)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_156_l249)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_157_l250)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_158_l251)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_159_l252)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_160_l253)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_161_l254)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_162_l255)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_163_l256)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_164_l257)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_165_l258)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_166_l259)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_167_l260)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_168_l261)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_169_l262)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_170_l263)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_171_l264)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_172_l265)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_173_l266)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_174_l267)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_175_l268)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_176_l269)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_177_l270)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_178_l271)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<section class=\"section\">"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_179_l272)));
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "<\/section>"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + __moth_read(moth___hir_tmp_180_l273)));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+            __moth_assign_value(moth___hir_tmp_150_l243, (__moth_read(moth___hir_tmp_150_l243) + "\n    <\/main>\n"));
+            __moth_assign_value(moth___hir_tmp_153_l246, true);
+        } else {
+        }
+        __moth_assign_value(moth___hir_tmp_152_l245, (__moth_read(moth___hir_tmp_152_l245) + ":root {\n    --accent: [accent];\n    --accent-2: [accent_2];\n    --accent-3: [accent_3];\n    --accent-4: [accent_4];\n    --border: [border];\n    --bg-0: [bg_0];\n    --bg-1: [bg_1];\n    --bg-2: [bg_2];\n    --bg-3: [bg_3];\n    --text-main: [text_main];\n    --text-muted: [text_muted];\n}\n\n* {\n    box-sizing: border-box;\n}\n\nhtml {\n    scroll-behavior: smooth;\n}\n\nbody {\n    margin: 0;\n    padding: 0;\n    font-family: Inter, system-ui, sans-serif;\n    background:\n        radial-gradient(circle at top left, rgba(147, 51, 234, 0.18), transparent 26rem),\n        radial-gradient(circle at top right, rgba(34, 211, 238, 0.10), transparent 22rem),\n        linear-gradient(180deg, var(--bg-0), var(--bg-1));\n    color: var(--text-main);\n}\n\n.page {\n    width: min(1280px, calc(100% - 2.8rem));\n    margin: 0 auto;\n    padding: 2rem 0 5rem 0;\n}\n\n.section {\n    margin-bottom: 1.1rem;\n}\n\n.card {\n    border: 1px solid var(--border);\n    background: linear-gradient(180deg, var(--bg-1), var(--bg-2));\n    border-radius: 18px;\n    padding: 1rem 1.1rem;\n    box-shadow: 0 16px 56px rgba(0, 0, 0, 0.24);\n    overflow: hidden;\n}\n\n.card-head {\n    margin-bottom: 0.75rem;\n}\n\n.card-foot {\n    margin-top: 0.9rem;\n    color: var(--text-muted);\n    font-size: 0.92rem;\n}\n\n.heading {\n    margin: 0;\n    font-size: 1.15rem;\n    font-weight: 800;\n    letter-spacing: 0.04rem;\n}\n\n.hero-title {\n    margin: 0 0 0.55rem 0;\n    font-size: 2.15rem;\n    font-weight: 900;\n    line-height: 1.04;\n}\n\n.hero-note {\n    color: var(--text-muted);\n    line-height: 1.55;\n}\n\n.tight-list {\n    margin: 0.7rem 0 0 1rem;\n    padding: 0;\n}\n\n.tight-list li {\n    margin: 0.2rem 0;\n}\n\n.chip-row {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 0.55rem;\n    margin-top: 0.8rem;\n}\n\n.chip {\n    display: inline-flex;\n    align-items: center;\n    gap: 0.45rem;\n    padding: 0.36rem 0.62rem;\n    border-radius: 999px;\n    border: 1px solid var(--border);\n    background: rgba(255, 255, 255, 0.035);\n    font-size: 0.9rem;\n}\n\n.chip strong {\n    font-weight: 800;\n}\n\n.runtime-grid {\n    display: grid;\n    grid-template-columns: repeat(3, minmax(0, 1fr));\n    gap: 0.8rem;\n}\n\n.runtime-card {\n    border: 1px solid var(--border);\n    border-radius: 14px;\n    padding: 0.9rem;\n    background: rgba(255, 255, 255, 0.03);\n}\n\n.runtime-card.even {\n    outline: 1px solid hsla(273, 92%, 63%, 0.28);\n}\n\n.runtime-card.odd {\n    outline: 1px solid hsla(196, 91%, 58%, 0.28);\n}\n\n.runtime-card.alt {\n    outline: 1px solid hsla(22, 96%, 60%, 0.28);\n}\n\n.runtime-table {\n    display: grid;\n    gap: 0.35rem;\n}\n\n.runtime-row {\n    display: grid;\n    grid-template-columns: 120px 1fr 120px 90px;\n    gap: 0.8rem;\n    padding: 0.45rem 0.6rem;\n    border-radius: 10px;\n    border: 1px solid var(--border);\n    background: rgba(255, 255, 255, 0.025);\n}\n\n.runtime-row.even {\n    background: rgba(255, 255, 255, 0.03);\n}\n\n.runtime-row.odd {\n    background: rgba(255, 255, 255, 0.05);\n}\n\n.runtime-row.alt {\n    background: rgba(255, 255, 255, 0.07);\n}\n\n.matrix {\n    display: grid;\n    gap: 0.35rem;\n}\n\n.matrix-row {\n    display: grid;\n    grid-template-columns: repeat(16, minmax(0, 1fr));\n    gap: 0.25rem;\n}\n\n.cell {\n    display: block;\n    text-align: center;\n    font-size: 0.8rem;\n    padding: 0.35rem 0.2rem;\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    background: rgba(255, 255, 255, 0.03);\n}\n\n.cell.hot {\n    background: rgba(147, 51, 234, 0.18);\n}\n\n.cell.cool {\n    background: rgba(34, 211, 238, 0.12);\n}\n\n.compare-table {\n    display: grid;\n    gap: 0.4rem;\n}\n\n.compare-row {\n    display: grid;\n    grid-template-columns: 160px 1fr 160px;\n    gap: 0.55rem;\n}\n\n.compare-cell {\n    border-radius: 10px;\n    border: 1px solid var(--border);\n    padding: 0.55rem 0.7rem;\n    background: rgba(255, 255, 255, 0.025);\n}\n\n.stack {\n    display: grid;\n    gap: 0.7rem;\n}\n\n.code-box {\n    border: 1px solid var(--border);\n    border-radius: 12px;\n    padding: 0.8rem 0.9rem;\n    background: rgba(0, 0, 0, 0.25);\n    overflow-x: auto;\n}\n\n.summary-grid {\n    display: grid;\n    grid-template-columns: repeat(4, minmax(0, 1fr));\n    gap: 0.65rem;\n}\n\n.summary-item {\n    border: 1px solid var(--border);\n    border-radius: 12px;\n    padding: 0.7rem 0.8rem;\n    background: rgba(255, 255, 255, 0.03);\n}\n\n.pair-grid {\n    display: grid;\n    grid-template-columns: repeat(3, minmax(0, 1fr));\n    gap: 0.6rem;\n}\n\n.pair-card {\n    border: 1px solid var(--border);\n    border-radius: 12px;\n    padding: 0.75rem 0.85rem;\n    background: rgba(255, 255, 255, 0.03);\n}\n\n.muted {\n    color: var(--text-muted);\n}\n\n.hero-accent {\n    color: var(--accent);\n}\n\n.hero-accent-2 {\n    color: var(--accent-2);\n}\n\n.hero-accent-3 {\n    color: var(--accent-3);\n}\n\n.hero-accent-4 {\n    color: var(--accent-4);\n}\n\n.dense {\n    line-height: 1.45;\n}\n\n@media (max-width: 1020px) {\n    .runtime-grid,\n    .summary-grid,\n    .pair-grid {\n        grid-template-columns: repeat(2, minmax(0, 1fr));\n    }\n\n    .compare-row {\n        grid-template-columns: 1fr;\n    }\n}\n\n@media (max-width: 700px) {\n    .runtime-grid,\n    .summary-grid,\n    .pair-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .runtime-row {\n        grid-template-columns: 1fr;\n    }\n\n    .matrix-row {\n        grid-template-columns: repeat(8, minmax(0, 1fr));\n    }\n}"));
+        __moth_assign_value(moth___hir_tmp_153_l246, true);
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + "<!doctype html>\n<html>\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>"));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + __moth_read(moth___hir_tmp_145_l238)));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + __moth_read(moth___hir_tmp_146_l239)));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + __moth_read(moth___hir_tmp_147_l240)));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + __moth_read(moth___hir_tmp_148_l241)));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + "<\/title>\n    <style>\n        "));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + __moth_read(moth___hir_tmp_152_l245)));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + "\n<\/style>\n<\/head>\n<body>\n"));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + __moth_read(moth___hir_tmp_149_l242)));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + __moth_read(moth___hir_tmp_150_l243)));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + __moth_read(moth___hir_tmp_151_l244)));
+        __moth_assign_value(moth___hir_tmp_144_l237, (__moth_read(moth___hir_tmp_144_l237) + "\n<\/body>\n<\/html>"));
+        __moth_read(moth___hir_tmp_136_l221).push(__moth_clone_value(__moth_read(moth___hir_tmp_144_l237)));
+        __moth_read(moth___hir_tmp_136_l221).push(" random runtime time top level template in the middle");
+        __moth_read(moth___hir_tmp_136_l221).push(" random runtime time top level template 2");
+        return __moth_read(moth___hir_tmp_136_l221);
+    }
+    function __moth_io_write(writer, value) {
+        writer.call(console, __moth_value_to_string(value));
+    }
+    function __moth_io_line(value) { __moth_io_write(console.log, value); }
+
+    </script>
+    <script>
+    (function () {
+      var moth_frags = moth_start_fn20();
+      var moth_slots = [
+        "moth-slot-0",
+        "moth-slot-1",
+        "moth-slot-2",
+        "moth-slot-3",
+      ];
+      for (var i = 0; i < moth_slots.length; i++) {
+        var el = document.getElementById(moth_slots[i]);
+        if (!el) throw new Error("Missing runtime mount slot: " + moth_slots[i]);
+        el.insertAdjacentHTML("beforeend", moth_frags[i] || "");
+      }
+    })();
+    </script>
+  </body>
+</html>
