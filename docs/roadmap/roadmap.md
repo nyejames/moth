@@ -11,12 +11,12 @@ Use the [Progress Matrix](docs/src/docs/progress/#page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Canonical module compilation and scoped packages](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
+- [Docs migration work](./plans/docs-language-migration.md)
 - [Benchmark system follow up corrections](./plans/benchmark-correctness-follow-up-implementation-plan.md)
+- [Canonical module compilation and scoped packages](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
 
 ## Queued implementation chain
 
-- Add `--terse` flag to `tests` command for a very compact summary and terse error messages / warnings when running the tests suite.
 - [TIR follow up cleanup](./plans/tir-corrections-and-simplification-plan.md)
 - [Project config, imported build values and anonymous records](./plans/import_values_anonymous_records_plan.md)
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)

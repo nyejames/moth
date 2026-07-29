@@ -234,3 +234,47 @@ fn triage_report_write_failure_returns_error() {
 
     fs::remove_dir_all(&root).expect("should clean up temporary report directory");
 }
+
+#[test]
+fn terse_with_list_rejected_before_callback() {
+    let callback_called = AtomicBool::new(false);
+    let result = run_loaded_suite(
+        suite_with_case(None, None),
+        TestRunnerOptions {
+            terse: true,
+            list: true,
+            ..TestRunnerOptions::default()
+        },
+        |_| {
+            callback_called.store(true, Ordering::SeqCst);
+            successful_execution_result()
+        },
+        "target/test-reports/unused-terse-list.json",
+        "target/test-reports/unused-terse-list-triage.json",
+    );
+
+    assert!(result.is_err());
+    assert!(!callback_called.load(Ordering::SeqCst));
+}
+
+#[test]
+fn terse_with_audit_rejected_before_callback() {
+    let callback_called = AtomicBool::new(false);
+    let result = run_loaded_suite(
+        suite_with_case(None, None),
+        TestRunnerOptions {
+            terse: true,
+            audit: true,
+            ..TestRunnerOptions::default()
+        },
+        |_| {
+            callback_called.store(true, Ordering::SeqCst);
+            successful_execution_result()
+        },
+        "target/test-reports/unused-terse-audit.json",
+        "target/test-reports/unused-terse-audit-triage.json",
+    );
+
+    assert!(result.is_err());
+    assert!(!callback_called.load(Ordering::SeqCst));
+}

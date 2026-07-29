@@ -1,8 +1,8 @@
 //! Tests for CLI command parsing and validation.
 
 use super::{
-    Command, build_warnings_messages, get_command, help_build_flag_entries, integration_run_status,
-    is_standalone_version_request,
+    Command, build_warnings_messages, compact_whitespace, get_command, help_build_flag_entries,
+    integration_run_status, is_standalone_version_request,
 };
 use crate::build_system::build::{BuildResult, CleanupPolicy, FileKind, OutputFile, Project};
 use crate::compiler_frontend::Flag;
@@ -381,10 +381,23 @@ fn tests_command_rejects_unknown_backend_and_positional_arguments() {
 }
 
 #[test]
+fn compact_whitespace_collapses_multiline_to_one_line() {
+    assert_eq!(compact_whitespace("hello\nworld"), "hello world");
+    assert_eq!(
+        compact_whitespace("line1\n\n  line2  \nline3"),
+        "line1 line2 line3"
+    );
+    assert_eq!(compact_whitespace(""), "");
+    assert_eq!(compact_whitespace("  "), "");
+    assert_eq!(compact_whitespace("single"), "single");
+}
+
+#[test]
 fn tests_command_rejects_unknown_flags() {
     let error =
         get_command(&args(&["tests", "--wat"])).expect_err("unknown tests flag should fail");
     assert!(error.contains("Unknown tests flag"));
+    assert!(error.contains("--terse"));
 }
 
 #[test]
@@ -610,6 +623,87 @@ fn integration_run_status_reflects_suite_correctness() {
         unexpected_successes: 1,
     };
     assert_eq!(integration_run_status(incorrect), CommandStatus::Failure);
+}
+
+#[test]
+fn tests_command_defaults_to_terse_false() {
+    let command = get_command(&args(&["tests"])).expect("tests command should parse");
+    assert_eq!(
+        command,
+        Command::CompilerTests {
+            options: TestRunnerOptions {
+                show_warnings: true,
+                ..TestRunnerOptions::default()
+            },
+        }
+    );
+}
+
+#[test]
+fn tests_command_terse_flag_sets_terse_true() {
+    let command = get_command(&args(&["tests", "--terse"])).expect("tests --terse should parse");
+    assert_eq!(
+        command,
+        Command::CompilerTests {
+            options: TestRunnerOptions {
+                show_warnings: true,
+                terse: true,
+                ..TestRunnerOptions::default()
+            },
+        }
+    );
+}
+
+#[test]
+fn tests_command_terse_composes_with_filters() {
+    for args_slice in [
+        vec!["tests", "--terse", "--case", "case_a"],
+        vec!["tests", "--case", "case_a", "--terse"],
+        vec!["tests", "--terse", "--tag", "integration"],
+        vec!["tests", "--terse", "--contract", "lang.case"],
+        vec!["tests", "--terse", "--backend", "html"],
+    ] {
+        assert!(
+            get_command(&args(&args_slice)).is_ok(),
+            "terse should compose with filters: {:?}",
+            args_slice
+        );
+    }
+}
+
+#[test]
+fn tests_command_rejects_duplicate_terse() {
+    let error = get_command(&args(&["tests", "--terse", "--terse"]))
+        .expect_err("duplicate --terse should fail");
+    assert!(error.contains("--terse") && error.contains("at most once"));
+}
+
+#[test]
+fn tests_command_rejects_terse_list_in_either_order() {
+    for values in [
+        vec!["tests", "--terse", "--list"],
+        vec!["tests", "--list", "--terse"],
+    ] {
+        let error = get_command(&args(&values)).expect_err("terse+list should fail");
+        assert!(
+            error.contains("--terse") && error.contains("--list"),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn tests_command_rejects_terse_audit_in_either_order() {
+    for values in [
+        vec!["tests", "--terse", "--audit"],
+        vec!["tests", "--audit", "--terse"],
+    ] {
+        let error = get_command(&args(&values)).expect_err("terse+audit should fail");
+        assert!(
+            error.contains("--terse") && error.contains("--audit"),
+            "unexpected error: {error}"
+        );
+    }
 }
 
 fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult {

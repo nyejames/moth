@@ -80,7 +80,7 @@ Before declaring a non-trivial code-bearing slice complete, run:
 
     [td:
         [: Compiler integration tests]
-        [: `cargo run --quiet -- tests`]
+        [: `cargo run --quiet -- tests --terse`]
         [: Canonical suite policy followed by end-to-end compiler cases]
     ]
 

@@ -92,7 +92,9 @@ where
         ));
     }
 
-    println!("Running Moth test cases...\n");
+    if !options.terse {
+        println!("Running Moth test cases...\n");
+    }
     let timer = std::time::Instant::now();
     let mut indexed_results = if let Some(thread_count) = test_thread_count_from_env()? {
         let pool = rayon::ThreadPoolBuilder::new()
@@ -151,73 +153,89 @@ where
         })
         .collect::<Vec<_>>();
 
-    let failures: Vec<_> = case_results.iter().filter(|(_, r)| !r.passed).collect();
-    if !failures.is_empty() {
-        say!(Cyan "Failures:");
-        say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
-        for (case, result) in &failures {
-            println!("  {}", case.display_name);
-            reporting::render_case_result(case, result, options.show_warnings);
-            say!(Dark White "-".repeat(SEPARATOR_LINE_LENGTH));
+    let elapsed = timer.elapsed();
+
+    if options.terse {
+        let terse_lines = reporting::format_terse_run_output(
+            &case_results,
+            total_summary,
+            elapsed,
+            options.show_warnings,
+        );
+        for line in terse_lines {
+            println!("{line}");
         }
-        println!();
-    }
-
-    println!();
-    say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
-    print!("Test Results Summary. Took: ");
-    say!(Green #timer.elapsed());
-
-    say!("\n  Total tests:             ", Yellow total_summary.total_tests);
-    say!(
-        "  Successful compilations: ",
-        Blue total_summary.passed_tests
-    );
-    say!(
-        "  Failed compilations:     ",
-        Blue total_summary.failed_tests
-    );
-    say!(
-        "  Expected failures:       ",
-        Blue total_summary.expected_failures
-    );
-    say!(
-        "  Unexpected successes:    ",
-        Blue total_summary.unexpected_successes
-    );
-
-    say!();
-    if total_summary.incorrect_results() == 0 {
-        say!(
-            "  Correct results:   ",
-            Green Bold total_summary.correct_results(),
-            Dark White " / ",
-            total_summary.total_tests
-        );
     } else {
-        say!(
-            "  Incorrect results: ",
-            Red Bold total_summary.incorrect_results(),
-            Dark White " / ",
-            total_summary.total_tests
-        );
-    }
+        let failures: Vec<_> = case_results.iter().filter(|(_, r)| !r.passed).collect();
+        if !failures.is_empty() {
+            say!(Cyan "Failures:");
+            say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
+            for (case, result) in &failures {
+                println!("  {}", case.display_name);
+                reporting::render_case_result(case, result, options.show_warnings);
+                say!(Dark White "-".repeat(SEPARATOR_LINE_LENGTH));
+            }
+            println!();
+        }
 
-    reporting::render_backend_summary(&backend_summaries);
+        println!();
+        say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
+        print!("Test Results Summary. Took: ");
+        say!(Green #elapsed);
 
-    if total_summary.incorrect_results() == 0 {
-        say!("\nAll tests behaved as expected.");
-    } else if total_summary.total_tests > 0 {
-        let percentage = reporting::format_pass_percentage(
-            total_summary.correct_results(),
-            total_summary.total_tests,
+        say!("\n  Total tests:             ", Yellow total_summary.total_tests);
+        say!(
+            "  Successful compilations: ",
+            Blue total_summary.passed_tests
         );
         say!(
-            Yellow "\n",
-            Bright Yellow percentage,
-            " %",
-            Reset " of tests behaved as expected"
+            "  Failed compilations:     ",
+            Blue total_summary.failed_tests
         );
+        say!(
+            "  Expected failures:       ",
+            Blue total_summary.expected_failures
+        );
+        say!(
+            "  Unexpected successes:    ",
+            Blue total_summary.unexpected_successes
+        );
+
+        say!();
+        if total_summary.incorrect_results() == 0 {
+            say!(
+                "  Correct results:   ",
+                Green Bold total_summary.correct_results(),
+                Dark White " / ",
+                total_summary.total_tests
+            );
+        } else {
+            say!(
+                "  Incorrect results: ",
+                Red Bold total_summary.incorrect_results(),
+                Dark White " / ",
+                total_summary.total_tests
+            );
+        }
+
+        reporting::render_backend_summary(&backend_summaries);
+
+        if total_summary.incorrect_results() == 0 {
+            say!("\nAll tests behaved as expected.");
+        } else if total_summary.total_tests > 0 {
+            let percentage = reporting::format_pass_percentage(
+                total_summary.correct_results(),
+                total_summary.total_tests,
+            );
+            say!(
+                Yellow "\n",
+                Bright Yellow percentage,
+                " %",
+                Reset " of tests behaved as expected"
+            );
+        }
+
+        say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
     }
 
     reporting::write_failure_triage_report(
@@ -226,7 +244,6 @@ where
         &failure_triage_entries,
     )?;
 
-    say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
     Ok(total_summary.into())
 }
 

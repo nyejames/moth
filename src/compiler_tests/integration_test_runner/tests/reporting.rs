@@ -4,16 +4,26 @@
 //! WHY: both reporting modes must expose retained metadata without invoking case execution.
 
 use super::super::policy::evaluate_suite;
-use super::super::reporting::{build_suite_inventory_report, format_case_listing};
+use super::super::reporting::{
+    build_suite_inventory_report, format_case_listing, format_terse_run_output,
+};
 use super::super::types::{
     DiagnosticAssertion, ExactWarningExpectation, GoldenExpectation, RenderedOutputExpectation,
     SuccessContract,
 };
 use super::super::{
-    BackendId, CaseRole, DiagnosticMatchMode, ExpectedOutcome, FailureExpectation,
-    SuccessExpectation, TestCaseSpec, TestSuiteSpec, WarningExpectation,
+    BackendId, CaseExecutionResult, CaseRole, DiagnosticMatchMode, ExpectedOutcome,
+    FailureExpectation, FailureKind, SuccessExpectation, SummaryCounts, TestCaseSpec,
+    TestSuiteSpec, WarningExpectation,
 };
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
+};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::path::PathBuf;
+use std::time::Duration;
 
 fn case(
     case_id: &str,
@@ -526,4 +536,394 @@ fn report_serializes_contains_policy_finding_once_with_typed_reason_fact() {
         json["cases"][0]["backends"][0]["diagnostic_match_reason"],
         "  "
     );
+}
+
+fn terse_result(case: TestCaseSpec, result: CaseExecutionResult) -> Vec<String> {
+    let mut summary = SummaryCounts::default();
+    summary.record(&case, &result);
+    format_terse_run_output(&[(case, result)], summary, Duration::from_secs(1), false)
+}
+
+#[test]
+fn terse_all_correct_produces_one_summary_line() {
+    let case = case(
+        "arithmetic_operator_precedence",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: Default::default(),
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    );
+    let result = CaseExecutionResult {
+        passed: true,
+        panic_message: None,
+        build_result: None,
+        messages: None,
+        failure_reason: None,
+        failure_kind: None,
+    };
+    let output = terse_result(case, result);
+
+    assert_eq!(output.len(), 1);
+    assert!(output[0].contains("1/1 correct"), "{}", output[0]);
+    assert!(!output[0].contains("incorrect"), "{}", output[0]);
+}
+
+#[test]
+fn terse_expected_success_failure_shows_fail_header() {
+    let case = case(
+        "arithmetic_operator_precedence",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: Default::default(),
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    );
+    let result = CaseExecutionResult {
+        passed: false,
+        panic_message: None,
+        build_result: None,
+        messages: None,
+        failure_reason: Some("Compilation unexpectedly failed.".to_owned()),
+        failure_kind: Some(FailureKind::ExpectationViolation),
+    };
+    let output = terse_result(case, result);
+
+    assert!(output[0].starts_with("FAIL"), "{}", output[0]);
+    assert!(
+        output[0].contains("arithmetic_operator_precedence"),
+        "{}",
+        output[0]
+    );
+    assert!(output[0].contains("[html]"), "{}", output[0]);
+    assert!(output[0].contains("expectation violation"), "{}", output[0]);
+    assert!(
+        output[0].contains("Compilation unexpectedly failed"),
+        "{}",
+        output[0]
+    );
+    assert!(
+        output.last().unwrap().contains("0/1 correct"),
+        "{}",
+        output.last().unwrap()
+    );
+}
+
+#[test]
+fn terse_expected_failure_success_shows_unexpected_success() {
+    let case = case(
+        "invalid_assignment",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Failure(FailureExpectation {
+            warnings: WarningExpectation::Forbid,
+            message_contains: Vec::new(),
+            diagnostic_codes: Vec::new(),
+            diagnostic_assertions: Vec::new(),
+            diagnostic_match: DiagnosticMatchMode::Contains,
+            diagnostic_match_reason: None,
+        }),
+    );
+    let result = CaseExecutionResult {
+        passed: false,
+        panic_message: None,
+        build_result: None,
+        messages: None,
+        failure_reason: Some("Compilation succeeded but a failure was expected.".to_owned()),
+        failure_kind: Some(FailureKind::ExpectationViolation),
+    };
+    let output = terse_result(case, result);
+
+    assert!(output[0].starts_with("UNEXPECTED SUCCESS"), "{}", output[0]);
+    assert!(
+        !output[0].contains("E|"),
+        "no invented diagnostic should appear"
+    );
+}
+
+#[test]
+fn terse_diagnostics_use_e_and_w_format() {
+    let string_table = StringTable::new();
+    let error_diag = CompilerDiagnostic::with_severity(
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticSeverity::Error,
+        SourceLocation::default(),
+        DiagnosticPayload::None,
+    );
+    let warning_diag = CompilerDiagnostic::with_severity(
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticSeverity::Warning,
+        SourceLocation::default(),
+        DiagnosticPayload::None,
+    );
+
+    let messages = CompilerMessages::from_diagnostics(vec![error_diag, warning_diag], string_table);
+
+    let case = case(
+        "diagnostics_case",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: Default::default(),
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    );
+    let result = CaseExecutionResult {
+        passed: false,
+        panic_message: None,
+        build_result: None,
+        messages: Some(messages),
+        failure_reason: Some("Compilation failed.".to_owned()),
+        failure_kind: Some(FailureKind::ExpectationViolation),
+    };
+
+    let output = terse_result(case, result);
+    let diag_lines: Vec<_> = output
+        .iter()
+        .filter(|l| l.starts_with('E') || l.starts_with('W'))
+        .collect();
+    assert!(
+        !diag_lines.is_empty(),
+        "should have at least error lines: {:?}",
+        output
+    );
+    assert!(
+        diag_lines.iter().any(|l| l.starts_with('E')),
+        "should have E line: {:?}",
+        output
+    );
+}
+
+#[test]
+fn terse_warnings_removed_when_show_warnings_false() {
+    let string_table = StringTable::new();
+    let error_diag = CompilerDiagnostic::with_severity(
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticSeverity::Error,
+        SourceLocation::default(),
+        DiagnosticPayload::None,
+    );
+    let warning_diag = CompilerDiagnostic::with_severity(
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticSeverity::Warning,
+        SourceLocation::default(),
+        DiagnosticPayload::None,
+    );
+
+    let messages = CompilerMessages::from_diagnostics(vec![error_diag, warning_diag], string_table);
+
+    let case = case(
+        "warnings_case",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: Default::default(),
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    );
+    let result = CaseExecutionResult {
+        passed: false,
+        panic_message: None,
+        build_result: None,
+        messages: Some(messages),
+        failure_reason: Some("Compilation failed.".to_owned()),
+        failure_kind: Some(FailureKind::ExpectationViolation),
+    };
+
+    let mut summary = SummaryCounts::default();
+    summary.record(&case, &result);
+    let output = format_terse_run_output(&[(case, result)], summary, Duration::from_secs(1), false);
+    let warning_lines: Vec<_> = output.iter().filter(|l| l.starts_with('W')).collect();
+    assert!(
+        warning_lines.is_empty(),
+        "warnings should be hidden: {:?}",
+        warning_lines
+    );
+}
+
+#[test]
+fn terse_panic_message_appears_and_collapses_multiline() {
+    let case = case(
+        "panic_case",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: Default::default(),
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    );
+    let result = CaseExecutionResult {
+        passed: false,
+        panic_message: Some("index out of bounds\n  at line 42\n  in function foo".to_owned()),
+        build_result: None,
+        messages: None,
+        failure_reason: Some("The compiler panicked.".to_owned()),
+        failure_kind: Some(FailureKind::HarnessFailed),
+    };
+    let output = terse_result(case, result);
+
+    assert!(
+        output[0].contains("harness error"),
+        "should show harness error kind: {}",
+        output[0]
+    );
+    assert!(
+        output[0].contains("The compiler panicked"),
+        "should show reason: {}",
+        output[0]
+    );
+    let panic_line = output
+        .iter()
+        .find(|l| l.contains("index out of bounds"))
+        .expect("panic text should appear");
+    assert!(
+        !panic_line.contains('\n'),
+        "panic text should be single line: {:?}",
+        panic_line
+    );
+}
+
+#[test]
+fn terse_output_has_no_ansi_or_separators() {
+    let case = case(
+        "ansi_test",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: Default::default(),
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    );
+    let result = CaseExecutionResult {
+        passed: true,
+        panic_message: None,
+        build_result: None,
+        messages: None,
+        failure_reason: None,
+        failure_kind: None,
+    };
+    let output = terse_result(case, result);
+
+    let joined = output.join(" ");
+    assert!(
+        !joined.contains('\x1b'),
+        "no ANSI escape codes: {:?}",
+        joined
+    );
+    assert!(!joined.contains("==="), "no separator rules: {:?}", joined);
+    assert!(!joined.contains("---"), "no separator rules: {:?}", joined);
+}
+
+#[test]
+fn terse_mixed_results_preserve_case_order_and_summary() {
+    let case_a = case(
+        "case_a",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: Default::default(),
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    );
+    let case_b = case(
+        "case_b",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: Default::default(),
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    );
+    let result_a = CaseExecutionResult {
+        passed: false,
+        panic_message: None,
+        build_result: None,
+        messages: None,
+        failure_reason: Some("failed.".to_owned()),
+        failure_kind: Some(FailureKind::ExpectationViolation),
+    };
+    let result_b = CaseExecutionResult {
+        passed: true,
+        panic_message: None,
+        build_result: None,
+        messages: None,
+        failure_reason: None,
+        failure_kind: None,
+    };
+
+    let mut summary = SummaryCounts::default();
+    summary.record(&case_a, &result_a);
+    summary.record(&case_b, &result_b);
+    let output = format_terse_run_output(
+        &[(case_a, result_a), (case_b, result_b)],
+        summary,
+        Duration::from_secs(1),
+        false,
+    );
+
+    assert_eq!(
+        output.len(),
+        2,
+        "one failure line + one summary: {:?}",
+        output
+    );
+    assert!(
+        output[0].starts_with("FAIL case_a"),
+        "first line is failure: {}",
+        output[0]
+    );
+    assert!(output[1].contains("1/2 correct"), "summary: {}", output[1]);
+    assert!(output[1].contains("1 incorrect"), "summary: {}", output[1]);
 }

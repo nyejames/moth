@@ -11,7 +11,9 @@ use super::{
     SummaryCounts, TestCaseSpec, WarningExpectation,
 };
 use super::{PolicyEvaluation, PolicyFinding};
-use crate::compiler_frontend::compiler_messages::render::{terminal, terse};
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, terminal, terse,
+};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticCategory, DiagnosticSeverity,
 };
@@ -424,19 +426,7 @@ pub(crate) fn render_case_result(
     }
 
     if let Some(kind) = result.failure_kind {
-        let label = match kind {
-            FailureKind::StrictGoldenMismatch => "[strict golden mismatch]",
-            FailureKind::NormalizedSemanticMismatch => "[normalized mismatch]",
-            FailureKind::RenderedOutputMismatch => "[rendered output mismatch]",
-            FailureKind::RenderedOutputExactMismatch => "[rendered output exact mismatch]",
-            FailureKind::RenderedOutputOrderMismatch => "[rendered output order mismatch]",
-            FailureKind::RenderedOutputMultiplicityMismatch => {
-                "[rendered output multiplicity mismatch]"
-            }
-            FailureKind::HarnessFailed => "[harness error]",
-            FailureKind::ExpectationViolation => "[expectation violation]",
-        };
-        say!(Dark White label);
+        say!(Dark White format!("[{}]", failure_kind_label(kind)));
     }
 
     if let Some(reason) = &result.failure_reason {
@@ -611,4 +601,131 @@ pub(crate) fn write_failure_triage_report(
         )
     })?;
     Ok(())
+}
+
+pub(crate) fn failure_kind_label(kind: FailureKind) -> &'static str {
+    match kind {
+        FailureKind::StrictGoldenMismatch => "strict golden mismatch",
+        FailureKind::NormalizedSemanticMismatch => "normalized mismatch",
+        FailureKind::RenderedOutputMismatch => "rendered output mismatch",
+        FailureKind::RenderedOutputExactMismatch => "rendered output exact mismatch",
+        FailureKind::RenderedOutputOrderMismatch => "rendered output order mismatch",
+        FailureKind::RenderedOutputMultiplicityMismatch => "rendered output multiplicity mismatch",
+        FailureKind::HarnessFailed => "harness error",
+        FailureKind::ExpectationViolation => "expectation violation",
+    }
+}
+
+fn compact_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+pub(crate) fn format_terse_run_output(
+    case_results: &[(TestCaseSpec, CaseExecutionResult)],
+    summary: SummaryCounts,
+    duration: std::time::Duration,
+    show_warnings: bool,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    if summary.incorrect_results() > 0 {
+        for (case, result) in case_results {
+            if !result.passed {
+                lines.extend(format_terse_failure_lines(case, result, show_warnings));
+            }
+        }
+    }
+
+    lines.push(format_terse_summary_line(summary, duration));
+    lines
+}
+
+fn format_terse_failure_lines(
+    case: &TestCaseSpec,
+    result: &CaseExecutionResult,
+    show_warnings: bool,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    let header = match &case.expected {
+        ExpectedOutcome::Success(_) => {
+            let mut header = format!("FAIL {} [{}]", case.case_id, case.backend_id.as_str());
+            if let Some(kind) = result.failure_kind {
+                header.push_str(&format!(" [{}]", failure_kind_label(kind)));
+            }
+            if let Some(reason) = &result.failure_reason {
+                header.push_str(&format!(": {}", compact_text(reason)));
+            }
+            header
+        }
+        ExpectedOutcome::Failure(_) => {
+            let mut header = format!(
+                "UNEXPECTED SUCCESS {} [{}]",
+                case.case_id,
+                case.backend_id.as_str(),
+            );
+            if let Some(reason) = &result.failure_reason {
+                header.push_str(&format!(": {}", compact_text(reason)));
+            }
+            header
+        }
+    };
+    lines.push(header);
+
+    if let Some(panic_message) = &result.panic_message {
+        lines.push(compact_text(panic_message));
+    }
+
+    if let Some(messages) = &result.messages {
+        for diagnostic_index in messages.diagnostic_display_order() {
+            let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
+            if diagnostic.severity == DiagnosticSeverity::Error {
+                lines.push(terse::format_terse_diagnostic_with_context(
+                    diagnostic,
+                    messages.diagnostic_render_context(diagnostic_index),
+                ));
+            }
+        }
+
+        if show_warnings {
+            for diagnostic_index in messages.diagnostic_display_order() {
+                let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
+                if diagnostic.severity == DiagnosticSeverity::Warning {
+                    lines.push(terse::format_terse_diagnostic_with_context(
+                        diagnostic,
+                        messages.diagnostic_render_context(diagnostic_index),
+                    ));
+                }
+            }
+        }
+    }
+
+    if show_warnings && let Some(build_result) = &result.build_result {
+        let ctx = DiagnosticRenderContext::new(&build_result.string_table);
+        for warning in &build_result.warnings {
+            lines.push(terse::format_terse_diagnostic_with_context(warning, ctx));
+        }
+    }
+
+    lines
+}
+
+fn format_terse_summary_line(summary: SummaryCounts, duration: std::time::Duration) -> String {
+    let incorrect = summary.incorrect_results();
+    if incorrect == 0 {
+        format!(
+            "Tests: {}/{} correct in {:.2}s.",
+            summary.correct_results(),
+            summary.total_tests,
+            duration.as_secs_f64(),
+        )
+    } else {
+        format!(
+            "Tests: {}/{} correct, {} incorrect in {:.2}s.",
+            summary.correct_results(),
+            summary.total_tests,
+            incorrect,
+            duration.as_secs_f64(),
+        )
+    }
 }

@@ -19,6 +19,7 @@ pub(crate) struct TestRunnerOptions {
     pub backend_filter: Option<BackendId>,
     pub list: bool,
     pub audit: bool,
+    pub terse: bool,
 }
 
 impl TestRunnerOptions {
@@ -26,6 +27,18 @@ impl TestRunnerOptions {
         if self.audit && (self.has_selection_filters() || self.list) {
             return Err(String::from(
                 "Tests command --audit cannot be combined with --case, --tag, --contract, --backend, or --list.",
+            ));
+        }
+
+        if self.terse && self.list {
+            return Err(String::from(
+                "Tests command --terse cannot be combined with --list.",
+            ));
+        }
+
+        if self.terse && self.audit {
+            return Err(String::from(
+                "Tests command --terse cannot be combined with --audit.",
             ));
         }
 

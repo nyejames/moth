@@ -120,14 +120,24 @@ pub fn start_cli() -> process::ExitCode {
                     }
                 }
 
-                Command::CompilerTests { options } => match run_all_test_cases(options) {
-                    Ok(summary) => integration_run_status(summary),
-                    Err(error) => {
-                        say!(Red "Failed to run integration tests:");
-                        println!("  {error}");
-                        CommandStatus::Failure
+                Command::CompilerTests { options } => {
+                    let terse = options.terse;
+                    match run_all_test_cases(options) {
+                        Ok(summary) => integration_run_status(summary),
+                        Err(error) => {
+                            if terse {
+                                println!(
+                                    "Tests failed to run: {}",
+                                    compact_whitespace(&error)
+                                );
+                            } else {
+                                say!(Red "Failed to run integration tests:");
+                                println!("  {error}");
+                            }
+                            CommandStatus::Failure
+                        }
                     }
-                },
+                }
             },
             Err(e) => {
                 say!(e);
@@ -477,9 +487,16 @@ fn parse_tests_command(args: &[String]) -> Result<Command, String> {
                 options.audit = true;
                 index += 1;
             }
+            "--terse" => {
+                if options.terse {
+                    return Err(String::from("Tests command accepts --terse at most once."));
+                }
+                options.terse = true;
+                index += 1;
+            }
             _ if arg.starts_with("--") => {
                 return Err(format!(
-                    "Unknown tests flag: '{arg}'. Supported tests flags are --case <id>, --tag <tag>, --contract <id>, --backend <html|html_wasm>, --list, and --audit."
+                    "Unknown tests flag: '{arg}'. Supported tests flags are --case <id>, --tag <tag>, --contract <id>, --backend <html|html_wasm>, --list, --audit, and --terse."
                 ));
             }
             _ => {
@@ -646,6 +663,7 @@ fn print_help() {
     say!("  --backend <id>          (supported: html, html_wasm)");
     say!("  --list                  (list selected metadata without compiling cases)");
     say!("  --audit                 (write the full suite inventory without compiling cases)");
+    say!("  --terse                (compact summary and one-line failure diagnostics)");
     say!("\nCheck command options:");
     say!("  --terse                (compact one-line diagnostics)");
     say!("\nNew command options:");
@@ -677,6 +695,10 @@ fn print_build_message(build_result: BuildResult, duration: std::time::Duration)
 /// would print without relying on stdout capture.
 /// WHY: `print_build_message` delegates to `print_compiler_messages`, which writes to the terminal.
 /// This helper is the decision boundary for whether any output is produced at all.
+fn compact_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[cfg(test)]
 fn build_warnings_messages(build_result: &BuildResult) -> Option<CompilerMessages> {
     if build_result.warnings.is_empty() {

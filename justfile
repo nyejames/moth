@@ -8,7 +8,7 @@ validate:
     cargo test --workspace --quiet -- --format terse
 
     @echo "integration tests"
-    cargo run --quiet -- tests
+    cargo run --quiet -- tests --terse
 
     @echo "docs build"
     cargo run --quiet -- check docs --terse
