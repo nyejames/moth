@@ -12,3 +12,4 @@ mod policy;
 mod reporting;
 mod runner;
 mod selection;
+mod terse_reporting;

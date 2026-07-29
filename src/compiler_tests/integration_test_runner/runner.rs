@@ -153,13 +153,21 @@ where
         })
         .collect::<Vec<_>>();
 
-    let elapsed = timer.elapsed();
+    let execution_duration = timer.elapsed();
+
+    // Persist required machine-readable output before printing a success-looking terminal summary.
+    // A report failure must leave the command with only its infrastructure error.
+    reporting::write_failure_triage_report(
+        triage_report_path,
+        total_summary,
+        &failure_triage_entries,
+    )?;
 
     if options.terse {
         let terse_lines = reporting::format_terse_run_output(
             &case_results,
             total_summary,
-            elapsed,
+            execution_duration,
             options.show_warnings,
         );
         for line in terse_lines {
@@ -181,7 +189,7 @@ where
         println!();
         say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
         print!("Test Results Summary. Took: ");
-        say!(Green #elapsed);
+        say!(Green #execution_duration);
 
         say!("\n  Total tests:             ", Yellow total_summary.total_tests);
         say!(
@@ -237,12 +245,6 @@ where
 
         say!(Dark White "=".repeat(SEPARATOR_LINE_LENGTH));
     }
-
-    reporting::write_failure_triage_report(
-        triage_report_path,
-        total_summary,
-        &failure_triage_entries,
-    )?;
 
     Ok(total_summary.into())
 }

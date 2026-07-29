@@ -228,13 +228,14 @@ fn build_command_rejects_force_flag() {
 }
 
 #[test]
-fn tests_command_uses_default_backend_selection() {
+fn tests_command_uses_default_options() {
     let command = get_command(&args(&["tests"])).expect("tests command should parse");
     assert_eq!(
         command,
         Command::CompilerTests {
             options: TestRunnerOptions {
                 show_warnings: true,
+                terse: false,
                 ..TestRunnerOptions::default()
             },
         }
@@ -623,20 +624,6 @@ fn integration_run_status_reflects_suite_correctness() {
         unexpected_successes: 1,
     };
     assert_eq!(integration_run_status(incorrect), CommandStatus::Failure);
-}
-
-#[test]
-fn tests_command_defaults_to_terse_false() {
-    let command = get_command(&args(&["tests"])).expect("tests command should parse");
-    assert_eq!(
-        command,
-        Command::CompilerTests {
-            options: TestRunnerOptions {
-                show_warnings: true,
-                ..TestRunnerOptions::default()
-            },
-        }
-    );
 }
 
 #[test]

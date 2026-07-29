@@ -689,16 +689,16 @@ fn print_build_message(build_result: BuildResult, duration: std::time::Duration)
     }
 }
 
+fn compact_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Build a `CompilerMessages` container for the warnings produced during a successful build.
 ///
 /// WHAT: centralises the conversion so tests can verify exactly which warnings a successful build
 /// would print without relying on stdout capture.
 /// WHY: `print_build_message` delegates to `print_compiler_messages`, which writes to the terminal.
 /// This helper is the decision boundary for whether any output is produced at all.
-fn compact_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 #[cfg(test)]
 fn build_warnings_messages(build_result: &BuildResult) -> Option<CompilerMessages> {
     if build_result.warnings.is_empty() {

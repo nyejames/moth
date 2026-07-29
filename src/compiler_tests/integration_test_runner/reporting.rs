@@ -603,7 +603,7 @@ pub(crate) fn write_failure_triage_report(
     Ok(())
 }
 
-pub(crate) fn failure_kind_label(kind: FailureKind) -> &'static str {
+fn failure_kind_label(kind: FailureKind) -> &'static str {
     match kind {
         FailureKind::StrictGoldenMismatch => "strict golden mismatch",
         FailureKind::NormalizedSemanticMismatch => "normalized mismatch",
@@ -613,6 +613,14 @@ pub(crate) fn failure_kind_label(kind: FailureKind) -> &'static str {
         FailureKind::RenderedOutputMultiplicityMismatch => "rendered output multiplicity mismatch",
         FailureKind::HarnessFailed => "harness error",
         FailureKind::ExpectationViolation => "expectation violation",
+    }
+}
+
+fn append_failure_kind(header: &mut String, failure_kind: Option<FailureKind>) {
+    if let Some(failure_kind) = failure_kind {
+        header.push_str(" [");
+        header.push_str(failure_kind_label(failure_kind));
+        header.push(']');
     }
 }
 
@@ -650,9 +658,7 @@ fn format_terse_failure_lines(
     let header = match &case.expected {
         ExpectedOutcome::Success(_) => {
             let mut header = format!("FAIL {} [{}]", case.case_id, case.backend_id.as_str());
-            if let Some(kind) = result.failure_kind {
-                header.push_str(&format!(" [{}]", failure_kind_label(kind)));
-            }
+            append_failure_kind(&mut header, result.failure_kind);
             if let Some(reason) = &result.failure_reason {
                 header.push_str(&format!(": {}", compact_text(reason)));
             }
@@ -664,6 +670,7 @@ fn format_terse_failure_lines(
                 case.case_id,
                 case.backend_id.as_str(),
             );
+            append_failure_kind(&mut header, result.failure_kind);
             if let Some(reason) = &result.failure_reason {
                 header.push_str(&format!(": {}", compact_text(reason)));
             }
@@ -673,37 +680,37 @@ fn format_terse_failure_lines(
     lines.push(header);
 
     if let Some(panic_message) = &result.panic_message {
-        lines.push(compact_text(panic_message));
+        lines.push(format!("panic: {}", compact_text(panic_message)));
     }
 
     if let Some(messages) = &result.messages {
         for diagnostic_index in messages.diagnostic_display_order() {
             let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-            if diagnostic.severity == DiagnosticSeverity::Error {
-                lines.push(terse::format_terse_diagnostic_with_context(
-                    diagnostic,
-                    messages.diagnostic_render_context(diagnostic_index),
-                ));
-            }
-        }
 
-        if show_warnings {
-            for diagnostic_index in messages.diagnostic_display_order() {
-                let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-                if diagnostic.severity == DiagnosticSeverity::Warning {
-                    lines.push(terse::format_terse_diagnostic_with_context(
-                        diagnostic,
-                        messages.diagnostic_render_context(diagnostic_index),
-                    ));
-                }
+            let should_render = match diagnostic.severity {
+                DiagnosticSeverity::Error => true,
+                DiagnosticSeverity::Warning => show_warnings,
+                DiagnosticSeverity::Note => false,
+            };
+
+            if !should_render {
+                continue;
             }
+
+            lines.push(terse::format_terse_diagnostic_with_context(
+                diagnostic,
+                messages.diagnostic_render_context(diagnostic_index),
+            ));
         }
     }
 
     if show_warnings && let Some(build_result) = &result.build_result {
-        let ctx = DiagnosticRenderContext::new(&build_result.string_table);
+        let render_context = DiagnosticRenderContext::new(&build_result.string_table);
         for warning in &build_result.warnings {
-            lines.push(terse::format_terse_diagnostic_with_context(warning, ctx));
+            lines.push(terse::format_terse_diagnostic_with_context(
+                warning,
+                render_context,
+            ));
         }
     }
 
