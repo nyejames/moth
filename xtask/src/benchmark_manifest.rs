@@ -24,11 +24,22 @@ pub(crate) struct BenchmarkManifest {
     pub(crate) repository_root: PathBuf,
 }
 
+/// Whether a workload entry is a single file or a directory project.
+///
+/// Discovered once during manifest validation so later execution phases
+/// never need to probe the filesystem to decide working-directory policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BenchmarkEntryKind {
+    File,
+    Directory,
+}
+
 /// One repository-relative benchmark input boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BenchmarkWorkload {
     pub(crate) id: String,
     pub(crate) entry: PathBuf,
+    pub(crate) entry_kind: BenchmarkEntryKind,
     pub(crate) fingerprint_roots: Vec<PathBuf>,
     pub(crate) fingerprint_excludes: Vec<PathBuf>,
 }
@@ -299,28 +310,6 @@ impl BenchmarkManifest {
             .filter(|case| matches!(case.runner, BenchmarkRunner::Frontend { .. }))
     }
 
-    pub(crate) fn cli_invocation(
-        &self,
-        case: &BenchmarkCase,
-    ) -> Result<CliBenchmarkInvocation, BenchmarkManifestError> {
-        let workload = self
-            .workload_for(case)
-            .ok_or_else(|| self.runtime_error(case, "workload relationship is invalid"))?;
-        let BenchmarkRunner::Cli { command, args } = &case.runner else {
-            return Err(self.runtime_error(case, "case does not declare a CLI runner"));
-        };
-
-        let mut invocation_args = Vec::with_capacity(args.len() + 1);
-        invocation_args.push(workload.entry.display().to_string());
-        invocation_args.extend(args.iter().cloned());
-
-        Ok(CliBenchmarkInvocation {
-            command: *command,
-            args: invocation_args,
-            current_directory: self.repository_root.clone(),
-        })
-    }
-
     pub(crate) fn frontend_invocation(
         &self,
         case: &BenchmarkCase,
@@ -338,7 +327,11 @@ impl BenchmarkManifest {
         })
     }
 
-    fn runtime_error(&self, case: &BenchmarkCase, message: &str) -> BenchmarkManifestError {
+    pub(crate) fn runtime_error(
+        &self,
+        case: &BenchmarkCase,
+        message: &str,
+    ) -> BenchmarkManifestError {
         BenchmarkManifestError::Invalid {
             path: self.manifest_path.clone(),
             subject: format!("case '{}'", case.id),
@@ -453,6 +446,11 @@ fn validate_manifest(
         workloads.push(BenchmarkWorkload {
             id: raw_workload.id,
             entry: entry.relative,
+            entry_kind: if entry.is_directory {
+                BenchmarkEntryKind::Directory
+            } else {
+                BenchmarkEntryKind::File
+            },
             fingerprint_roots: fingerprint_roots
                 .into_iter()
                 .map(|root| root.relative)

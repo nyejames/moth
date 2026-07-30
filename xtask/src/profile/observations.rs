@@ -22,7 +22,7 @@
 
 use crate::bench_types::BenchmarkCaseObservations;
 use crate::benchmark_execution::{BenchmarkCaseExecution, BenchmarkExecutionContext, execute_case};
-use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest};
+use crate::benchmark_manifest::BenchmarkCase;
 
 /// Observation data collected from one benchmark case run.
 ///
@@ -58,11 +58,10 @@ pub(crate) struct ProfileObservation {
 /// hotspot estimation in later phases.
 pub(crate) fn run_observation(
     context: &BenchmarkExecutionContext<'_>,
-    manifest: &BenchmarkManifest,
     case: &BenchmarkCase,
 ) -> Result<ProfileObservation, String> {
-    let invocation = manifest
-        .cli_invocation(case)
+    let invocation = context
+        .resolve_cli_invocation(case)
         .map_err(|error| error.to_string())?;
     let execution = execute_case(context, case)
         .map_err(|failure| format!("Observation pass failed:\n{failure}"))?;

@@ -17,6 +17,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, BenchmarkRunner, load_benchmark_manifest,
 };
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
 use crate::frontend_bench::{present_read_only_frontend_run, run_frontend_cases};
 use crate::workload_fingerprint::{WorkloadFingerprint, compute_workload_fingerprints};
@@ -47,7 +48,8 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
     let compiler = build_release_compiler_with_timers(&manifest.repository_root)?;
     let workload_fingerprints =
         compute_workload_fingerprints(&manifest).map_err(|error| error.to_string())?;
-    let context = BenchmarkExecutionContext::new(&manifest, compiler.as_path());
+    let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
+    let context = BenchmarkExecutionContext::new(&manifest, compiler.as_path(), &workspace);
     let thread_count = effective_thread_count()?;
     let policy = bench_ci_policy()?;
 

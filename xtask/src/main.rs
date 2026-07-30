@@ -34,6 +34,7 @@ mod bench_validate;
 mod benchmark_execution;
 mod benchmark_manifest;
 mod benchmark_status;
+mod benchmark_workspace;
 mod compiler_binary;
 mod frontend_bench;
 mod mode;

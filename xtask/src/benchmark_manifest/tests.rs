@@ -1,4 +1,5 @@
 use super::*;
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use std::fs::{self, File};
 use tempfile::tempdir;
 
@@ -135,12 +136,20 @@ profile = "dev"
     );
     assert_eq!(manifest.cases[0].workload_index, 0);
     assert_eq!(manifest.cases[1].workload_index, 1);
-    assert_eq!(
-        manifest
-            .cli_invocation(&manifest.cases[0])
-            .expect("CLI invocation")
-            .args,
-        ["first.moth"]
+
+    let canonical_root =
+        fs::canonicalize(directory.path()).expect("repository root should canonicalise");
+    let workspace = BenchmarkExecutionWorkspace::create(&canonical_root)
+        .expect("workspace should be creatable");
+    let cli_invocation = workspace
+        .resolve_cli_invocation(&manifest, &manifest.cases[0])
+        .expect("CLI invocation should resolve");
+    assert!(cli_invocation.args[0].ends_with("first.moth"));
+    assert!(cli_invocation.current_directory.ends_with("first_case"));
+    assert!(
+        cli_invocation
+            .current_directory
+            .starts_with(&canonical_root)
     );
     assert_eq!(
         manifest
@@ -176,16 +185,23 @@ fn nested_start_directory_resolves_all_invocations_from_repository_root() {
         .expect("nested invocation should find the repository manifest");
     let canonical_root =
         fs::canonicalize(directory.path()).expect("repository root should canonicalise");
-    let cli_invocation = manifest
-        .cli_invocation(&manifest.cases[0])
+    let workspace = BenchmarkExecutionWorkspace::create(&canonical_root)
+        .expect("workspace should be creatable");
+    let cli_invocation = workspace
+        .resolve_cli_invocation(&manifest, &manifest.cases[0])
         .expect("CLI invocation should resolve");
     let frontend_invocation = manifest
         .frontend_invocation(&manifest.cases[1])
         .expect("frontend invocation should resolve");
 
     assert_eq!(manifest.repository_root, canonical_root);
-    assert_eq!(cli_invocation.current_directory, canonical_root);
-    assert_eq!(cli_invocation.args, ["fixture.moth"]);
+    assert!(cli_invocation.current_directory.ends_with("cli_case"));
+    assert!(
+        cli_invocation
+            .current_directory
+            .starts_with(&canonical_root)
+    );
+    assert!(cli_invocation.args[0].ends_with("fixture.moth"));
     assert_eq!(
         frontend_invocation.entry,
         canonical_root.join("fixture.moth")
@@ -195,6 +211,7 @@ fn nested_start_directory_resolves_all_invocations_from_repository_root() {
 struct ExpectedWorkload {
     id: &'static str,
     entry: &'static str,
+    entry_kind: BenchmarkEntryKind,
     roots: &'static [&'static str],
     excludes: &'static [&'static str],
 }
@@ -223,102 +240,119 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "root_single_file",
             entry: "benchmark-root-single-file.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmark-root-single-file.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "speed_test",
             entry: "benchmarks/speed-test.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/speed-test.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "docs",
             entry: "docs",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["docs/config.moth", "docs/src"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "template_stress",
             entry: "benchmarks/template-stress.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/template-stress.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "type_stress",
             entry: "benchmarks/type-stress.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/type-stress.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "fold_stress",
             entry: "benchmarks/fold-stress.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/fold-stress.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "pattern_stress",
             entry: "benchmarks/pattern-stress.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/pattern-stress.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "collection_stress",
             entry: "benchmarks/collection-stress.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/collection-stress.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "environment_stress",
             entry: "benchmarks/environment-stress.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/environment-stress.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "one_module_kitchen_sink",
             entry: "benchmarks/adversarial/one-module-kitchen-sink.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/adversarial/one-module-kitchen-sink.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "deep_scope_churn",
             entry: "benchmarks/adversarial/deep-scope-churn.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/adversarial/deep-scope-churn.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "template_render_plan_churn",
             entry: "benchmarks/adversarial/template-render-plan-churn.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/adversarial/template-render-plan-churn.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "constant_dag_churn",
             entry: "benchmarks/adversarial/constant-dag-churn.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/adversarial/constant-dag-churn.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "expression_rpn_churn",
             entry: "benchmarks/adversarial/expression-rpn-churn.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/adversarial/expression-rpn-churn.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "generic_trait_churn",
             entry: "benchmarks/adversarial/generic-trait-churn.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/adversarial/generic-trait-churn.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "collection_map_borrow_churn",
             entry: "benchmarks/adversarial/collection-map-borrow-churn.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/adversarial/collection-map-borrow-churn.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "module_graph",
             entry: "benchmarks/module-graph",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/module-graph"],
             excludes: &[
                 "benchmarks/module-graph/dev",
@@ -328,6 +362,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "import_fanout",
             entry: "benchmarks/import-fanout",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/import-fanout"],
             excludes: &[
                 "benchmarks/import-fanout/dev",
@@ -337,6 +372,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "external_js_imports",
             entry: "benchmarks/external-js-imports",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/external-js-imports"],
             excludes: &[
                 "benchmarks/external-js-imports/dev",
@@ -346,6 +382,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "module_root_stress",
             entry: "benchmarks/module-root-stress",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/module-root-stress"],
             excludes: &[
                 "benchmarks/module-root-stress/dev",
@@ -355,6 +392,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "import_external_churn",
             entry: "benchmarks/adversarial/import-external-churn",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/adversarial/import-external-churn"],
             excludes: &[
                 "benchmarks/adversarial/import-external-churn/dev",
@@ -364,12 +402,14 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "borrow_stress",
             entry: "benchmarks/borrow-stress.moth",
+            entry_kind: BenchmarkEntryKind::File,
             roots: &["benchmarks/borrow-stress.moth"],
             excludes: &[],
         },
         ExpectedWorkload {
             id: "module_root_role_mix",
             entry: "benchmarks/module-root-role-mix",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/module-root-role-mix"],
             excludes: &[
                 "benchmarks/module-root-role-mix/scratch",
@@ -379,6 +419,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "tiny_one_file",
             entry: "benchmarks/parallelism/tiny-one-file",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/tiny-one-file"],
             excludes: &[
                 "benchmarks/parallelism/tiny-one-file/dev",
@@ -388,6 +429,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "tiny_two_files",
             entry: "benchmarks/parallelism/tiny-two-files",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/tiny-two-files"],
             excludes: &[
                 "benchmarks/parallelism/tiny-two-files/dev",
@@ -397,6 +439,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "tiny_seven_files",
             entry: "benchmarks/parallelism/tiny-seven-files",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/tiny-seven-files"],
             excludes: &[
                 "benchmarks/parallelism/tiny-seven-files/dev",
@@ -406,6 +449,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "tiny_eight_files",
             entry: "benchmarks/parallelism/tiny-eight-files",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/tiny-eight-files"],
             excludes: &[
                 "benchmarks/parallelism/tiny-eight-files/dev",
@@ -415,6 +459,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "many_tiny_files",
             entry: "benchmarks/parallelism/many-tiny-files",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/many-tiny-files"],
             excludes: &[
                 "benchmarks/parallelism/many-tiny-files/dev",
@@ -424,6 +469,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "many_medium_files",
             entry: "benchmarks/parallelism/many-medium-files",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/many-medium-files"],
             excludes: &[
                 "benchmarks/parallelism/many-medium-files/dev",
@@ -433,6 +479,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "many_markdown_assets",
             entry: "benchmarks/parallelism/many-markdown-assets",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/many-markdown-assets"],
             excludes: &[
                 "benchmarks/parallelism/many-markdown-assets/dev",
@@ -442,6 +489,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "many_modules_one_file_each",
             entry: "benchmarks/parallelism/many-modules-one-file-each",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/many-modules-one-file-each"],
             excludes: &[
                 "benchmarks/parallelism/many-modules-one-file-each/dev",
@@ -451,6 +499,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedWorkload {
             id: "few_modules_many_files_each",
             entry: "benchmarks/parallelism/few-modules-many-files-each",
+            entry_kind: BenchmarkEntryKind::Directory,
             roots: &["benchmarks/parallelism/few-modules-many-files-each"],
             excludes: &[
                 "benchmarks/parallelism/few-modules-many-files-each/dev",
@@ -873,6 +922,7 @@ fn repository_manifest_has_complete_ordered_authority() {
     for (actual, expected) in manifest.workloads.iter().zip(expected_workloads) {
         assert_eq!(actual.id, expected.id);
         assert_eq!(actual.entry, PathBuf::from(expected.entry));
+        assert_eq!(actual.entry_kind, expected.entry_kind);
         assert_eq!(
             actual.fingerprint_roots,
             expected.roots.iter().map(PathBuf::from).collect::<Vec<_>>()
@@ -1240,6 +1290,40 @@ fn missing_exclude_through_symlink_outside_root_fails() {
         error
             .to_string()
             .contains("escapes its declared directory root")
+    );
+}
+
+#[test]
+fn file_entry_retains_file_kind() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "entry.moth");
+    let path = write_manifest(
+        directory.path(),
+        &minimal_manifest("entry.moth", "first_case"),
+    );
+    let manifest = load_manifest_at(&path, directory.path()).expect("manifest should load");
+
+    assert_eq!(manifest.workloads[0].entry_kind, BenchmarkEntryKind::File);
+}
+
+#[test]
+fn directory_entry_retains_directory_kind() {
+    let directory = tempdir().expect("temporary repository should exist");
+    fs::create_dir_all(directory.path().join("project"))
+        .expect("project directory should be creatable");
+    create_entry(directory.path(), "project/main.moth");
+    let contents = minimal_manifest("project/main.moth", "first_case")
+        .replace(r#"entry = "project/main.moth""#, r#"entry = "project""#)
+        .replace(
+            "fingerprint_roots = [\"project/main.moth\"]",
+            "fingerprint_roots = [\"project\"]",
+        );
+    let path = write_manifest(directory.path(), &contents);
+    let manifest = load_manifest_at(&path, directory.path()).expect("manifest should load");
+
+    assert_eq!(
+        manifest.workloads[0].entry_kind,
+        BenchmarkEntryKind::Directory
     );
 }
 

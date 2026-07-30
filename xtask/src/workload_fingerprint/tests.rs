@@ -3,7 +3,7 @@
 use super::*;
 use crate::bench_types::{BenchmarkCaseObservations, BenchmarkCaseResult, BenchmarkComparison};
 use crate::benchmark_manifest::{
-    BenchmarkExpectation, CliBenchmarkCommand, FrontendBenchmarkProfile,
+    BenchmarkEntryKind, BenchmarkExpectation, CliBenchmarkCommand, FrontendBenchmarkProfile,
 };
 use std::fs;
 use tempfile::{TempDir, tempdir};
@@ -53,6 +53,11 @@ fn manifest(
         workloads: vec![BenchmarkWorkload {
             id: "workload".to_owned(),
             entry: entry.into(),
+            entry_kind: if entry.ends_with(".moth") {
+                BenchmarkEntryKind::File
+            } else {
+                BenchmarkEntryKind::Directory
+            },
             fingerprint_roots: roots.iter().map(PathBuf::from).collect(),
             fingerprint_excludes: excludes.iter().map(PathBuf::from).collect(),
         }],
@@ -528,12 +533,14 @@ fn bulk_api_preserves_manifest_workload_order() {
             BenchmarkWorkload {
                 id: "first".to_owned(),
                 entry: "first.moth".into(),
+                entry_kind: BenchmarkEntryKind::File,
                 fingerprint_roots: vec!["first.moth".into()],
                 fingerprint_excludes: vec![],
             },
             BenchmarkWorkload {
                 id: "second".to_owned(),
                 entry: "second.moth".into(),
+                entry_kind: BenchmarkEntryKind::File,
                 fingerprint_roots: vec!["second.moth".into()],
                 fingerprint_excludes: vec![],
             },

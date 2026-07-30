@@ -46,6 +46,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, BenchmarkRunner, load_benchmark_manifest,
 };
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::{CompilerBinary, build_profiling_compiler_with_timers};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -106,7 +107,8 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     let profiling_binary = build_profiling_compiler_with_timers(&manifest.repository_root)?;
     let moth_path = profiling_binary.as_path();
     let symbol_dirs = profiling_binary.symbol_dirs.clone();
-    let execution_context = BenchmarkExecutionContext::new(&manifest, moth_path);
+    let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
+    let execution_context = BenchmarkExecutionContext::new(&manifest, moth_path, &workspace);
 
     println!(
         "Preflighting {} CLI profile case(s) with the profiling binary...",
@@ -139,13 +141,13 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     )> = Vec::new();
 
     for case in &selected_cases {
-        let invocation = manifest
-            .cli_invocation(case)
+        let invocation = execution_context
+            .resolve_cli_invocation(case)
             .map_err(|error| error.to_string())?;
         print!("  {} ", case.id);
 
         // Observation pass (timer/counter data without profiler overhead).
-        let observation = run_observation(&execution_context, &manifest, case)?;
+        let observation = run_observation(&execution_context, case)?;
         print!("~{:.0}ms ", observation.wall_ms);
 
         // Write per-case artifacts (stdout, stderr, observations).

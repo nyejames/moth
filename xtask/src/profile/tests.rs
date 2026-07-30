@@ -1,8 +1,11 @@
 use super::select_profile_cases;
+use crate::benchmark_execution::BenchmarkExecutionContext;
 use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkExpectation, BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload,
-    CliBenchmarkCommand, FrontendBenchmarkProfile,
+    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest, BenchmarkRunner,
+    BenchmarkWorkload, CliBenchmarkCommand, FrontendBenchmarkProfile,
 };
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use std::path::PathBuf;
 
 #[test]
 fn profile_selection_rejects_frontend_cases_clearly() {
@@ -31,6 +34,7 @@ fn manifest() -> BenchmarkManifest {
         workloads: vec![BenchmarkWorkload {
             id: "fixture".to_owned(),
             entry: "fixture.moth".into(),
+            entry_kind: BenchmarkEntryKind::File,
             fingerprint_roots: vec!["fixture.moth".into()],
             fingerprint_excludes: Vec::new(),
         }],
@@ -60,4 +64,63 @@ fn manifest() -> BenchmarkManifest {
         manifest_path: "manifest.toml".into(),
         repository_root: ".".into(),
     }
+}
+
+#[test]
+fn observation_and_samply_receive_one_resolved_invocation() {
+    let directory = tempfile::tempdir().expect("temporary repository should exist");
+    std::fs::write(directory.path().join("fixture.moth"), "value = 42\n")
+        .expect("fixture should be writable");
+
+    let manifest = BenchmarkManifest {
+        workloads: vec![BenchmarkWorkload {
+            id: "fixture".to_owned(),
+            entry: "fixture.moth".into(),
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_roots: vec!["fixture.moth".into()],
+            fingerprint_excludes: Vec::new(),
+        }],
+        cases: vec![BenchmarkCase {
+            id: "cli_case".to_owned(),
+            workload_index: 0,
+            group_name: "core".to_owned(),
+            quick: false,
+            expectation: BenchmarkExpectation::Clean,
+            runner: BenchmarkRunner::Cli {
+                command: CliBenchmarkCommand::Check,
+                args: vec!["--terse".to_owned()],
+            },
+        }],
+        manifest_path: directory.path().join("manifest.toml"),
+        repository_root: directory.path().to_path_buf(),
+    };
+    let workspace = BenchmarkExecutionWorkspace::create(directory.path())
+        .expect("workspace should be creatable");
+    let compiler = directory.path().join("unused-compiler");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
+
+    // The profile orchestrator resolves one invocation and passes the same
+    // command, args and current directory to both the observation pass and
+    // Samply. This test verifies the resolved invocation is consistent.
+    let invocation = context
+        .resolve_cli_invocation(&manifest.cases[0])
+        .expect("invocation should resolve");
+
+    // The observation pass uses invocation.command and invocation.args.
+    // The Samply pass uses invocation.current_directory, invocation.command
+    // and invocation.args. Both must come from the same resolved invocation.
+    assert_eq!(invocation.command, CliBenchmarkCommand::Check);
+    assert!(invocation.args[0].ends_with("fixture.moth"));
+    assert_eq!(invocation.args[1], "--terse");
+    assert!(
+        invocation
+            .current_directory
+            .starts_with(directory.path().join("target").join("benchmark-work"))
+    );
+    assert!(invocation.current_directory.ends_with("cli_case"));
+
+    // Both the observation and Samply paths consume the same fields from this
+    // one invocation. The profile orchestrator must not reconstruct the
+    // command separately for either pass.
+    let _ = PathBuf::from(&invocation.current_directory);
 }

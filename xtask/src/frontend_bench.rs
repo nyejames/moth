@@ -30,6 +30,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, FrontendBenchmarkProfile, load_benchmark_manifest,
 };
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::workload_fingerprint::{WorkloadFingerprint, compute_workload_fingerprints};
 use std::num::NonZeroUsize;
 
@@ -60,7 +61,8 @@ pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), 
         .filter(|case| policy.selects_case(case.quick))
         .cloned()
         .collect();
-    let context = BenchmarkExecutionContext::frontend(&manifest);
+    let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
+    let context = BenchmarkExecutionContext::frontend(&manifest, &workspace);
 
     println!(
         "Running {} frontend benchmark cases: 1 shared preflight + {} measured",

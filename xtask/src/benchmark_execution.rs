@@ -13,34 +13,57 @@ use crate::bench_observations::{
 };
 use crate::bench_types::BenchmarkCaseObservations;
 use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkExpectation, BenchmarkManifest, BenchmarkRunner,
+    BenchmarkCase, BenchmarkExpectation, BenchmarkManifest, BenchmarkManifestError,
+    BenchmarkRunner, CliBenchmarkInvocation,
 };
 use crate::benchmark_status::{BenchmarkDiagnosticStatus, BenchmarkStatusError};
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::frontend_bench::{report_to_observations, run_one_frontend_case};
 use crate::process_runner::{ProcessRun, run_moth_command};
 
 const MAX_FAILURE_EVIDENCE_CHARS: usize = 2_000;
 
 /// Immutable inputs shared by every case in one benchmark execution boundary.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub(crate) struct BenchmarkExecutionContext<'a> {
     manifest: &'a BenchmarkManifest,
     compiler_binary: Option<&'a Path>,
+    workspace: &'a BenchmarkExecutionWorkspace,
 }
 
 impl<'a> BenchmarkExecutionContext<'a> {
-    pub(crate) fn new(manifest: &'a BenchmarkManifest, compiler_binary: &'a Path) -> Self {
+    pub(crate) fn new(
+        manifest: &'a BenchmarkManifest,
+        compiler_binary: &'a Path,
+        workspace: &'a BenchmarkExecutionWorkspace,
+    ) -> Self {
         Self {
             manifest,
             compiler_binary: Some(compiler_binary),
+            workspace,
         }
     }
 
-    pub(crate) fn frontend(manifest: &'a BenchmarkManifest) -> Self {
+    pub(crate) fn frontend(
+        manifest: &'a BenchmarkManifest,
+        workspace: &'a BenchmarkExecutionWorkspace,
+    ) -> Self {
         Self {
             manifest,
             compiler_binary: None,
+            workspace,
         }
+    }
+
+    /// Resolve one CLI invocation through the run workspace.
+    ///
+    /// File-entry cases receive an isolated working directory below
+    /// `target/benchmark-work/`. Directory-entry cases keep the repository root.
+    pub(crate) fn resolve_cli_invocation(
+        &self,
+        case: &BenchmarkCase,
+    ) -> Result<CliBenchmarkInvocation, BenchmarkManifestError> {
+        self.workspace.resolve_cli_invocation(self.manifest, case)
     }
 }
 
@@ -212,8 +235,7 @@ fn execute_cli_case(
         )
     })?;
     let invocation = context
-        .manifest
-        .cli_invocation(case)
+        .resolve_cli_invocation(case)
         .map_err(|error| infrastructure_failure(context, case, error.to_string()))?;
     let run = run_moth_command(
         compiler_binary,

@@ -11,10 +11,11 @@ use super::{
 };
 use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric};
 use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkExpectation, BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload,
-    CliBenchmarkCommand, FrontendBenchmarkProfile,
+    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest, BenchmarkRunner,
+    BenchmarkWorkload, CliBenchmarkCommand, FrontendBenchmarkProfile,
 };
 use crate::benchmark_status::BenchmarkDiagnosticStatus;
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 
 static FRONTEND_EXECUTION_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -22,9 +23,15 @@ static FRONTEND_EXECUTION_TEST_LOCK: Mutex<()> = Mutex::new(());
 fn cli_execution_uses_declared_build_command_entry_and_ordered_args() {
     let fixture = CliFixture::new();
     let compiler = fixture.mock_path("declared_build");
+    let absolute_entry = fixture.root().join("benchmarks/fixture.moth");
     create_expected_invocation_executable(
         &compiler,
-        &["build", "benchmarks/fixture.moth", "--release", "--terse"],
+        &[
+            "build",
+            &absolute_entry.display().to_string(),
+            "--release",
+            "--terse",
+        ],
     );
     let manifest = fixture.manifest(
         vec![fixture.workload("benchmarks/fixture.moth")],
@@ -35,7 +42,9 @@ fn cli_execution_uses_declared_build_command_entry_and_ordered_args() {
             &["--release", "--terse"],
         )],
     );
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
     let execution =
         execute_case(&context, &manifest.cases[0]).expect("declared build case should pass");
@@ -59,9 +68,10 @@ fn cli_execution_uses_declared_build_command_entry_and_ordered_args() {
 fn cli_execution_uses_declared_check_command() {
     let fixture = CliFixture::new();
     let compiler = fixture.mock_path("declared_check");
+    let absolute_entry = fixture.root().join("benchmarks/fixture.moth");
     create_expected_invocation_executable(
         &compiler,
-        &["check", "benchmarks/fixture.moth", "--terse"],
+        &["check", &absolute_entry.display().to_string(), "--terse"],
     );
     let manifest = fixture.manifest(
         vec![fixture.workload("benchmarks/fixture.moth")],
@@ -72,7 +82,9 @@ fn cli_execution_uses_declared_check_command() {
             &["--terse"],
         )],
     );
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
     execute_case(&context, &manifest.cases[0]).expect("declared check case should pass");
 }
@@ -83,7 +95,9 @@ fn clean_cli_execution_rejects_warning_status() {
     let compiler = fixture.mock_path("warning");
     create_output_executable(&compiler, "MOTH_BENCH status errors=0 warnings=2", "", 0);
     let manifest = fixture.single_cli_manifest();
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
     let failure =
         execute_case(&context, &manifest.cases[0]).expect_err("warnings must fail clean preflight");
@@ -110,7 +124,9 @@ fn successful_cli_process_rejects_reported_errors() {
     let compiler = fixture.mock_path("errors");
     create_output_executable(&compiler, "MOTH_BENCH status errors=3 warnings=0", "", 0);
     let manifest = fixture.single_cli_manifest();
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
     let failure =
         execute_case(&context, &manifest.cases[0]).expect_err("reported errors must fail closed");
@@ -139,7 +155,9 @@ fn successful_cli_process_rejects_missing_malformed_and_duplicate_status() {
     ] {
         let compiler = fixture.mock_path(name);
         create_output_executable(&compiler, stdout, "", 0);
-        let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+        let workspace = BenchmarkExecutionWorkspace::create(fixture.root())
+            .expect("workspace should be creatable");
+        let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
         let failure = execute_case(&context, &manifest.cases[0])
             .expect_err("invalid machine status must fail closed");
@@ -170,7 +188,9 @@ fn successful_cli_process_rejects_invalid_live_observations_with_bounded_evidenc
         let compiler = fixture.mock_path(name);
         let stdout = format!("MOTH_BENCH status errors=0 warnings=0\n{observation_output}");
         create_output_executable(&compiler, &stdout, "", 0);
-        let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+        let workspace = BenchmarkExecutionWorkspace::create(fixture.root())
+            .expect("workspace should be creatable");
+        let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
         let failure = execute_case(&context, &manifest.cases[0])
             .expect_err("invalid live observations must fail closed");
@@ -203,7 +223,9 @@ fn nonzero_process_status_fails_even_when_machine_status_is_clean() {
         7,
     );
     let manifest = fixture.single_cli_manifest();
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
     let failure =
         execute_case(&context, &manifest.cases[0]).expect_err("nonzero process must fail");
@@ -231,7 +253,9 @@ fn missing_compiler_binary_is_a_process_spawn_failure() {
     let fixture = CliFixture::new();
     let compiler = fixture.root().join("missing-compiler");
     let manifest = fixture.single_cli_manifest();
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
     let failure =
         execute_case(&context, &manifest.cases[0]).expect_err("spawn failure must be retained");
@@ -253,7 +277,9 @@ fn cli_and_frontend_total_durations_must_be_positive_and_finite() {
             frontend_case("fixture_frontend", 0),
         ],
     );
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
     let status = BenchmarkDiagnosticStatus {
         error_count: 0,
         warning_count: 0,
@@ -277,7 +303,9 @@ fn inconsistent_measured_metric_sets_use_typed_observation_failure() {
     let fixture = CliFixture::new();
     let manifest = fixture.single_cli_manifest();
     let compiler = fixture.root().join("unused-compiler");
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
     let observations = vec![
         BenchmarkCaseObservations {
             stage_timings: vec![BenchmarkMetric {
@@ -322,7 +350,9 @@ fn preflight_executes_every_case_once_and_aggregates_failures_in_manifest_order(
             cli_case("second_case", 1, CliBenchmarkCommand::Build, &[]),
         ],
     );
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
     let failures =
         preflight_cases(&context, &manifest.cases).expect_err("both cases should fail preflight");
@@ -342,7 +372,9 @@ fn failed_preflight_prevents_measurement_callback_invocation() {
     let compiler = fixture.mock_path("failed_preflight");
     create_output_executable(&compiler, "", "preflight failed", 1);
     let manifest = fixture.single_cli_manifest();
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
     let measurement_called = Cell::new(false);
 
     let result = run_preflighted_suite(
@@ -370,7 +402,9 @@ fn failed_measurement_prevents_history_callback_invocation() {
         0,
     );
     let manifest = fixture.single_cli_manifest();
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
     let history_called = Cell::new(false);
 
     let result = run_preflighted_suite(
@@ -395,7 +429,9 @@ fn failure_evidence_keeps_stdout_and_stderr_separate_and_bounded() {
     let stderr = "e".repeat(2_500);
     create_output_executable(&compiler, &stdout, &stderr, 1);
     let manifest = fixture.single_cli_manifest();
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
 
     let failure =
         execute_case(&context, &manifest.cases[0]).expect_err("nonzero process should fail");
@@ -430,7 +466,9 @@ fn frontend_execution_returns_the_common_success_shape() {
         vec![frontend_case("clean_frontend", 0)],
     );
     let unused_compiler = fixture.root().join("unused-compiler");
-    let context = BenchmarkExecutionContext::new(&manifest, &unused_compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &unused_compiler, &workspace);
 
     let execution =
         execute_case(&context, &manifest.cases[0]).expect("clean frontend case should pass");
@@ -482,7 +520,9 @@ if value is:
         vec![frontend_case("warning_frontend", 0)],
     );
     let unused_compiler = fixture.root().join("unused-compiler");
-    let context = BenchmarkExecutionContext::new(&manifest, &unused_compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &unused_compiler, &workspace);
 
     let failure = execute_case(&context, &manifest.cases[0])
         .expect_err("frontend warnings must fail clean preflight");
@@ -516,7 +556,9 @@ fn frontend_compilation_failure_is_typed_and_bounded() {
         vec![frontend_case("invalid_frontend", 0)],
     );
     let unused_compiler = fixture.root().join("unused-compiler");
-    let context = BenchmarkExecutionContext::new(&manifest, &unused_compiler);
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &unused_compiler, &workspace);
 
     let failure = execute_case(&context, &manifest.cases[0])
         .expect_err("frontend compiler failure must fail preflight");
@@ -566,6 +608,11 @@ impl CliFixture {
                 .trim_end_matches(".moth")
                 .to_owned(),
             entry: PathBuf::from(entry),
+            entry_kind: if entry.ends_with(".moth") {
+                BenchmarkEntryKind::File
+            } else {
+                BenchmarkEntryKind::Directory
+            },
             fingerprint_roots: vec![PathBuf::from(entry)],
             fingerprint_excludes: Vec::new(),
         }

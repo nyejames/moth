@@ -33,6 +33,7 @@ use crate::benchmark_execution::{
     BenchmarkExecutionContext, average_case_observations, execute_case, run_preflighted_suite,
 };
 use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, load_benchmark_manifest};
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
 use crate::workload_fingerprint::{WorkloadFingerprint, compute_workload_fingerprints};
 use std::num::NonZeroUsize;
@@ -73,7 +74,8 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
         .filter(|case| policy.selects_case(case.quick))
         .cloned()
         .collect();
-    let context = BenchmarkExecutionContext::new(&manifest, compiler.as_path());
+    let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
+    let context = BenchmarkExecutionContext::new(&manifest, compiler.as_path(), &workspace);
 
     println!(
         "Running {} benchmark cases: 1 shared preflight + {} measured",

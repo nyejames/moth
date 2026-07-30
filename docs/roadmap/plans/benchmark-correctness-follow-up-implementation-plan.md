@@ -27,16 +27,17 @@ docs/roadmap/plans/benchmark-correctness-follow-up-plan.md
 ## Current state
 
 ```text
-ACTIVE_PLAN: docs/roadmap/plans/benchmark-correctness-follow-up-plan.md
-STATUS: ready for implementation
-CURRENT_SLICE: Phase 0 - reload authorities and confirm the reviewed base
-LAST_REVIEWED_COMMIT: e97a9b9ff9f8a4d40aae3f2cb427947b1b955819
-BASE_IMPLEMENTATION_COMMIT: 5528c3f891b933c71cf8ced625fcca06ea1a0de8
-KNOWN_TRACKED_POLLUTION: speed-test.html
-KNOWN_BLOCKING_FINDING: single-file build cases run from the repository root
-KNOWN_IDENTITY_GAPS: profile history has no workload fingerprint and manifest boundary validation accepts incomplete roots
-RECORDING_POLICY: do not run recording benchmark commands until Phases 1 through 6 pass review
-NEXT_ACTION: implement Phase 1A only after confirming current main still contains the reviewed ownership paths
+WORK_ID: bench-followup
+WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
+BASE_REVISION: 9af62e5a9
+STATUS: active
+CURRENT_SLICE: Phase 2 - detect repository mutation and fix persistence ordering
+COMPLETED: Phase 1 - entry kind enum, run workspace, one invocation authority, profile invocation, removed speed-test.html
+NEXT_ACTION: implement Phase 2A (benchmark repository snapshots)
+VALIDATION: cargo test --package xtask (509 passed), cargo fmt, bench-validate (4 pre-existing compiler failures from canonical module compilation)
+AUDITS: none
+BLOCKERS: pre-existing compiler failures in docs_check, docs_frontend, module_root_role_mix_frontend, few_modules_many_files_each_frontend
+NOTES: Pre-existing failures are from canonical module compilation phase 5, not benchmark changes. speed-test.html no longer reappears.
 ```
 
 Update this block after each accepted phase. Keep it concise. Git history remains the durable implementation record, so do not append command transcripts or worker journals.
