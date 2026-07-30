@@ -1,6 +1,6 @@
 use super::*;
 use crate::bench_time::BenchmarkTimestamp;
-use crate::bench_types::{BenchmarkSystem, SuiteStats, calculate_group_stats};
+use crate::bench_types::{BenchmarkSystem, GitRevision, SuiteStats, calculate_group_stats};
 use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;
@@ -304,11 +304,6 @@ fn to_case_results_preserves_current_identity_and_observations() {
     let cases = to_case_results(&current_record());
 
     assert_eq!(cases[0], benchmark_case());
-}
-
-#[test]
-fn git_revision_collection_never_fails_benchmarking() {
-    let _revision = get_git_revision();
 }
 
 #[test]

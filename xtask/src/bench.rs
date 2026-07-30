@@ -16,7 +16,7 @@
 
 use crate::bench_history::{
     RUNS_JSONL_PATH, append_local_run, effective_thread_count, find_latest_matching_run,
-    get_git_revision, read_local_runs, thread_identity_suffix, to_case_results, to_local_record,
+    read_local_runs, thread_identity_suffix, to_case_results, to_local_record,
 };
 use crate::bench_migration::migrate_old_results;
 use crate::bench_summary::update_monthly_summary;
@@ -25,14 +25,15 @@ use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
     BenchmarkChangeKind, BenchmarkComparison, BenchmarkRecording, BenchmarkRun, BenchmarkRunPolicy,
-    BenchmarkSelection, BenchmarkSuiteKind, BenchmarkThresholds, SuiteStats, calculate_group_stats,
-    calculate_mean, calculate_median, calculate_stage_movement, calculate_stddev,
-    format_stage_movement_line, format_top_current_stages,
+    BenchmarkSelection, BenchmarkSuiteKind, BenchmarkThresholds, GitRevision, SuiteStats,
+    calculate_group_stats, calculate_mean, calculate_median, calculate_stage_movement,
+    calculate_stddev, format_stage_movement_line, format_top_current_stages,
 };
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, average_case_observations, execute_case, run_preflighted_suite,
 };
 use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, load_benchmark_manifest};
+use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
 use crate::workload_fingerprint::{WorkloadFingerprint, compute_workload_fingerprints};
@@ -63,6 +64,11 @@ const OLD_BENCHMARKS_DIR: &str = "benchmarks/old-benchmarks";
 /// Ok(()) on success, or an error message on failure.
 pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
     let manifest = load_benchmark_manifest().map_err(|error| error.to_string())?;
+
+    // Capture repository state before any compiler construction or preflight.
+    let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
+        .map_err(|error| error.to_string())?;
+
     let workload_fingerprints =
         compute_workload_fingerprints(&manifest).map_err(|error| error.to_string())?;
 
@@ -83,7 +89,9 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
         policy.measured_iterations()
     );
 
-    run_preflighted_suite(
+    let git_revision = snapshot.git_revision();
+
+    let result = run_preflighted_suite(
         &context,
         &cases,
         || {
@@ -96,14 +104,17 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
                 policy.measured_iterations(),
             )
         },
-        |case_results| complete_benchmark_run(case_results, thread_count, policy),
-    )
+        |case_results| complete_benchmark_run(case_results, thread_count, policy, &git_revision),
+    );
+
+    verify_after_operation(&snapshot, &manifest.repository_root, result)
 }
 
 fn complete_benchmark_run(
     case_results: Vec<BenchmarkCaseResult>,
     thread_count: Option<u32>,
     policy: BenchmarkRunPolicy,
+    git_revision: &GitRevision,
 ) -> Result<(), String> {
     if policy.recording() == BenchmarkRecording::ReadOnly {
         return present_read_only_benchmark_run(&case_results, thread_count, policy.selection());
@@ -120,7 +131,7 @@ fn complete_benchmark_run(
     let run = BenchmarkRun {
         timestamp: presentation.timestamp,
         benchmark_protocol_version: BENCHMARK_PROTOCOL_VERSION,
-        git_revision: get_git_revision(),
+        git_revision: git_revision.clone(),
         system: presentation.system,
         suite_kind: BenchmarkSuiteKind::EndToEndCli,
         cases: case_results,

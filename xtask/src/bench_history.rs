@@ -7,14 +7,13 @@
 
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
-    BenchmarkGroupStats, BenchmarkMetric, BenchmarkRun, BenchmarkSuiteKind, GitRevision,
+    BenchmarkGroupStats, BenchmarkMetric, BenchmarkRun, BenchmarkSuiteKind,
 };
 use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand, FrontendBenchmarkProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 /// Path to the local raw benchmark history file, relative to repo root.
 pub const RUNS_JSONL_PATH: &str = "benchmarks/local-data/runs.jsonl";
@@ -225,44 +224,6 @@ pub fn append_local_run(path: &Path, record: &LocalRunRecord) -> Result<(), Stri
 
     use std::io::Write;
     writeln!(file, "{line}").map_err(|error| format!("Failed to append to runs.jsonl: {error}"))
-}
-
-/// Capture best-effort commit and dirty-state metadata.
-pub fn get_git_revision() -> GitRevision {
-    GitRevision {
-        commit: git_commit(),
-        dirty: git_dirty(),
-    }
-}
-
-fn git_commit() -> Option<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    non_empty_stdout(&output.stdout)
-}
-
-fn git_dirty() -> Option<bool> {
-    let output = Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    Some(!output.stdout.is_empty())
-}
-
-fn non_empty_stdout(bytes: &[u8]) -> Option<String> {
-    let value = String::from_utf8_lossy(bytes);
-    let trimmed = value.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 /// Capture the effective `RAYON_NUM_THREADS` setting as a normalized identity.

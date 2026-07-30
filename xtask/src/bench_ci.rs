@@ -17,6 +17,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, BenchmarkRunner, load_benchmark_manifest,
 };
+use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
 use crate::frontend_bench::{present_read_only_frontend_run, run_frontend_cases};
@@ -44,6 +45,10 @@ const FRONTEND_SECTION: BenchCiSection = BenchCiSection {
 pub(crate) fn run_bench_ci() -> Result<(), String> {
     let manifest = load_benchmark_manifest().map_err(|error| error.to_string())?;
 
+    // Capture repository state before any compiler construction or preflight.
+    let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
+        .map_err(|error| error.to_string())?;
+
     println!("Building release compiler...");
     let compiler = build_release_compiler_with_timers(&manifest.repository_root)?;
     let workload_fingerprints =
@@ -58,7 +63,7 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
         manifest.cases.len()
     );
 
-    run_bench_ci_pipeline(
+    let result = run_bench_ci_pipeline(
         &manifest.cases,
         policy,
         |cases| {
@@ -95,7 +100,9 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
                 BenchmarkSelection::Quick,
             )
         },
-    )
+    );
+
+    verify_after_operation(&snapshot, &manifest.repository_root, result)
 }
 
 fn bench_ci_policy() -> Result<BenchmarkRunPolicy, String> {

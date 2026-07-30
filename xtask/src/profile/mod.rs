@@ -38,7 +38,6 @@ pub(crate) mod summary;
 // Re-export the narrow surface needed by main.rs and mode.rs.
 pub(crate) use options::{ProfileOptions, ProfileParseResult, parse_profile_args};
 
-use crate::bench_history::get_git_revision;
 use crate::bench_time::BenchmarkTimestamp;
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
@@ -46,6 +45,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, BenchmarkRunner, load_benchmark_manifest,
 };
+use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::{CompilerBinary, build_profiling_compiler_with_timers};
 use std::collections::HashMap;
@@ -89,6 +89,10 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     let manifest = load_benchmark_manifest().map_err(|error| error.to_string())?;
     let selected_cases = select_profile_cases(&manifest, options.case_filter.as_deref())?;
 
+    // Capture repository state before compiler construction or preflight.
+    let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
+        .map_err(|error| error.to_string())?;
+
     // Verify Samply is available and learn the version-specific record flags before doing work.
     let samply_capabilities = check_samply_available()?;
     if options.presymbolicate
@@ -117,8 +121,9 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     preflight_cases(&execution_context, &selected_cases)
         .map_err(|failures| format_case_failures("profile preflight", &failures))?;
 
-    // Get the short commit hash for the run id.
-    let commit = get_git_revision().commit;
+    // Use the start snapshot's commit for the run id.
+    let git_revision = snapshot.git_revision();
+    let commit = git_revision.commit.clone();
 
     // Create the run directory.
     let profiles_root = PathBuf::from(PROFILES_ROOT);
@@ -396,7 +401,9 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         append_drift_to_agent_summary(&run_paths, &drift_section)?;
     }
 
-    // Append profile history record after the full run succeeds.
+    // Append profile history record after repository verification succeeds.
+    // The collection phase (cases, artifacts, drift) is complete; persistence
+    // must not run if the repository changed during the run.
     if options.filter != ProfileFilterMode::RawIndex {
         let history_cases: Vec<HistoryCaseRecord> = case_summaries
             .iter()
@@ -450,8 +457,15 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
             history_cases,
         )?;
 
-        let history_path = std::path::Path::new(PROFILE_RUNS_JSONL_PATH);
-        history::append_profile_run(history_path, &history_record)?;
+        // Verify repository state before appending profile history.
+        verify_after_operation::<(), String>(&snapshot, &manifest.repository_root, Ok(()))
+            .and_then(|()| {
+                let history_path = std::path::Path::new(PROFILE_RUNS_JSONL_PATH);
+                history::append_profile_run(history_path, &history_record)
+            })?;
+    } else {
+        // Raw-index mode does not append history, but still verifies.
+        verify_after_operation::<(), String>(&snapshot, &manifest.repository_root, Ok(()))?;
     }
 
     println!(

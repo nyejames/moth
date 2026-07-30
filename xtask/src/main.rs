@@ -33,6 +33,7 @@ mod bench_types;
 mod bench_validate;
 mod benchmark_execution;
 mod benchmark_manifest;
+mod benchmark_repository;
 mod benchmark_status;
 mod benchmark_workspace;
 mod compiler_binary;
