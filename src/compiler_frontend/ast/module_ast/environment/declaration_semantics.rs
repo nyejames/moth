@@ -30,7 +30,7 @@ pub(crate) enum DeclarationSemanticKind {
 }
 
 /// Immutable path-indexed classification table shared by body emission contexts.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct DeclarationSemanticTable {
     by_path: FxHashMap<InternedPath, DeclarationSemanticKind>,
 }

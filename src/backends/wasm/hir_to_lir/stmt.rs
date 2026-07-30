@@ -54,6 +54,16 @@ pub(crate) fn lower_statement(
                         "Wasm lowering received unresolved cross-module function target {origin:?}"
                     )));
                 }
+                CallTarget::ModulePrivate(identity) => {
+                    return Err(lir_transformation_error(format!(
+                        "Wasm lowering received unresolved module-private function target {identity:?}"
+                    )));
+                }
+                CallTarget::Generated(identity) => {
+                    return Err(lir_transformation_error(format!(
+                        "Wasm lowering received unresolved generated function target {identity:?}"
+                    )));
+                }
                 CallTarget::External(_) => {
                     // Host calls lower to deterministic import ids.
                     let import_id = resolve_host_call_import(context.module_context, target)?;

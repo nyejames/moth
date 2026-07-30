@@ -125,7 +125,8 @@ pub(crate) struct ResolvedPublicTypeRootTable {
 /// Inputs required to build the resolved public type-root table.
 ///
 /// WHAT: groups the resolved signature, nominal identity, alias, constant and receiver
-/// side tables used while building the root table.
+/// side tables used while building the root table, plus the set of re-exported declaration
+/// paths targeted by public export entries from the root's `export:` block.
 /// WHY: building the table sits at the join of completed AST environment facts; keeping the
 /// inputs named makes that boundary easier to audit than a long positional list.
 pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
@@ -141,6 +142,10 @@ pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
     pub trait_environment: &'a TraitEnvironment,
     pub type_environment: &'a TypeEnvironment,
     pub string_table: &'a StringTable,
+    /// Source declaration paths re-exported through the root's `export:` block from private files
+    /// in the same module. These are not in the active root file but are targeted by public export
+    /// entries and need their resolved roots included in the table.
+    pub reexport_target_paths: &'a FxHashSet<InternedPath>,
 }
 
 /// Build the resolved public type-root table from completed AST environment facts.
@@ -172,6 +177,7 @@ pub(crate) fn build_resolved_public_type_roots(
         trait_environment,
         type_environment,
         string_table,
+        reexport_target_paths,
     } = input;
 
     let mut roots = Vec::new();
@@ -277,24 +283,123 @@ pub(crate) fn build_resolved_public_type_roots(
         }
     }
 
-    // Pass 2: select receiver methods attached to directly-defined public nominal receivers.
-    // Real methods on a public receiver are normally private headers outside `export:`, so
-    // this pass ignores the method header's export mode and selects by receiver ownership.
-    // Imported module roots and builtin/external receivers are excluded because their
-    // nominal paths are not in the directly-defined public nominal set.
-    let mut receiver_method_entries = Vec::new();
+    // Pass 1b: collect re-exported declaration roots from private files targeted by public export
+    // entries. These declarations are not in the active root file, so Pass 1 excluded them. The
+    // header-built public export maps already resolved the re-export target paths, so this pass
+    // joins them into the root table using the same resolved AST environment facts.
     for header in sorted_headers {
-        if !header.file_role.is_active_module_root() {
+        if !reexport_target_paths.contains(&header.tokens.src_path) {
             continue;
         }
+
+        // Skip declarations already collected by Pass 1 (directly-defined active-root public
+        // declarations). A re-export that targets a directly-defined declaration is already in the
+        // table.
+        if is_active_root_public_declaration(header) {
+            continue;
+        }
+
+        let path = &header.tokens.src_path;
+
+        match &header.kind {
+            HeaderKind::Function { .. } => {
+                let Some(resolved) = resolved_function_signatures_by_path.get(path) else {
+                    return Err(missing_resolved_function_signature(path, string_table));
+                };
+
+                // Receiver methods are not free export bindings. They travel with their receiver
+                // surface and are selected by receiver ownership in Pass 2.
+                if resolved.receiver.is_some() {
+                    continue;
+                }
+
+                let generic_parameter_list_id = generic_function_templates_by_path
+                    .get(path)
+                    .map(|template| template.generic_parameter_list_id);
+
+                roots.push(ResolvedPublicTypeRoot {
+                    path: path.to_owned(),
+                    kind: ResolvedPublicTypeRootKind::Function {
+                        signature: resolved.signature.clone(),
+                        generic_parameter_list_id,
+                    },
+                });
+            }
+
+            HeaderKind::Struct { .. } => {
+                let Some(&type_id) = nominal_type_ids_by_path.get(path) else {
+                    return Err(missing_nominal_type_id(path, string_table));
+                };
+                public_nominal_paths.insert(path.to_owned());
+                let fields = resolved_struct_fields_by_path
+                    .get(path)
+                    .cloned()
+                    .ok_or_else(|| missing_resolved_struct_fields(path, string_table))?;
+                roots.push(ResolvedPublicTypeRoot {
+                    path: path.to_owned(),
+                    kind: ResolvedPublicTypeRootKind::Struct { type_id, fields },
+                });
+            }
+
+            HeaderKind::Choice { .. } => {
+                let Some(&type_id) = nominal_type_ids_by_path.get(path) else {
+                    return Err(missing_nominal_type_id(path, string_table));
+                };
+                public_nominal_paths.insert(path.to_owned());
+                roots.push(ResolvedPublicTypeRoot {
+                    path: path.to_owned(),
+                    kind: ResolvedPublicTypeRootKind::Choice { type_id },
+                });
+            }
+
+            HeaderKind::TypeAlias { .. } => {
+                let Some(annotation) = resolved_type_aliases_by_path.get(path) else {
+                    return Err(missing_resolved_alias(path, string_table));
+                };
+                let Some(target_type_id) = annotation.type_id else {
+                    return Err(missing_resolved_alias_type_id(path, string_table));
+                };
+                roots.push(ResolvedPublicTypeRoot {
+                    path: path.to_owned(),
+                    kind: ResolvedPublicTypeRootKind::TransparentAlias { target_type_id },
+                });
+            }
+
+            HeaderKind::Constant { .. } => {
+                let Some(declaration) = declaration_table.get_by_path(path) else {
+                    return Err(missing_resolved_constant(path, string_table));
+                };
+                roots.push(ResolvedPublicTypeRoot {
+                    path: path.to_owned(),
+                    kind: ResolvedPublicTypeRootKind::Constant {
+                        type_id: declaration.value.type_id,
+                    },
+                });
+            }
+
+            // Trait declarations, non-declaration headers and trait relations are not type roots.
+            HeaderKind::Trait { .. }
+            | HeaderKind::ConstTemplate { .. }
+            | HeaderKind::StartFunction
+            | HeaderKind::TraitConformance { .. }
+            | HeaderKind::TraitIncompatibility { .. } => {}
+        }
+    }
+
+    // Pass 2: select receiver methods attached to public nominal receivers owned by this module.
+    // Real methods on a public receiver are normally private headers outside `export:`, so this
+    // pass ignores the method header's export mode and file role and selects by the receiver path
+    // admitted in Pass 1/1b. Imported-provider methods cannot enter because their receiver paths
+    // are not in this module's public nominal set.
+    let mut receiver_method_entries = Vec::new();
+    for header in sorted_headers {
         if !matches!(&header.kind, HeaderKind::Function { .. }) {
             continue;
         }
 
         let path = &header.tokens.src_path;
-        // AST environment construction resolves every function signature before this table,
-        // so an active-root function missing from the signature table is an internal error,
-        // not a skip. Imported roots and non-function headers are excluded above.
+        // AST environment construction resolves every function signature before this table, so
+        // a function whose receiver is selected below must have a resolved signature.
         let Some(resolved) = resolved_function_signatures_by_path.get(path) else {
             return Err(missing_resolved_function_signature(path, string_table));
         };

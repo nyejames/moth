@@ -537,6 +537,44 @@ impl<'a> BorrowChecker<'a> {
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
             }
+            CallTarget::ModulePrivate(identity) => {
+                let Some(summary) = self.module.module_private_call_summaries.get(identity) else {
+                    return Err(self.diagnostics.internal_error(
+                        format!(
+                            "Borrow checker is missing the call summary for module-private function {identity:?}"
+                        ),
+                        self.diagnostics.statement_error_location(statement),
+                    ));
+                };
+                let Some(parameter) = summary.parameters.get(argument_index) else {
+                    return Err(self.diagnostics.internal_error(
+                        format!(
+                            "Borrow checker found out-of-range argument {argument_index} while finalizing module-private call summary for {identity:?}"
+                        ),
+                        self.diagnostics.statement_error_location(statement),
+                    ));
+                };
+                Ok(parameter.mutation == PublicCallMutationEffect::Writes)
+            }
+            CallTarget::Generated(identity) => {
+                let Some(summary) = self.module.generated_call_summaries.get(identity) else {
+                    return Err(self.diagnostics.internal_error(
+                        format!(
+                            "Borrow checker is missing the call summary for generated function {identity:?}"
+                        ),
+                        self.diagnostics.statement_error_location(statement),
+                    ));
+                };
+                let Some(parameter) = summary.parameters.get(argument_index) else {
+                    return Err(self.diagnostics.internal_error(
+                        format!(
+                            "Borrow checker found out-of-range argument {argument_index} while finalizing generated call summary for {identity:?}"
+                        ),
+                        self.diagnostics.statement_error_location(statement),
+                    ));
+                };
+                Ok(parameter.mutation == PublicCallMutationEffect::Writes)
+            }
             CallTarget::External(function_id) => {
                 let Some(definition) = self
                     .external_package_registry
@@ -1000,6 +1038,22 @@ impl<'a> BorrowChecker<'a> {
                 reachable_blocks,
                 visiting_locals,
             ),
+            CallTarget::ModulePrivate(identity) => self.project_module_private_call_return_alias(
+                function,
+                &identity,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                visiting_locals,
+            ),
+            CallTarget::Generated(identity) => self.project_generated_call_return_alias(
+                function,
+                &identity,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                visiting_locals,
+            ),
             CallTarget::External(function_id) => {
                 let Some(definition) = self
                     .external_package_registry
@@ -1051,6 +1105,22 @@ impl<'a> BorrowChecker<'a> {
             CallTarget::CrossModule(origin) => self.project_imported_call_return_alias(
                 function,
                 &origin,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                visiting_locals,
+            ),
+            CallTarget::ModulePrivate(identity) => self.project_module_private_call_return_alias(
+                function,
+                &identity,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                visiting_locals,
+            ),
+            CallTarget::Generated(identity) => self.project_generated_call_return_alias(
+                function,
+                &identity,
                 args,
                 param_index_by_local,
                 reachable_blocks,
@@ -1149,6 +1219,68 @@ impl<'a> BorrowChecker<'a> {
                 param_index_by_local,
                 reachable_blocks,
                 callee_description: "imported function",
+            },
+            visiting_locals,
+        )
+    }
+
+    fn project_generated_call_return_alias(
+        &self,
+        function: &HirFunction,
+        identity: &crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+        args: &[HirExpression],
+        param_index_by_local: &FxHashMap<LocalId, usize>,
+        reachable_blocks: &[BlockId],
+        visiting_locals: &mut FxHashSet<LocalId>,
+    ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
+        let Some(summary) = self.module.generated_call_summaries.get(identity) else {
+            return Err(self.diagnostics.internal_error(
+                format!(
+                    "Borrow checker is missing the call summary for generated function {identity:?} while classifying a forwarded return"
+                ),
+                self.diagnostics.function_error_location(function.id),
+            ));
+        };
+
+        self.project_alias_summary_through_arguments(
+            AliasProjectionContext {
+                function,
+                return_alias: &summary.return_alias,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                callee_description: "generated function",
+            },
+            visiting_locals,
+        )
+    }
+
+    fn project_module_private_call_return_alias(
+        &self,
+        function: &HirFunction,
+        identity: &crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
+        args: &[HirExpression],
+        param_index_by_local: &FxHashMap<LocalId, usize>,
+        reachable_blocks: &[BlockId],
+        visiting_locals: &mut FxHashSet<LocalId>,
+    ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
+        let Some(summary) = self.module.module_private_call_summaries.get(identity) else {
+            return Err(self.diagnostics.internal_error(
+                format!(
+                    "Borrow checker is missing the call summary for module-private function {identity:?} while classifying a forwarded return"
+                ),
+                self.diagnostics.function_error_location(function.id),
+            ));
+        };
+
+        self.project_alias_summary_through_arguments(
+            AliasProjectionContext {
+                function,
+                return_alias: &summary.return_alias,
+                args,
+                param_index_by_local,
+                reachable_blocks,
+                callee_description: "module-private function",
             },
             visiting_locals,
         )

@@ -144,6 +144,8 @@ impl BackendBuilder for HtmlProjectBuilder {
                     entry.external_imports,
                     &entry.linked_modules,
                     Arc::clone(&entry.source_function_names),
+                    Arc::clone(&entry.module_private_function_names),
+                    Arc::clone(&entry.generated_function_names),
                     &logical_html_output_path,
                     config.project_name.as_str(),
                     &document_config,
@@ -361,6 +363,18 @@ impl HtmlProjectBuilder {
                 String,
             >,
         >,
+        module_private_function_names: Arc<
+            std::collections::HashMap<
+                crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
+                String,
+            >,
+        >,
+        generated_function_names: Arc<
+            std::collections::HashMap<
+                crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+                String,
+            >,
+        >,
         logical_html_output_path: &Path,
         project_name: &str,
         document_config: &crate::projects::html_project::document_config::HtmlDocumentConfig,
@@ -459,6 +473,8 @@ impl HtmlProjectBuilder {
                 external_imports,
                 linked_modules,
                 source_function_names,
+                module_private_function_names,
+                generated_function_names,
                 &compile_input,
                 string_table,
                 logical_html_output_path.to_path_buf(),

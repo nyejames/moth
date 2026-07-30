@@ -299,19 +299,23 @@ impl<'a> RootIndex<'a> {
         Ok(Self { roots_by_name })
     }
 
-    /// Remove and return the root for `public_name`, or `CompilerError` when no root matches.
+    /// Remove and return the root for an export binding, or `CompilerError` when no root matches.
     ///
-    /// Consuming the root guarantees each transient root joins at most one binding and lets the
-    /// caller detect a root left unmatched after every binding has joined.
-    pub(super) fn take(
+    /// Roots retain their defining declaration names while bindings retain public aliases. The
+    /// stable origin joins those two identities without adding a duplicate alias entry that would
+    /// leave the defining root unmatched after projection.
+    pub(super) fn take_for_binding(
         &mut self,
-        public_name: &str,
+        binding: &ExportBinding,
     ) -> Result<&'a ResolvedPublicTypeRoot, CompilerError> {
-        self.roots_by_name.remove(public_name).ok_or_else(|| {
+        let defining_name = binding.origin().defining_name();
+        self.roots_by_name.remove(defining_name).ok_or_else(|| {
             CompilerError::compiler_error(format!(
-                "defined public type-surface projection: the export binding '{}' has no \
-                 matching public type root; every non-trait binding must join exactly one root",
-                public_name
+                "defined public type-surface projection: the export binding '{}' for defining \
+                 declaration '{}' has no matching public type root; every non-trait binding must \
+                 join exactly one root",
+                binding.public_name(),
+                defining_name
             ))
         })
     }
@@ -347,11 +351,15 @@ pub(super) fn register_generic_parameter_origins(
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
 ) -> Result<(), CompilerError> {
-    // Build a name-to-function-origin lookup from the export bindings.
+    // Build a defining-name-to-function-origin lookup from the export bindings. Public aliases
+    // remain spelling only and must not affect generic declaration identity.
     let mut function_origin_by_name: FxHashMap<&str, &OriginFunctionId> = FxHashMap::default();
     for binding in export_bindings {
         if let OriginDeclarationId::Function(function_origin) = binding.origin() {
-            function_origin_by_name.insert(binding.public_name(), function_origin);
+            if function_origin.module_origin() != binding.exporting_module() {
+                continue;
+            }
+            function_origin_by_name.insert(function_origin.defining_name(), function_origin);
         }
     }
 

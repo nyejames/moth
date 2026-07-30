@@ -79,6 +79,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &mut self.type_environment,
             string_table,
         )?;
+        self.project_imported_trait_declarations(&mut trait_environment, string_table)
+            .map_err(|error| self.error_messages(error, string_table))?;
 
         for header in sorted_headers {
             let HeaderKind::Trait { declaration } = &header.kind else {

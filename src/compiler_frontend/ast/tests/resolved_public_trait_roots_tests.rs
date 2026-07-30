@@ -124,9 +124,13 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
         ),
     ];
 
-    let trait_roots =
-        build_resolved_public_trait_roots(&headers, &trait_environment, &string_table)
-            .expect("two public active-root traits should produce two roots");
+    let trait_roots = build_resolved_public_trait_roots(
+        &headers,
+        &Default::default(),
+        &trait_environment,
+        &string_table,
+    )
+    .expect("two public active-root traits should produce two roots");
 
     assert_eq!(trait_roots.len(), 2);
     assert_eq!(
@@ -171,9 +175,13 @@ fn excludes_private_traits() {
         ),
     ];
 
-    let trait_roots =
-        build_resolved_public_trait_roots(&headers, &trait_environment, &string_table)
-            .expect("private traits are excluded, not errors");
+    let trait_roots = build_resolved_public_trait_roots(
+        &headers,
+        &Default::default(),
+        &trait_environment,
+        &string_table,
+    )
+    .expect("private traits are excluded, not errors");
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
@@ -212,9 +220,13 @@ fn excludes_imported_and_non_active_root_traits() {
         ),
     ];
 
-    let trait_roots =
-        build_resolved_public_trait_roots(&headers, &trait_environment, &string_table)
-            .expect("imported traits are excluded, not errors");
+    let trait_roots = build_resolved_public_trait_roots(
+        &headers,
+        &Default::default(),
+        &trait_environment,
+        &string_table,
+    )
+    .expect("imported traits are excluded, not errors");
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
@@ -242,7 +254,12 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
         &mut string_table,
     )];
 
-    let result = build_resolved_public_trait_roots(&headers, &trait_environment, &string_table);
+    let result = build_resolved_public_trait_roots(
+        &headers,
+        &Default::default(),
+        &trait_environment,
+        &string_table,
+    );
 
     let error = result.expect_err("a source header must not project a compiler-owned core trait");
     assert!(
@@ -276,9 +293,13 @@ fn excludes_non_trait_declarations() {
         ),
     ];
 
-    let trait_roots =
-        build_resolved_public_trait_roots(&headers, &trait_environment, &string_table)
-            .expect("non-trait headers are skipped");
+    let trait_roots = build_resolved_public_trait_roots(
+        &headers,
+        &Default::default(),
+        &trait_environment,
+        &string_table,
+    )
+    .expect("non-trait headers are skipped");
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
@@ -299,7 +320,12 @@ fn missing_trait_definition_is_compiler_error() {
         &mut string_table,
     )];
 
-    let result = build_resolved_public_trait_roots(&headers, &trait_environment, &string_table);
+    let result = build_resolved_public_trait_roots(
+        &headers,
+        &Default::default(),
+        &trait_environment,
+        &string_table,
+    );
 
     assert!(
         matches!(result, Err(CompilerError { .. })),
@@ -348,9 +374,13 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
         ),
     ];
 
-    let trait_roots =
-        build_resolved_public_trait_roots(&headers, &trait_environment, &string_table)
-            .expect("two public traits with a public incompatibility produce two roots");
+    let trait_roots = build_resolved_public_trait_roots(
+        &headers,
+        &Default::default(),
+        &trait_environment,
+        &string_table,
+    )
+    .expect("two public traits with a public incompatibility produce two roots");
 
     assert_eq!(trait_roots.len(), 2);
 
@@ -400,9 +430,13 @@ fn private_incompatibility_relation_is_absent_from_trait_roots() {
         ),
     ];
 
-    let trait_roots =
-        build_resolved_public_trait_roots(&headers, &trait_environment, &string_table)
-            .expect("private relations are excluded from trait roots, not errors");
+    let trait_roots = build_resolved_public_trait_roots(
+        &headers,
+        &Default::default(),
+        &trait_environment,
+        &string_table,
+    )
+    .expect("private relations are excluded from trait roots, not errors");
 
     assert_eq!(trait_roots.len(), 2);
     assert!(

@@ -1,0 +1,6 @@
+import @provider { DISPLAY_TEXT, LabelBox, make_label }
+
+build_label_box || -> String:
+    box = LabelBox(make_label("hidden"))
+    return box.value.text
+;

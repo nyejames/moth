@@ -48,7 +48,11 @@ pub(crate) fn validate_generic_function_body(
     } = input;
 
     context.generic_template_validation = true;
-    let mut token_stream = template.body_tokens.to_owned();
+    let mut token_stream = template
+        .body_tokens
+        .as_ref()
+        .expect("declaring-module generic validation requires retained body syntax")
+        .to_owned();
     let validated_nodes = function_body_to_ast(
         &mut token_stream,
         context,

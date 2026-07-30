@@ -26,6 +26,7 @@
 
 mod compilation;
 mod frontend_orchestration;
+pub(crate) mod generated_worklist;
 pub(crate) mod import_scanning;
 mod module_identity;
 mod module_inventory;
@@ -55,7 +56,7 @@ pub(crate) use crate::projects::settings;
 #[cfg(test)]
 pub(crate) use std::fs;
 
-use crate::build_system::build::Module;
+use crate::build_system::build::ProjectFrontendCompilation;
 
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
@@ -80,7 +81,7 @@ pub fn compile_project_frontend(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
-) -> Result<Vec<Module>, CompilerMessages> {
+) -> Result<ProjectFrontendCompilation, CompilerMessages> {
     // Frontend counters are command-scoped and gated by `benchmark_counters`.
     // The counter storage is atomic so directory module compilation can update
     // it safely from Rayon workers.

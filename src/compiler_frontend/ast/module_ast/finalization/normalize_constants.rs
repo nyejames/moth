@@ -73,7 +73,7 @@ impl AstFinalizer<'_, '_> {
             // Wrapper constants remain valid here even when their authored source used
             // slot-oriented composition structure, as long as the final constant value
             // classifies as `RenderableString` or `WrapperTemplate`.
-            if self.contains_helper_only_template_value(&declaration.value)? {
+            if self.is_helper_only_template_value(&declaration.value)? {
                 continue;
             }
 
@@ -243,74 +243,34 @@ pub(super) fn normalize_module_constant_template_expression(
 // --------------------------
 
 impl AstFinalizer<'_, '_> {
-    fn contains_helper_only_template_value(
+    fn is_helper_only_template_value(
         &self,
         expression: &Expression,
     ) -> Result<bool, TemplateNormalizationError> {
-        let contains_helper = match &expression.kind {
-            ExpressionKind::Template(template) => {
-                let store = self.context.template_ir_store.borrow();
-                let template_kind = effective_template_kind_from_store(template, &store)?;
-                if !matches!(template_kind, TemplateType::SlotInsert(_)) {
-                    return Ok(false);
-                }
-
-                let reference = &template.tir_reference;
-                let view = TirView::with_minimum_phase(
-                    &store,
-                    reference.root,
-                    reference.phase,
-                    TemplateTirPhase::Composed,
-                    reference.context,
-                )?;
-                let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
-                matches!(
-                    preparation,
-                    PreparedTemplate::Helper(TemplateHelperKind::SlotInsert)
-                )
-            }
-
-            ExpressionKind::Collection(items) => {
-                for item in items {
-                    if self.contains_helper_only_template_value(item)? {
-                        return Ok(true);
-                    }
-                }
-                false
-            }
-
-            ExpressionKind::StructInstance(fields)
-            | ExpressionKind::ChoiceConstruct { fields, .. } => {
-                for field in fields {
-                    if self.contains_helper_only_template_value(&field.value)? {
-                        return Ok(true);
-                    }
-                }
-                false
-            }
-
-            ExpressionKind::Range(start, end) => {
-                self.contains_helper_only_template_value(start)?
-                    || self.contains_helper_only_template_value(end)?
-            }
-
-            #[cfg(test)]
-            ExpressionKind::FallibleCarrierConstruct { value, .. } => {
-                self.contains_helper_only_template_value(value)?
-            }
-
-            ExpressionKind::OptionPropagation { value } => {
-                self.contains_helper_only_template_value(value)?
-            }
-
-            ExpressionKind::Coerced { value, .. } => {
-                self.contains_helper_only_template_value(value)?
-            }
-
-            _ => false,
+        let ExpressionKind::Template(template) = &expression.kind else {
+            return Ok(false);
         };
 
-        Ok(contains_helper)
+        let store = self.context.template_ir_store.borrow();
+        let template_kind = effective_template_kind_from_store(template, &store)?;
+        if !matches!(template_kind, TemplateType::SlotInsert(_)) {
+            return Ok(false);
+        }
+
+        let reference = &template.tir_reference;
+        let view = TirView::with_minimum_phase(
+            &store,
+            reference.root,
+            reference.phase,
+            TemplateTirPhase::Composed,
+            reference.context,
+        )?;
+        let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+
+        Ok(matches!(
+            preparation,
+            PreparedTemplate::Helper(TemplateHelperKind::SlotInsert)
+        ))
     }
 }
 

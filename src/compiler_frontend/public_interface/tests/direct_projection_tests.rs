@@ -260,6 +260,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         trait_roots: vec![trait_root],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
 
     let max_size_constant = Declaration {
@@ -412,6 +413,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -526,6 +528,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
 
     // Build a generic function template for the receiver method, using the same generic
@@ -533,9 +536,10 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     let template = GenericFunctionTemplate {
         function_path: method_fn_path.clone(),
         source_file: InternedPath::new(),
+        declaration_identity: None,
         generic_parameter_list_id: list_id,
         signature: method_signature,
-        body_tokens: FileTokens::new(method_fn_path.clone(), vec![]),
+        body_tokens: Some(FileTokens::new(method_fn_path.clone(), vec![])),
         declaration_location: SourceLocation::default(),
     };
     let template_map: FxHashMap<InternedPath, GenericFunctionTemplate> =
@@ -607,6 +611,7 @@ fn module_origin_survives_empty_public_surface() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -730,6 +735,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -829,6 +835,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -926,6 +933,7 @@ fn choice_payload_fields_remain_default_free() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -1024,6 +1032,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();

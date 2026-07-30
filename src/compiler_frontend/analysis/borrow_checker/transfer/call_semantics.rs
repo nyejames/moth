@@ -128,6 +128,84 @@ pub(super) fn resolve_call_semantics(
             })
         }
 
+        CallTarget::ModulePrivate(identity) => {
+            let Some(summary) = context.module_private_call_summaries.get(identity) else {
+                return Err(context.diagnostics.internal_error(
+                    format!(
+                        "Borrow checker is missing the call summary for module-private function {identity:?}"
+                    ),
+                    location,
+                ));
+            };
+
+            if summary.parameters.len() != arg_len {
+                return Err(context.diagnostics.internal_error(
+                    format!(
+                        "Borrow checker found argument count mismatch for module-private function {identity:?}: expected {}, got {}",
+                        summary.parameters.len(),
+                        arg_len
+                    ),
+                    location,
+                ));
+            }
+
+            validate_return_alias_summary(
+                context,
+                &summary.return_alias,
+                arg_len,
+                location,
+                &format!("module-private function {identity:?}"),
+            )?;
+
+            Ok(CallSemantics {
+                arg_effects: summary
+                    .parameters
+                    .iter()
+                    .map(parameter_arg_effect)
+                    .collect(),
+                return_alias: summary.return_alias.clone(),
+            })
+        }
+
+        CallTarget::Generated(identity) => {
+            let Some(summary) = context.generated_call_summaries.get(identity) else {
+                return Err(context.diagnostics.internal_error(
+                    format!(
+                        "Borrow checker is missing the call summary for generated function {identity:?}"
+                    ),
+                    location,
+                ));
+            };
+
+            if summary.parameters.len() != arg_len {
+                return Err(context.diagnostics.internal_error(
+                    format!(
+                        "Borrow checker found argument count mismatch for generated function {identity:?}: expected {}, got {}",
+                        summary.parameters.len(),
+                        arg_len
+                    ),
+                    location,
+                ));
+            }
+
+            validate_return_alias_summary(
+                context,
+                &summary.return_alias,
+                arg_len,
+                location,
+                &format!("generated function {identity:?}"),
+            )?;
+
+            Ok(CallSemantics {
+                arg_effects: summary
+                    .parameters
+                    .iter()
+                    .map(parameter_arg_effect)
+                    .collect(),
+                return_alias: summary.return_alias.clone(),
+            })
+        }
+
         CallTarget::External(id) => {
             let host_def = resolve_host_definition(context, *id, location.clone())?;
             if host_def.parameters.len() != arg_len {

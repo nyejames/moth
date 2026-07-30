@@ -13,7 +13,8 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
     ContextKind, ReceiverMethodCatalog, ScopeContext,
 };
 use crate::compiler_frontend::ast::receiver_methods::{
-    BuildReceiverMethodCatalogInput, ReceiverMethodCatalogError, build_receiver_method_catalog,
+    BuildReceiverMethodCatalogInput, ReceiverMethodCatalogError, ReceiverMethodEntry,
+    build_receiver_method_catalog,
 };
 use crate::compiler_frontend::ast::statements::functions::function_signature_from_syntax_with_unresolved_types;
 use crate::compiler_frontend::ast::statements::functions::{
@@ -40,6 +41,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -316,7 +318,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             sorted_headers.len(),
         );
 
-        let catalog = build_receiver_method_catalog(BuildReceiverMethodCatalogInput {
+        let mut catalog = build_receiver_method_catalog(BuildReceiverMethodCatalogInput {
             sorted_headers,
             resolved_function_signatures_by_path: &self.resolved_function_signatures_by_path,
             struct_fields_by_path: &self.resolved_struct_fields_by_path,
@@ -333,6 +335,71 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 self.error_messages(*error, string_table)
             }
         })?;
+
+        for function_path in self.projected_imported_functions_by_local_path.keys() {
+            let Some(resolved) = self.resolved_function_signatures_by_path.get(function_path)
+            else {
+                return Err(self.error_messages(
+                    CompilerError::compiler_error(format!(
+                        "Imported callable path {function_path:?} has no resolved signature"
+                    )),
+                    string_table,
+                ));
+            };
+            let Some(receiver) = resolved.receiver.as_ref() else {
+                continue;
+            };
+            let Some(method_name) = function_path.name() else {
+                return Err(self.error_messages(
+                    CompilerError::compiler_error(
+                        "Imported receiver method path has no final method-name component",
+                    ),
+                    string_table,
+                ));
+            };
+            let entry = ReceiverMethodEntry {
+                function_path: function_path.clone(),
+                receiver: receiver.clone(),
+                source_file: function_path.parent().unwrap_or_else(InternedPath::new),
+                receiver_mutable: resolved
+                    .signature
+                    .parameters
+                    .first()
+                    .is_some_and(|parameter| parameter.value.value_mode.is_mutable()),
+                signature: resolved.signature.clone(),
+            };
+
+            catalog
+                .by_receiver_and_name
+                .entry((receiver.clone(), method_name))
+                .or_default()
+                .push(entry.clone());
+            catalog
+                .by_method_name
+                .entry(method_name)
+                .or_default()
+                .push(entry.clone());
+            if catalog
+                .by_function_path
+                .insert(function_path.clone(), entry)
+                .is_some()
+            {
+                return Err(self.error_messages(
+                    CompilerError::compiler_error(format!(
+                        "Imported receiver method path {function_path:?} collides with an existing receiver method"
+                    )),
+                    string_table,
+                ));
+            }
+        }
+
+        for entries in catalog.by_method_name.values_mut() {
+            entries.sort_by(|left, right| {
+                left.function_path
+                    .to_string(string_table)
+                    .cmp(&right.function_path.to_string(string_table))
+            });
+        }
         add_ast_counter(
             AstCounter::ReceiverMethodsRegistered,
             catalog.by_function_path.len(),
@@ -413,9 +480,10 @@ fn build_generic_function_template(
     GenericFunctionTemplate {
         function_path: header.tokens.src_path.to_owned(),
         source_file: header.source_file.to_owned(),
+        declaration_identity: None,
         generic_parameter_list_id,
         signature: signature.to_owned(),
-        body_tokens: header.tokens.to_owned(),
+        body_tokens: Some(header.tokens.to_owned()),
         declaration_location: header.name_location.to_owned(),
     }
 }

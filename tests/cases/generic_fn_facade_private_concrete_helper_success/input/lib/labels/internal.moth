@@ -1,0 +1,7 @@
+private_label || -> String:
+    return "private-helper"
+;
+
+label_impl type T |value T| -> String:
+    return private_label()
+;

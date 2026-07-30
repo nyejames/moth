@@ -101,11 +101,9 @@ mod tests;
 // -------------------------
 
 pub(crate) use ids::{
-    ExpressionSiteId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId,
+    ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
+    TemplateWrapperSetId,
 };
-
-#[cfg(test)]
-pub(crate) use ids::SlotOccurrenceId;
 
 pub(crate) use expression_payload_walker::walk_tir_view_expression_payloads;
 pub(crate) use expression_payload_walker::{
@@ -121,6 +119,7 @@ pub(crate) use node::{
 pub(crate) use store::TemplateIrStore;
 #[cfg(test)]
 pub(crate) use summary::TemplateIrSummary;
+pub(crate) use summary::summarize_existing_root;
 
 pub(crate) use refs::{TemplateTirReference, TemplateWrapperReference};
 pub(crate) use view::{TirView, TirViewIdentity};
@@ -162,7 +161,9 @@ pub(crate) use classification::{
     tir_subtree_has_unresolved_slots,
 };
 
-pub(crate) use fold::fold_prepared_template;
+pub(crate) use fold::{
+    FoldedConstTemplatePiece, fold_prepared_const_template_pattern, fold_prepared_template,
+};
 pub(crate) use handoff_materialization::{
     owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
 };

@@ -12,6 +12,7 @@ use super::super::emission::AstEmission;
 use super::super::environment::AstModuleEnvironment;
 use super::const_fact_collection::ConstFactCollector;
 use super::normalize_ast::TemplateNormalizationError;
+use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     collect_and_strip_comment_templates, collect_const_top_level_fragments,
 };
@@ -171,6 +172,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Normalize module constants
         // ----------------------------
         let module_constant_normalization_start = Instant::now();
+        let public_const_templates = self
+            .project_public_const_templates(project_path_resolver, string_table)
+            .map_err(|error| {
+                self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+            })?;
         let module_constants = self
             .normalize_module_constants_for_hir(project_path_resolver, string_table)
             .map_err(|error| {
@@ -289,6 +295,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             }
         };
 
+        let materialisation_context = ModuleMaterialisationContext::from_environment(
+            &owned_lookups,
+            &type_environment,
+            &resolved_public_trait_roots,
+            self.context.entry_dir.clone(),
+            string_table,
+            self.context.template_const_loop_iteration_limit,
+            self.context.capacity_estimate,
+        );
         let rendered_path_usages =
             std::mem::take(&mut *owned_lookups.rendered_path_usages.borrow_mut());
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
@@ -296,9 +311,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             trait_roots: resolved_public_trait_roots,
             trait_environment: Some(owned_lookups.trait_environment),
             trait_evidence_environment: Some(owned_lookups.trait_evidence_environment),
+            const_templates_by_name: public_const_templates,
         };
-        let generic_function_templates = owned_lookups.generic_function_templates_by_path;
-
         Ok(AstBuildResult {
             ast: Ast {
                 nodes: emitted.ast,
@@ -316,7 +330,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 imported_functions_by_local_path: owned_lookups.imported_functions_by_local_path,
             },
             public_interface_projection_input,
-            generic_function_templates,
+            materialisation_context,
+            deferred_generic_requests: emitted.deferred_generic_requests,
         })
     }
 

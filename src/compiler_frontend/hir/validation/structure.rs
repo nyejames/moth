@@ -10,7 +10,6 @@ use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::utils::terminator_targets;
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
@@ -133,14 +132,24 @@ impl<'a> HirValidator<'a> {
         // functions, so this loop independently catches the reverse direction (two origins
         // mapped to one local function) against malformed HIR inputs rather than relying only
         // on construction-time map key uniqueness.
-        let mut origin_for_local_function: FxHashMap<FunctionId, &OriginFunctionId> =
-            FxHashMap::default();
-        for (origin, function_id) in &self.module.function_ids_by_origin {
+        let mut identity_for_local_function: FxHashMap<FunctionId, String> = FxHashMap::default();
+        for (identity, function_id) in self
+            .module
+            .function_ids_by_origin
+            .iter()
+            .map(|(origin, function_id)| (format!("{origin:?}"), function_id))
+            .chain(
+                self.module
+                    .function_ids_by_private_origin
+                    .iter()
+                    .map(|(identity, function_id)| (format!("{identity:?}"), function_id)),
+            )
+        {
             if Some(*function_id) == self.module.start_function {
                 return Err(self.error_with_hir(
                     format!(
-                        "HIR implicit start function {:?} must not carry a public function origin {:?}",
-                        function_id, origin
+                        "HIR implicit start function {:?} must not carry a stable executable identity {}",
+                        function_id, identity
                     ),
                     Some(HirLocation::Function(*function_id)),
                 ));
@@ -149,24 +158,24 @@ impl<'a> HirValidator<'a> {
             if !self.function_ids.contains(function_id) {
                 return Err(self.error_with_hir(
                     format!(
-                        "HIR public function origin {:?} references missing function {:?}",
-                        origin, function_id
+                        "HIR stable executable identity {} references missing function {:?}",
+                        identity, function_id
                     ),
                     Some(HirLocation::Function(*function_id)),
                 ));
             }
 
-            if let Some(existing_origin) = origin_for_local_function.get(function_id) {
+            if let Some(existing_identity) = identity_for_local_function.get(function_id) {
                 return Err(self.error_with_hir(
                     format!(
-                        "HIR public function origins {:?} and {:?} both map to local function {:?}",
-                        existing_origin, origin, function_id
+                        "HIR stable executable identities {} and {} both map to local function {:?}",
+                        existing_identity, identity, function_id
                     ),
                     Some(HirLocation::Function(*function_id)),
                 ));
             }
 
-            origin_for_local_function.insert(*function_id, origin);
+            identity_for_local_function.insert(*function_id, identity);
         }
 
         Ok(())

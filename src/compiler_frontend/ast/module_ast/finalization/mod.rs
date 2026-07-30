@@ -13,6 +13,7 @@ pub(super) mod debug_type_validation;
 pub(in crate::compiler_frontend::ast) mod finalizer;
 pub(super) mod normalize_ast;
 pub(super) mod normalize_constants;
+pub(super) mod public_const_templates;
 pub(super) mod reactive_templates;
 pub(super) mod template_helpers;
 pub(super) mod validate_types;

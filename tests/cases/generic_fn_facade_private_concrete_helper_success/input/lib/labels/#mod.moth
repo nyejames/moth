@@ -1,0 +1,7 @@
+import @internal {label_impl}
+
+export:
+    label type T |value T| -> String:
+        return label_impl(value)
+    ;
+;

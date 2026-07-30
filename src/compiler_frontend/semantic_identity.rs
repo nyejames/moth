@@ -17,9 +17,118 @@
 //! does not invent a string-based or placeholder evidence key.
 
 use crate::builder_surface::PackageOrigin;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalEvidenceIdentity, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use std::path::{Component, Path};
+
+/// Stable declaration target for one generated generic function.
+///
+/// Public generics retain their consumer-visible origin. Private generics use the same
+/// artefact-scoped executable identity as other private call targets, so they remain resolvable
+/// without acquiring a public interface identity.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum GeneratedDeclarationIdentity {
+    Public(OriginFunctionId),
+    ModulePrivate(ModulePrivateExecutableIdentity),
+}
+
+impl GeneratedDeclarationIdentity {
+    pub(crate) fn defining_name(&self) -> &str {
+        match self {
+            Self::Public(origin) => origin.defining_name(),
+            Self::ModulePrivate(identity) => identity.defining_name(),
+        }
+    }
+}
+
+/// Stable identity for one concrete generated generic function.
+///
+/// The build-owned worklist deduplicates this exact declaration/type/evidence tuple across
+/// requesters. Call locations and requester modules remain diagnostic context and never affect
+/// identity.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct GeneratedFunctionIdentity {
+    declaration: GeneratedDeclarationIdentity,
+    type_arguments: Box<[CanonicalTypeIdentity]>,
+    evidence: Box<[CanonicalEvidenceIdentity]>,
+}
+
+impl GeneratedFunctionIdentity {
+    pub(crate) fn new(
+        declaration: GeneratedDeclarationIdentity,
+        type_arguments: Box<[CanonicalTypeIdentity]>,
+        evidence: Box<[CanonicalEvidenceIdentity]>,
+    ) -> Self {
+        Self {
+            declaration,
+            type_arguments,
+            evidence,
+        }
+    }
+
+    pub(crate) fn declaration(&self) -> &GeneratedDeclarationIdentity {
+        &self.declaration
+    }
+
+    pub(crate) fn type_arguments(&self) -> &[CanonicalTypeIdentity] {
+        &self.type_arguments
+    }
+
+    pub(crate) fn evidence(&self) -> &[CanonicalEvidenceIdentity] {
+        &self.evidence
+    }
+}
+
+/// Artefact-scoped identity for an executable that is not part of a public interface.
+///
+/// Private executables remain resolvable by generated sidecars without acquiring a public
+/// [`OriginFunctionId`]. The declaring source binds the identity to its defining artefact scope,
+/// while the optional receiver path keeps same-named methods on distinct module-private receiver
+/// surfaces disjoint. The receiver path is artefact-local by design: private source nominals do
+/// not acquire a public [`OriginTypeId`] merely so their methods can be called from a generated
+/// sidecar. Generated sidecars retain the declaring implementation compatibility fingerprint
+/// separately because compatibility and executable identity have different owners.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct ModulePrivateExecutableIdentity {
+    module_origin: StableModuleOriginIdentity,
+    declaring_source: String,
+    category: ModulePrivateExecutableCategory,
+    defining_name: String,
+    receiver_path: Option<String>,
+}
+
+impl ModulePrivateExecutableIdentity {
+    pub(crate) fn new(
+        module_origin: StableModuleOriginIdentity,
+        declaring_source: String,
+        category: ModulePrivateExecutableCategory,
+        defining_name: String,
+        receiver_path: Option<String>,
+    ) -> Self {
+        Self {
+            module_origin,
+            declaring_source,
+            category,
+            defining_name,
+            receiver_path,
+        }
+    }
+
+    pub(crate) fn defining_name(&self) -> &str {
+        &self.defining_name
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[allow(dead_code)]
+pub(crate) enum ModulePrivateExecutableCategory {
+    FreeFunction,
+    ReceiverMethod,
+    GenericFunction,
+}
 
 /// Owned, hashable, cross-build identity for one source package within one build boundary.
 ///
@@ -64,6 +173,18 @@ impl StablePackageIdentity {
         Self {
             origin,
             name: import_prefix.to_owned(),
+        }
+    }
+
+    /// Stable identity for one binding-backed package.
+    ///
+    /// Binding packages retain their exact canonical import path, including the leading `@`,
+    /// because that path and the package origin together identify the builder-supplied semantic
+    /// interface across independent registry constructions.
+    pub(crate) fn binding(origin: PackageOrigin, canonical_package_path: &str) -> Self {
+        Self {
+            origin,
+            name: canonical_package_path.to_owned(),
         }
     }
 
@@ -491,7 +612,7 @@ impl OriginConstantId {
 /// location, ordinary source-file path, declaration order, export alias or dense build-local ID.
 /// WHY: cross-module conformance evidence and trait references key off this origin so renaming a
 /// trait or moving it between modules alters identity while reordering and aliasing do not.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct OriginTraitId {
     module_origin: StableModuleOriginIdentity,
     defining_name: String,
@@ -547,6 +668,20 @@ impl OriginDeclarationId {
             OriginDeclarationId::Type(type_id) => type_id.module_origin(),
             OriginDeclarationId::Constant(constant) => constant.module_origin(),
             OriginDeclarationId::Trait(trait_id) => trait_id.module_origin(),
+        }
+    }
+
+    /// The exact defining declaration name.
+    ///
+    /// WHAT: the authored name of the declaration, independent of any export alias. For a
+    /// directly-defined export this equals the public name; for a re-export with an alias it
+    /// differs from the public name.
+    pub(crate) fn defining_name(&self) -> &str {
+        match self {
+            OriginDeclarationId::Function(function) => function.defining_name(),
+            OriginDeclarationId::Type(type_id) => type_id.defining_name(),
+            OriginDeclarationId::Constant(constant) => constant.defining_name(),
+            OriginDeclarationId::Trait(trait_id) => trait_id.defining_name(),
         }
     }
 }

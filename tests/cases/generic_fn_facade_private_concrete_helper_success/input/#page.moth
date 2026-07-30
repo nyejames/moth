@@ -1,0 +1,3 @@
+import @labels {label}
+
+[: [label(42)] ]

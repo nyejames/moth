@@ -75,6 +75,19 @@ impl ExternalImportResolutionTable {
         self.resolved_by_package_id.get(package_id)
     }
 
+    /// Looks up the runtime metadata retained for one provider-created package.
+    ///
+    /// Generated sidecars no longer have an authored source-file set from which to repeat the
+    /// source-index query. Their HIR already records exact external function identities, so link
+    /// planning resolves those functions to package IDs and joins the corresponding provider
+    /// metadata through this build-owned index.
+    pub(crate) fn get_by_package_id(
+        &self,
+        package_id: ExternalPackageId,
+    ) -> Option<&ResolvedExternalImport> {
+        self.resolved_by_package_id.get(&package_id)
+    }
+
     /// Collects unique resolved external imports for a set of source file logical paths.
     ///
     /// WHAT: looks up all resolution entries whose source file matches one of the provided logical

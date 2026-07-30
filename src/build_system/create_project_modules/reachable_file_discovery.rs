@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 
 use super::import_scanning::{ScannedImportSource, scan_imports_with_source};
 use super::module_identity::ModuleId;
-use super::module_namespace::{DirectoryImportResolution, NamespaceBoundary, ResolvedImport};
+use super::module_namespace::{DirectoryImportResolution, ResolvedImport};
 use super::prepared_source::PreparedSourceInput;
 use super::prepared_source_store::{MothScanOrigin, PreparedSourceStore};
 use super::semantic_source_set::SemanticSourceSet;
@@ -116,6 +116,14 @@ pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider: StructuralProviderReference,
 }
 
+/// One authored import from a module to a separately compiled source-package facade.
+#[derive(Clone, Debug)]
+pub(crate) struct ResolvedSourcePackageImport {
+    pub(super) consumer_module_id: ModuleId,
+    pub(super) import_prefix: String,
+    pub(super) provider: StructuralProviderReference,
+}
+
 /// Reachable discovery output pairing the file inventory with direct dependency edges.
 ///
 /// WHAT: the complete retained inventory plus the project-local `ModuleId` edges observed during
@@ -127,6 +135,7 @@ pub(crate) struct ResolvedDependencyEdge {
 pub(super) struct ReachableDiscoveryResult {
     pub(super) inventory: ReachableSourceInventory,
     pub(super) resolved_edges: Vec<ResolvedDependencyEdge>,
+    pub(super) source_package_imports: Vec<ResolvedSourcePackageImport>,
 }
 
 /// Collected reachable inputs for one entry plus the retained dependency edges.
@@ -139,6 +148,7 @@ pub(super) struct ReachableDiscoveryResult {
 pub(super) struct CollectedReachableInputs {
     pub(super) input_files: Vec<PreparedSourceInput>,
     pub(super) resolved_edges: Vec<ResolvedDependencyEdge>,
+    pub(super) source_package_imports: Vec<ResolvedSourcePackageImport>,
 }
 
 /// Retained Stage 0 source proven provider-free during the serial classification pass.
@@ -186,6 +196,7 @@ struct ReachableQueue<'a> {
     reachable: &'a BTreeSet<ReachableSourceFile>,
     queue: &'a mut VecDeque<ReachableSourceFile>,
     resolved_edges: &'a mut Vec<ResolvedDependencyEdge>,
+    source_package_imports: &'a mut Vec<ResolvedSourcePackageImport>,
     semantic_source_set: Option<&'a mut SemanticSourceSet>,
 }
 
@@ -263,6 +274,7 @@ pub(super) fn collect_reachable_input_files(
     let ReachableDiscoveryResult {
         inventory,
         resolved_edges,
+        source_package_imports,
     } = discovery;
 
     let input_files = assemble_input_files_from_inventory(
@@ -275,6 +287,7 @@ pub(super) fn collect_reachable_input_files(
     Ok(CollectedReachableInputs {
         input_files,
         resolved_edges,
+        source_package_imports,
     })
 }
 
@@ -321,7 +334,7 @@ pub(super) fn assemble_input_files_from_inventory(
                 set,
                 store,
                 local_source_cache.unwrap_or_default(),
-                resolution.project_source_tree_index(),
+                resolution.source_tree_index(),
                 string_table,
             )
         }
@@ -671,7 +684,7 @@ fn scan_moth_source(
                     "Store source storage requires directory import resolution",
                 )
             })?;
-            let source_tree_index = resolution.project_source_tree_index();
+            let source_tree_index = resolution.source_tree_index();
             let Some(source_id) = source_tree_index.source_id_for_canonical_path(canonical_file)
             else {
                 return scan_and_cache_local_moth_source(
@@ -704,7 +717,7 @@ fn scan_moth_source(
                 )
             })?;
             let source_id = resolution
-                .project_source_tree_index()
+                .source_tree_index()
                 .source_id_for_canonical_path(canonical_file)
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
@@ -746,6 +759,7 @@ struct ReachableTraversalOutcome {
     inventory: ReachableSourceInventory,
     provider_capable_required: bool,
     resolved_edges: Vec<ResolvedDependencyEdge>,
+    source_package_imports: Vec<ResolvedSourcePackageImport>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -770,6 +784,7 @@ fn traverse_reachable_source_files(
     let mut imports_scanned: usize = 0;
     let mut provider_capable_required = false;
     let mut resolved_edges: Vec<ResolvedDependencyEdge> = Vec::new();
+    let mut source_package_imports = Vec::new();
 
     // Build the project semantic source set for one normal entry module when the traversal is a
     // per-entry directory discovery. Classification passes multiple entries and does not build
@@ -803,7 +818,7 @@ fn traverse_reachable_source_files(
                 SemanticSourceSet::from_entry_source(
                     source_id,
                     module_id,
-                    resolution.project_source_tree_index(),
+                    resolution.source_tree_index(),
                 )
                 .map_err(SourceDiscoveryError::from)?,
             )
@@ -816,16 +831,6 @@ fn traverse_reachable_source_files(
     for entry_path in entry_paths {
         queue.push_back(ReachableSourceFile {
             path: entry_path.clone(),
-            kind: SourceFileKind::Moth,
-        });
-    }
-
-    // Seed every source-backed package root file so its authored public surface is available.
-    // WHY: imports may directly resolve to a target file after Stage 0 path scanning, but the
-    // root file still needs to be compiled so its public declarations can be checked later.
-    for (_, root_path) in project_path_resolver.source_package_public_surface_files() {
-        queue.push_back(ReachableSourceFile {
-            path: root_path.clone(),
             kind: SourceFileKind::Moth,
         });
     }
@@ -917,6 +922,7 @@ fn traverse_reachable_source_files(
                         reachable: &reachable,
                         queue: &mut queue,
                         resolved_edges: &mut resolved_edges,
+                        source_package_imports: &mut source_package_imports,
                         semantic_source_set: semantic_source_set.as_mut(),
                     };
                     let result = resolve_and_queue_local_import(
@@ -963,7 +969,7 @@ fn traverse_reachable_source_files(
             )
         })?;
         Some(
-            set.finish(resolution.project_source_tree_index())
+            set.finish(resolution.source_tree_index())
                 .map_err(SourceDiscoveryError::from)?,
         )
     } else {
@@ -978,6 +984,7 @@ fn traverse_reachable_source_files(
         },
         provider_capable_required,
         resolved_edges,
+        source_package_imports,
     })
 }
 
@@ -1026,6 +1033,7 @@ pub(super) fn discover_reachable_source_files(
     Ok(ReachableDiscoveryResult {
         inventory: outcome.inventory,
         resolved_edges: outcome.resolved_edges,
+        source_package_imports: outcome.source_package_imports,
     })
 }
 
@@ -1094,10 +1102,8 @@ fn resolve_and_queue_via_namespace(
             canonical_path,
             source_kind,
             consumer_module_id,
-            boundary,
         } => {
-            if boundary == NamespaceBoundary::Project
-                && let Some(set) = reachable_queue.semantic_source_set.as_deref_mut()
+            if let Some(set) = reachable_queue.semantic_source_set.as_deref_mut()
                 && consumer_module_id == set.entry_module_id()
             {
                 set.add_same_owner_source(source_id);
@@ -1107,7 +1113,7 @@ fn resolve_and_queue_via_namespace(
                 reachable_queue.queue.push_back(source_file);
             }
         }
-        ResolvedImport::CrossModuleProject {
+        ResolvedImport::CrossModule {
             provider_module_id,
             consumer_module_id,
             root_file,
@@ -1117,22 +1123,21 @@ fn resolve_and_queue_via_namespace(
                 consumer_module_id,
                 provider: provider.clone(),
             });
-            let root_source = ReachableSourceFile {
-                path: root_file,
-                kind: SourceFileKind::Moth,
-            };
-            if !reachable_queue.reachable.contains(&root_source) {
-                reachable_queue.queue.push_back(root_source);
-            }
+            let _ = root_file;
         }
-        ResolvedImport::RootFile { root_file } => {
-            let root_source = ReachableSourceFile {
-                path: root_file,
-                kind: SourceFileKind::Moth,
-            };
-            if !reachable_queue.reachable.contains(&root_source) {
-                reachable_queue.queue.push_back(root_source);
-            }
+        ResolvedImport::SourcePackageSurface {
+            consumer_module_id,
+            import_prefix,
+            root_file,
+        } => {
+            let _ = root_file;
+            reachable_queue
+                .source_package_imports
+                .push(ResolvedSourcePackageImport {
+                    consumer_module_id,
+                    import_prefix,
+                    provider: provider.clone(),
+                });
         }
         ResolvedImport::BindingPackage => {}
     }
@@ -1394,6 +1399,7 @@ pub(super) fn discover_reachable_source_files_provider_free(
     Ok(ReachableDiscoveryResult {
         inventory: outcome.inventory,
         resolved_edges: outcome.resolved_edges,
+        source_package_imports: outcome.source_package_imports,
     })
 }
 

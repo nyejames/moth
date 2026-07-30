@@ -18,7 +18,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// The set of builtin types that may be a cast source or target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum BuiltinCastTarget {
     Bool,
     Int,
@@ -29,7 +29,7 @@ pub(crate) enum BuiltinCastTarget {
 }
 
 /// Whether a builtin cast is infallible or fallible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum BuiltinCastFallibility {
     Infallible,
     Fallible,

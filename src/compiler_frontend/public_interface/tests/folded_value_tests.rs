@@ -98,6 +98,7 @@ fn build_constant_records(
         trait_roots: vec![],
         trait_environment: Some(Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
     let registry = ExternalPackageRegistry::new();
     PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {

@@ -94,6 +94,16 @@ impl ModuleProviderStore {
         self.artifacts
     }
 
+    pub(crate) fn materialisation_contexts(
+        &self,
+    ) -> impl Iterator<
+        Item = &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    > {
+        self.artifacts
+            .iter()
+            .filter_map(|artifact| artifact.module.metadata.materialisation_context.as_ref())
+    }
+
     fn transition_unavailable(
         &mut self,
         module_id: ModuleId,

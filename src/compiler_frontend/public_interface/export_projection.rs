@@ -31,12 +31,13 @@
 //!
 //! ## Scope
 //!
-//! Only declarations defined directly in the active module root's public surface are recorded:
-//! free functions, nominal structs, choices, transparent aliases, constants and traits. Receiver
-//! methods are attached to their exported receiver type's surface rather than becoming free
-//! namespace bindings. Source re-exports are absent by construction: the current entry-closure
-//! compilation lacks completed provider interfaces, so donor-local source paths are not stable
-//! origins. The future completed provider interface owns re-export stable origin and binding.
+//! Only declarations defined directly in the active module root's public surface are recorded
+//! as directly-defined exports: free functions, nominal structs, choices, transparent aliases,
+//! constants and traits. Receiver methods are attached to their exported receiver type's surface
+//! rather than becoming free namespace bindings. Same-module re-exports from the root's `export:`
+//! block that target private-file declarations are joined alongside directly-defined exports.
+//! Cross-module re-exports from provider interfaces are joined during recursive closure at
+//! publication time.
 //!
 //! The declaration-kind set recorded here matches the directly-defined public export surface
 //! owned by `headers::public_exports` and `ast::module_ast::environment::public_surface`. Those
@@ -44,8 +45,13 @@
 //! (export-capable roots versus the active module root alone); this module's projection is
 //! narrower because imported-module-root headers belong to another module's component.
 
+use super::SourceProviderImportSet;
+use super::model::PublicBindingExport;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::module_symbols::{
+    ModuleSymbols, PublicExportEntry, PublicExportTarget,
+};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginConstantId, OriginDeclarationId, OriginFunctionId, OriginTraitId,
@@ -56,7 +62,7 @@ use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Pre-AST seed of the directly-defined public export identity facts.
 ///
@@ -71,6 +77,7 @@ use rustc_hash::FxHashMap;
 pub(crate) struct DirectExportSeed {
     module_origin: StableModuleOriginIdentity,
     export_bindings: Vec<ExportBinding>,
+    binding_exports: Vec<PublicBindingExport>,
     public_nominal_type_origins: FxHashMap<InternedPath, OriginTypeId>,
 }
 
@@ -89,8 +96,14 @@ impl DirectExportSeed {
         Self {
             module_origin,
             export_bindings,
+            binding_exports: Vec::new(),
             public_nominal_type_origins,
         }
+    }
+
+    fn with_binding_exports(mut self, binding_exports: Vec<PublicBindingExport>) -> Self {
+        self.binding_exports = binding_exports;
+        self
     }
 
     /// The stable origin of the module that owns these directly defined exports.
@@ -121,11 +134,13 @@ impl DirectExportSeed {
     ) -> (
         StableModuleOriginIdentity,
         Vec<ExportBinding>,
+        Vec<PublicBindingExport>,
         FxHashMap<InternedPath, OriginTypeId>,
     ) {
         (
             self.module_origin,
             self.export_bindings,
+            self.binding_exports,
             self.public_nominal_type_origins,
         )
     }
@@ -149,22 +164,136 @@ pub(crate) fn build_direct_export_seed(
     active_root_file_id: FileId,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
+    source_provider_imports: &SourceProviderImportSet<'_>,
+    external_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
 ) -> Result<DirectExportSeed, CompilerError> {
     let active_origin =
         resolve_active_module_origin(source_module_origins, active_root_file_id, sorted_headers)?;
 
-    let public_nominal_type_origins =
-        index_public_nominal_type_origins(&active_origin, sorted_headers, string_table)?;
+    let export_bindings = collect_free_export_bindings(
+        source_module_origins,
+        &active_origin,
+        sorted_headers,
+        module_symbols,
+        source_provider_imports,
+        string_table,
+    )?;
+    let public_nominal_type_origins = index_public_nominal_type_origins(
+        &active_origin,
+        &export_bindings,
+        sorted_headers,
+        module_symbols,
+        string_table,
+    )?;
+    let binding_exports = collect_binding_exports(
+        &active_origin,
+        module_symbols,
+        source_provider_imports,
+        external_registry,
+        string_table,
+    )?;
 
-    let export_bindings =
-        collect_free_export_bindings(&active_origin, sorted_headers, module_symbols, string_table)?;
+    Ok(
+        DirectExportSeed::new(active_origin, export_bindings, public_nominal_type_origins)
+            .with_binding_exports(binding_exports),
+    )
+}
 
-    Ok(DirectExportSeed::new(
-        active_origin,
-        export_bindings,
-        public_nominal_type_origins,
-    ))
+fn collect_binding_exports(
+    module_origin: &StableModuleOriginIdentity,
+    module_symbols: &ModuleSymbols,
+    source_provider_imports: &SourceProviderImportSet<'_>,
+    external_registry: &ExternalPackageRegistry,
+    string_table: &StringTable,
+) -> Result<Vec<PublicBindingExport>, CompilerError> {
+    // Synthetic single-file compilation does not construct a Stage 0 module namespace and never
+    // publishes a provider interface. Binding-backed re-exports belong to canonical graph jobs,
+    // whose prepared symbols always carry module-root membership.
+    if module_symbols.file_module_membership.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let has_direct_binding_export = module_symbols
+        .module_root_public_exports
+        .values()
+        .chain(module_symbols.source_package_public_exports.values())
+        .flatten()
+        .any(|entry| matches!(entry.target, PublicExportTarget::External(_)));
+    if !has_direct_binding_export && source_provider_imports.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let active_module_root = resolve_active_module_root_membership(module_symbols)?;
+    let active_root_source = resolve_active_root_source(module_symbols, active_module_root)?;
+    let mut entries = Vec::new();
+
+    if let Some(root_entries) = module_symbols
+        .module_root_public_exports
+        .get(active_module_root)
+    {
+        entries.extend(root_entries);
+    }
+    if let Some(package_prefix) = module_symbols
+        .file_package_membership
+        .get(active_root_source)
+        && let Some(package_entries) = module_symbols
+            .source_package_public_exports
+            .get(package_prefix)
+    {
+        entries.extend(package_entries);
+    }
+
+    let mut exports = Vec::new();
+    for entry in entries {
+        let target = match &entry.target {
+            PublicExportTarget::External(symbol_id) => external_registry
+                .canonical_symbol_identity(*symbol_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "binding re-export construction: external symbol {:?} has no canonical package identity",
+                        symbol_id
+                    ))
+                })?,
+            PublicExportTarget::Source(target_path) => {
+                let Some(provider_interface) = source_provider_imports.resolve_reexport(
+                    active_root_source,
+                    target_path,
+                    string_table,
+                ) else {
+                    continue;
+                };
+                let imported_name = target_path.name_str(string_table).ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "binding re-export construction: provider target {:?} has no imported name",
+                        target_path
+                    ))
+                })?;
+                let Some(binding) = provider_interface.binding_export(imported_name) else {
+                    continue;
+                };
+                binding.target.clone()
+            }
+        };
+
+        exports.push(PublicBindingExport {
+            exporting_module: module_origin.clone(),
+            public_name: string_table.resolve(entry.export_name).to_owned(),
+            target,
+        });
+    }
+
+    exports.sort_by(|left, right| left.public_name.cmp(&right.public_name));
+    exports.dedup_by(|left, right| left == right);
+    for pair in exports.windows(2) {
+        if pair[0].public_name == pair[1].public_name {
+            return Err(CompilerError::compiler_error(format!(
+                "binding re-export construction: duplicate public export name '{}' in module {:?}",
+                pair[0].public_name, module_origin
+            )));
+        }
+    }
+    Ok(exports)
 }
 
 /// Resolve the one active module origin from the per-file source-origin table.
@@ -242,16 +371,15 @@ fn resolve_active_module_origin(
 /// so the rule already holds.
 fn index_public_nominal_type_origins(
     module_origin: &StableModuleOriginIdentity,
+    export_bindings: &[ExportBinding],
     sorted_headers: &[Header],
+    module_symbols: &ModuleSymbols,
     string_table: &StringTable,
 ) -> Result<FxHashMap<InternedPath, OriginTypeId>, CompilerError> {
     let mut nominal_type_origins = FxHashMap::default();
+    let active_module_root = resolve_optional_active_module_root_membership(module_symbols)?;
 
     for header in sorted_headers {
-        if !is_directly_defined_public_export(header) {
-            continue;
-        }
-
         // A directly-defined public declaration always has a defining name: the header parser
         // records one for every authored declaration shell. A missing name here is an impossible
         // metadata gap, not an intentional exclusion, so it must surface as an internal failure
@@ -268,11 +396,26 @@ fn index_public_nominal_type_origins(
             HeaderKind::Choice { .. } => OriginTypeCategory::Choice,
             _ => continue,
         };
+        let origin = OriginTypeId::new(module_origin.clone(), name.to_owned(), category);
+        let is_exported_origin = export_bindings.iter().any(|binding| {
+            matches!(binding.origin(), OriginDeclarationId::Type(exported) if exported == &origin)
+        });
+        if !is_exported_origin {
+            continue;
+        }
+        let belongs_to_active_module = match active_module_root {
+            Some(active_module_root) => module_symbols
+                .canonical_source_by_symbol_path
+                .get(&header.tokens.src_path)
+                .and_then(|source| module_symbols.file_module_membership.get(source))
+                .is_some_and(|module_root| module_root == active_module_root),
+            None => is_directly_defined_public_export(header),
+        };
+        if !belongs_to_active_module {
+            continue;
+        }
 
-        nominal_type_origins.insert(
-            header.tokens.src_path.clone(),
-            OriginTypeId::new(module_origin.clone(), name.to_owned(), category),
-        );
+        nominal_type_origins.insert(header.tokens.src_path.clone(), origin);
     }
 
     Ok(nominal_type_origins)
@@ -501,18 +644,27 @@ fn any_retained_public_export_targets_source_path(
             })
 }
 
-/// Collect the free-namespace export bindings for directly-defined public declarations.
+/// Collect the free-namespace export bindings for directly-defined public declarations and
+/// re-exported same-module declarations.
 ///
 /// Receiver methods are excluded here: they are attached to their receiver through the
 /// callable seed table (see `build_callable_seed_table`) and must not become independent
 /// free namespace bindings.
+///
+/// Re-exports from the root's `export:` block that target same-module private-file declarations
+/// are joined here alongside directly-defined root-file exports. Each re-export's public name
+/// comes from the `module_root_public_exports` entry and its origin is derived from the target
+/// declaration's header through the `SourceModuleOriginTable`.
 fn collect_free_export_bindings(
+    source_module_origins: &SourceModuleOriginTable,
     module_origin: &StableModuleOriginIdentity,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
+    source_provider_imports: &SourceProviderImportSet<'_>,
     string_table: &StringTable,
 ) -> Result<Vec<ExportBinding>, CompilerError> {
     let mut export_bindings = Vec::new();
+    let mut seen_public_names: FxHashSet<String> = FxHashSet::default();
 
     for header in sorted_headers {
         if !is_directly_defined_public_export(header) {
@@ -537,12 +689,30 @@ fn collect_free_export_bindings(
             // namespace. That exclusion is intentional.
             continue;
         };
-
+        seen_public_names.insert(name.to_owned());
         export_bindings.push(ExportBinding::new(
             module_origin.clone(),
             name.to_owned(),
             origin,
         ));
+    }
+
+    // Collect re-export bindings from the module root's public export entries. These entries
+    // cover declarations from private files re-exported through the root's `export:` block.
+    // Directly-defined exports already collected above are skipped by checking the public name.
+    let reexport_bindings = collect_reexport_bindings(
+        source_module_origins,
+        module_origin,
+        sorted_headers,
+        module_symbols,
+        source_provider_imports,
+        string_table,
+    )?;
+
+    for binding in reexport_bindings {
+        if seen_public_names.insert(binding.public_name().to_owned()) {
+            export_bindings.push(binding);
+        }
     }
 
     // Deterministic order independent of hash-map iteration and declaration scheduling: sort by
@@ -554,6 +724,284 @@ fn collect_free_export_bindings(
     });
 
     Ok(export_bindings)
+}
+
+/// Collect re-export bindings from `module_root_public_exports` and
+/// `source_package_public_exports` entries that target same-module source declarations.
+///
+/// WHAT: iterates the header-built public export maps for the active module root and source
+///       packages. Each `PublicExportTarget::Source(path)` entry whose target declaration path
+///       belongs to the active module is resolved to an `ExportBinding` with the export name and
+///       the declaration's stable origin. `External` targets are deferred to the binding-backed
+///       re-export owner.
+/// WHY: the `export:` block may re-export declarations from private files within the same module.
+/// Those declarations are not in the active root file, so `is_directly_defined_public_export`
+/// excludes them. The header-built public export maps already resolved the re-export target, so
+/// this function joins them into the export seed without a second source scan.
+fn collect_reexport_bindings(
+    source_module_origins: &SourceModuleOriginTable,
+    module_origin: &StableModuleOriginIdentity,
+    sorted_headers: &[Header],
+    module_symbols: &ModuleSymbols,
+    source_provider_imports: &SourceProviderImportSet<'_>,
+    string_table: &StringTable,
+) -> Result<Vec<ExportBinding>, CompilerError> {
+    if module_symbols.file_module_membership.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let active_module_root = resolve_active_module_root_membership(module_symbols)?;
+    let active_root_source = resolve_active_root_source(module_symbols, active_module_root)?;
+
+    // Build a lookup from canonical source path to header so re-export targets can find their
+    // declaration header without iterating the full header list for each entry.
+    let mut header_by_path: FxHashMap<&InternedPath, &Header> = FxHashMap::default();
+    for header in sorted_headers {
+        header_by_path.insert(&header.tokens.src_path, header);
+    }
+
+    let mut bindings = Vec::new();
+    let context = ReexportBindingContext {
+        source_module_origins,
+        module_origin,
+        active_module_root,
+        module_symbols,
+        header_by_path: &header_by_path,
+        source_provider_imports,
+        string_table,
+    };
+
+    // Collect re-exports from module root public exports. Only entries targeting declarations
+    // that belong to the active module are included. Cross-module re-exports from provider
+    // interfaces are handled by the recursive closure step during publication.
+    if let Some(entries) = module_symbols
+        .module_root_public_exports
+        .get(active_module_root)
+    {
+        for entry in entries {
+            collect_one_reexport_binding(&mut bindings, active_root_source, entry, &context)?;
+        }
+    }
+
+    Ok(bindings)
+}
+
+struct ReexportBindingContext<'a> {
+    source_module_origins: &'a SourceModuleOriginTable,
+    module_origin: &'a StableModuleOriginIdentity,
+    active_module_root: &'a InternedPath,
+    module_symbols: &'a ModuleSymbols,
+    header_by_path: &'a FxHashMap<&'a InternedPath, &'a Header>,
+    source_provider_imports: &'a SourceProviderImportSet<'a>,
+    string_table: &'a StringTable,
+}
+
+fn resolve_active_root_source<'a>(
+    module_symbols: &'a ModuleSymbols,
+    active_module_root: &InternedPath,
+) -> Result<&'a InternedPath, CompilerError> {
+    module_symbols
+        .file_roles_by_source
+        .iter()
+        .find_map(|(source, role)| {
+            (role.is_active_module_root()
+                && module_symbols.file_module_membership.get(source) == Some(active_module_root))
+                .then_some(source)
+        })
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "re-export binding construction: active module-root membership has no active root source",
+            )
+        })
+}
+
+/// Resolve the one module-root membership owned by the active compilation.
+///
+/// WHAT: joins the header-owned active-root file role to the canonical module-membership table.
+/// WHY: retained provider headers may currently carry the same preliminary stable origin as the
+/// active root on compatibility compilation paths. Module membership is already the authoritative
+/// header-stage boundary, so same-module re-export collection must use it rather than `FileRole`
+/// or stable-origin equality alone.
+fn resolve_active_module_root_membership(
+    module_symbols: &ModuleSymbols,
+) -> Result<&InternedPath, CompilerError> {
+    resolve_optional_active_module_root_membership(module_symbols)?.ok_or_else(|| {
+        CompilerError::compiler_error(
+            "re-export binding construction: active root source has no module-root membership",
+        )
+    })
+}
+
+fn resolve_optional_active_module_root_membership(
+    module_symbols: &ModuleSymbols,
+) -> Result<Option<&InternedPath>, CompilerError> {
+    let mut active_module_root = None;
+
+    for (source, role) in &module_symbols.file_roles_by_source {
+        if !role.is_active_module_root() {
+            continue;
+        }
+        let Some(module_root) = module_symbols.file_module_membership.get(source) else {
+            continue;
+        };
+
+        if active_module_root.is_some_and(|existing| existing != module_root) {
+            return Err(CompilerError::compiler_error(
+                "re-export binding construction: active root sources resolve to more than one module-root membership",
+            ));
+        }
+        active_module_root = Some(module_root);
+    }
+
+    Ok(active_module_root)
+}
+
+/// Resolve one re-export entry to an `ExportBinding` if it targets a same-module source
+/// declaration.
+fn collect_one_reexport_binding(
+    bindings: &mut Vec<ExportBinding>,
+    exporting_source: &InternedPath,
+    entry: &PublicExportEntry,
+    context: &ReexportBindingContext<'_>,
+) -> Result<(), CompilerError> {
+    let PublicExportTarget::Source(target_path) = &entry.target else {
+        // External targets are deferred to the binding-backed re-export owner.
+        return Ok(());
+    };
+
+    // Cross-module re-exports resolve through the immutable provider interface selected by
+    // Stage 0. The origin remains provider-owned while this module owns the public alias.
+    if let Some(provider_interface) = context.source_provider_imports.resolve_reexport(
+        exporting_source,
+        target_path,
+        context.string_table,
+    ) {
+        let imported_name = target_path.name_str(context.string_table).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "re-export binding construction: a provider target has no resolvable imported name (path: {:?})",
+                target_path
+            ))
+        })?;
+        let Some(provider_origin) = provider_interface.exported_origin(imported_name).cloned()
+        else {
+            if provider_interface.binding_export(imported_name).is_some() {
+                return Ok(());
+            }
+            return Err(CompilerError::compiler_error(format!(
+                "re-export binding construction: completed provider interface {:?} has no public binding '{}' required by target {:?}",
+                provider_interface.module_origin, imported_name, target_path
+            )));
+        };
+        let export_name = context.string_table.resolve(entry.export_name).to_owned();
+        bindings.push(ExportBinding::new(
+            context.module_origin.clone(),
+            export_name,
+            provider_origin,
+        ));
+        return Ok(());
+    }
+
+    // Same-module re-exports join the retained local declaration header.
+    let Some(header) = context.header_by_path.get(target_path) else {
+        return Err(CompilerError::compiler_error(format!(
+            "re-export binding construction: source target {:?} has neither a local declaration header nor a completed provider interface",
+            target_path
+        )));
+    };
+
+    let target_belongs_to_active_module = context
+        .module_symbols
+        .canonical_source_by_symbol_path
+        .get(target_path)
+        .and_then(|source| context.module_symbols.file_module_membership.get(source))
+        .is_some_and(|module_root| module_root == context.active_module_root);
+    if !target_belongs_to_active_module {
+        return Ok(());
+    }
+
+    // Only include declarations whose graph-derived owner is the active module. `FileRole::Normal`
+    // is not sufficient here because the retained header set also contains ordinary private files
+    // from imported provider modules. Provider declarations remain references to provider
+    // interfaces; they must never become consumer-owned direct bindings.
+    let file_id = header.tokens.file_id.ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "re-export binding construction: a re-export target declaration has no retained file identity (path: {:?})",
+            target_path
+        ))
+    })?;
+    let Some(target_origin) = context.source_module_origins.origin_for(file_id)? else {
+        return Ok(());
+    };
+    if target_origin != context.module_origin {
+        return Ok(());
+    }
+
+    // The target declaration must have a defining name to build a stable origin.
+    let Some(name) = header.tokens.src_path.name_str(context.string_table) else {
+        return Err(CompilerError::compiler_error(format!(
+            "re-export binding construction: a re-export target declaration has no resolvable defining name (path: {:?})",
+            target_path
+        )));
+    };
+
+    // Determine the declaration category from the header kind and build the origin.
+    let origin = reexport_declaration_origin(header, context.module_origin, name)?;
+
+    let export_name = context.string_table.resolve(entry.export_name).to_owned();
+    bindings.push(ExportBinding::new(
+        context.module_origin.clone(),
+        export_name,
+        origin,
+    ));
+
+    Ok(())
+}
+
+/// Resolve the stable origin for one re-exported declaration from its header kind.
+///
+/// WHAT: builds the `OriginDeclarationId` from the module origin and the declaration's defining
+///       name. Receiver methods are excluded because they travel with their receiver surface.
+fn reexport_declaration_origin(
+    header: &Header,
+    module_origin: &StableModuleOriginIdentity,
+    defining_name: &str,
+) -> Result<OriginDeclarationId, CompilerError> {
+    match &header.kind {
+        HeaderKind::Function { .. } => Ok(OriginDeclarationId::Function(
+            OriginFunctionId::new_free(module_origin.clone(), defining_name.to_owned()),
+        )),
+        HeaderKind::Struct { .. } => Ok(OriginDeclarationId::Type(OriginTypeId::new(
+            module_origin.clone(),
+            defining_name.to_owned(),
+            OriginTypeCategory::Struct,
+        ))),
+        HeaderKind::Choice { .. } => Ok(OriginDeclarationId::Type(OriginTypeId::new(
+            module_origin.clone(),
+            defining_name.to_owned(),
+            OriginTypeCategory::Choice,
+        ))),
+        HeaderKind::TypeAlias { .. } => Ok(OriginDeclarationId::Type(OriginTypeId::new(
+            module_origin.clone(),
+            defining_name.to_owned(),
+            OriginTypeCategory::TransparentAlias,
+        ))),
+        HeaderKind::Constant { .. } => Ok(OriginDeclarationId::Constant(OriginConstantId::new(
+            module_origin.clone(),
+            defining_name.to_owned(),
+        ))),
+        HeaderKind::Trait { .. } => Ok(OriginDeclarationId::Trait(OriginTraitId::new(
+            module_origin.clone(),
+            defining_name.to_owned(),
+        ))),
+        // Non-declaration headers are not valid re-export targets.
+        HeaderKind::StartFunction
+        | HeaderKind::ConstTemplate { .. }
+        | HeaderKind::TraitConformance { .. }
+        | HeaderKind::TraitIncompatibility { .. } => Err(CompilerError::compiler_error(format!(
+            "re-export binding construction: a re-export target is a non-declaration header kind (path: {:?})",
+            header.tokens.src_path
+        ))),
+    }
 }
 
 /// Resolve the stable origin for one directly-defined public free-namespace export declaration,

@@ -48,7 +48,7 @@ use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironm
 use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 fn path(name: &str, string_table: &mut StringTable) -> InternedPath {
     InternedPath::from_single_str(name, string_table)
@@ -210,6 +210,7 @@ fn build_table(
         trait_environment,
         type_environment,
         string_table,
+        reexport_target_paths: &FxHashSet::default(),
     })
 }
 

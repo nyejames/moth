@@ -176,6 +176,10 @@ impl SlotOccurrenceId {
                 .expect("slot occurrence index exceeds u32::MAX; this is a compiler bug"),
         )
     }
+
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
 }
 
 impl fmt::Display for SlotOccurrenceId {

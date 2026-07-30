@@ -1,0 +1,363 @@
+//! Build-owned generated-function request scheduling and sidecar storage.
+//!
+//! WHAT: owns one deterministic request worklist per project or package compilation boundary,
+//! dense request IDs, requester/dependency records, exact completed summaries and the separate
+//! generated-sidecar lane.
+//! WHY: generic call inference belongs to AST, but aggregation, deduplication, fixed-point
+//! scheduling and sidecar placement belong to the build boundary. A module compiles against a
+//! transactional session and publishes its delta only after the module succeeds.
+
+use crate::build_system::build::GeneratedFunctionSidecar;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedFunctionIdentity, StableModuleOriginIdentity,
+};
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+
+use rustc_hash::FxHashMap;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct GeneratedRequestId(usize);
+
+impl GeneratedRequestId {
+    pub(super) fn index(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GeneratedRequester {
+    Module(StableModuleOriginIdentity),
+    Generated(GeneratedRequestId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GeneratedRequestState {
+    Pending,
+    Materialising,
+    Complete,
+}
+
+struct GeneratedRequestRecord {
+    identity: GeneratedFunctionIdentity,
+    requesters: Vec<GeneratedRequester>,
+    dependencies: Vec<GeneratedRequestId>,
+    state: GeneratedRequestState,
+}
+
+/// Result of attempting to enter one request during depth-first fixed-point materialisation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GeneratedRequestEntry {
+    Materialise,
+    Complete,
+    Recursive,
+}
+
+/// Transactional request worklist for one module compilation.
+///
+/// Existing boundary summaries seed the session, while newly produced sidecars stay local until
+/// the containing module has completed and its string IDs have been merged.
+pub(super) struct GeneratedFunctionWorklist {
+    known_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+    records: Vec<GeneratedRequestRecord>,
+    ids_by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedRequestId>,
+    completed_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+    sidecars: Vec<GeneratedFunctionSidecar>,
+}
+
+impl GeneratedFunctionWorklist {
+    fn new(known_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>) -> Self {
+        Self {
+            known_summaries,
+            records: Vec::new(),
+            ids_by_identity: FxHashMap::default(),
+            completed_summaries: FxHashMap::default(),
+            sidecars: Vec::new(),
+        }
+    }
+
+    pub(super) fn register_module_requests(
+        &mut self,
+        requester: &StableModuleOriginIdentity,
+        identities: impl IntoIterator<Item = GeneratedFunctionIdentity>,
+    ) -> Vec<GeneratedRequestId> {
+        self.register_requests(GeneratedRequester::Module(requester.clone()), identities)
+    }
+
+    pub(super) fn register_generated_requests(
+        &mut self,
+        requester: GeneratedRequestId,
+        identities: impl IntoIterator<Item = GeneratedFunctionIdentity>,
+    ) -> Vec<GeneratedRequestId> {
+        let dependency_ids =
+            self.register_requests(GeneratedRequester::Generated(requester), identities);
+        let record = &mut self.records[requester.index()];
+        for dependency_id in &dependency_ids {
+            if !record.dependencies.contains(dependency_id) {
+                record.dependencies.push(*dependency_id);
+            }
+        }
+        record.dependencies.sort_unstable();
+        dependency_ids
+    }
+
+    fn register_requests(
+        &mut self,
+        requester: GeneratedRequester,
+        identities: impl IntoIterator<Item = GeneratedFunctionIdentity>,
+    ) -> Vec<GeneratedRequestId> {
+        let mut identities = identities.into_iter().collect::<Vec<_>>();
+        identities.sort();
+        identities.dedup();
+
+        let mut request_ids = Vec::with_capacity(identities.len());
+        for identity in identities {
+            if self.known_summaries.contains_key(&identity) {
+                continue;
+            }
+
+            let request_id = if let Some(request_id) = self.ids_by_identity.get(&identity) {
+                *request_id
+            } else {
+                let request_id = GeneratedRequestId(self.records.len());
+                self.ids_by_identity.insert(identity.clone(), request_id);
+                self.records.push(GeneratedRequestRecord {
+                    identity,
+                    requesters: Vec::new(),
+                    dependencies: Vec::new(),
+                    state: GeneratedRequestState::Pending,
+                });
+                request_id
+            };
+            let record = &mut self.records[request_id.index()];
+            if !record.requesters.contains(&requester) {
+                record.requesters.push(requester.clone());
+            }
+            request_ids.push(request_id);
+        }
+        request_ids
+    }
+
+    pub(super) fn identity(
+        &self,
+        request_id: GeneratedRequestId,
+    ) -> Result<&GeneratedFunctionIdentity, CompilerError> {
+        self.records
+            .get(request_id.index())
+            .map(|record| &record.identity)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Generated worklist received out-of-range request id {}",
+                    request_id.index()
+                ))
+            })
+    }
+
+    pub(super) fn enter(
+        &mut self,
+        request_id: GeneratedRequestId,
+    ) -> Result<GeneratedRequestEntry, CompilerError> {
+        let record = self.records.get_mut(request_id.index()).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Generated worklist received out-of-range request id {}",
+                request_id.index()
+            ))
+        })?;
+        match record.state {
+            GeneratedRequestState::Pending => {
+                record.state = GeneratedRequestState::Materialising;
+                Ok(GeneratedRequestEntry::Materialise)
+            }
+            GeneratedRequestState::Materialising => Ok(GeneratedRequestEntry::Recursive),
+            GeneratedRequestState::Complete => Ok(GeneratedRequestEntry::Complete),
+        }
+    }
+
+    pub(super) fn complete(
+        &mut self,
+        request_id: GeneratedRequestId,
+        summary: PublicCallSummary,
+        sidecar: GeneratedFunctionSidecar,
+    ) -> Result<(), CompilerError> {
+        let record = self.records.get_mut(request_id.index()).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Generated worklist received out-of-range request id {}",
+                request_id.index()
+            ))
+        })?;
+        if record.state != GeneratedRequestState::Materialising {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated request {:?} completed from an invalid worklist state",
+                record.identity
+            )));
+        }
+        if sidecar.identity != record.identity {
+            return Err(CompilerError::compiler_error(
+                "Generated sidecar identity disagrees with its worklist request",
+            ));
+        }
+        if self
+            .completed_summaries
+            .insert(record.identity.clone(), summary)
+            .is_some()
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated request {:?} completed more than once",
+                record.identity
+            )));
+        }
+        record.state = GeneratedRequestState::Complete;
+        self.sidecars.push(sidecar);
+        Ok(())
+    }
+
+    pub(super) fn summary(
+        &self,
+        identity: &GeneratedFunctionIdentity,
+    ) -> Option<&PublicCallSummary> {
+        self.completed_summaries
+            .get(identity)
+            .or_else(|| self.known_summaries.get(identity))
+    }
+
+    pub(super) fn completed_summaries(
+        &self,
+    ) -> FxHashMap<GeneratedFunctionIdentity, PublicCallSummary> {
+        let mut summaries = self.known_summaries.clone();
+        summaries.extend(self.completed_summaries.clone());
+        summaries
+    }
+
+    pub(super) fn sidecars_mut(&mut self) -> &mut [GeneratedFunctionSidecar] {
+        &mut self.sidecars
+    }
+
+    pub(super) fn sidecar_count(&self) -> usize {
+        self.sidecars.len()
+    }
+
+    pub(super) fn remap_sidecars_from(&mut self, first_sidecar: usize, remap: &StringIdRemap) {
+        for sidecar in &mut self.sidecars[first_sidecar..] {
+            sidecar.remap_string_ids(remap);
+        }
+    }
+
+    pub(super) fn update_summary(
+        &mut self,
+        identity: &GeneratedFunctionIdentity,
+        summary: PublicCallSummary,
+    ) -> Result<bool, CompilerError> {
+        let current = self.completed_summaries.get_mut(identity).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Generated worklist cannot update unknown completed request {identity:?}"
+            ))
+        })?;
+        let changed = *current != summary;
+        *current = summary;
+        Ok(changed)
+    }
+
+    pub(super) fn summaries_for(
+        &self,
+        identities: impl IntoIterator<Item = GeneratedFunctionIdentity>,
+    ) -> Result<FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>, CompilerError> {
+        let mut summaries = FxHashMap::default();
+        for identity in identities {
+            let summary = self.summary(&identity).cloned().ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Generated request {identity:?} has no exact completed summary"
+                ))
+            })?;
+            summaries.insert(identity, summary);
+        }
+        Ok(summaries)
+    }
+
+    pub(super) fn finish(self) -> Result<GeneratedFunctionWorklistDelta, CompilerError> {
+        if let Some(record) = self
+            .records
+            .iter()
+            .find(|record| record.state != GeneratedRequestState::Complete)
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated worklist stopped before request {:?} completed",
+                record.identity
+            )));
+        }
+        Ok(GeneratedFunctionWorklistDelta {
+            summaries: self.completed_summaries,
+            sidecars: self.sidecars,
+        })
+    }
+}
+
+/// Successful new work produced while compiling one module.
+pub(crate) struct GeneratedFunctionWorklistDelta {
+    summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+    sidecars: Vec<GeneratedFunctionSidecar>,
+}
+
+impl GeneratedFunctionWorklistDelta {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for sidecar in &mut self.sidecars {
+            sidecar.remap_string_ids(remap);
+        }
+    }
+}
+
+/// One project/package boundary's exact generated summaries and explicit sidecar lane.
+#[derive(Default)]
+pub(super) struct BoundaryGeneratedFunctionStore {
+    summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+    sidecars: Vec<GeneratedFunctionSidecar>,
+}
+
+impl BoundaryGeneratedFunctionStore {
+    pub(super) fn import_completed_summaries(
+        &mut self,
+        completed: &BoundaryGeneratedFunctionStore,
+    ) -> Result<(), CompilerError> {
+        for (identity, summary) in &completed.summaries {
+            if let Some(existing) = self.summaries.insert(identity.clone(), summary.clone())
+                && existing != *summary
+            {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated identity {identity:?} has conflicting completed summaries across source-package boundaries"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn session(&self) -> GeneratedFunctionWorklist {
+        GeneratedFunctionWorklist::new(self.summaries.clone())
+    }
+
+    pub(super) fn publish(
+        &mut self,
+        delta: GeneratedFunctionWorklistDelta,
+    ) -> Result<(), CompilerError> {
+        let GeneratedFunctionWorklistDelta {
+            summaries,
+            sidecars,
+        } = delta;
+        for (identity, summary) in summaries {
+            if self.summaries.insert(identity.clone(), summary).is_some() {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated identity {identity:?} was published more than once in one compilation boundary"
+                )));
+            }
+        }
+        self.sidecars.extend(sidecars);
+        Ok(())
+    }
+
+    pub(super) fn into_sidecars(self) -> Vec<GeneratedFunctionSidecar> {
+        self.sidecars
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/generated_worklist_tests.rs"]
+mod tests;

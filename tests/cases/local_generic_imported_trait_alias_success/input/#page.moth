@@ -1,0 +1,7 @@
+import @provider { DISPLAY_TEXT as PRINTABLE, Label }
+
+show type Item is PRINTABLE |item Item| -> String:
+    return item.display()
+;
+
+[:local_generic_imported_trait_alias_success [show(Label("visible"))]]

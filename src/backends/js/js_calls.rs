@@ -41,6 +41,28 @@ impl<'hir> JsEmitter<'hir> {
                         "JavaScript backend received unresolved cross-module function target {origin:?}"
                     ))
                 }),
+            CallTarget::ModulePrivate(identity) => self
+                .config
+                .module_private_function_names
+                .get(identity)
+                .cloned()
+                .map(LoweredCallTarget::FunctionName)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "JavaScript backend received unresolved module-private function target {identity:?}"
+                    ))
+                }),
+            CallTarget::Generated(identity) => self
+                .config
+                .generated_function_names
+                .get(identity)
+                .cloned()
+                .map(LoweredCallTarget::FunctionName)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "JavaScript backend received unresolved generated function target {identity:?}"
+                    ))
+                }),
             CallTarget::External(id) => {
                 self.referenced_external_functions.insert(*id);
                 let function_def = self
@@ -154,6 +176,26 @@ impl<'hir> JsEmitter<'hir> {
                 .hir
                 .imported_call_summaries
                 .get(origin)
+                .is_some_and(|summary| {
+                    matches!(
+                        summary.return_alias,
+                        crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary::AliasParams(_)
+                    )
+                }),
+            CallTarget::ModulePrivate(identity) => self
+                .hir
+                .module_private_call_summaries
+                .get(identity)
+                .is_some_and(|summary| {
+                    matches!(
+                        summary.return_alias,
+                        crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary::AliasParams(_)
+                    )
+                }),
+            CallTarget::Generated(identity) => self
+                .hir
+                .generated_call_summaries
+                .get(identity)
                 .is_some_and(|summary| {
                     matches!(
                         summary.return_alias,

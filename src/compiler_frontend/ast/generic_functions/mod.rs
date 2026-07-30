@@ -9,13 +9,15 @@ mod body_rules;
 mod calls;
 mod diagnostics;
 mod instances;
+mod materialisation;
 mod templates;
 
 pub(crate) use body_rules::{GenericFunctionBodyValidationInput, validate_generic_function_body};
 pub(crate) use calls::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionInferenceInput,
     concrete_argument_mapping, infer_generic_function_call, parse_generic_function_call_expression,
-    substitute_function_signature, validate_generic_function_template_call_expression,
+    substitute_function_signature, validate_generic_function_bound_evidence,
+    validate_generic_function_template_call_expression,
 };
 pub(crate) use diagnostics::{
     GenericInstantiationDiagnosticContext, recursive_generic_function_instantiation,
@@ -23,6 +25,9 @@ pub(crate) use diagnostics::{
 };
 pub(crate) use instances::{
     GenericFunctionInstance, GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,
+};
+pub(crate) use materialisation::{
+    MaterialisedGenericAst, ModuleMaterialisationContext, bootstrap_call_summary_from_signature,
 };
 pub(crate) use templates::GenericFunctionTemplate;
 

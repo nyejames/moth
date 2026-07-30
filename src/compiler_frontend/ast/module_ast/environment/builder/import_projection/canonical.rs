@@ -62,12 +62,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         "Imported canonical source type {origin:?} has no projected consumer-local nominal declaration"
                     ))
                 })?,
+            CanonicalTypeIdentity::ModulePrivateNominal(identity) => {
+                return Err(CompilerError::compiler_error(format!(
+                    "Public interface exposed module-private nominal identity {identity:?}"
+                )));
+            }
             CanonicalTypeIdentity::ExternalOpaque(external) => {
                 let (external_type_id, _) = self
                     .context
                     .external_package_registry
-                    .resolve_package_type_by_path(
-                        external.package_path(),
+                    .resolve_canonical_package_type_by_path(
+                        external.package(),
                         external.symbol_path(),
                     )
                     .ok_or_else(|| {

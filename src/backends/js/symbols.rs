@@ -52,6 +52,30 @@ impl<'hir> JsEmitter<'hir> {
                 self.function_name_by_id.insert(function_id, name.clone());
                 continue;
             }
+            if let Some((identity, _)) = self
+                .hir
+                .function_ids_by_private_origin
+                .iter()
+                .find(|(_, local_function_id)| **local_function_id == function_id)
+                && let Some(name) = self.config.module_private_function_names.get(identity)
+            {
+                self.used_identifiers.insert(name.clone());
+                self.function_name_by_id.insert(function_id, name.clone());
+                continue;
+            }
+            if let Some((identity, _)) = self
+                .hir
+                .function_ids_by_generated
+                .iter()
+                .find(|(_, local_function_id)| **local_function_id == function_id)
+            {
+                let Some(name) = self.config.generated_function_names.get(identity).cloned() else {
+                    continue;
+                };
+                self.used_identifiers.insert(name.clone());
+                self.function_name_by_id.insert(function_id, name);
+                continue;
+            }
             let leaf_name_hint = self
                 .hir
                 .side_table

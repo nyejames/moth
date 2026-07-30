@@ -150,7 +150,9 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::instrumentation::{log_ast_counters, reset_ast_counters};
 
 use crate::benchmark_timer_log;
-use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericFunctionInstantiationRequest, ModuleMaterialisationContext,
+};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -253,7 +255,8 @@ pub(crate) struct AstImportedFunctionContract {
 ///
 /// WHAT: the single result of AST construction. `ast` holds executable state only.
 ///       `public_interface_projection_input` feeds the public-interface draft projection and
-///       `generic_function_templates` feeds validated generic-template extraction, both before
+///       `materialisation_context` retains validated generic templates and their closed
+///       declaring-module semantic context, both before
 ///       HIR receives the executable `Ast`. Config and direct Moth-template compilation discard
 ///       the side results because they stop at folded AST data.
 /// WHY: separating the projection side results from executable `Ast` keeps HIR input
@@ -267,8 +270,12 @@ pub struct AstBuildResult {
     /// Direct public-interface projection input consumed by the public-interface draft builder.
     pub public_interface_projection_input: AstPublicInterfaceProjectionInput,
 
-    /// Donor-local validated generic-template map consumed by the extraction/join owner.
-    pub generic_function_templates: FxHashMap<InternedPath, GenericFunctionTemplate>,
+    /// Immutable declaring-module context consumed by generated-function materialisation.
+    pub(crate) materialisation_context: ModuleMaterialisationContext,
+
+    /// Imported generic requests inferred against provider contracts. The requester carries only
+    /// stable declaration/type evidence into the build-owned sidecar worklist.
+    pub(crate) deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
 }
 
 /// Complete header-stage output consumed by AST construction.

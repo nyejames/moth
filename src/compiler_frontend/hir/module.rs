@@ -24,7 +24,9 @@ use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::HirStruct;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::FxHashMap;
@@ -97,7 +99,13 @@ pub struct HirModule {
     /// WHY: public-interface finalization joins borrow summaries to declaration records through
     /// this side table rather than rendered names, paths or declaration order.
     pub function_ids_by_origin: FxHashMap<OriginFunctionId, FunctionId>,
+    pub(crate) function_ids_by_private_origin:
+        FxHashMap<ModulePrivateExecutableIdentity, FunctionId>,
+    pub(crate) function_ids_by_generated: FxHashMap<GeneratedFunctionIdentity, FunctionId>,
     pub(crate) imported_call_summaries: FxHashMap<OriginFunctionId, PublicCallSummary>,
+    pub(crate) module_private_call_summaries:
+        FxHashMap<ModulePrivateExecutableIdentity, PublicCallSummary>,
+    pub(crate) generated_call_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
 
     pub module_constants: Vec<HirModuleConst>,
 
@@ -135,7 +143,11 @@ impl HirModule {
             start_function: None,
             function_origins: FxHashMap::default(),
             function_ids_by_origin: FxHashMap::default(),
+            function_ids_by_private_origin: FxHashMap::default(),
+            function_ids_by_generated: FxHashMap::default(),
             imported_call_summaries: FxHashMap::default(),
+            module_private_call_summaries: FxHashMap::default(),
+            generated_call_summaries: FxHashMap::default(),
             module_constants: vec![],
             regions: vec![],
             const_facts: HirConstFacts::default(),

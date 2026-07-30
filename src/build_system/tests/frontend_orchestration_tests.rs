@@ -554,11 +554,19 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         external_packages: Arc::clone(&external_packages),
         external_import_resolution_table: &resolution_table,
         source_provider_imports: &source_provider_imports,
+        source_provider_materialisations: &super::SourceProviderMaterialisationSet::default(),
         builder_runtime_packages: &[],
     };
 
+    let generated_store =
+        super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
     let draft = compile_context
-        .compile_module_semantic(prepared, &canonical_entry, module_label)
+        .compile_module_semantic(
+            prepared,
+            &canonical_entry,
+            module_label,
+            generated_store.session(),
+        )
         .expect("semantic compilation should succeed");
 
     let draft = match draft {
@@ -569,7 +577,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     };
 
     assert_eq!(
-        draft.public_interface.draft.module_origin, stable_origin,
+        draft.public_interface.module_origin, stable_origin,
         "the semantic draft should retain the module's stable origin"
     );
     assert!(
@@ -588,31 +596,16 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         draft.module.metadata.warnings.is_empty(),
         "semantic compilation should not introduce warnings for a clean generic free-function declaration"
     );
+    let materialisation_context = draft
+        .module
+        .metadata
+        .materialisation_context
+        .as_ref()
+        .expect("a successful semantic module retains its materialisation context");
     assert_eq!(
-        draft.module.metadata.validated_generic_templates.len(),
+        materialisation_context.generic_function_templates().len(),
         1,
         "the production semantic path should retain one generic free-function template body"
-    );
-    assert_eq!(
-        draft
-            .module
-            .metadata
-            .validated_generic_templates
-            .artefacts()[0]
-            .origin
-            .defining_name(),
-        "identity",
-        "generic template metadata should retain the exported function origin"
-    );
-    assert!(
-        draft
-            .module
-            .metadata
-            .validated_generic_templates
-            .artefacts()[0]
-            .origin
-            .receiver()
-            .is_none()
     );
 }
 
@@ -698,10 +691,13 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         external_packages,
         external_import_resolution_table: &resolution_table,
         source_provider_imports: &source_provider_imports,
+        source_provider_materialisations: &super::SourceProviderMaterialisationSet::default(),
         builder_runtime_packages: &[],
     };
+    let generated_store =
+        super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
     let outcome = compile_context
-        .compile_module_semantic(prepared, &canonical_entry, None)
+        .compile_module_semantic(prepared, &canonical_entry, None, generated_store.session())
         .expect("API-only semantic compilation should not fail internally");
     let draft = match outcome {
         super::ModuleCompilationOutcome::Success(draft) => draft,
@@ -710,8 +706,8 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         }
     };
 
-    assert_eq!(draft.public_interface.draft.module_origin, stable_origin);
-    assert_eq!(draft.public_interface.draft.export_bindings.len(), 1);
+    assert_eq!(draft.public_interface.module_origin, stable_origin);
+    assert_eq!(draft.public_interface.export_bindings.len(), 1);
     assert_eq!(draft.module.executable.hir.start_function, None);
     assert!(draft.module.executable.hir.functions.is_empty());
     assert!(

@@ -368,13 +368,15 @@ fn mutable_call_argument_records_reactive_invalidation() {
     let facts = all_reactive_invalidations(&report);
     assert_eq!(facts.len(), 1);
     assert_eq!(facts[0].source, source_id);
-    assert!(matches!(
-        &facts[0].kind,
-        ReactiveInvalidationKind::MutableCallArgument {
-            target: CallTarget::Local(_),
-            argument_index: 0,
-        }
-    ));
+    let ReactiveInvalidationKind::MutableCallArgument {
+        target,
+        argument_index,
+    } = &facts[0].kind
+    else {
+        panic!("expected a mutable-call reactive invalidation");
+    };
+    assert!(matches!(target.as_ref(), CallTarget::Local(_)));
+    assert_eq!(*argument_index, 0);
 
     let source_local = hir
         .side_table

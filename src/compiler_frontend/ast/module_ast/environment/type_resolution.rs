@@ -64,7 +64,6 @@ enum MemberShellSemanticContext {
 
 struct NominalBoundSurfaceValidationContext<'a> {
     visibility: &'a FileVisibility,
-    source_file_scope: &'a InternedPath,
     trait_environment: &'a TraitEnvironment,
     trait_evidence_environment: &'a TraitEvidenceEnvironment,
 }
@@ -667,10 +666,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone();
-            let source_file_scope = header.canonical_source_file(string_table);
             let validation_context = NominalBoundSurfaceValidationContext {
                 visibility: &visibility,
-                source_file_scope: &source_file_scope,
                 trait_environment,
                 trait_evidence_environment,
             };
@@ -804,7 +801,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             validation_context.trait_environment,
             validation_context.trait_evidence_environment,
             validation_context.visibility,
-            validation_context.source_file_scope,
+            &self.resolved_type_aliases_by_path,
         );
 
         validate_nominal_generic_bound_evidence(type_id, location, &evidence_context)

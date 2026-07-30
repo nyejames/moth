@@ -7,12 +7,14 @@
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::{
-    ExternalAbiType, ExternalAccessKind, ExternalConstantDef, ExternalConstantId,
-    ExternalConstantValue, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
-    ExternalJsLowering, ExternalPackageRegistry, ExternalParameter, ExternalReturnAlias,
-    ExternalReturnSlot, ExternalSignatureType, ExternalSymbolId, ExternalSymbolPath,
-    ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID, external_success_returns,
+    CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstantDef,
+    ExternalConstantId, ExternalConstantValue, ExternalFunctionDef, ExternalFunctionId,
+    ExternalFunctionLowerings, ExternalJsLowering, ExternalPackageRegistry, ExternalParameter,
+    ExternalReturnAlias, ExternalReturnSlot, ExternalSignatureType, ExternalSymbolCategory,
+    ExternalSymbolId, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
+    IO_INPUT_EXTERNAL_TYPE_ID, external_success_returns,
 };
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -297,6 +299,227 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
         error_return_type: None,
         lowerings: ExternalFunctionLowerings::default(),
     }
+}
+
+fn scalar_int_constant(name: &str, value: i32) -> ExternalConstantDef {
+    ExternalConstantDef {
+        name: name.to_owned(),
+        data_type: ExternalAbiType::I32,
+        value: ExternalConstantValue::Int(value),
+    }
+}
+
+#[test]
+fn duplicate_explicit_function_id_is_rejected_without_mutation() {
+    let mut registry = ExternalPackageRegistry::default();
+    let package_id = registry
+        .register_package(
+            "@test/functions",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("test package should register");
+    let function_id = ExternalFunctionId::Synthetic(700);
+    let original_path =
+        ExternalSymbolPath::from_components(vec!["nested".to_owned(), "original".to_owned()]);
+    let duplicate_path = ExternalSymbolPath::from_single("duplicate");
+
+    registry
+        .register_function_at_path(
+            package_id,
+            original_path.clone(),
+            function_id,
+            empty_void_function("original"),
+        )
+        .expect("the original function should register");
+    let result = registry.register_function_at_path(
+        package_id,
+        duplicate_path.clone(),
+        function_id,
+        empty_void_function("duplicate"),
+    );
+
+    assert!(result.is_err(), "an explicit function ID must be injective");
+    assert!(
+        registry
+            .resolve_package_function_by_path("@test/functions", &duplicate_path)
+            .is_none(),
+        "the rejected path must not mutate the package surface"
+    );
+    let identity = registry
+        .canonical_symbol_identity(ExternalSymbolId::Function(function_id))
+        .expect("the original reverse identity must remain intact");
+    assert_eq!(identity.symbol_path, original_path);
+}
+
+#[test]
+fn duplicate_explicit_constant_id_is_rejected_without_mutation() {
+    let mut registry = ExternalPackageRegistry::default();
+    let package_id = registry
+        .register_package(
+            "@test/constants",
+            crate::builder_surface::PackageOrigin::Core,
+        )
+        .expect("test package should register");
+    let constant_id = ExternalConstantId(701);
+    let original_path =
+        ExternalSymbolPath::from_components(vec!["nested".to_owned(), "ORIGINAL".to_owned()]);
+    let duplicate_path = ExternalSymbolPath::from_single("DUPLICATE");
+
+    registry
+        .register_constant_at_path(
+            package_id,
+            original_path.clone(),
+            constant_id,
+            scalar_int_constant("ORIGINAL", 1),
+        )
+        .expect("the original constant should register");
+    let result = registry.register_constant_at_path(
+        package_id,
+        duplicate_path.clone(),
+        constant_id,
+        scalar_int_constant("DUPLICATE", 2),
+    );
+
+    assert!(result.is_err(), "an explicit constant ID must be injective");
+    assert!(
+        registry
+            .resolve_package_constant_by_path("@test/constants", &duplicate_path)
+            .is_none(),
+        "the rejected path must not mutate the package surface"
+    );
+    let identity = registry
+        .canonical_symbol_identity(ExternalSymbolId::Constant(constant_id))
+        .expect("the original reverse identity must remain intact");
+    assert_eq!(identity.symbol_path, original_path);
+}
+
+#[test]
+fn canonical_binding_identity_resolves_across_independent_registries() {
+    let function_path =
+        ExternalSymbolPath::from_components(vec!["nested".to_owned(), "call".to_owned()]);
+    let type_path =
+        ExternalSymbolPath::from_components(vec!["nested".to_owned(), "Thing".to_owned()]);
+    let constant_path =
+        ExternalSymbolPath::from_components(vec!["nested".to_owned(), "VALUE".to_owned()]);
+    let mut provider = ExternalPackageRegistry::default();
+    let provider_package = provider
+        .register_package(
+            "@test/shared",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("provider package should register");
+    provider
+        .register_function_at_path(
+            provider_package,
+            function_path.clone(),
+            ExternalFunctionId::Synthetic(702),
+            empty_void_function("call"),
+        )
+        .expect("provider function should register");
+    provider
+        .register_type_at_path(
+            provider_package,
+            type_path.clone(),
+            ExternalTypeId(704),
+            ExternalTypeDef {
+                name: "Thing".to_owned(),
+                package_id: provider_package,
+                abi_type: ExternalAbiType::Handle,
+            },
+        )
+        .expect("provider type should register");
+    provider
+        .register_constant_at_path(
+            provider_package,
+            constant_path.clone(),
+            ExternalConstantId(705),
+            scalar_int_constant("VALUE", 1),
+        )
+        .expect("provider constant should register");
+
+    let function_identity = provider
+        .canonical_symbol_identity(ExternalSymbolId::Function(ExternalFunctionId::Synthetic(
+            702,
+        )))
+        .expect("provider should publish a canonical identity");
+    let type_identity = provider
+        .canonical_symbol_identity(ExternalSymbolId::Type(ExternalTypeId(704)))
+        .expect("provider should publish a canonical type identity");
+    let constant_identity = provider
+        .canonical_symbol_identity(ExternalSymbolId::Constant(ExternalConstantId(705)))
+        .expect("provider should publish a canonical constant identity");
+
+    let mut consumer = ExternalPackageRegistry::default();
+    consumer
+        .register_package(
+            "@test/unrelated",
+            crate::builder_surface::PackageOrigin::Core,
+        )
+        .expect("unrelated package should shift the local package ID");
+    let consumer_package = consumer
+        .register_package(
+            "@test/shared",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("consumer package should register independently");
+    consumer
+        .register_function_at_path(
+            consumer_package,
+            function_path.clone(),
+            ExternalFunctionId::Synthetic(703),
+            empty_void_function("call"),
+        )
+        .expect("consumer function should register with a different local ID");
+    consumer
+        .register_type_at_path(
+            consumer_package,
+            type_path,
+            ExternalTypeId(706),
+            ExternalTypeDef {
+                name: "Thing".to_owned(),
+                package_id: consumer_package,
+                abi_type: ExternalAbiType::Handle,
+            },
+        )
+        .expect("consumer type should register with a different local ID");
+    consumer
+        .register_constant_at_path(
+            consumer_package,
+            constant_path,
+            ExternalConstantId(707),
+            scalar_int_constant("VALUE", 1),
+        )
+        .expect("consumer constant should register with a different local ID");
+
+    assert_eq!(
+        consumer.resolve_canonical_symbol(&function_identity),
+        Some(ExternalSymbolId::Function(ExternalFunctionId::Synthetic(
+            703
+        )))
+    );
+    assert_eq!(
+        consumer.resolve_canonical_symbol(&type_identity),
+        Some(ExternalSymbolId::Type(ExternalTypeId(706)))
+    );
+    assert_eq!(
+        consumer.resolve_canonical_symbol(&constant_identity),
+        Some(ExternalSymbolId::Constant(ExternalConstantId(707)))
+    );
+
+    let mismatched_origin = CanonicalBindingSymbolIdentity {
+        package: StablePackageIdentity::binding(
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+            "@test/shared",
+        ),
+        symbol_path: function_path,
+        category: ExternalSymbolCategory::Function,
+    };
+    assert!(
+        consumer
+            .resolve_canonical_symbol(&mismatched_origin)
+            .is_none(),
+        "the same package path from another origin must not resolve"
+    );
 }
 
 #[test]
@@ -1011,11 +1234,15 @@ fn register_package_always_produces_binding_backed_metadata() {
 fn reverse_lookup_resolves_builtin_external_type_to_owned_identity() {
     let registry = ExternalPackageRegistry::new();
 
-    let (package_path, symbol_path) = registry
+    let (package, symbol_path) = registry
         .resolve_type_package_and_symbol_path(IO_INPUT_EXTERNAL_TYPE_ID)
         .expect("io.input.Input must resolve to its stable identity");
 
-    assert_eq!(package_path, "@core/io");
+    assert_eq!(package.name(), "@core/io");
+    assert_eq!(
+        package.origin(),
+        crate::builder_surface::PackageOrigin::Core
+    );
     assert_eq!(
         symbol_path.display_text(),
         "input.Input",
@@ -1049,11 +1276,15 @@ fn reverse_lookup_resolves_dynamically_registered_external_type() {
         )
         .expect("test type should register at a structured path");
 
-    let (package_path, symbol_path) = registry
+    let (package, symbol_path) = registry
         .resolve_type_package_and_symbol_path(ExternalTypeId(42))
         .expect("dynamically registered type must resolve through the reverse lookup");
 
-    assert_eq!(package_path, "@test/canvas");
+    assert_eq!(package.name(), "@test/canvas");
+    assert_eq!(
+        package.origin(),
+        crate::builder_surface::PackageOrigin::Builder
+    );
     assert_eq!(symbol_path.display_text(), "render.Context");
 }
 
@@ -1094,11 +1325,11 @@ fn clone_preserves_type_reverse_lookup() {
         .expect("test type should register");
 
     let cloned = registry.clone();
-    let (package_path, symbol_path) = cloned
+    let (package, symbol_path) = cloned
         .resolve_type_package_and_symbol_path(ExternalTypeId(7))
         .expect("cloned registry must preserve the type reverse lookup");
 
-    assert_eq!(package_path, "@test/clone");
+    assert_eq!(package.name(), "@test/clone");
     assert_eq!(symbol_path.display_text(), "Handle");
 }
 
@@ -1184,10 +1415,10 @@ fn duplicate_external_type_id_at_distinct_path_is_rejected_and_preserves_origina
     );
 
     // The original reverse identity must remain intact after the failed duplicate.
-    let (package_path, symbol_path) = registry
+    let (package, symbol_path) = registry
         .resolve_type_package_and_symbol_path(ExternalTypeId(11))
         .expect("the original reverse identity must survive the failed duplicate");
-    assert_eq!(package_path, "@test/reuse");
+    assert_eq!(package.name(), "@test/reuse");
     assert_eq!(
         symbol_path.display_text(),
         "shapes.Origin",
@@ -1244,9 +1475,9 @@ fn duplicate_external_type_id_across_distinct_packages_is_rejected() {
         "reusing an ExternalTypeId in a second package must be a CompilerError"
     );
 
-    let (package_path, symbol_path) = registry
+    let (package, symbol_path) = registry
         .resolve_type_package_and_symbol_path(ExternalTypeId(5))
         .expect("the original alpha reverse identity must survive the failed duplicate");
-    assert_eq!(package_path, "@test/alpha");
+    assert_eq!(package.name(), "@test/alpha");
     assert_eq!(symbol_path.display_text(), "Handle");
 }

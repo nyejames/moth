@@ -45,7 +45,7 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
-use crate::compiler_frontend::hir::ids::{FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
@@ -1075,7 +1075,7 @@ impl<'a> HirBuilder<'a> {
         expr_type_id: FrontendTypeId,
         location: &SourceLocation,
     ) -> Result<LoweredExpression, CompilerError> {
-        let function_id = self.resolve_function_id_or_error(method_path, location)?;
+        let call_target = self.resolve_call_target_or_error(method_path, location)?;
         let source_argument = CallArgument::positional(
             (*cast.source).clone(),
             CallAccessMode::Shared,
@@ -1086,7 +1086,7 @@ impl<'a> HirBuilder<'a> {
             CastHandling::Infallible => {
                 let result_type_ids = vec![cast.target_type_id];
                 let lowered = self.lower_call_expression(
-                    CallTarget::Local(function_id),
+                    call_target,
                     &[source_argument],
                     &result_type_ids,
                     location,
@@ -1103,7 +1103,7 @@ impl<'a> HirBuilder<'a> {
             }
             CastHandling::Propagate => {
                 let carrier = self.emit_user_defined_cast_call_carrier(
-                    function_id,
+                    call_target,
                     &source_argument,
                     location,
                 )?;
@@ -1148,14 +1148,14 @@ impl<'a> HirBuilder<'a> {
             }
 
             ResolvedCastEvidence::UserDefined { method_path, .. } => {
-                let function_id = self.resolve_function_id_or_error(method_path, location)?;
+                let call_target = self.resolve_call_target_or_error(method_path, location)?;
                 let source_argument = CallArgument::positional(
                     (*cast.source).clone(),
                     CallAccessMode::Shared,
                     location.to_owned(),
                 );
                 let carrier = self.emit_user_defined_cast_call_carrier(
-                    function_id,
+                    call_target,
                     &source_argument,
                     location,
                 )?;
@@ -1246,11 +1246,10 @@ impl<'a> HirBuilder<'a> {
     /// Emits a user-defined cast method call that returns a fallible carrier.
     fn emit_user_defined_cast_call_carrier(
         &mut self,
-        function_id: FunctionId,
+        target: CallTarget,
         source_argument: &CallArgument,
         location: &SourceLocation,
     ) -> Result<EmittedFallibleCarrier, CompilerError> {
-        let target = CallTarget::Local(function_id);
         let (carrier_type, ok_type, err_type) =
             self.result_call_carrier_slots(&target, location)?;
 

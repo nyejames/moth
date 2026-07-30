@@ -70,6 +70,11 @@ pub(crate) struct ImportEnvironmentInput<'a> {
 pub(crate) fn prepare_import_environment(
     input: ImportEnvironmentInput<'_>,
 ) -> Result<HeaderImportEnvironment, CompilerMessages> {
+    input
+        .source_provider_imports
+        .validate_binding_targets(input.external_package_registry)
+        .map_err(|error| CompilerMessages::from_error_ref(error, input.string_table))?;
+
     let importable_symbol_paths = input.module_symbols.importable_source_symbol_paths.clone();
 
     let mut builder = ImportEnvironmentBuilder {

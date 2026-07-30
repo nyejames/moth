@@ -170,15 +170,18 @@ impl<'a> DirectTraitProjection<'a> {
         };
 
         let public_name = binding.public_name();
+        let defining_name = trait_origin.defining_name();
         let root = self
             .roots_by_name
-            .get(public_name)
+            .get(defining_name)
+            .or_else(|| self.roots_by_name.get(public_name))
             .copied()
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
-                    "public-interface draft trait projection: the trait export binding '{}' has no \
-                 matching trait root; every direct trait binding must join exactly one root",
-                    public_name
+                    "public-interface draft trait projection: the trait export binding '{}' for \
+                     defining trait '{}' has no matching trait root; every direct trait binding \
+                     must join exactly one root",
+                    public_name, defining_name
                 ))
             })?;
 
@@ -204,11 +207,11 @@ impl<'a> DirectTraitProjection<'a> {
             )));
         }
 
-        if self.consumed.insert(public_name, ()).is_some() {
+        if self.consumed.insert(defining_name, ()).is_some() {
             return Err(CompilerError::compiler_error(format!(
-                "public-interface draft trait projection: two trait export bindings share the \
-                 public name '{}'; a duplicate trait binding must not join twice",
-                public_name
+                "public-interface draft trait projection: trait '{}' joined more than once; \
+                 aliases preserve one declaration record and must not project its root twice",
+                defining_name
             )));
         }
 

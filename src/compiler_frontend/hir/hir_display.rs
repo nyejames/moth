@@ -768,6 +768,12 @@ impl<'a> HirDisplayContext<'a> {
             CallTarget::CrossModule(origin) => {
                 format!("imported {}", origin.defining_name())
             }
+            CallTarget::ModulePrivate(identity) => {
+                format!("module-private {identity:?}")
+            }
+            CallTarget::Generated(identity) => {
+                format!("generated {}", identity.declaration().defining_name())
+            }
             CallTarget::External(id) => id.name().to_owned(),
         }
     }

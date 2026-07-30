@@ -342,6 +342,58 @@ impl<'a> HirBuilder<'a> {
                 }
             }
 
+            CallTarget::ModulePrivate(identity) => {
+                let carrier_type_id = self
+                    .module_private_fallible_carriers_by_identity
+                    .get(identity)
+                    .copied()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "Fallible module-private call target {identity:?} has no projected carrier type"
+                        ))
+                    })?;
+                match self
+                    .type_environment
+                    .fallible_carrier_slots(carrier_type_id)
+                {
+                    Some((success, error)) => Ok((carrier_type_id, success, error)),
+                    None => {
+                        return_hir_transformation_error!(
+                            format!(
+                                "Fallible module-private call target {identity:?} has an invalid projected carrier type"
+                            ),
+                            self.hir_error_location(location)
+                        );
+                    }
+                }
+            }
+
+            CallTarget::Generated(identity) => {
+                let carrier_type_id = self
+                    .generated_fallible_carriers_by_identity
+                    .get(identity)
+                    .copied()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "Fallible generated call target {identity:?} has no projected carrier type"
+                        ))
+                    })?;
+                match self
+                    .type_environment
+                    .fallible_carrier_slots(carrier_type_id)
+                {
+                    Some((success, error)) => Ok((carrier_type_id, success, error)),
+                    None => {
+                        return_hir_transformation_error!(
+                            format!(
+                                "Fallible generated call target {identity:?} has an invalid projected carrier type"
+                            ),
+                            self.hir_error_location(location)
+                        );
+                    }
+                }
+            }
+
             CallTarget::External(_) => {
                 return_hir_transformation_error!(
                     "Fallible-handled call targeted a host function",

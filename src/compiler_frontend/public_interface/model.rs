@@ -17,6 +17,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
     ExportedGenericParameterIdentity, StableTraitRequirementIdentity,
 };
+use crate::compiler_frontend::external_packages::CanonicalBindingSymbolIdentity;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::public_call_summary::{PublicCallParameterAccess, PublicCallSummary};
 use crate::compiler_frontend::semantic_identity::{
@@ -141,25 +142,25 @@ pub(crate) enum PublicTraitReceiverAccess {
 /// `name` is the owned authored parameter name, or `None` when the source signature omits it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicTraitRequirementParameter {
-    pub(super) name: Option<String>,
-    pub(super) value_mode: ValueMode,
-    pub(super) type_identity: TraitSurfaceTypeIdentity,
+    pub(crate) name: Option<String>,
+    pub(crate) value_mode: ValueMode,
+    pub(crate) type_identity: TraitSurfaceTypeIdentity,
 }
 
 /// One return slot in a trait requirement surface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicTraitRequirementReturn {
-    pub(super) channel: ReturnChannel,
-    pub(super) type_identity: TraitSurfaceTypeIdentity,
+    pub(crate) channel: ReturnChannel,
+    pub(crate) type_identity: TraitSurfaceTypeIdentity,
 }
 
 /// One method requirement in a trait surface, in authored order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicTraitRequirementSurface {
-    pub(super) name: String,
-    pub(super) receiver_access: PublicTraitReceiverAccess,
-    pub(super) parameters: Vec<PublicTraitRequirementParameter>,
-    pub(super) returns: Vec<PublicTraitRequirementReturn>,
+    pub(crate) name: String,
+    pub(crate) receiver_access: PublicTraitReceiverAccess,
+    pub(crate) parameters: Vec<PublicTraitRequirementParameter>,
+    pub(crate) returns: Vec<PublicTraitRequirementReturn>,
 }
 
 // ===========================================================================
@@ -380,8 +381,22 @@ pub(crate) struct PublicEvidenceRecord {
 pub(crate) struct PublicInterfaceDraft {
     pub(crate) module_origin: StableModuleOriginIdentity,
     pub(crate) export_bindings: Vec<ExportBinding>,
+    pub(crate) binding_exports: Vec<PublicBindingExport>,
     pub(crate) declarations: Vec<PublicDeclarationRecord>,
     pub(crate) reusable_evidence: Vec<PublicEvidenceRecord>,
+}
+
+/// One binding-backed symbol re-exported by a source module.
+///
+/// WHAT: owns the source-facing public name plus the canonical binding package identity,
+/// structured symbol path and declaration category.
+/// WHY: build-local `ExternalSymbolId` values cannot cross a source-module interface. A consumer
+/// resolves this stable identity through the binding package registry supplied to its own build.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PublicBindingExport {
+    pub(crate) exporting_module: StableModuleOriginIdentity,
+    pub(crate) public_name: String,
+    pub(crate) target: CanonicalBindingSymbolIdentity,
 }
 
 /// One completed concrete-local summary record, retained in stable-origin order.
@@ -428,43 +443,24 @@ pub(crate) struct LocalPublicInterface {
 pub(crate) struct PublicSemanticInterface {
     pub(crate) module_origin: StableModuleOriginIdentity,
     pub(crate) export_bindings: Vec<ExportBinding>,
+    pub(crate) binding_exports: Vec<PublicBindingExport>,
     pub(crate) declarations: Vec<PublicDeclarationRecord>,
     pub(crate) reusable_evidence: Vec<PublicEvidenceRecord>,
     pub(crate) concrete_call_summaries: Vec<ConcreteCallSummaryRecord>,
 }
 
 impl PublicSemanticInterface {
-    /// Close one completed direct interface for publication.
-    ///
-    /// Public re-export closure extends this constructor before the canonical cutover is
-    /// accepted. This conversion already enforces the important phase boundary: only a completed
-    /// post-borrow `LocalPublicInterface` can become a provider surface.
-    pub(crate) fn from_local(local: LocalPublicInterface) -> Self {
-        let LocalPublicInterface {
-            draft,
-            concrete_call_summaries,
-        } = local;
-        let PublicInterfaceDraft {
-            module_origin,
-            export_bindings,
-            declarations,
-            reusable_evidence,
-        } = draft;
-
-        Self {
-            module_origin,
-            export_bindings,
-            declarations,
-            reusable_evidence,
-            concrete_call_summaries,
-        }
-    }
-
     pub(crate) fn exported_origin(&self, public_name: &str) -> Option<&OriginDeclarationId> {
         self.export_bindings
             .iter()
             .find(|binding| binding.public_name() == public_name)
             .map(ExportBinding::origin)
+    }
+
+    pub(crate) fn binding_export(&self, public_name: &str) -> Option<&PublicBindingExport> {
+        self.binding_exports
+            .iter()
+            .find(|binding| binding.public_name == public_name)
     }
 
     pub(crate) fn declaration(

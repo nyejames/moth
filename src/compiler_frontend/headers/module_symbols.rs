@@ -125,7 +125,7 @@ pub(crate) struct GenericDeclarationMetadata {
 ///   `declarations`) by `resolve_module_dependencies`.
 /// - `declarations` is empty after `prepare_header_syntax` and filled by
 ///   `resolve_module_dependencies`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ModuleSymbols {
     // Declarations in sorted-header order.
     // Empty until resolve_module_dependencies completes; do not read before sorting.

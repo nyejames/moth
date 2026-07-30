@@ -18,12 +18,24 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let PublicDeclarationSemantics::Function(function) = record.semantics else {
                 continue;
             };
-            if !matches!(function.category, PublicFunctionCategory::ConcreteLocal) {
-                continue;
-            }
+            let generic_parameter_list_id = match &function.category {
+                PublicFunctionCategory::ConcreteLocal => None,
+                PublicFunctionCategory::GenericTemplate(descriptor) => self
+                    .register_imported_generic_parameters(
+                        &descriptor.generic_parameters,
+                        string_table,
+                    )
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+            };
 
             let (signature, function_type_id, fallible_carrier_type_id) = self
-                .project_imported_function_signature(&local_path, &function, string_table)
+                .project_imported_callable_signature(
+                    &local_path,
+                    &function.parameters,
+                    &function.returns,
+                    function.error_return.as_ref(),
+                    string_table,
+                )
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
             let diagnostic_type = DataType::Function(Box::new(None), signature.clone());
             let declaration = Declaration {
@@ -41,9 +53,44 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 local_path.clone(),
                 ResolvedFunctionSignature {
                     receiver: None,
-                    signature,
+                    signature: signature.clone(),
                 },
             );
+
+            if let PublicFunctionCategory::GenericTemplate(_) = &function.category {
+                let OriginDeclarationId::Function(origin) = record.origin else {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Imported generic function declaration has no function origin",
+                        ),
+                        string_table,
+                    ));
+                };
+                let generic_parameter_list_id = generic_parameter_list_id.ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Imported generic function declaration has no projected parameter list",
+                        ),
+                        string_table,
+                    )
+                })?;
+
+                self.generic_function_templates_by_path.insert(
+                    local_path.clone(),
+                    GenericFunctionTemplate {
+                        function_path: local_path,
+                        source_file: InternedPath::new(),
+                        declaration_identity: Some(
+                            crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity::Public(origin),
+                        ),
+                        generic_parameter_list_id,
+                        signature,
+                        body_tokens: None,
+                        declaration_location: Default::default(),
+                    },
+                );
+                continue;
+            }
 
             let header_contract = self
                 .import_environment
@@ -72,10 +119,125 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
-    fn project_imported_function_signature(
+    pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_receiver_method_declarations(
+        &mut self,
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerMessages> {
+        let imported = self
+            .import_environment
+            .imported_declarations_by_local_path
+            .clone();
+
+        for (imported_type_path, record) in imported {
+            let OriginDeclarationId::Type(receiver_origin) = &record.origin else {
+                continue;
+            };
+            let methods = match &record.semantics {
+                PublicDeclarationSemantics::Struct(structure) => &structure.receiver_methods,
+                PublicDeclarationSemantics::Choice(choice) => &choice.receiver_methods,
+                _ => continue,
+            };
+            let Some(receiver_type_id) = self
+                .imported_type_ids_by_origin
+                .get(receiver_origin)
+                .copied()
+            else {
+                continue;
+            };
+            let receiver = match receiver_origin.category() {
+                crate::compiler_frontend::semantic_identity::OriginTypeCategory::Struct => {
+                    let path = self
+                        .type_environment
+                        .struct_definition_for(receiver_type_id)
+                        .ok_or_else(|| {
+                            CompilerMessages::from_error_ref(
+                                CompilerError::compiler_error(
+                                    "Imported receiver struct has no registered nominal definition",
+                                ),
+                                string_table,
+                            )
+                        })?
+                        .path
+                        .clone();
+                    crate::compiler_frontend::datatypes::ReceiverKey::Struct(path)
+                }
+                crate::compiler_frontend::semantic_identity::OriginTypeCategory::Choice => {
+                    let path = self
+                        .type_environment
+                        .choice_definition_for(receiver_type_id)
+                        .ok_or_else(|| {
+                            CompilerMessages::from_error_ref(
+                                CompilerError::compiler_error(
+                                    "Imported receiver choice has no registered nominal definition",
+                                ),
+                                string_table,
+                            )
+                        })?
+                        .path
+                        .clone();
+                    crate::compiler_frontend::datatypes::ReceiverKey::Choice(path)
+                }
+                crate::compiler_frontend::semantic_identity::OriginTypeCategory::TransparentAlias => {
+                    continue;
+                }
+            };
+
+            for method in methods {
+                if !matches!(method.category, PublicReceiverMethodCategory::ConcreteLocal) {
+                    continue;
+                }
+                let method_name = string_table.intern(method.method_origin.defining_name());
+                let method_path = imported_type_path.append(method_name);
+                let (signature, _, fallible_carrier_type_id) = self
+                    .project_imported_callable_signature(
+                        &method_path,
+                        &method.parameters,
+                        &method.returns,
+                        method.error_return.as_ref(),
+                        string_table,
+                    )
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                self.resolved_function_signatures_by_path.insert(
+                    method_path.clone(),
+                    ResolvedFunctionSignature {
+                        receiver: Some(receiver.clone()),
+                        signature,
+                    },
+                );
+
+                let header_contract = self
+                    .import_environment
+                    .imported_functions_by_local_path
+                    .get(&method_path)
+                    .ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(format!(
+                                "Imported concrete receiver method '{}' has no header-stage call contract",
+                                method.method_origin.defining_name()
+                            )),
+                            string_table,
+                        )
+                    })?;
+                self.projected_imported_functions_by_local_path.insert(
+                    method_path,
+                    AstImportedFunctionContract {
+                        target: header_contract.target.clone(),
+                        summary: header_contract.summary.clone(),
+                        fallible_carrier_type_id,
+                    },
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn project_imported_callable_signature(
         &mut self,
         function_path: &InternedPath,
-        function: &PublicFunctionSemantics,
+        parameter_surfaces: &[PublicParameterTypeSlot],
+        return_surfaces: &[PublicReturnTypeSlot],
+        error_surface: Option<&CanonicalTypeIdentity>,
         string_table: &mut StringTable,
     ) -> Result<
         (
@@ -89,9 +251,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
         };
 
-        let mut parameters = Vec::with_capacity(function.parameters.len());
-        let mut parameter_type_ids = Vec::with_capacity(function.parameters.len());
-        for (index, parameter) in function.parameters.iter().enumerate() {
+        let mut parameters = Vec::with_capacity(parameter_surfaces.len());
+        let mut parameter_type_ids = Vec::with_capacity(parameter_surfaces.len());
+        for (index, parameter) in parameter_surfaces.iter().enumerate() {
             let type_id = self.intern_imported_canonical_type(&parameter.type_identity)?;
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
             let name = parameter
@@ -130,7 +292,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         let mut returns = Vec::new();
         let mut return_type_ids = Vec::new();
-        for returned in &function.returns {
+        for returned in return_surfaces {
             let type_id = self.intern_imported_canonical_type(&returned.type_identity)?;
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
             let mut slot = ReturnSlot::success(FunctionReturn::Value(diagnostic_type));
@@ -139,7 +301,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return_type_ids.push(type_id);
         }
 
-        let error_return = if let Some(error_identity) = &function.error_return {
+        let error_return = if let Some(error_identity) = error_surface {
             let type_id = self.intern_imported_canonical_type(error_identity)?;
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
             returns.push(ReturnSlot {

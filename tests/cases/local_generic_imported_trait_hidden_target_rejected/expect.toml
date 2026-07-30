@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0057"]
+message_contains = ["Label has no visible trait evidence"]

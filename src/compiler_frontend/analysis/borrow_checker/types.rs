@@ -167,7 +167,7 @@ pub(crate) enum ReactiveInvalidationKind {
     PlaceWrite(ReactivePlaceWriteKind),
     MapMutation(HirMapOp),
     MutableCallArgument {
-        target: CallTarget,
+        target: Box<CallTarget>,
         argument_index: usize,
     },
 }

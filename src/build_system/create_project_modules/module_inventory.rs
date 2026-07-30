@@ -32,9 +32,9 @@ use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
 use super::reachable_file_discovery::{
     CollectedReachableInputs, ExternalImportDiscoveryState, ProviderFreeDiscoveryFailed,
-    ProviderFreeProjectInventory, ResolvedDependencyEdge, assemble_input_files_from_inventory,
-    classify_provider_free_project, collect_reachable_input_files,
-    discover_reachable_source_files_provider_free,
+    ProviderFreeProjectInventory, ResolvedDependencyEdge, ResolvedSourcePackageImport,
+    assemble_input_files_from_inventory, classify_provider_free_project,
+    collect_reachable_input_files, discover_reachable_source_files_provider_free,
 };
 
 /// Minimum number of entry modules before the provider-free path uses Rayon.
@@ -82,6 +82,12 @@ pub(crate) struct DiscoveredModule {
     pub(crate) input_files: Vec<PreparedSourceInput>,
 }
 
+struct DiscoveredModuleBatch {
+    drafts: Vec<DiscoveredModuleDraft>,
+    resolved_edges: Vec<ResolvedDependencyEdge>,
+    source_package_imports: Vec<ResolvedSourcePackageImport>,
+}
+
 /// Normal entry modules grouped by the populated graph's compile waves.
 ///
 /// WHAT: owns the wave-preserving data contract between module inventory and directory
@@ -96,6 +102,7 @@ pub(crate) struct DiscoveredModule {
 pub(crate) struct ModuleEntryCompileWaves {
     waves: Vec<Vec<DiscoveredModule>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
+    source_package_imports: Vec<ResolvedSourcePackageImport>,
 }
 
 impl ModuleEntryCompileWaves {
@@ -107,8 +114,18 @@ impl ModuleEntryCompileWaves {
         &self.waves
     }
 
-    pub(crate) fn into_parts(self) -> (Vec<Vec<DiscoveredModule>>, Vec<ResolvedDependencyEdge>) {
-        (self.waves, self.provider_bindings)
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Vec<Vec<DiscoveredModule>>,
+        Vec<ResolvedDependencyEdge>,
+        Vec<ResolvedSourcePackageImport>,
+    ) {
+        (
+            self.waves,
+            self.provider_bindings,
+            self.source_package_imports,
+        )
     }
 }
 
@@ -133,9 +150,53 @@ pub(crate) fn discover_all_modules_in_project(
     directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
 ) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+    discover_all_modules_in_boundary(
+        config,
+        project_path_resolver,
+        project_module_graph,
+        style_directives,
+        external_imports,
+        directory_import_resolution,
+        true,
+        string_table,
+    )
+}
+
+pub(crate) fn discover_all_modules_in_package(
+    config: &Config,
+    project_path_resolver: &ProjectPathResolver,
+    package_module_graph: &mut ProjectModuleGraph,
+    style_directives: &StyleDirectiveRegistry,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    directory_import_resolution: DirectoryImportResolution<'_>,
+    string_table: &mut StringTable,
+) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+    discover_all_modules_in_boundary(
+        config,
+        project_path_resolver,
+        package_module_graph,
+        style_directives,
+        external_imports,
+        directory_import_resolution,
+        false,
+        string_table,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn discover_all_modules_in_boundary(
+    config: &Config,
+    project_path_resolver: &ProjectPathResolver,
+    project_module_graph: &mut ProjectModuleGraph,
+    style_directives: &StyleDirectiveRegistry,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    directory_import_resolution: DirectoryImportResolution<'_>,
+    require_normal_entry: bool,
+    string_table: &mut StringTable,
+) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
 
-    if project_module_graph.entry_modules().is_empty() {
+    if require_normal_entry && project_module_graph.entry_modules().is_empty() {
         return Err(config_diagnostic_messages(
             config,
             "entry_root",
@@ -151,7 +212,7 @@ pub(crate) fn discover_all_modules_in_project(
     // the per-entry path-keyed `ScannedImportSource` caches.
     let mut prepared_source_store = PreparedSourceStore::new(
         directory_import_resolution
-            .project_source_tree_index()
+            .source_tree_index()
             .source_count(),
     );
 
@@ -180,7 +241,11 @@ pub(crate) fn discover_all_modules_in_project(
         ProviderFreeProjectInventory::provider_capable_required()
     };
 
-    let (drafts, resolved_edges) = if !provider_free_inventory.provider_capable_required {
+    let DiscoveredModuleBatch {
+        drafts,
+        resolved_edges,
+        source_package_imports,
+    } = if !provider_free_inventory.provider_capable_required {
         match discover_modules_provider_free_parallel(
             &seeds,
             project_path_resolver,
@@ -240,6 +305,7 @@ pub(crate) fn discover_all_modules_in_project(
         project_module_graph,
         drafts,
         resolved_edges,
+        source_package_imports,
         string_table,
     )
 }
@@ -338,6 +404,7 @@ fn order_discovered_modules_by_compile_waves(
     project_module_graph: &ProjectModuleGraph,
     drafts: Vec<DiscoveredModuleDraft>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
+    source_package_imports: Vec<ResolvedSourcePackageImport>,
     string_table: &mut StringTable,
 ) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
     let waves = project_module_graph
@@ -409,6 +476,7 @@ fn order_discovered_modules_by_compile_waves(
     Ok(ModuleEntryCompileWaves {
         waves: grouped_waves,
         provider_bindings,
+        source_package_imports,
     })
 }
 
@@ -426,14 +494,16 @@ fn discover_modules_serial_provider_capable(
     prepared_source_store: &mut PreparedSourceStore,
     directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
-) -> Result<(Vec<DiscoveredModuleDraft>, Vec<ResolvedDependencyEdge>), CompilerMessages> {
+) -> Result<DiscoveredModuleBatch, CompilerMessages> {
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
+    let mut source_package_imports = Vec::new();
 
     for seed in seeds {
         let CollectedReachableInputs {
             input_files,
             resolved_edges: entry_edges,
+            source_package_imports: entry_package_imports,
         } = collect_reachable_input_files(
             &seed.entry_path,
             project_path_resolver,
@@ -450,9 +520,14 @@ fn discover_modules_serial_provider_capable(
             input_files,
         });
         resolved_edges.extend(entry_edges);
+        source_package_imports.extend(entry_package_imports);
     }
 
-    Ok((drafts, resolved_edges))
+    Ok(DiscoveredModuleBatch {
+        drafts,
+        resolved_edges,
+        source_package_imports,
+    })
 }
 
 /// Parallel provider-free module discovery.
@@ -471,8 +546,7 @@ fn discover_modules_provider_free_parallel(
     prepared_source_store: &mut PreparedSourceStore,
     directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
-) -> Result<(Vec<DiscoveredModuleDraft>, Vec<ResolvedDependencyEdge>), ProviderFreeDiscoveryFailed>
-{
+) -> Result<DiscoveredModuleBatch, ProviderFreeDiscoveryFailed> {
     // Phase 1: Run provider-free BFS for each entry seed in parallel. Each worker forks a local
     // `StringTable` from the parent so classification's retained tokens (parent-valid StringIds)
     // stay interpretable without re-tokenizing. Workers read from the shared `PreparedSourceStore`
@@ -483,6 +557,7 @@ fn discover_modules_provider_free_parallel(
         usize,
         super::reachable_file_discovery::ReachableSourceInventory,
         Vec<ResolvedDependencyEdge>,
+        Vec<ResolvedSourcePackageImport>,
     )> = seeds
         .par_iter()
         .enumerate()
@@ -499,20 +574,26 @@ fn discover_modules_provider_free_parallel(
             )
             .map_err(|_| ProviderFreeDiscoveryFailed)?;
 
-            Ok((index, discovery.inventory, discovery.resolved_edges))
+            Ok((
+                index,
+                discovery.inventory,
+                discovery.resolved_edges,
+                discovery.source_package_imports,
+            ))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     // Deterministic ordering: seeds are created in graph-assigned ModuleId order, so restoring
     // their original indexes restores ModuleId order regardless of worker completion order.
-    indexed_outcomes.sort_by_key(|(index, _, _)| *index);
+    indexed_outcomes.sort_by_key(|(index, _, _, _)| *index);
 
     // Phase 2: Assemble `PreparedSourceInput` values serially on the main thread from the shared
     // store. The immutable worker borrows have ended, so the store can be mutably reborrowed for
     // lazy `.mtf`/`.md` preparation during assembly.
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
-    for (index, inventory, entry_edges) in indexed_outcomes {
+    let mut source_package_imports = Vec::new();
+    for (index, inventory, entry_edges, entry_package_imports) in indexed_outcomes {
         let input_files = assemble_input_files_from_inventory(
             inventory,
             Some(prepared_source_store),
@@ -527,7 +608,12 @@ fn discover_modules_provider_free_parallel(
             input_files,
         });
         resolved_edges.extend(entry_edges);
+        source_package_imports.extend(entry_package_imports);
     }
 
-    Ok((drafts, resolved_edges))
+    Ok(DiscoveredModuleBatch {
+        drafts,
+        resolved_edges,
+        source_package_imports,
+    })
 }

@@ -35,7 +35,9 @@ use crate::compiler_frontend::hir::validation::validate_hir_module;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, HirLoweringResult};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::return_hir_transformation_error;
@@ -144,6 +146,10 @@ pub struct HirBuilder<'a> {
     pub(super) functions_by_name: FxHashMap<InternedPath, FunctionId>,
     pub(super) imported_functions_by_name: FxHashMap<InternedPath, AstImportedFunctionContract>,
     pub(super) imported_fallible_carriers_by_origin: FxHashMap<OriginFunctionId, TypeId>,
+    pub(super) module_private_fallible_carriers_by_identity:
+        FxHashMap<ModulePrivateExecutableIdentity, TypeId>,
+    pub(super) generated_fallible_carriers_by_identity:
+        FxHashMap<GeneratedFunctionIdentity, TypeId>,
     pub(super) structs_by_name: FxHashMap<InternedPath, StructId>,
     pub(super) choices_by_name: FxHashMap<InternedPath, ChoiceId>,
     /// Generic struct instantiations keyed by structured identity, not string paths.
@@ -259,6 +265,8 @@ impl<'a> HirBuilder<'a> {
             functions_by_name: FxHashMap::default(),
             imported_functions_by_name: FxHashMap::default(),
             imported_fallible_carriers_by_origin: FxHashMap::default(),
+            module_private_fallible_carriers_by_identity: FxHashMap::default(),
+            generated_fallible_carriers_by_identity: FxHashMap::default(),
             structs_by_name: FxHashMap::default(),
             choices_by_name: FxHashMap::default(),
             generic_structs_by_key: FxHashMap::default(),
@@ -341,6 +349,34 @@ impl<'a> HirBuilder<'a> {
                 _ => None,
             })
             .collect();
+        self.generated_fallible_carriers_by_identity = self
+            .imported_functions_by_name
+            .values()
+            .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
+                (
+                    crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Generated {
+                        identity,
+                        ..
+                    },
+                    Some(carrier_type_id),
+                ) => Some((identity.clone(), carrier_type_id)),
+                _ => None,
+            })
+            .collect();
+        self.module_private_fallible_carriers_by_identity = self
+            .imported_functions_by_name
+            .values()
+            .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
+                (
+                    crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::ModulePrivate {
+                        identity,
+                        ..
+                    },
+                    Some(carrier_type_id),
+                ) => Some((identity.clone(), carrier_type_id)),
+                _ => None,
+            })
+            .collect();
         self.module.imported_call_summaries = self
             .imported_functions_by_name
             .values()
@@ -348,7 +384,31 @@ impl<'a> HirBuilder<'a> {
                 crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Imported { origin, .. } => {
                     Some((origin.clone(), contract.summary.clone()))
                 }
-                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Local(_) => None,
+                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Local(_)
+                | crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Generated { .. }
+                | crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::ModulePrivate { .. } => None,
+            })
+            .collect();
+        self.module.module_private_call_summaries = self
+            .imported_functions_by_name
+            .values()
+            .filter_map(|contract| match &contract.target {
+                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::ModulePrivate {
+                    identity,
+                    ..
+                } => Some((identity.clone(), contract.summary.clone())),
+                _ => None,
+            })
+            .collect();
+        self.module.generated_call_summaries = self
+            .imported_functions_by_name
+            .values()
+            .filter_map(|contract| match &contract.target {
+                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Generated {
+                    identity,
+                    ..
+                } => Some((identity.clone(), contract.summary.clone())),
+                _ => None,
             })
             .collect();
 

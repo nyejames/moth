@@ -31,7 +31,7 @@ use super::project_structure_diagnostics::{
 /// WHAT: owned by [`SourcePackageBoundaryIndexes`] and iterated in import-prefix order so the
 /// Stage 0 package-boundary owner preserves one canonical package order at every surface.
 #[derive(Debug)]
-struct SourcePackageBoundaryIndex {
+pub(crate) struct SourcePackageBoundaryIndex {
     import_prefix: String,
     index: SourceTreeIndex,
 }

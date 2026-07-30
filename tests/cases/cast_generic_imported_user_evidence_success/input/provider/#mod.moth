@@ -1,0 +1,11 @@
+export:
+    Card = |
+        text String,
+    |
+;
+
+to_string |this Card| -> String:
+    return this.text
+;
+
+Card must CASTABLE_TO_STRING

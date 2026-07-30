@@ -10,8 +10,10 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::public_interface::PublicDeclarationRecord;
-use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginFunctionId};
+use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
+use crate::compiler_frontend::semantic_identity::{
+    ModulePrivateExecutableIdentity, OriginDeclarationId, OriginFunctionId,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -192,6 +194,14 @@ pub(crate) enum SourceFunctionTarget {
         origin: OriginFunctionId,
         local_path: InternedPath,
     },
+    Generated {
+        identity: crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+        local_path: InternedPath,
+    },
+    ModulePrivate {
+        identity: ModulePrivateExecutableIdentity,
+        local_path: InternedPath,
+    },
 }
 
 impl SourceFunctionTarget {
@@ -199,6 +209,12 @@ impl SourceFunctionTarget {
         match self {
             Self::Local(path)
             | Self::Imported {
+                local_path: path, ..
+            }
+            | Self::Generated {
+                local_path: path, ..
+            }
+            | Self::ModulePrivate {
                 local_path: path, ..
             } => path,
         }
@@ -281,6 +297,12 @@ pub(crate) struct HeaderImportEnvironment {
         crate::compiler_frontend::semantic_identity::OriginDeclarationId,
         PublicDeclarationRecord,
     >,
+    /// Stable reusable evidence supplied by imported provider interfaces.
+    ///
+    /// Duplicates are retained here because the same immutable provider may be imported by
+    /// several files. AST inverse projection owns deterministic deduplication and consistency
+    /// validation once canonical types, traits and receiver call targets have local handles.
+    pub(crate) imported_reusable_evidence: Vec<PublicEvidenceRecord>,
     pub(crate) imported_functions_by_local_path: FxHashMap<InternedPath, ImportedFunctionContract>,
     pub(crate) warnings: Vec<CompilerDiagnostic>,
 }

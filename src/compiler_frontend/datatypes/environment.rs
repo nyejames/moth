@@ -1013,6 +1013,38 @@ impl TypeEnvironment {
         self.nominal_by_path.get(path).copied()
     }
 
+    /// Register an additional consumer-local lookup spelling for an existing nominal type.
+    ///
+    /// Imported declarations use a collision-free internal canonical path while source generic
+    /// instantiation starts from the file-local imported spelling. Both paths must resolve to the
+    /// same nominal identity; the alias is a lookup fact and does not create another type.
+    pub(crate) fn register_nominal_path_alias(
+        &mut self,
+        path: InternedPath,
+        type_id: TypeId,
+    ) -> Result<(), CompilerError> {
+        let nominal_id = match self.get(type_id) {
+            Some(TypeDefinition::Struct(definition)) => definition.id,
+            Some(TypeDefinition::Choice(definition)) => definition.id,
+            _ => {
+                return Err(CompilerError::compiler_error(
+                    "Nominal path alias target is not a registered struct or choice",
+                ));
+            }
+        };
+
+        if let Some(existing) = self.nominal_by_path.get(&path)
+            && *existing != nominal_id
+        {
+            return Err(CompilerError::compiler_error(
+                "Nominal path alias collides with a different registered nominal type",
+            ));
+        }
+
+        self.nominal_by_path.insert(path, nominal_id);
+        Ok(())
+    }
+
     /// Returns the `TypeId` for a nominal, if registered.
     pub fn type_id_for_nominal_id(&self, id: NominalTypeId) -> Option<TypeId> {
         self.nominal_to_type_id.get(&id).copied()

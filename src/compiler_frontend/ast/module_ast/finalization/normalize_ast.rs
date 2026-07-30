@@ -314,6 +314,17 @@ impl AstFinalizer<'_, '_> {
 
         // First, synchronize every by_function_path entry by branching on generic metadata.
         for (function_path, entry) in &mut catalog.by_function_path {
+            // Imported receiver contracts arrive from an already-completed provider interface.
+            // Their defaults were folded by the provider's normalization owner, and they have no
+            // consumer-emitted declaration node to synchronize against.
+            if self
+                .environment
+                .lookups
+                .imported_functions_by_local_path
+                .contains_key(function_path)
+            {
+                continue;
+            }
             if generic_function_templates_by_path.contains_key(function_path) {
                 // Generic receiver method: must have no emitted node.
                 if normalized_function_signatures_by_path.contains_key(function_path) {

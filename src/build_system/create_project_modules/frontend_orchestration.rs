@@ -5,48 +5,74 @@
 //! borrow checking.
 
 use crate::build_system::build::{
-    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
-    ModuleSemanticDraft, ResolvedConstFragment,
+    GeneratedFunctionSidecar, Module, ModuleCompilerMetadata, ModuleExecutable,
+    ModuleExternalImport, ModuleLinkFacts, ModuleRootActivity, ModuleSemanticDraft,
+    ResolvedConstFragment,
 };
 
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
-use crate::compiler_frontend::ast::{Ast, AstBuildResult};
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericFunctionInstantiationRequest, GenericFunctionTemplate,
+    bootstrap_call_summary_from_signature, concrete_argument_mapping,
+    recursive_generic_function_instantiation, substitute_function_signature,
+};
+use crate::compiler_frontend::ast::{Ast, AstBuildResult, AstImportedFunctionContract};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalEvidenceIdentity, CanonicalTypeIdentity, CanonicalTypeProjectionContext,
+    ExportedGenericParameterIdentity, GenericParameterOriginResolver, NominalOriginResolver,
+    project_type_id_to_canonical_identity,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPackageRegistry};
+use crate::compiler_frontend::headers::import_environment::SourceFunctionTarget;
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderKind,
     HeaderParseOptions, PreparedHeaderSyntax, bind_module_headers, prepare_header_syntax,
 };
-use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
+use crate::compiler_frontend::hir::functions::{
+    HirFunctionOriginLookup, PrivateFunctionOriginSeed,
+};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
+use crate::compiler_frontend::hir::reachability::{
+    collect_module_function_link_facts, collect_reachability_from_function_link_facts,
+};
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{
-    PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, SourceProviderImportSet,
+    PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, PublicSemanticInterface,
+    SourceProviderImportSet,
 };
 use crate::compiler_frontend::public_interface::{
     build_direct_export_seed, build_public_source_nominal_origin_index,
     build_public_source_trait_origin_index,
 };
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole, OriginTypeId,
+    StableModuleOriginIdentity,
+};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
-use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
-use crate::compiler_frontend::validated_generic_template_metadata::extract_validated_generic_template_artefacts;
+use crate::compiler_frontend::symbols::string_interning::{
+    StringId, StringTable, StringTableForkSource,
+};
+use crate::compiler_frontend::validated_generic_template_metadata::validate_materialisation_context_templates;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
 
+use super::generated_worklist::{
+    GeneratedFunctionWorklist, GeneratedRequestEntry, GeneratedRequestId,
+};
 use super::prepared_module::PreparedModule;
 use super::prepared_source::PreparedSourceInput;
 
@@ -227,7 +253,42 @@ pub(super) struct FrontendModuleBuildContext<'a> {
     pub(super) external_packages: Arc<ExternalPackageRegistry>,
     pub(super) external_import_resolution_table: &'a ExternalImportResolutionTable,
     pub(super) source_provider_imports: &'a SourceProviderImportSet<'a>,
+    pub(super) source_provider_materialisations: &'a SourceProviderMaterialisationSet<'a>,
     pub(super) builder_runtime_packages: &'a [BuilderRuntimePackageMetadata],
+}
+
+#[derive(Default)]
+pub(super) struct SourceProviderMaterialisationSet<'a> {
+    contexts:
+        Vec<&'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext>,
+}
+
+impl<'a> SourceProviderMaterialisationSet<'a> {
+    pub(super) fn new(
+        contexts: Vec<
+            &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        >,
+    ) -> Self {
+        Self { contexts }
+    }
+
+    fn context_for(
+        &self,
+        identity: &GeneratedDeclarationIdentity,
+        requester_context: &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    ) -> Option<&'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext>
+    {
+        self.contexts
+            .iter()
+            .copied()
+            .find(|context| context.template_for_identity(identity).is_some())
+            .or_else(|| {
+                requester_context
+                    .template_for_identity(identity)
+                    .is_some()
+                    .then_some(requester_context)
+            })
+    }
 }
 
 /// Typed result of one retained module's semantic compilation.
@@ -811,6 +872,7 @@ impl FrontendModuleBuildContext<'_> {
         prepared: PreparedModule,
         entry_file_path: &Path,
         module_label: Option<&str>,
+        mut generated_worklist: GeneratedFunctionWorklist,
     ) -> Result<ModuleCompilationOutcome, CompilerError> {
         let PreparedModule {
             active_root_file_id,
@@ -823,7 +885,7 @@ impl FrontendModuleBuildContext<'_> {
             source_byte_count,
         } = prepared;
 
-        let active_root_role = source_module_origins
+        let active_module_origin = source_module_origins
             .origin_for(active_root_file_id)?
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
@@ -831,7 +893,8 @@ impl FrontendModuleBuildContext<'_> {
                     active_root_file_id.0
                 ))
             })?
-            .role();
+            .clone();
+        let active_root_role = active_module_origin.role();
 
         // The active module origin is resolved from the per-file source-origin table using the
         // retained active root FileId, not from a loose origin argument. Preparation already
@@ -903,6 +966,8 @@ impl FrontendModuleBuildContext<'_> {
                 active_root_file_id,
                 &sorted.headers,
                 &sorted.module_symbols,
+                self.source_provider_imports,
+                compiler.external_package_registry.as_ref(),
                 &compiler.string_table,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
@@ -963,9 +1028,10 @@ impl FrontendModuleBuildContext<'_> {
             // Destructure the build result once: the projection input and generic-template map
             // feed the draft and extraction owners, while only the executable `Ast` reaches HIR.
             let AstBuildResult {
-                ast: module_ast,
+                ast: mut module_ast,
                 public_interface_projection_input,
-                generic_function_templates,
+                mut materialisation_context,
+                deferred_generic_requests,
             } = module_ast_build;
 
             // 4. Build the one aggregate public-interface draft before HIR consumes the AST. The
@@ -996,13 +1062,43 @@ impl FrontendModuleBuildContext<'_> {
                     type_environment: &module_ast.type_environment,
                     external_registry: compiler.external_package_registry.as_ref(),
                     string_table: &compiler.string_table,
-                    generic_function_templates: &generic_function_templates,
+                    generic_function_templates: materialisation_context
+                        .generic_function_templates(),
                     module_constants: &module_ast.module_constants,
                 })
                 .build()
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
             let public_interface_draft = public_interface_build.draft;
 
+            let public_origins_by_path = public_interface_build
+                .callable_seeds
+                .iter()
+                .map(|seed| (seed.path.clone(), seed.origin.clone()))
+                .collect::<FxHashMap<_, _>>();
+            let private_function_origin_seeds = materialisation_context
+                .install_concrete_executable_contracts(
+                    &active_module_origin,
+                    &public_origins_by_path,
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+                .into_iter()
+                .map(|(path, origin)| PrivateFunctionOriginSeed { path, origin })
+                .collect::<Vec<_>>();
+
+            let generated_requests = install_generated_request_contracts(
+                &deferred_generic_requests,
+                &materialisation_context,
+                materialisation_context.generic_function_templates(),
+                compiler.external_package_registry.as_ref(),
+                &mut module_ast,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            let generated_request_ids = generated_worklist.register_module_requests(
+                &active_module_origin,
+                generated_requests
+                    .iter()
+                    .map(|request| request.identity.clone()),
+            );
             // 4b. Extract validated generic-template body artefacts before HIR consumes AST
             //     state. The transient public callable seed table is the exact path-to-origin
             //     authority for every directly exported generic free function or receiver method;
@@ -1012,15 +1108,16 @@ impl FrontendModuleBuildContext<'_> {
             //     Private and non-generic templates remain intentional exclusions.
             //     This runs after generic body validation and before HIR so the templates never
             //     re-enter donor AST state.
-            let validated_generic_templates = extract_validated_generic_template_artefacts(
+            validate_materialisation_context_templates(
                 &public_interface_draft,
                 &public_interface_build.callable_seeds,
-                generic_function_templates,
+                materialisation_context.generic_function_templates_mut(),
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
-            let function_origin_lookup = HirFunctionOriginLookup::from_seeds(
+            let function_origin_lookup = HirFunctionOriginLookup::from_public_and_private_seeds(
                 public_interface_build.function_origin_seeds,
+                private_function_origin_seeds,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
@@ -1040,7 +1137,7 @@ impl FrontendModuleBuildContext<'_> {
                     Self::lower_hir(&mut compiler, module_ast, &warnings, function_origin_lookup)
                 })?;
             let HirLoweringResult {
-                hir_module,
+                mut hir_module,
                 type_environment,
                 metadata: lowering_metadata,
             } = hir_lowering;
@@ -1055,12 +1152,84 @@ impl FrontendModuleBuildContext<'_> {
             }
 
             // 8. Run static analysis (Borrow Checker).
-            let borrow_analysis = timed_frontend_stage(
+            let bootstrap_borrow_analysis = timed_frontend_stage(
                 "frontend.borrow",
                 "Borrow checking completed in: ",
                 module_label,
                 || Self::check_borrows(&compiler, &hir_module, &warnings),
             )?;
+            install_exact_concrete_call_summaries(
+                &mut materialisation_context,
+                &hir_module,
+                &bootstrap_borrow_analysis,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            self.materialise_generated_request_roots(
+                &generated_requests,
+                &generated_request_ids,
+                &mut generated_worklist,
+                &materialisation_context,
+                &mut compiler,
+                entry_file_path,
+            )?;
+            hir_module.generated_call_summaries = generated_worklist
+                .summaries_for(
+                    generated_requests
+                        .iter()
+                        .map(|request| request.identity.clone()),
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+
+            let convergence_limit = hir_module
+                .functions
+                .len()
+                .saturating_add(generated_requests.len())
+                .saturating_mul(4)
+                .max(1);
+            let mut stable_borrow_analysis = None;
+            for _ in 0..convergence_limit {
+                let borrow_analysis = timed_frontend_stage(
+                    "frontend.borrow.exact_generated",
+                    "Exact generated-call borrow checking completed in: ",
+                    module_label,
+                    || Self::check_borrows(&compiler, &hir_module, &warnings),
+                )?;
+                let concrete_summaries_changed = install_exact_concrete_call_summaries(
+                    &mut materialisation_context,
+                    &hir_module,
+                    &borrow_analysis,
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+                let generated_summaries_changed = self.recheck_generated_borrows(
+                    &mut generated_worklist,
+                    &materialisation_context,
+                    &compiler,
+                )?;
+                hir_module.generated_call_summaries = generated_worklist
+                    .summaries_for(
+                        generated_requests
+                            .iter()
+                            .map(|request| request.identity.clone()),
+                    )
+                    .map_err(|error| {
+                        CompilerMessages::from_error_ref(error, &compiler.string_table)
+                    })?;
+                if !concrete_summaries_changed && !generated_summaries_changed {
+                    stable_borrow_analysis = Some(borrow_analysis);
+                    break;
+                }
+            }
+            let borrow_analysis = stable_borrow_analysis.ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "Generated/private call-summary fixed point did not converge",
+                    ),
+                    &compiler.string_table,
+                )
+            })?;
+            let generated_worklist_delta = generated_worklist
+                .finish()
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
             record_borrow_counters(&borrow_analysis);
 
             // Concrete call-summary finalization runs exactly once after HIR and borrow
@@ -1071,9 +1240,15 @@ impl FrontendModuleBuildContext<'_> {
             // generated summaries belong to the future sidecar worklist, distinct from these
             // direct concrete summaries. Private functions and implicit start retain local
             // summaries but never enter declaration records.
-            let public_interface = public_interface_draft
+            let local_public_interface = public_interface_draft
                 .finalize_after_borrow_validation(&borrow_analysis.analysis, &hir_module)
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            let public_interface = PublicSemanticInterface::close_from_local(
+                local_public_interface,
+                self.source_provider_imports,
+                compiler.external_package_registry.as_ref(),
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
             // Record every base function before entry selection. Build-owned assembly later
             // traverses these direct facts from the selected root and derives runtime unions.
@@ -1152,10 +1327,11 @@ impl FrontendModuleBuildContext<'_> {
                         lowering_metadata,
                         const_top_level_fragments,
                         root_activity,
-                        validated_generic_templates,
+                        materialisation_context,
                     ),
                 },
                 public_interface,
+                generated_worklist_delta,
             ))
         })();
 
@@ -1165,11 +1341,12 @@ impl FrontendModuleBuildContext<'_> {
         // (an infrastructure failure recovered losslessly from its structured payload). This is
         // the single lossless ownership transfer; graph and render consumers never re-classify.
         match compile_result {
-            Ok((module, public_interface)) => {
+            Ok((module, public_interface, generated_worklist_delta)) => {
                 let string_table = compiler.string_table;
                 Ok(ModuleCompilationOutcome::Success(Box::new(
                     ModuleSemanticDraft {
                         module,
+                        generated_worklist_delta,
                         string_table,
                         public_interface,
                     },
@@ -1266,6 +1443,302 @@ impl FrontendModuleBuildContext<'_> {
         }
     }
 
+    fn materialise_generated_request_roots(
+        &self,
+        requests: &[CanonicalGeneratedRequest],
+        request_ids: &[GeneratedRequestId],
+        worklist: &mut GeneratedFunctionWorklist,
+        requester_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        compiler: &mut CompilerFrontend,
+        entry_file_path: &Path,
+    ) -> Result<(), CompilerMessages> {
+        for request_id in request_ids {
+            let identity = worklist
+                .identity(*request_id)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+                .clone();
+            let request = requests
+                .iter()
+                .find(|request| request.identity == identity)
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Generated root request lost its diagnostic context",
+                        ),
+                        &compiler.string_table,
+                    )
+                })?;
+            self.materialise_generated_request(
+                *request_id,
+                request,
+                worklist,
+                requester_context,
+                compiler,
+                entry_file_path,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn materialise_generated_request(
+        &self,
+        request_id: GeneratedRequestId,
+        request: &CanonicalGeneratedRequest,
+        worklist: &mut GeneratedFunctionWorklist,
+        requester_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        compiler: &mut CompilerFrontend,
+        entry_file_path: &Path,
+    ) -> Result<(), CompilerMessages> {
+        match worklist
+            .enter(request_id)
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+        {
+            GeneratedRequestEntry::Complete => return Ok(()),
+            GeneratedRequestEntry::Recursive => {
+                return Err(CompilerMessages::from_diagnostic(
+                    recursive_generic_function_instantiation(
+                        request.function_name,
+                        request.call_location.clone(),
+                    ),
+                    compiler.string_table.clone(),
+                ));
+            }
+            GeneratedRequestEntry::Materialise => {}
+        }
+
+        let identity = worklist
+            .identity(request_id)
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+            .clone();
+        let declaring_context = self
+            .source_provider_materialisations
+            .context_for(identity.declaration(), requester_context)
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "Generated request for '{}' has no completed declaring-module materialisation context",
+                        identity.declaration().defining_name()
+                    )),
+                    &compiler.string_table,
+                )
+            })?;
+        let materialised = declaring_context.materialise_ast(
+            &identity,
+            requester_context,
+            &request.call_location,
+        )?;
+        let crate::compiler_frontend::ast::generic_functions::MaterialisedGenericAst {
+            build_result,
+            string_table: generated_string_table,
+            instance_path,
+        } = materialised;
+        let AstBuildResult {
+            ast: mut generated_ast,
+            materialisation_context: generated_context,
+            deferred_generic_requests: nested_requests,
+            ..
+        } = build_result;
+        let nested_requests = install_generated_request_contracts(
+            &nested_requests,
+            &generated_context,
+            generated_context.generic_function_templates(),
+            self.external_packages.as_ref(),
+            &mut generated_ast,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, &generated_string_table))?;
+        let nested_request_ids = worklist.register_generated_requests(
+            request_id,
+            nested_requests
+                .iter()
+                .map(|request| request.identity.clone()),
+        );
+
+        let first_nested_sidecar = worklist.sidecar_count();
+        let mut generated_compiler = CompilerFrontend::new(
+            self.config,
+            generated_string_table,
+            self.style_directives.clone(),
+            Arc::clone(&self.external_packages),
+            self.project_path_resolver.clone(),
+        );
+        for nested_request_id in &nested_request_ids {
+            let nested_identity = worklist
+                .identity(*nested_request_id)
+                .map_err(|error| {
+                    CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
+                })?
+                .clone();
+            let nested_request = nested_requests
+                .iter()
+                .find(|request| request.identity == nested_identity)
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Nested generated request lost its diagnostic context",
+                        ),
+                        &generated_compiler.string_table,
+                    )
+                })?;
+            self.materialise_generated_request(
+                *nested_request_id,
+                nested_request,
+                worklist,
+                &generated_context,
+                &mut generated_compiler,
+                entry_file_path,
+            )?;
+        }
+
+        let generated_warnings = generated_ast.warnings.clone();
+        let generated_lowering = Self::lower_hir(
+            &mut generated_compiler,
+            generated_ast,
+            &generated_warnings,
+            HirFunctionOriginLookup::default(),
+        )?;
+        let HirLoweringResult {
+            mut hir_module,
+            type_environment,
+            metadata: lowering_metadata,
+        } = generated_lowering;
+        hir_module.generated_call_summaries = worklist
+            .summaries_for(
+                nested_requests
+                    .iter()
+                    .map(|request| request.identity.clone()),
+            )
+            .map_err(|error| {
+                CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
+            })?;
+        let function_id = hir_module
+            .functions
+            .iter()
+            .find_map(|function| {
+                (hir_module.side_table.function_name_path(function.id) == Some(&instance_path))
+                    .then_some(function.id)
+            })
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "Generated HIR omitted its requested root function",
+                    ),
+                    &generated_compiler.string_table,
+                )
+            })?;
+        hir_module
+            .function_ids_by_generated
+            .insert(identity.clone(), function_id);
+        let borrow_analysis =
+            Self::check_borrows(&generated_compiler, &hir_module, &generated_warnings)?;
+        let functions = collect_module_function_link_facts(&hir_module).map_err(|error| {
+            CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
+        })?;
+        let reachability =
+            collect_reachability_from_function_link_facts(&functions, &[function_id]).map_err(
+                |error| CompilerMessages::from_error_ref(error, &generated_compiler.string_table),
+            )?;
+        let mut reachable_package_ids = rustc_hash::FxHashSet::default();
+        for external_function_id in &reachability.reachable_external_functions {
+            let package_id = self
+                .external_packages
+                .resolve_function_package_id(*external_function_id)
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(format!(
+                            "Generated external function {external_function_id:?} has no owning package"
+                        )),
+                        &generated_compiler.string_table,
+                    )
+                })?;
+            reachable_package_ids.insert(package_id);
+        }
+        let external_import_candidates = collect_external_import_candidates_for_packages(
+            &reachable_package_ids,
+            self.external_import_resolution_table,
+            self.builder_runtime_packages,
+        );
+        let mut generated_module = Module {
+            executable: ModuleExecutable {
+                hir: hir_module,
+                type_environment,
+                borrow_analysis,
+            },
+            link_facts: ModuleLinkFacts {
+                external_package_registry: Arc::clone(&self.external_packages),
+                external_import_candidates,
+                functions,
+            },
+            metadata: ModuleCompilerMetadata {
+                entry_point: entry_file_path.to_path_buf(),
+                warnings: generated_warnings,
+                const_top_level_fragments: Vec::new(),
+                root_activity: ModuleRootActivity::default(),
+                doc_fragments: lowering_metadata.doc_fragments,
+                rendered_path_usages: lowering_metadata.rendered_path_usages,
+                materialisation_context: None,
+            },
+        };
+        let summary =
+            exact_generated_sidecar_summary(&identity, &generated_module).map_err(|error| {
+                CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
+            })?;
+        let generated_remap = compiler
+            .string_table
+            .merge_from(&generated_compiler.string_table);
+        if !generated_remap.is_identity() {
+            worklist.remap_sidecars_from(first_nested_sidecar, &generated_remap);
+            generated_module.remap_string_ids(&generated_remap);
+        }
+        worklist
+            .complete(
+                request_id,
+                summary,
+                GeneratedFunctionSidecar::new(identity, generated_module),
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))
+    }
+
+    fn recheck_generated_borrows(
+        &self,
+        worklist: &mut GeneratedFunctionWorklist,
+        materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        compiler: &CompilerFrontend,
+    ) -> Result<bool, CompilerMessages> {
+        let generated_summaries = worklist.completed_summaries();
+        let private_summaries = exact_private_call_summaries(materialisation_context);
+        let mut updated_summaries = Vec::new();
+
+        for sidecar in worklist.sidecars_mut() {
+            sidecar.module.executable.hir.generated_call_summaries = generated_summaries.clone();
+            for (identity, summary) in &private_summaries {
+                if let Some(existing) = sidecar
+                    .module
+                    .executable
+                    .hir
+                    .module_private_call_summaries
+                    .get_mut(identity)
+                {
+                    *existing = summary.clone();
+                }
+            }
+            let warnings = sidecar.module.metadata.warnings.clone();
+            let borrow_analysis =
+                Self::check_borrows(compiler, &sidecar.module.executable.hir, &warnings)?;
+            sidecar.module.executable.borrow_analysis = borrow_analysis;
+            let summary = exact_generated_sidecar_summary(&sidecar.identity, &sidecar.module)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            updated_summaries.push((sidecar.identity.clone(), summary));
+        }
+
+        let mut changed = false;
+        for (identity, summary) in updated_summaries {
+            changed |= worklist
+                .update_summary(&identity, summary)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+        }
+        Ok(changed)
+    }
+
     fn lower_hir(
         compiler: &mut CompilerFrontend,
         module_ast: Ast,
@@ -1291,6 +1764,354 @@ impl FrontendModuleBuildContext<'_> {
 // -------------------------
 //  Shared Helpers
 // -------------------------
+
+fn install_exact_concrete_call_summaries(
+    context: &mut crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    hir: &HirModule,
+    borrow_analysis: &BorrowCheckReport,
+) -> Result<bool, CompilerError> {
+    let mut changed = false;
+    for contract in context.imported_functions_by_local_path.values_mut() {
+        let function_id = match &contract.target {
+            SourceFunctionTarget::Imported { origin, .. } => {
+                let Some(function_id) = hir.function_ids_by_origin.get(origin).copied() else {
+                    continue;
+                };
+                function_id
+            }
+            SourceFunctionTarget::ModulePrivate { identity, .. } => hir
+                .function_ids_by_private_origin
+                .get(identity)
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Module materialisation context could not resolve private executable {identity:?}"
+                    ))
+                })?,
+            SourceFunctionTarget::Local(_) | SourceFunctionTarget::Generated { .. } => continue,
+        };
+        let exact_summary = borrow_analysis
+            .analysis
+            .public_call_summaries
+            .get(&function_id)
+            .cloned()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Module materialisation context is missing the exact call summary for {function_id:?}"
+                ))
+            })?;
+        changed |= contract.summary != exact_summary;
+        contract.summary = exact_summary;
+    }
+    Ok(changed)
+}
+
+fn collect_external_import_candidates_for_packages(
+    package_ids: &rustc_hash::FxHashSet<ExternalPackageId>,
+    resolution_table: &ExternalImportResolutionTable,
+    builder_runtime_packages: &[BuilderRuntimePackageMetadata],
+) -> Vec<ModuleExternalImport> {
+    let mut candidates = Vec::with_capacity(package_ids.len());
+
+    for package_id in package_ids {
+        if let Some(resolved) = resolution_table.get_by_package_id(*package_id) {
+            candidates.push(ModuleExternalImport {
+                package_id: *package_id,
+                runtime_asset: resolved.runtime_asset.clone(),
+                required_runtime_imports: resolved.required_runtime_imports.clone(),
+            });
+            continue;
+        }
+
+        if let Some(builder_runtime) = builder_runtime_packages
+            .iter()
+            .find(|runtime| runtime.package_id == *package_id)
+        {
+            candidates.push(ModuleExternalImport {
+                package_id: *package_id,
+                runtime_asset: builder_runtime.runtime_asset.clone(),
+                required_runtime_imports: builder_runtime.required_runtime_imports.clone(),
+            });
+        }
+    }
+
+    candidates.sort_by_key(|candidate| candidate.package_id.0);
+    candidates
+}
+
+fn exact_private_call_summaries(
+    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+) -> FxHashMap<
+    crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
+    PublicCallSummary,
+> {
+    materialisation_context
+        .imported_functions_by_local_path
+        .values()
+        .filter_map(|contract| match &contract.target {
+            SourceFunctionTarget::ModulePrivate { identity, .. } => {
+                Some((identity.clone(), contract.summary.clone()))
+            }
+            SourceFunctionTarget::Local(_)
+            | SourceFunctionTarget::Imported { .. }
+            | SourceFunctionTarget::Generated { .. } => None,
+        })
+        .collect()
+}
+
+fn exact_generated_sidecar_summary(
+    identity: &GeneratedFunctionIdentity,
+    module: &Module,
+) -> Result<PublicCallSummary, CompilerError> {
+    let function_id = module
+        .executable
+        .hir
+        .function_ids_by_generated
+        .get(identity)
+        .copied()
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Generated sidecar {identity:?} has no matching HIR executable identity"
+            ))
+        })?;
+    if module.executable.hir.function_ids_by_generated.len() != 1 {
+        return Err(CompilerError::compiler_error(format!(
+            "Generated sidecar {identity:?} contains more than one generated root identity"
+        )));
+    }
+    module
+        .executable
+        .borrow_analysis
+        .analysis
+        .public_call_summaries
+        .get(&function_id)
+        .cloned()
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Generated function {identity:?} has no exact borrow summary"
+            ))
+        })
+}
+
+struct GeneratedRequestNominalOrigins<'a> {
+    type_environment: &'a crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+}
+
+impl NominalOriginResolver for GeneratedRequestNominalOrigins<'_> {
+    fn resolve_nominal_origin(
+        &self,
+        nominal_id: crate::compiler_frontend::datatypes::ids::NominalTypeId,
+    ) -> Result<OriginTypeId, CompilerError> {
+        let type_id = self
+            .type_environment
+            .type_id_for_nominal_id(nominal_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated request references a nominal type without a local type identity",
+                )
+            })?;
+        let canonical_identity = self
+            .type_environment
+            .canonical_identity_for_type_id(type_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated request nominal type has no canonical identity",
+                )
+            })?;
+        let CanonicalTypeIdentity::SourceNominal(origin) = canonical_identity else {
+            return Err(CompilerError::compiler_error(
+                "Generated request nominal type has a non-source canonical identity",
+            ));
+        };
+
+        Ok(origin.clone())
+    }
+}
+
+struct NoGeneratedRequestGenericParameters;
+
+impl GenericParameterOriginResolver for NoGeneratedRequestGenericParameters {
+    fn resolve_generic_parameter_origin(
+        &self,
+        _parameter_id: crate::compiler_frontend::datatypes::ids::GenericParameterId,
+    ) -> Result<ExportedGenericParameterIdentity, CompilerError> {
+        Err(CompilerError::compiler_error(
+            "Concrete generated request retained an unresolved generic parameter",
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct CanonicalGeneratedRequest {
+    identity: GeneratedFunctionIdentity,
+    function_name: Option<StringId>,
+    call_location: crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+}
+
+fn install_generated_request_contracts(
+    requests: &[GenericFunctionInstantiationRequest],
+    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    templates: &FxHashMap<
+        crate::compiler_frontend::symbols::interned_path::InternedPath,
+        GenericFunctionTemplate,
+    >,
+    external_registry: &ExternalPackageRegistry,
+    module_ast: &mut Ast,
+) -> Result<Vec<CanonicalGeneratedRequest>, CompilerError> {
+    let mut identities = Vec::with_capacity(requests.len());
+    for request in requests {
+        let template = templates.get(&request.key.function_path).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Deferred generic request has no requester-local generic contract",
+            )
+        })?;
+        let declaration_identity = template.declaration_identity.clone().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Deferred generic request template has no stable declaration identity",
+            )
+        })?;
+        if let Some(request_identity) = request.declaration_identity.as_ref()
+            && request_identity != &declaration_identity
+        {
+            return Err(CompilerError::compiler_error(
+                "Deferred generic request declaration identity disagrees with its template",
+            ));
+        }
+
+        let canonical_type_arguments = {
+            let nominal_origins = GeneratedRequestNominalOrigins {
+                type_environment: &materialisation_context.type_environment,
+            };
+            let generic_parameter_origins = NoGeneratedRequestGenericParameters;
+            let projection_context = CanonicalTypeProjectionContext::new(
+                &nominal_origins,
+                &generic_parameter_origins,
+                external_registry,
+            );
+            let mut canonical_type_arguments = Vec::with_capacity(request.key.type_arguments.len());
+            for type_id in request.key.type_arguments.iter().copied() {
+                canonical_type_arguments.push(project_type_id_to_canonical_identity(
+                    type_id,
+                    &materialisation_context.type_environment,
+                    &projection_context,
+                )?);
+            }
+            canonical_type_arguments
+        };
+        let identity = GeneratedFunctionIdentity::new(
+            declaration_identity,
+            canonical_type_arguments.into_boxed_slice(),
+            canonicalize_generated_request_evidence(
+                request,
+                materialisation_context,
+                external_registry,
+            )?,
+        );
+
+        let mapping = concrete_argument_mapping(
+            template.generic_parameter_list_id,
+            request.key.type_arguments.as_ref(),
+            &module_ast.type_environment,
+        )
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Deferred generic request does not match its projected parameter list",
+            )
+        })?;
+        let signature = substitute_function_signature(
+            &template.signature,
+            &mapping,
+            &mut module_ast.type_environment,
+        );
+        let fallible_carrier_type_id = signature.error_return_type_id().map(|error_type_id| {
+            let success_type_id = match signature.success_return_type_ids().as_slice() {
+                [] => crate::compiler_frontend::datatypes::builtin_type_ids::NONE,
+                [single] => *single,
+                many => module_ast.type_environment.intern_tuple(many.to_vec()),
+            };
+            module_ast
+                .type_environment
+                .intern_fallible_carrier(success_type_id, error_type_id)
+        });
+        let summary = bootstrap_call_summary_from_signature(&signature);
+        identities.push(CanonicalGeneratedRequest {
+            identity: identity.clone(),
+            function_name: request.key.function_path.name(),
+            call_location: request.call_location.clone(),
+        });
+        let contract = AstImportedFunctionContract {
+            target: SourceFunctionTarget::Generated {
+                identity,
+                local_path: request.instance_path.clone(),
+            },
+            summary,
+            fallible_carrier_type_id,
+        };
+
+        if module_ast
+            .imported_functions_by_local_path
+            .insert(request.instance_path.clone(), contract)
+            .is_some()
+        {
+            return Err(CompilerError::compiler_error(
+                "Generated request path collides with another imported or generated callable",
+            ));
+        }
+    }
+
+    Ok(identities)
+}
+
+fn canonicalize_generated_request_evidence(
+    request: &GenericFunctionInstantiationRequest,
+    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    external_registry: &ExternalPackageRegistry,
+) -> Result<Box<[CanonicalEvidenceIdentity]>, CompilerError> {
+    if request.evidence.is_empty() {
+        return Ok(Box::new([]));
+    }
+
+    let nominal_origins = GeneratedRequestNominalOrigins {
+        type_environment: &materialisation_context.type_environment,
+    };
+    let generic_parameter_origins = NoGeneratedRequestGenericParameters;
+    let projection_context = CanonicalTypeProjectionContext::new(
+        &nominal_origins,
+        &generic_parameter_origins,
+        external_registry,
+    );
+    let mut canonical_evidence = Vec::with_capacity(request.evidence.len());
+    for evidence_id in request.evidence.iter().copied() {
+        let evidence = materialisation_context
+            .trait_evidence_environment()
+            .get(evidence_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated request retained a missing requester-local evidence selection",
+                )
+            })?;
+        let target_type_identity = project_type_id_to_canonical_identity(
+            evidence.target_type_id,
+            &materialisation_context.type_environment,
+            &projection_context,
+        )?;
+        let trait_identity = materialisation_context
+            .trait_environment()
+            .canonical_identity_for_id(evidence.trait_id)
+            .cloned()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated request evidence has no stable canonical trait identity",
+                )
+            })?;
+        canonical_evidence.push(CanonicalEvidenceIdentity::new(
+            target_type_identity,
+            trait_identity,
+        ));
+    }
+
+    Ok(canonical_evidence.into_boxed_slice())
+}
 
 fn plan_file_preparation_chunks(
     source_file_count: usize,

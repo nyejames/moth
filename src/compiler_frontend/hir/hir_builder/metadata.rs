@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstDocFragmentKind;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
+use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirStableFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::module_metadata::{ModuleDocFragment, ModuleDocFragmentKind};
 
@@ -43,6 +43,7 @@ impl<'a> HirBuilder<'a> {
         // backend-facing origin tags remain unchanged for private functions and entry start.
         self.module.function_origins.clear();
         self.module.function_ids_by_origin.clear();
+        self.module.function_ids_by_private_origin.clear();
 
         for function in &self.module.functions {
             self.module
@@ -70,16 +71,34 @@ impl<'a> HirBuilder<'a> {
                 continue;
             };
 
-            if self.module.function_ids_by_origin.contains_key(&origin) {
-                return Err(CompilerError::compiler_error(format!(
-                    "HIR function-origin lowering received duplicate stable origin {:?}",
-                    origin
-                )));
+            match origin {
+                HirStableFunctionOrigin::Public(origin) => {
+                    if self.module.function_ids_by_origin.contains_key(&origin) {
+                        return Err(CompilerError::compiler_error(format!(
+                            "HIR function-origin lowering received duplicate stable origin {:?}",
+                            origin
+                        )));
+                    }
+                    self.module
+                        .function_ids_by_origin
+                        .insert(origin, function.id);
+                }
+                HirStableFunctionOrigin::ModulePrivate(origin) => {
+                    if self
+                        .module
+                        .function_ids_by_private_origin
+                        .contains_key(&origin)
+                    {
+                        return Err(CompilerError::compiler_error(format!(
+                            "HIR function-origin lowering received duplicate private origin {:?}",
+                            origin
+                        )));
+                    }
+                    self.module
+                        .function_ids_by_private_origin
+                        .insert(origin, function.id);
+                }
             }
-
-            self.module
-                .function_ids_by_origin
-                .insert(origin.clone(), function.id);
         }
 
         // Reject any concrete origin seed that no lowered function consumed. An unmatched seed

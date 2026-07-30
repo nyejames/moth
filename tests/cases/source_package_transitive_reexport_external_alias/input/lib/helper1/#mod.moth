@@ -1,0 +1,4 @@
+export:
+    import @core/math { sin, PI }
+    import @core/time { Duration, duration_from_seconds, as_seconds }
+;

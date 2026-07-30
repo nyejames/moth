@@ -25,7 +25,7 @@ pub(in crate::compiler_frontend::ast) struct DeclarationId(u32);
 ///
 /// Provides fast path-based and name-based lookups with optional visibility filtering.
 /// Declarations are stored in dependency-sorted order and indexed by `DeclarationId`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct TopLevelDeclarationTable {
     declarations: Vec<Declaration>,
     /// Path-to-ID map built from `Declaration::id` at construction time.

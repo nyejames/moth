@@ -43,6 +43,7 @@ use std::sync::Arc;
 /// WHAT: one flat struct that carries every side table produced during environment construction.
 /// WHY: `ScopeContext` and AST finalization need random access to declarations, signatures, type
 /// aliases, and receiver methods without re-traversing headers or re-resolving paths.
+#[derive(Clone)]
 pub(crate) struct AstModuleLookups {
     // Header-stage source data.
     // WHY: these are moved straight from the header/dependency-sort phase; AST does not rebuild them.

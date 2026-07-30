@@ -1192,6 +1192,34 @@ contract = "language.generics.trait_bound_missing_evidence_rejected"
 role = "boundary"
 
 [[case]]
+id = "imported_evidence_file_visibility_rejected"
+path = "imported_evidence_file_visibility_rejected"
+tags = ["integration", "generics", "traits", "imports", "diagnostics"]
+contract = "language.generics.trait_bound_missing_evidence_rejected"
+role = "boundary"
+
+[[case]]
+id = "imported_evidence_file_visibility_success"
+path = "imported_evidence_file_visibility_success"
+tags = ["integration", "generics", "traits", "imports"]
+contract = "language.generics.trait_bound_generic_struct"
+role = "boundary"
+
+[[case]]
+id = "local_generic_imported_trait_alias_success"
+path = "local_generic_imported_trait_alias_success"
+tags = ["integration", "generics", "traits", "imports", "aliases"]
+contract = "language.generics.trait_bound_function"
+role = "boundary"
+
+[[case]]
+id = "local_generic_imported_trait_hidden_target_rejected"
+path = "local_generic_imported_trait_hidden_target_rejected"
+tags = ["integration", "generics", "traits", "imports", "aliases", "diagnostics"]
+contract = "language.generics.trait_bound_missing_evidence_rejected"
+role = "boundary"
+
+[[case]]
 id = "trait_bound_generic_matching_method_without_conformance_rejected"
 path = "trait_bound_generic_matching_method_without_conformance_rejected"
 tags = ["integration","generics","traits","structs","diagnostics"]
@@ -6611,6 +6639,13 @@ contract = "language.casts.generic_user_evidence_acceptance"
 role = "primary"
 
 [[case]]
+id = "cast_generic_imported_user_evidence_success"
+path = "cast_generic_imported_user_evidence_success"
+tags = ["integration", "language", "cast", "generics", "traits", "user-defined", "imports"]
+contract = "language.casts.generic_user_evidence_acceptance"
+role = "boundary"
+
+[[case]]
 id = "cast_missing_target_rejected"
 path = "cast_missing_target_rejected"
 tags = ["integration","diagnostics","cast"]
@@ -8913,6 +8948,13 @@ contract = "language.imports.source_package_reexport_external_acceptance"
 role = "boundary"
 
 [[case]]
+id = "source_package_transitive_reexport_external_alias"
+path = "source_package_transitive_reexport_external_alias"
+tags = ["integration", "language", "imports", "facade", "source-packages"]
+contract = "language.imports.source_package_reexport_external_acceptance"
+role = "boundary"
+
+[[case]]
 id = "source_package_reexport_cross_package_single"
 path = "source_package_reexport_cross_package_single"
 tags = ["integration", "language", "imports", "facade", "source-packages"]
@@ -9184,6 +9226,13 @@ path = "nested_module_root_namespace_child_facade_success"
 tags = ["integration", "imports", "namespace-imports", "facade"]
 contract = "language.imports.namespace_import_module_facade_acceptance"
 role = "boundary"
+
+[[case]]
+id = "module_facade_transitive_reexport_closure_success"
+path = "module_facade_transitive_reexport_closure_success"
+tags = ["integration", "imports", "facade", "reexports"]
+contract = "language.imports.module_facade_transitive_reexport_closure_acceptance"
+role = "primary"
 
 [[case]]
 id = "module_facade_reexport_namespace_success"
@@ -9952,6 +10001,20 @@ role = "boundary"
 id = "generic_fn_facade_private_impl_nested_success"
 path = "generic_fn_facade_private_impl_nested_success"
 tags = ["integration", "generics", "functions", "imports", "facade"]
+contract = "language.generics.function_facade_export_acceptance"
+role = "boundary"
+
+[[case]]
+id = "generic_fn_facade_private_concrete_helper_success"
+path = "generic_fn_facade_private_concrete_helper_success"
+tags = ["integration", "generics", "functions", "imports", "facade"]
+contract = "language.generics.function_facade_export_acceptance"
+role = "boundary"
+
+[[case]]
+id = "generic_fn_facade_external_runtime_success"
+path = "generic_fn_facade_external_runtime_success"
+tags = ["integration", "generics", "functions", "imports", "facade", "external-imports"]
 contract = "language.generics.function_facade_export_acceptance"
 role = "boundary"
 

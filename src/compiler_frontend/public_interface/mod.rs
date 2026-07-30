@@ -61,6 +61,8 @@ mod direct_projection;
 mod evidence_projection;
 mod export_projection;
 mod import_bindings;
+mod interface_closure;
+mod interface_validation;
 mod local_finalization;
 mod model;
 mod receiver_projection;
@@ -77,11 +79,15 @@ pub(crate) use export_projection::{
     build_public_source_trait_origin_index,
 };
 pub(crate) use import_bindings::{SourceProviderImport, SourceProviderImportSet};
+#[cfg(test)]
+pub(crate) use model::LocalPublicInterface;
 pub(crate) use model::{
-    LocalPublicInterface, PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationRecord,
-    PublicDeclarationSemantics, PublicFunctionCategory, PublicFunctionSemantics,
-    PublicGenericParameterSurface, PublicInterfaceDraft, PublicReceiverMethodCategory,
-    PublicReceiverMethodSemantics, PublicSemanticInterface, PublicStructSemantics,
+    PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationRecord,
+    PublicDeclarationSemantics, PublicEvidenceRecord, PublicFunctionCategory,
+    PublicGenericParameterSurface, PublicInterfaceDraft, PublicParameterTypeSlot,
+    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicReturnTypeSlot,
+    PublicSemanticInterface, PublicStructSemantics, PublicTraitReceiverAccess,
+    PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
 };
 pub(crate) use receiver_projection::CallableSeed;
 
@@ -91,9 +97,8 @@ pub(crate) use receiver_projection::CallableSeed;
 use evidence_projection::{EvidenceProjectionContext, project_reusable_evidence};
 #[cfg(test)]
 pub(crate) use model::{
-    PublicEvidenceOwnership, PublicEvidenceRecord, PublicGenericTemplateDescriptor,
-    PublicParameterTypeSlot, PublicTraitReceiverAccess, PublicTraitSemantics,
-    TraitSurfaceTypeIdentity,
+    PublicEvidenceOwnership, PublicFunctionSemantics, PublicGenericTemplateDescriptor,
+    PublicTraitSemantics,
 };
 #[cfg(test)]
 pub(crate) use receiver_projection::CallableSeedKind;

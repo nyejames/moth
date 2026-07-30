@@ -376,7 +376,7 @@ fn provider_created_package_registry_survives_into_module() {
     )
     .expect("provider-backed import should compile");
 
-    let module = modules.into_iter().next().expect("expected one module");
+    let module = modules.first().expect("expected one module");
 
     assert!(
         !module.link_facts.external_import_candidates.is_empty(),
@@ -499,7 +499,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
         !module.link_facts.external_import_candidates.is_empty(),
         "module link facts should retain provider candidates independently of entry reachability"
     );
-    let project_compilation = ProjectCompilation::from_successful_modules(vec![module])
+    let project_compilation = ProjectCompilation::from_frontend(modules)
         .expect("compiled module should assemble an entry");
     let entries = project_compilation.entries();
     assert_eq!(
@@ -569,7 +569,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     )
     .expect("unused @html canvas wrapper should compile");
 
-    let module = modules.into_iter().next().expect("expected one module");
+    let module = modules.first().expect("expected one module");
     assert!(
         module
             .link_facts
@@ -586,7 +586,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
             .any(|import| import.package_id == canvas_package_id),
         "module link facts should retain the available @web/canvas runtime candidate"
     );
-    let project_compilation = ProjectCompilation::from_successful_modules(vec![module])
+    let project_compilation = ProjectCompilation::from_frontend(modules)
         .expect("compiled module should assemble an entry");
     let entries = project_compilation.entries();
     assert_eq!(
@@ -635,7 +635,7 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
 
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
     let project_compilation =
-        crate::build_system::build::ProjectCompilation::from_successful_modules(modules)
+        crate::build_system::build::ProjectCompilation::from_frontend(modules)
             .expect("compiled modules should assemble entries");
     let project = builder
         .build_backend(project_compilation, &config, &[], &mut string_table)

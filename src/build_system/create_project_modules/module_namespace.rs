@@ -126,32 +126,29 @@ pub(crate) enum ResolvedImport {
     ///
     /// The traversal queues the canonical path as the IO handle with the indexed source kind.
     /// `source_id` is the boundary-local `SourceId` from the namespace entry, carried directly so
-    /// the project semantic-set builder records same-owner membership without re-resolving
-    /// through paths. `consumer_module_id` is the importing file's owning module, and `boundary`
-    /// distinguishes project from package resolution so only project-boundary same-owner sources
-    /// enter the project semantic set.
+    /// the semantic-set builder records same-owner membership without re-resolving through paths.
+    /// `consumer_module_id` is the importing file's owning module inside the active boundary.
     SameModuleSource {
         source_id: SourceId,
         canonical_path: PathBuf,
         source_kind: SourceFileKind,
         consumer_module_id: ModuleId,
-        boundary: NamespaceBoundary,
     },
-    /// A cross-module target in the project boundary (child normal module or visible support).
+    /// A cross-module target in the active project or package boundary.
     ///
     /// The traversal inserts a provider-before-consumer edge by `ModuleId` and queues the
     /// target module's root file.
-    CrossModuleProject {
+    CrossModule {
         provider_module_id: ModuleId,
         consumer_module_id: ModuleId,
         root_file: PathBuf,
     },
-    /// A root file to queue without a project graph edge.
-    ///
-    /// Covers source-backed package public surfaces and cross-module targets inside a package
-    /// boundary. Package graphs are separate from the project graph, so no project edge is
-    /// inserted.
-    RootFile { root_file: PathBuf },
+    /// A source-backed package facade selected by its registered import prefix.
+    SourcePackageSurface {
+        consumer_module_id: ModuleId,
+        import_prefix: String,
+        root_file: PathBuf,
+    },
     /// A registered binding-backed package handled by frontend import binding.
     BindingPackage,
 }
@@ -187,17 +184,34 @@ pub(crate) struct ModuleNamespaceSet {
 #[derive(Clone, Copy)]
 pub(crate) struct DirectoryImportResolution<'a> {
     namespace_set: &'a ModuleNamespaceSet,
-    project_source_tree_index: &'a SourceTreeIndex,
+    source_tree_index: &'a SourceTreeIndex,
+    boundary: NamespaceBoundary,
+    package_prefix: Option<&'a str>,
 }
 
 impl<'a> DirectoryImportResolution<'a> {
-    pub(crate) fn new(
+    pub(crate) fn project(
         namespace_set: &'a ModuleNamespaceSet,
-        project_source_tree_index: &'a SourceTreeIndex,
+        source_tree_index: &'a SourceTreeIndex,
     ) -> Self {
         Self {
             namespace_set,
-            project_source_tree_index,
+            source_tree_index,
+            boundary: NamespaceBoundary::Project,
+            package_prefix: None,
+        }
+    }
+
+    pub(crate) fn package(
+        namespace_set: &'a ModuleNamespaceSet,
+        import_prefix: &'a str,
+        source_tree_index: &'a SourceTreeIndex,
+    ) -> Self {
+        Self {
+            namespace_set,
+            source_tree_index,
+            boundary: NamespaceBoundary::Package,
+            package_prefix: Some(import_prefix),
         }
     }
 
@@ -210,7 +224,9 @@ impl<'a> DirectoryImportResolution<'a> {
         self.namespace_set.resolve_import(
             provider,
             importing_canonical_path,
-            self.project_source_tree_index,
+            self.source_tree_index,
+            self.boundary,
+            self.package_prefix,
             string_table,
         )
     }
@@ -235,9 +251,9 @@ impl<'a> DirectoryImportResolution<'a> {
         canonical_path: &Path,
     ) -> Option<(SourceId, ModuleId)> {
         let source_id = self
-            .project_source_tree_index
+            .source_tree_index
             .source_id_for_canonical_path(canonical_path)?;
-        match self.project_source_tree_index.source(source_id).ownership() {
+        match self.source_tree_index.source(source_id).ownership() {
             SourceOwnership::Owned(module_id) => Some((source_id, module_id)),
             SourceOwnership::Unrooted => None,
         }
@@ -247,8 +263,8 @@ impl<'a> DirectoryImportResolution<'a> {
     ///
     /// Used by the reachable traversal to build and verify the project `SemanticSourceSet`
     /// ownership against the central source record table.
-    pub(crate) fn project_source_tree_index(&self) -> &SourceTreeIndex {
-        self.project_source_tree_index
+    pub(crate) fn source_tree_index(&self) -> &SourceTreeIndex {
+        self.source_tree_index
     }
 
     pub(crate) fn resolve_provider_target(
@@ -262,13 +278,24 @@ impl<'a> DirectoryImportResolution<'a> {
             provider_path,
             importing_canonical_path,
             import_location,
-            self.project_source_tree_index,
+            self.source_tree_index,
             string_table,
         )
     }
 }
 
 impl ModuleNamespaceSet {
+    /// Iterate the independently indexed source-package boundaries in deterministic prefix order.
+    ///
+    /// Package compilation builds one graph and provider store per item from this view. The
+    /// boundary-local indexes remain owned here beside their namespaces, so their `SourceId` and
+    /// `ModuleId` values cannot be mixed with the project boundary or another package.
+    pub(crate) fn source_package_boundaries(
+        &self,
+    ) -> impl Iterator<Item = (&str, &SourceTreeIndex)> {
+        self.package_boundary_indexes.iter()
+    }
+
     /// Build the complete namespace set from the project index, graph and package boundary
     /// indexes.
     ///
@@ -312,7 +339,9 @@ impl ModuleNamespaceSet {
         &self,
         provider: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
         importing_canonical_path: &Path,
-        project_source_tree_index: &SourceTreeIndex,
+        source_tree_index: &SourceTreeIndex,
+        boundary: NamespaceBoundary,
+        package_prefix: Option<&str>,
         string_table: &mut StringTable,
     ) -> Result<ResolvedImport, CompilerDiagnostic> {
         let import_path = &provider.path;
@@ -323,48 +352,33 @@ impl ModuleNamespaceSet {
 
         let full_components = provider.path.as_components();
         let prefix_components = structural_provider_components(provider);
-        let (namespace, index, boundary, consumer_module_id) = match project_source_tree_index
+        let source_id = source_tree_index
             .source_id_for_canonical_path(importing_canonical_path)
-        {
-            Some(source_id) => {
-                let ownership = project_source_tree_index.source(source_id).ownership();
-                let SourceOwnership::Owned(module_id) = ownership else {
-                    return Err(CompilerDiagnostic::missing_import_target(
-                        import_path.clone(),
-                        import_location.clone(),
-                    ));
-                };
-                let namespace = &self.project_namespaces[module_id.index()];
-                (
-                    namespace,
-                    project_source_tree_index,
-                    NamespaceBoundary::Project,
-                    module_id,
+            .ok_or_else(|| {
+                CompilerDiagnostic::missing_import_target(
+                    import_path.clone(),
+                    import_location.clone(),
                 )
-            }
-            None => {
-                let (package_prefix, package_index, owning_module_id) = self
-                    .find_package_namespace_owner(importing_canonical_path)
-                    .ok_or_else(|| {
-                        CompilerDiagnostic::missing_import_target(
-                            import_path.clone(),
-                            import_location.clone(),
-                        )
-                    })?;
-
-                let package_namespaces = self
+            })?;
+        let SourceOwnership::Owned(consumer_module_id) =
+            source_tree_index.source(source_id).ownership()
+        else {
+            return Err(CompilerDiagnostic::missing_import_target(
+                import_path.clone(),
+                import_location.clone(),
+            ));
+        };
+        let namespace = match boundary {
+            NamespaceBoundary::Project => &self.project_namespaces[consumer_module_id.index()],
+            NamespaceBoundary::Package => {
+                let package_prefix = package_prefix.expect("package resolution carries its prefix");
+                &self
                     .package_namespaces
                     .get(package_prefix)
-                    .expect("package prefix found by find_package_namespace_owner");
-                let namespace = &package_namespaces[owning_module_id.index()];
-                (
-                    namespace,
-                    package_index,
-                    NamespaceBoundary::Package,
-                    owning_module_id,
-                )
+                    .expect("package resolution prefix exists")[consumer_module_id.index()]
             }
         };
+        let index = source_tree_index;
 
         let key = portable_import_key(prefix_components, string_table);
 
@@ -396,7 +410,7 @@ impl ModuleNamespaceSet {
             return Ok(ResolvedImport::BindingPackage);
         }
 
-        if let Some(root_file) = source_package_surface {
+        if let Some((import_prefix, root_file)) = source_package_surface {
             if namespace_conflicts_with_package_prefix(namespace, &key) {
                 return Err(CompilerDiagnostic::ambiguous_import_target(
                     import_path.clone(),
@@ -404,7 +418,9 @@ impl ModuleNamespaceSet {
                 ));
             }
 
-            return Ok(ResolvedImport::RootFile {
+            return Ok(ResolvedImport::SourcePackageSurface {
+                consumer_module_id,
+                import_prefix: import_prefix.to_owned(),
                 root_file: root_file.to_path_buf(),
             });
         }
@@ -433,7 +449,6 @@ impl ModuleNamespaceSet {
                 return resolve_entry(
                     entry,
                     index,
-                    boundary,
                     consumer_module_id,
                     import_path,
                     import_location,
@@ -446,7 +461,6 @@ impl ModuleNamespaceSet {
             return resolve_entry(
                 entry,
                 index,
-                boundary,
                 consumer_module_id,
                 import_path,
                 import_location,
@@ -580,10 +594,12 @@ impl ModuleNamespaceSet {
 
     /// Check whether the complete provider path matches a source-backed package prefix and return
     /// the package's root file.
-    fn find_source_package_surface(&self, provider_path: &str) -> Option<&Path> {
+    fn find_source_package_surface(&self, provider_path: &str) -> Option<(&str, &Path)> {
         for (import_prefix, package_index) in self.package_boundary_indexes.iter() {
             if import_prefix == provider_path {
-                return package_index.root_file_for_entry_root();
+                return package_index
+                    .root_file_for_entry_root()
+                    .map(|root_file| (import_prefix, root_file));
             }
         }
         None
@@ -880,7 +896,6 @@ fn support_package_key(identities: &ModuleIdentityTable, support_id: ModuleId) -
 fn resolve_entry(
     entry: &NamespaceEntry,
     index: &SourceTreeIndex,
-    boundary: NamespaceBoundary,
     consumer_module_id: ModuleId,
     import_path: &InternedPath,
     import_location: &SourceLocation,
@@ -905,7 +920,6 @@ fn resolve_entry(
                 canonical_path: record.canonical_path().to_path_buf(),
                 source_kind: *source_kind,
                 consumer_module_id,
-                boundary,
             })
         }
         NamespaceEntry::CrossModule { target_module_id } => {
@@ -914,13 +928,10 @@ fn resolve_entry(
                 .record(*target_module_id)
                 .root_file()
                 .to_path_buf();
-            Ok(match boundary {
-                NamespaceBoundary::Project => ResolvedImport::CrossModuleProject {
-                    provider_module_id: *target_module_id,
-                    consumer_module_id,
-                    root_file,
-                },
-                NamespaceBoundary::Package => ResolvedImport::RootFile { root_file },
+            Ok(ResolvedImport::CrossModule {
+                provider_module_id: *target_module_id,
+                consumer_module_id,
+                root_file,
             })
         }
         NamespaceEntry::SameModuleProvider { .. } => Err(

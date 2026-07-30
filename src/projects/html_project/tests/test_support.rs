@@ -32,7 +32,6 @@ use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-use crate::compiler_frontend::validated_generic_template_metadata::ValidatedGenericTemplateStore;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -106,7 +105,7 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
             },
             doc_fragments: vec![],
             rendered_path_usages: vec![],
-            validated_generic_templates: ValidatedGenericTemplateStore::default(),
+            materialisation_context: None,
         },
     }
 }

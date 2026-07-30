@@ -476,7 +476,7 @@ fn projects_external_opaque_to_owned_package_and_symbol_path() {
         .expect("external opaque projection should succeed");
 
     let expected = CanonicalTypeIdentity::ExternalOpaque(ExternalOpaqueTypeIdentity::new(
-        "@core/io".to_owned(),
+        StablePackageIdentity::binding(crate::builder_surface::PackageOrigin::Core, "@core/io"),
         ExternalSymbolPath::from_components(vec!["input".to_owned(), "Input".to_owned()]),
     ));
     assert_eq!(
@@ -488,11 +488,11 @@ fn projects_external_opaque_to_owned_package_and_symbol_path() {
 #[test]
 fn external_opaque_identity_is_equal_for_equal_package_and_symbol() {
     let a = ExternalOpaqueTypeIdentity::new(
-        "@core/io".to_owned(),
+        StablePackageIdentity::binding(crate::builder_surface::PackageOrigin::Core, "@core/io"),
         ExternalSymbolPath::from_components(vec!["input".to_owned(), "Input".to_owned()]),
     );
     let b = ExternalOpaqueTypeIdentity::new(
-        "@core/io".to_owned(),
+        StablePackageIdentity::binding(crate::builder_surface::PackageOrigin::Core, "@core/io"),
         ExternalSymbolPath::from_components(vec!["input".to_owned(), "Input".to_owned()]),
     );
     assert_eq!(
@@ -511,14 +511,41 @@ fn external_opaque_identity_is_equal_for_equal_package_and_symbol() {
 #[test]
 fn external_opaque_identity_distinguishes_different_packages() {
     let a = ExternalOpaqueTypeIdentity::new(
-        "@core/io".to_owned(),
+        StablePackageIdentity::binding(crate::builder_surface::PackageOrigin::Core, "@core/io"),
         ExternalSymbolPath::from_single("Input"),
     );
     let b = ExternalOpaqueTypeIdentity::new(
-        "@test/canvas".to_owned(),
+        StablePackageIdentity::binding(
+            crate::builder_surface::PackageOrigin::Builder,
+            "@test/canvas",
+        ),
         ExternalSymbolPath::from_single("Input"),
     );
     assert_ne!(a, b, "same symbol path in different packages must differ");
+}
+
+#[test]
+fn external_opaque_identity_distinguishes_same_package_path_from_different_origins() {
+    let symbol_path = ExternalSymbolPath::from_single("Handle");
+    let builder = ExternalOpaqueTypeIdentity::new(
+        StablePackageIdentity::binding(
+            crate::builder_surface::PackageOrigin::Builder,
+            "@shared/api",
+        ),
+        symbol_path.clone(),
+    );
+    let project = ExternalOpaqueTypeIdentity::new(
+        StablePackageIdentity::binding(
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+            "@shared/api",
+        ),
+        symbol_path,
+    );
+
+    assert_ne!(
+        builder, project,
+        "same-spelling packages from different origins must not share opaque type identity"
+    );
 }
 
 #[test]
@@ -535,7 +562,10 @@ fn projects_external_opaque_from_test_registry() {
         .expect("test external opaque projection should succeed");
 
     let expected = CanonicalTypeIdentity::ExternalOpaque(ExternalOpaqueTypeIdentity::new(
-        "@test/canvas".to_owned(),
+        StablePackageIdentity::binding(
+            crate::builder_surface::PackageOrigin::Builder,
+            "@test/canvas",
+        ),
         ExternalSymbolPath::from_single("Canvas"),
     ));
     assert_eq!(identity, expected);
@@ -1092,7 +1122,7 @@ fn canonical_identity_carries_no_local_ids_or_paths() {
     // string IDs or external type IDs. This is a structural invariant: the enum and its
     // supporting structs only carry owned stable values.
     let opaque = ExternalOpaqueTypeIdentity::new(
-        "@core/io".to_owned(),
+        StablePackageIdentity::binding(crate::builder_surface::PackageOrigin::Core, "@core/io"),
         ExternalSymbolPath::from_components(vec!["input".to_owned(), "Input".to_owned()]),
     );
     let identity = CanonicalTypeIdentity::ExternalOpaque(opaque);

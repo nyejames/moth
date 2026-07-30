@@ -15,6 +15,7 @@ use crate::build_system::utils::{file_error_messages, should_skip_unchanged_writ
 
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -25,12 +26,13 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFragment};
-use crate::compiler_frontend::public_interface::{LocalPublicInterface, PublicSemanticInterface};
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::semantic_identity::{
+    ModulePrivateExecutableIdentity, OriginFunctionId,
+};
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
-use crate::compiler_frontend::validated_generic_template_metadata::ValidatedGenericTemplateStore;
 
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::external_import_providers::provider::{
@@ -166,22 +168,8 @@ pub(crate) struct ModuleCompilerMetadata {
     pub(crate) root_activity: ModuleRootActivity,
     pub(crate) doc_fragments: Vec<ModuleDocFragment>,
     pub(crate) rendered_path_usages: Vec<RenderedPathUsage>,
-    /// Validated generic callable template body artefacts keyed by stable
-    /// [`crate::compiler_frontend::semantic_identity::OriginFunctionId`].
-    ///
-    /// WHAT: one deterministic artefact per directly exported generic free-function or
-    ///       receiver-method origin and none for non-generic or private callables. Each artefact
-    ///       moves the one existing validated `GenericFunctionTemplate` body payload out of the
-    ///       donor-local AST template map. The store is TIR-free and `Send`.
-    /// WHY: locked decision 10 retains the declaring module's template body as a compiler
-    ///      metadata checkpoint for the future build-owned generated sidecar worklist
-    ///      (R5D-R5G). This is a body-artefact checkpoint only, not the complete materialisation
-    ///      context: complete materialisation also needs declaration, file-visibility,
-    ///      generic/type and related frontend context that this slice intentionally does not
-    ///      retain. The pre-provider project-compilation handoff drops this store before string-table remap
-    ///      because the retained `FunctionSignature` carries donor-local `StringId`s whose remap
-    ///      owner is not in scope for the current slice.
-    pub(crate) validated_generic_templates: ValidatedGenericTemplateStore,
+    /// Self-contained declaring-module semantics used by generated-function materialisation.
+    pub(crate) materialisation_context: Option<ModuleMaterialisationContext>,
 }
 
 impl ModuleCompilerMetadata {
@@ -191,7 +179,7 @@ impl ModuleCompilerMetadata {
         lowering_metadata: HirLoweringMetadata,
         const_top_level_fragments: Vec<ResolvedConstFragment>,
         root_activity: ModuleRootActivity,
-        validated_generic_templates: ValidatedGenericTemplateStore,
+        materialisation_context: ModuleMaterialisationContext,
     ) -> Self {
         Self {
             entry_point,
@@ -200,7 +188,7 @@ impl ModuleCompilerMetadata {
             rendered_path_usages: lowering_metadata.rendered_path_usages,
             const_top_level_fragments,
             root_activity,
-            validated_generic_templates,
+            materialisation_context: Some(materialisation_context),
         }
     }
 
@@ -211,10 +199,6 @@ impl ModuleCompilerMetadata {
     ///      remain reachable by a backend after the pre-provider project-compilation handoff, so each handoff
     ///      path calls this before `remap_string_ids`. The discard is deliberate; R5D-R5G
     ///      will replace this body-only checkpoint with the complete artefact store and worklist.
-    pub(crate) fn discard_validated_generic_templates(&mut self) {
-        let _ = std::mem::take(&mut self.validated_generic_templates);
-    }
-
     /// Remap interned string IDs after string-table merging.
     ///
     /// WHY: warnings, documentation locations, and rendered-path interned fields must all remap
@@ -259,6 +243,28 @@ pub struct Module {
     pub(crate) metadata: ModuleCompilerMetadata,
 }
 
+/// One independently lowered concrete generic executable.
+///
+/// The stable identity is stored beside, rather than rediscovered from, its HIR module. Base
+/// canonical modules and generated sidecars therefore remain distinct project-compilation lanes.
+pub(crate) struct GeneratedFunctionSidecar {
+    pub(crate) identity: crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+    pub(crate) module: Module,
+}
+
+impl GeneratedFunctionSidecar {
+    pub(crate) fn new(
+        identity: crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+        module: Module,
+    ) -> Self {
+        Self { identity, module }
+    }
+
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        self.module.remap_string_ids(remap);
+    }
+}
+
 /// One successful canonical module artefact.
 ///
 /// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable semantic
@@ -271,6 +277,36 @@ pub(crate) struct CompiledModuleArtifact {
     pub(crate) interface: PublicSemanticInterface,
 }
 
+/// Successful frontend result with canonical modules and generated executables in separate lanes.
+pub struct ProjectFrontendCompilation {
+    modules: Vec<Module>,
+    generated_sidecars: Vec<GeneratedFunctionSidecar>,
+}
+
+impl ProjectFrontendCompilation {
+    pub(crate) fn new(
+        modules: Vec<Module>,
+        generated_sidecars: Vec<GeneratedFunctionSidecar>,
+    ) -> Self {
+        Self {
+            modules,
+            generated_sidecars,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (Vec<Module>, Vec<GeneratedFunctionSidecar>) {
+        (self.modules, self.generated_sidecars)
+    }
+}
+
+impl std::ops::Deref for ProjectFrontendCompilation {
+    type Target = [Module];
+
+    fn deref(&self) -> &Self::Target {
+        &self.modules
+    }
+}
+
 /// Success-only frontend payload consumed by project builders.
 ///
 /// WHAT: owns every successfully compiled module and the explicit entry assemblies selected from
@@ -280,14 +316,53 @@ pub(crate) struct CompiledModuleArtifact {
 ///      filtering a flat module vector.
 pub struct ProjectCompilation {
     modules: Vec<Module>,
+    generated_sidecars: Vec<GeneratedFunctionSidecar>,
     entries: Vec<EntryAssembly>,
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
+    module_private_function_names:
+        Arc<std::collections::HashMap<ModulePrivateExecutableIdentity, String>>,
+    generated_function_names: Arc<
+        std::collections::HashMap<
+            crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+            String,
+        >,
+    >,
 }
 
 impl ProjectCompilation {
+    #[cfg(test)]
     pub(crate) fn from_successful_modules(modules: Vec<Module>) -> Result<Self, CompilerError> {
+        Self::from_successful_parts(modules, Vec::new())
+    }
+
+    pub(crate) fn from_frontend(
+        frontend: ProjectFrontendCompilation,
+    ) -> Result<Self, CompilerError> {
+        let (modules, generated_sidecars) = frontend.into_parts();
+        Self::from_successful_parts(modules, generated_sidecars)
+    }
+
+    fn from_successful_parts(
+        modules: Vec<Module>,
+        generated_sidecars: Vec<GeneratedFunctionSidecar>,
+    ) -> Result<Self, CompilerError> {
+        let base_module_count = modules.len();
+        let module_at = |index: usize| -> &Module {
+            if index < base_module_count {
+                &modules[index]
+            } else {
+                &generated_sidecars[index - base_module_count].module
+            }
+        };
         let mut function_owner_by_origin = FxHashMap::default();
-        for (module_index, module) in modules.iter().enumerate() {
+        let mut function_owner_by_private_identity = FxHashMap::default();
+        let mut function_owner_by_generated = FxHashMap::default();
+        for (module_index, module) in modules.iter().enumerate().chain(
+            generated_sidecars
+                .iter()
+                .enumerate()
+                .map(|(index, sidecar)| (base_module_count + index, &sidecar.module)),
+        ) {
             for (origin, function_id) in &module.executable.hir.function_ids_by_origin {
                 if function_owner_by_origin
                     .insert(origin.clone(), (module_index, *function_id))
@@ -295,6 +370,26 @@ impl ProjectCompilation {
                 {
                     return Err(CompilerError::compiler_error(format!(
                         "Project compilation contains duplicate source function origin {origin:?}"
+                    )));
+                }
+            }
+            for (origin, function_id) in &module.executable.hir.function_ids_by_private_origin {
+                if function_owner_by_private_identity
+                    .insert(origin.clone(), (module_index, *function_id))
+                    .is_some()
+                {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Project compilation contains duplicate private function origin {origin:?}"
+                    )));
+                }
+            }
+            for (identity, function_id) in &module.executable.hir.function_ids_by_generated {
+                if function_owner_by_generated
+                    .insert(identity.clone(), (module_index, *function_id))
+                    .is_some()
+                {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Project compilation contains duplicate generated function identity {identity:?}"
                     )));
                 }
             }
@@ -307,6 +402,32 @@ impl ProjectCompilation {
                 .into_iter()
                 .enumerate()
                 .map(|(index, origin)| (origin, format!("__moth_src_fn_{index}")))
+                .collect(),
+        );
+        let mut sorted_private_functions = function_owner_by_private_identity
+            .iter()
+            .map(|(identity, owner)| (identity.clone(), *owner))
+            .collect::<Vec<_>>();
+        sorted_private_functions
+            .sort_by_key(|(_, (module_index, function_id))| (*module_index, function_id.0));
+        let module_private_function_names = Arc::new(
+            sorted_private_functions
+                .into_iter()
+                .enumerate()
+                .map(|(index, (identity, _))| (identity, format!("__moth_private_fn_{index}")))
+                .collect(),
+        );
+        let mut sorted_generated_functions = function_owner_by_generated
+            .iter()
+            .map(|(identity, owner)| (identity.clone(), *owner))
+            .collect::<Vec<_>>();
+        sorted_generated_functions
+            .sort_by_key(|(_, (module_index, function_id))| (*module_index, function_id.0));
+        let generated_function_names = Arc::new(
+            sorted_generated_functions
+                .into_iter()
+                .enumerate()
+                .map(|(index, (identity, _))| (identity, format!("__moth_generated_fn_{index}")))
                 .collect(),
         );
         let mut entries = Vec::new();
@@ -334,7 +455,7 @@ impl ProjectCompilation {
                     .copied()
                     .collect::<Vec<_>>();
                 roots.sort_by_key(|function_id| function_id.0);
-                let reachable_module = &modules[reachable_module_index];
+                let reachable_module = module_at(reachable_module_index);
                 let reachability = collect_reachability_from_function_link_facts(
                     &reachable_module.link_facts.functions,
                     &roots,
@@ -354,6 +475,40 @@ impl ProjectCompilation {
                         .insert(provider_function_id)
                     {
                         pending_modules.push_back(provider_module_index);
+                    }
+                }
+
+                for identity in &reachability.reachable_module_private_functions {
+                    let Some((provider_module_index, provider_function_id)) =
+                        function_owner_by_private_identity.get(identity).copied()
+                    else {
+                        return Err(CompilerError::compiler_error(format!(
+                            "Entry assembly could not resolve module-private function identity {identity:?}"
+                        )));
+                    };
+                    if roots_by_module
+                        .entry(provider_module_index)
+                        .or_default()
+                        .insert(provider_function_id)
+                    {
+                        pending_modules.push_back(provider_module_index);
+                    }
+                }
+
+                for identity in &reachability.reachable_generated_functions {
+                    let Some((generated_module_index, generated_function_id)) =
+                        function_owner_by_generated.get(identity).copied()
+                    else {
+                        return Err(CompilerError::compiler_error(format!(
+                            "Entry assembly could not resolve generated function identity {identity:?}"
+                        )));
+                    };
+                    if roots_by_module
+                        .entry(generated_module_index)
+                        .or_default()
+                        .insert(generated_function_id)
+                    {
+                        pending_modules.push_back(generated_module_index);
                     }
                 }
 
@@ -381,7 +536,7 @@ impl ProjectCompilation {
                 .chain(
                     linked_modules
                         .iter()
-                        .map(|linked| (&modules[linked.module_index], &linked.reachability)),
+                        .map(|linked| (module_at(linked.module_index), &linked.reachability)),
                 )
             {
                 let reachable_package_ids = collect_reachable_external_package_ids(
@@ -413,13 +568,24 @@ impl ProjectCompilation {
 
         Ok(Self {
             modules,
+            generated_sidecars,
             entries,
             source_function_names,
+            module_private_function_names,
+            generated_function_names,
         })
     }
 
     pub(crate) fn modules(&self) -> &[Module] {
         &self.modules
+    }
+
+    fn module_at(&self, index: usize) -> &Module {
+        if index < self.modules.len() {
+            &self.modules[index]
+        } else {
+            &self.generated_sidecars[index - self.modules.len()].module
+        }
     }
 
     /// Resolve every entry through this compilation's own module store.
@@ -441,11 +607,13 @@ impl ProjectCompilation {
                     .linked_modules
                     .iter()
                     .map(|linked| ProjectLinkedModule {
-                        module: &self.modules[linked.module_index],
+                        module: self.module_at(linked.module_index),
                         reachability: &linked.reachability,
                     })
                     .collect(),
                 source_function_names: Arc::clone(&self.source_function_names),
+                module_private_function_names: Arc::clone(&self.module_private_function_names),
+                generated_function_names: Arc::clone(&self.generated_function_names),
             });
         }
 
@@ -503,6 +671,14 @@ pub(crate) struct ProjectEntry<'a> {
     pub(crate) external_imports: &'a [ModuleExternalImport],
     pub(crate) linked_modules: Vec<ProjectLinkedModule<'a>>,
     pub(crate) source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
+    pub(crate) module_private_function_names:
+        Arc<std::collections::HashMap<ModulePrivateExecutableIdentity, String>>,
+    pub(crate) generated_function_names: Arc<
+        std::collections::HashMap<
+            crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+            String,
+        >,
+    >,
 }
 
 impl Module {
@@ -537,20 +713,17 @@ pub(crate) struct ModuleSemanticDraft {
     /// Current executable, link-fact and compiler-metadata lanes: validated base HIR, paired type
     /// environment, borrow facts, complete base-function link facts and compiler metadata.
     pub module: Module,
+    /// New generated identities, summaries and sidecars produced transactionally for this
+    /// module. The boundary scheduler remaps and publishes this delta only after module success.
+    pub generated_worklist_delta: crate::build_system::create_project_modules::generated_worklist::GeneratedFunctionWorklistDelta,
     /// The module-local string table carrying every diagnostic render identity produced during
     /// semantic compilation. Merged into the build table once per module at the compilation
     /// boundary so downstream consumers see a single remapped table.
     pub string_table: StringTable,
-    /// The completed direct public interface for declarations defined directly in the active
-    /// module root. This is a draft relative to the future completed provider interface: it
-    /// owns the pre-HIR declaration draft plus the concrete-local summary records produced
-    /// after borrow validation, with explicit callable categories distinguishing concrete-local
-    /// callables from generic-template declarations whose generated summaries remain
-    /// sidecar-owned. It carries the stable module origin through `draft.module_origin` and
-    /// only owned stable values: no `TypeId`, `NominalTypeId`, `GenericParameterId`,
-    /// `TraitId`, `InternedPath` or `StringId` crosses this boundary. The compilation
-    /// graph scheduler publishes it as the completed provider interface for later waves.
-    pub public_interface: LocalPublicInterface,
+    /// The closed and publication-validated semantic interface. Provider-owned re-export facts
+    /// have already joined through immutable completed interfaces, so the graph can publish this
+    /// value directly after deterministic string-table merge.
+    pub public_interface: PublicSemanticInterface,
 }
 
 // -------------------------
@@ -760,19 +933,19 @@ pub fn build_project(
     };
 
     let compile_frontend_start = crate::timing::start_pipeline_timing();
-    let modules = match compile_project_frontend(
+    let frontend_compilation = match compile_project_frontend(
         &mut config,
         flags,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
     ) {
-        Ok(modules) => {
+        Ok(frontend_compilation) => {
             log_stage_timing(
                 "build_project.compile_project_frontend",
                 compile_frontend_start,
             );
-            modules
+            frontend_compilation
         }
         Err(messages) => {
             log_stage_timing(
@@ -783,7 +956,7 @@ pub fn build_project(
             return Err(messages);
         }
     };
-    let project_compilation = ProjectCompilation::from_successful_modules(modules)
+    let project_compilation = ProjectCompilation::from_frontend(frontend_compilation)
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     let mut warnings = collect_frontend_warnings(project_compilation.modules());
 

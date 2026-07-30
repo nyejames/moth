@@ -186,7 +186,7 @@ fn discover_modules_for_test(
         &mut project_module_graph,
         style_directives,
         &mut external_imports,
-        DirectoryImportResolution::new(&module_namespace_set, &source_tree_index),
+        DirectoryImportResolution::project(&module_namespace_set, &source_tree_index),
         &mut string_table,
     )
 }
@@ -243,7 +243,7 @@ fn discover_modules_for_test_with_providers(
         &mut project_module_graph,
         style_directives,
         &mut external_imports,
-        DirectoryImportResolution::new(&module_namespace_set, &source_tree_index),
+        DirectoryImportResolution::project(&module_namespace_set, &source_tree_index),
         &mut string_table,
     )
 }
@@ -290,7 +290,7 @@ fn with_namespace_resolution(
         source_package_boundary_indexes,
         &external_packages,
     );
-    let resolution = DirectoryImportResolution::new(&module_namespace_set, &source_tree_index);
+    let resolution = DirectoryImportResolution::project(&module_namespace_set, &source_tree_index);
     body(&resolution, &mut string_table);
 }
 
@@ -410,14 +410,14 @@ fn grouped_import_resolves_cross_module_child_facade() {
                 .resolve_import(&provider, &importer, string_table)
                 .expect("a grouped child-module facade should resolve");
             match resolved {
-                ResolvedImport::CrossModuleProject { root_file, .. } => {
+                ResolvedImport::CrossModule { root_file, .. } => {
                     assert!(
                         root_file.ends_with("child/#mod.moth"),
                         "expected the child module facade root file, got {:?}",
                         root_file
                     );
                 }
-                other => panic!("expected CrossModuleProject, got {:?}", other),
+                other => panic!("expected CrossModule, got {:?}", other),
             }
         },
     );
@@ -472,14 +472,14 @@ fn grouped_import_resolves_source_package_facade() {
                 .resolve_import(&provider, &importer, string_table)
                 .expect("a grouped source-package facade should resolve");
             match resolved {
-                ResolvedImport::RootFile { root_file } => {
+                ResolvedImport::SourcePackageSurface { root_file, .. } => {
                     assert!(
                         root_file.ends_with("helper/#mod.moth"),
                         "expected the helper package facade root file, got {:?}",
                         root_file
                     );
                 }
-                other => panic!("expected RootFile, got {:?}", other),
+                other => panic!("expected SourcePackageSurface, got {:?}", other),
             }
         },
     );
@@ -549,7 +549,7 @@ fn discover_modules_and_graph_for_test(
         &mut project_module_graph,
         style_directives,
         &mut external_imports,
-        DirectoryImportResolution::new(&module_namespace_set, &source_tree_index),
+        DirectoryImportResolution::project(&module_namespace_set, &source_tree_index),
         &mut string_table,
     )
     .expect("module discovery should pass for focused graph-edge tests");
@@ -6100,12 +6100,37 @@ fn discover_semantic_set_result_for_entry_with_inputs(
         cache: &mut external_import_cache,
         resolution_table: &mut external_import_resolution_table,
     };
+
+    // Source packages now compile as separate indexed graphs. Validate their semantic imports
+    // through the same package-boundary namespace before discovering the project consumer set.
+    // The project traversal sees only each package facade and cannot inspect private package
+    // sources by design.
+    for (import_prefix, package_index) in module_namespace_set.source_package_boundaries() {
+        let mut package_graph =
+            super::project_module_graph::ProjectModuleGraph::from_source_tree_index(package_index);
+        let package_resolver = resolver.for_source_package_boundary(
+            package_index.entry_root().to_path_buf(),
+            package_index
+                .module_identities()
+                .derive_compilation_root_table(),
+        );
+        super::module_inventory::discover_all_modules_in_package(
+            config,
+            &package_resolver,
+            &mut package_graph,
+            style_directives,
+            &mut external_imports,
+            DirectoryImportResolution::package(&module_namespace_set, import_prefix, package_index),
+            &mut string_table,
+        )?;
+    }
+
     super::reachable_file_discovery::discover_semantic_source_set_for_test(
         entry_path,
         &resolver,
         style_directives,
         &mut external_imports,
-        DirectoryImportResolution::new(&module_namespace_set, &source_tree_index),
+        DirectoryImportResolution::project(&module_namespace_set, &source_tree_index),
         &mut string_table,
     )
     .map(|set| {

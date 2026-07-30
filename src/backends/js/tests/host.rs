@@ -83,6 +83,8 @@ fn host_io_reads_the_underlying_value_before_logging() {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_module_export_glue_enabled: false,
             source_function_names: Arc::new(Default::default()),
+            module_private_function_names: Arc::new(Default::default()),
+            generated_function_names: Arc::new(Default::default()),
         },
         &type_environment,
     )
@@ -140,6 +142,8 @@ fn auto_invokes_start_function_when_enabled() {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_module_export_glue_enabled: false,
             source_function_names: Arc::new(Default::default()),
+            module_private_function_names: Arc::new(Default::default()),
+            generated_function_names: Arc::new(Default::default()),
         },
         &type_environment,
     )

@@ -124,6 +124,8 @@ impl<'a> BorrowChecker<'a> {
             external_package_registry: self.external_package_registry,
             public_call_summaries: &self.public_call_summaries,
             imported_call_summaries: &self.module.imported_call_summaries,
+            module_private_call_summaries: &self.module.module_private_call_summaries,
+            generated_call_summaries: &self.module.generated_call_summaries,
             diagnostics: BorrowDiagnostics::new(self.module, self.string_table),
         };
 

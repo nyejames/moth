@@ -10,6 +10,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::ExternalSymbolCategory;
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
@@ -28,9 +29,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{
     ExternalPackageSymbolLookup, ExternalPackageSymbolResolutionInput, FileVisibility,
     HeaderImportEnvironment, ImportTargetResolutionInput, ModuleBoundaryCheckInput,
-    NamespaceRecordSource, NamespaceTargetResolutionInput, PublicExportLookupResult,
-    PublicExportResolutionInput, ResolvedImportTarget, SourceDeclarationTarget, SourceImportAccess,
-    SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
+    NamespaceRecord, NamespaceRecordSource, NamespaceTargetResolutionInput, NamespaceTypeMember,
+    NamespaceValueMember, PublicExportLookupResult, PublicExportResolutionInput,
+    ReceiverMethodVisibility, ResolvedImportTarget, SourceDeclarationTarget, SourceFunctionTarget,
+    SourceImportAccess, SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
     check_alias_case_warning, check_module_boundary, check_source_package_boundary,
     has_explicit_moth_extension, resolve_external_package_symbol, resolve_import_target,
     resolve_namespace_target, resolve_public_export_boundary,
@@ -368,6 +370,9 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 .entry(provider_declaration.origin.clone())
                 .or_insert_with(|| provider_declaration.clone());
         }
+        self.environment
+            .imported_reusable_evidence
+            .extend(interface.reusable_evidence.iter().cloned());
 
         let Some(public_name_id) = import.provider.path.name() else {
             return Err(Box::new(super::diagnostics::missing_import_target_no_path(
@@ -376,16 +381,25 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         };
         let public_name = self.string_table.resolve(public_name_id);
         let Some(origin) = interface.exported_origin(public_name).cloned() else {
-            return Err(Box::new(super::diagnostics::missing_import_target(
-                &import.provider.path,
-                import.location.clone(),
-            )));
+            if let Some(binding) = interface.binding_export(public_name) {
+                let Some(symbol_id) = self
+                    .external_package_registry
+                    .resolve_canonical_symbol(&binding.target)
+                else {
+                    return Err(Box::new(
+                        self.provider_public_surface_diagnostic(import, interface),
+                    ));
+                };
+                return self.register_external_import(file_visibility, registry, import, symbol_id);
+            }
+            return Err(Box::new(
+                self.provider_public_surface_diagnostic(import, interface),
+            ));
         };
         let Some(declaration) = interface.declaration(&origin).cloned() else {
-            return Err(Box::new(super::diagnostics::missing_import_target(
-                &import.provider.path,
-                import.location.clone(),
-            )));
+            return Err(Box::new(
+                self.provider_public_surface_diagnostic(import, interface),
+            ));
         };
 
         let local_name = self.derive_import_local_name(import)?;
@@ -429,9 +443,26 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             }
         }
 
+        let receiver_methods = match &declaration.semantics {
+            PublicDeclarationSemantics::Struct(structure) => {
+                Some(structure.receiver_methods.clone())
+            }
+            PublicDeclarationSemantics::Choice(choice) => Some(choice.receiver_methods.clone()),
+            _ => None,
+        };
         self.environment
             .imported_declarations_by_local_path
             .insert(local_path.clone(), declaration);
+
+        if let Some(receiver_methods) = receiver_methods {
+            self.register_imported_receiver_methods(
+                file_visibility,
+                &local_path,
+                &receiver_methods,
+                interface,
+                &import.location,
+            )?;
+        }
 
         if let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Function(
             function_origin,
@@ -449,6 +480,214 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 },
             );
         }
+        Ok(())
+    }
+
+    fn provider_public_surface_diagnostic(
+        &mut self,
+        import: &FileImport,
+        interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
+    ) -> CompilerDiagnostic {
+        let module_path = interface.module_origin.logical_module_path();
+        let (surface_name, surface_type) = module_path
+            .rsplit('/')
+            .find(|component| !component.is_empty())
+            .map_or_else(
+                || {
+                    (
+                        interface.module_origin.package().name(),
+                        ImportPublicSurfaceType::SourcePackage,
+                    )
+                },
+                |name| (name, ImportPublicSurfaceType::ModuleRoot),
+            );
+        let surface_name = self.string_table.intern(surface_name);
+
+        super::diagnostics::not_exported_by_public_surface(
+            &import.provider.path,
+            surface_name,
+            surface_type,
+            import.location.clone(),
+        )
+    }
+
+    fn register_source_provider_namespace_import(
+        &mut self,
+        file_visibility: &mut FileVisibility,
+        registry: &mut VisibleNameRegistry,
+        import: &FileImport,
+        interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
+    ) -> BuilderResult<()> {
+        for provider_declaration in &interface.declarations {
+            self.environment
+                .imported_declarations_by_origin
+                .entry(provider_declaration.origin.clone())
+                .or_insert_with(|| provider_declaration.clone());
+        }
+        self.environment
+            .imported_reusable_evidence
+            .extend(interface.reusable_evidence.iter().cloned());
+
+        let mut record = NamespaceRecord::empty(NamespaceRecordSource::SourceFile(
+            import.provider.path.clone(),
+        ));
+        for binding in &interface.export_bindings {
+            let Some(declaration) = interface.declaration(binding.origin()).cloned() else {
+                return Err(Box::new(super::diagnostics::missing_import_target(
+                    &import.provider.path,
+                    import.location.clone(),
+                )));
+            };
+            let name = self.string_table.intern(binding.public_name());
+            let local_path = import.provider.path.append(name);
+            let target = SourceDeclarationTarget::Imported {
+                origin: binding.origin().clone(),
+                local_path: local_path.clone(),
+            };
+
+            match &declaration.semantics {
+                PublicDeclarationSemantics::Struct(structure) => {
+                    record
+                        .type_members
+                        .insert(name, NamespaceTypeMember::SourceDeclaration(target.clone()));
+                    self.register_imported_receiver_methods(
+                        file_visibility,
+                        &local_path,
+                        &structure.receiver_methods,
+                        interface,
+                        &import.location,
+                    )?;
+                }
+                PublicDeclarationSemantics::Choice(choice) => {
+                    record
+                        .type_members
+                        .insert(name, NamespaceTypeMember::SourceDeclaration(target.clone()));
+                    self.register_imported_receiver_methods(
+                        file_visibility,
+                        &local_path,
+                        &choice.receiver_methods,
+                        interface,
+                        &import.location,
+                    )?;
+                }
+                PublicDeclarationSemantics::TransparentAlias(_) => {
+                    record
+                        .type_members
+                        .insert(name, NamespaceTypeMember::SourceDeclaration(target.clone()));
+                }
+                PublicDeclarationSemantics::Function(_) => {
+                    record.value_members.insert(
+                        name,
+                        NamespaceValueMember::SourceDeclaration(target.clone()),
+                    );
+                    if let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Function(
+                        function_origin,
+                    ) = binding.origin()
+                        && let Some(summary) = interface.concrete_call_summary(function_origin)
+                    {
+                        self.environment.imported_functions_by_local_path.insert(
+                            local_path.clone(),
+                            super::ImportedFunctionContract {
+                                target: SourceFunctionTarget::Imported {
+                                    origin: function_origin.clone(),
+                                    local_path: local_path.clone(),
+                                },
+                                summary: summary.clone(),
+                            },
+                        );
+                    }
+                }
+                PublicDeclarationSemantics::Constant(_) => {
+                    record.value_members.insert(
+                        name,
+                        NamespaceValueMember::SourceDeclaration(target.clone()),
+                    );
+                }
+                PublicDeclarationSemantics::Trait(_) => continue,
+            }
+
+            self.environment
+                .imported_declarations_by_local_path
+                .insert(local_path, declaration);
+        }
+
+        for binding in &interface.binding_exports {
+            let Some(symbol_id) = self
+                .external_package_registry
+                .resolve_canonical_symbol(&binding.target)
+            else {
+                return Err(Box::new(super::diagnostics::missing_import_target(
+                    &import.provider.path,
+                    import.location.clone(),
+                )));
+            };
+            let name = self.string_table.intern(&binding.public_name);
+            match binding.target.category {
+                ExternalSymbolCategory::Function | ExternalSymbolCategory::Constant => {
+                    record
+                        .value_members
+                        .insert(name, NamespaceValueMember::ExternalSymbol(symbol_id));
+                }
+                ExternalSymbolCategory::Type => {
+                    record
+                        .type_members
+                        .insert(name, NamespaceTypeMember::ExternalSymbol(symbol_id));
+                }
+            }
+        }
+
+        let local_name = self.derive_namespace_name(import)?;
+        registry.register(
+            local_name,
+            VisibleNameBinding::NamespaceRecord {
+                record_source: record.record_source.clone(),
+            },
+            Some(import.location.clone()),
+        )?;
+        file_visibility
+            .visible_namespace_records
+            .insert(local_name, record);
+        Ok(())
+    }
+
+    fn register_imported_receiver_methods(
+        &mut self,
+        file_visibility: &mut FileVisibility,
+        imported_type_path: &InternedPath,
+        methods: &[crate::compiler_frontend::public_interface::PublicReceiverMethodSemantics],
+        interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
+        import_location: &SourceLocation,
+    ) -> BuilderResult<()> {
+        for method in methods {
+            let method_name = self
+                .string_table
+                .intern(method.method_origin.defining_name());
+            let method_path = imported_type_path.append(method_name);
+            let target = SourceFunctionTarget::Imported {
+                origin: method.method_origin.clone(),
+                local_path: method_path.clone(),
+            };
+
+            file_visibility
+                .visible_receiver_methods
+                .entry(method_name)
+                .or_default()
+                .push(ReceiverMethodVisibility {
+                    target: target.clone(),
+                    location: import_location.clone(),
+                });
+
+            if let Some(summary) = interface.concrete_call_summary(&method.method_origin) {
+                self.environment.imported_functions_by_local_path.insert(
+                    method_path,
+                    super::ImportedFunctionContract {
+                        target,
+                        summary: summary.clone(),
+                    },
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -705,7 +944,10 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         source_file: &InternedPath,
         importable_symbol_paths: &FxHashSet<InternedPath>,
     ) -> BuilderResult<()> {
-        if let Some(interface) = self.source_provider_imports.resolve(source_file, import) {
+        if let Some(interface) =
+            self.source_provider_imports
+                .resolve(source_file, import, self.string_table)
+        {
             return self.register_source_provider_import(
                 file_visibility,
                 registry,
@@ -905,6 +1147,18 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 import.provider.path.clone(),
                 import.location.clone(),
             )));
+        }
+
+        if let Some(interface) =
+            self.source_provider_imports
+                .resolve(source_file, import, self.string_table)
+        {
+            return self.register_source_provider_namespace_import(
+                file_visibility,
+                registry,
+                import,
+                interface,
+            );
         }
 
         // Check for provider-backed bare import.

@@ -1,0 +1,4 @@
+import @cards { Card, make_card, render_card }
+
+card Card = make_card("nested")
+[:module_facade_transitive_reexport_closure_success [render_card(card)]]

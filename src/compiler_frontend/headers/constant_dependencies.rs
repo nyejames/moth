@@ -16,6 +16,9 @@ use crate::compiler_frontend::headers::import_environment::{
 use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::headers::types::LocalDeclarationOrderingHint;
+use crate::compiler_frontend::public_interface::{
+    PublicDeclarationRecord, PublicDeclarationSemantics,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
@@ -48,6 +51,7 @@ struct ConstantPosition {
 
 pub(crate) enum ConstantReferenceResolution {
     SourceConstant { path: InternedPath },
+    ImportedConstant,
     SourceNonConstant { _path: InternedPath },
     SourceTypeAlias { _path: InternedPath },
     ExternalConstant { _symbol_id: ExternalSymbolId },
@@ -143,6 +147,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                 &constant_positions,
                 &struct_or_choice_paths,
                 module_symbols,
+                &import_environment.imported_declarations_by_local_path,
             );
 
             match resolution {
@@ -183,6 +188,7 @@ pub(crate) fn add_constant_initializer_dependencies(
 
                 // Type aliases live in the type namespace. They do not create value dependency edges.
                 ConstantReferenceResolution::SourceTypeAlias { .. }
+                | ConstantReferenceResolution::ImportedConstant
                 | ConstantReferenceResolution::ExternalConstant { .. }
                 | ConstantReferenceResolution::ConstructorLikeSource { .. } => {}
 
@@ -228,6 +234,7 @@ fn classify_reference(
     constant_positions: &FxHashMap<InternedPath, ConstantPosition>,
     struct_or_choice_paths: &FxHashSet<InternedPath>,
     module_symbols: &ModuleSymbols,
+    imported_declarations: &FxHashMap<InternedPath, PublicDeclarationRecord>,
 ) -> ConstantReferenceResolution {
     // 1. External symbols: constants are valid references; non-constants are errors.
     if let Some(symbol_id) = visibility.visible_external_symbols.get(&reference.name) {
@@ -265,6 +272,7 @@ fn classify_reference(
                 struct_or_choice_paths,
                 module_symbols,
                 reference,
+                imported_declarations,
             );
         }
 
@@ -292,6 +300,7 @@ fn classify_reference(
         struct_or_choice_paths,
         module_symbols,
         reference,
+        imported_declarations,
     )
 }
 
@@ -301,6 +310,7 @@ fn classify_namespace_value_member(
     struct_or_choice_paths: &FxHashSet<InternedPath>,
     module_symbols: &ModuleSymbols,
     reference: &InitializerReference,
+    imported_declarations: &FxHashMap<InternedPath, PublicDeclarationRecord>,
 ) -> ConstantReferenceResolution {
     match member {
         NamespaceValueMember::SourceDeclaration(target_path) => {
@@ -310,6 +320,7 @@ fn classify_namespace_value_member(
                 struct_or_choice_paths,
                 module_symbols,
                 reference,
+                imported_declarations,
             )
         }
 
@@ -333,7 +344,31 @@ fn classify_source_declaration_reference(
     struct_or_choice_paths: &FxHashSet<InternedPath>,
     module_symbols: &ModuleSymbols,
     reference: &InitializerReference,
+    imported_declarations: &FxHashMap<InternedPath, PublicDeclarationRecord>,
 ) -> ConstantReferenceResolution {
+    if let Some(record) = imported_declarations.get(target_path) {
+        return match &record.semantics {
+            PublicDeclarationSemantics::Constant(_) => {
+                ConstantReferenceResolution::ImportedConstant
+            }
+            PublicDeclarationSemantics::Struct(_) | PublicDeclarationSemantics::Choice(_)
+                if reference.followed_by_call || reference.followed_by_choice_namespace =>
+            {
+                ConstantReferenceResolution::ConstructorLikeSource {
+                    _path: target_path.clone(),
+                }
+            }
+            PublicDeclarationSemantics::TransparentAlias(_) => {
+                ConstantReferenceResolution::SourceTypeAlias {
+                    _path: target_path.clone(),
+                }
+            }
+            _ => ConstantReferenceResolution::SourceNonConstant {
+                _path: target_path.clone(),
+            },
+        };
+    }
+
     let is_constant = constant_positions.contains_key(target_path);
 
     if is_constant {

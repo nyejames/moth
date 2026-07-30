@@ -35,7 +35,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// One transient callable identity seed: the single authority pairing a donor-local
 /// declaration path with its stable public origin and callable classification.
@@ -110,11 +110,20 @@ pub(crate) fn build_callable_seed_table(
     // generic-parameter classification. Non-function bindings produce no seed but still consume
     // their root so a binding with no matching root is rejected here.
     let mut root_index = RootIndex::new(&root_table.roots, string_table)?;
+
+    let mut seen_origins = FxHashSet::default();
+
     for binding in export_bindings {
+        if binding.origin().module_origin() != module_origin {
+            continue;
+        }
         if matches!(binding.origin(), OriginDeclarationId::Trait(_)) {
             continue;
         }
-        let root = root_index.take(binding.public_name())?;
+        if !seen_origins.insert(binding.origin().clone()) {
+            continue;
+        }
+        let root = root_index.take_for_binding(binding)?;
         if let ResolvedPublicTypeRootKind::Function {
             generic_parameter_list_id,
             ..

@@ -91,17 +91,12 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
     ) -> Result<LoweredExpression, CompilerError> {
-        let function_id = self.resolve_function_id_or_error(method_path, location)?;
+        let target = self.resolve_call_target_or_error(method_path, location)?;
         let mut full_args = Vec::with_capacity(args.len() + 1);
         full_args.push(Self::shared_call_argument(receiver.clone(), location));
         full_args.extend(args.iter().cloned());
 
-        self.lower_call_expression(
-            CallTarget::Local(function_id),
-            &full_args,
-            result_type_ids,
-            location,
-        )
+        self.lower_call_expression(target, &full_args, result_type_ids, location)
     }
 
     pub(crate) fn lower_collection_builtin_call_expression(
@@ -249,7 +244,10 @@ impl<'a> HirBuilder<'a> {
                         }
                     })
             }
-            CallTarget::CrossModule(_) | CallTarget::External(_) => None,
+            CallTarget::CrossModule(_)
+            | CallTarget::ModulePrivate(_)
+            | CallTarget::Generated(_)
+            | CallTarget::External(_) => None,
         };
 
         if result_carrying_user_call.is_some() {

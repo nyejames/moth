@@ -29,6 +29,7 @@ use crate::compiler_frontend::ast::field_access::receiver_access::{
 use crate::compiler_frontend::ast::generic_functions::{
     GenericCallExpectedContext, GenericFunctionInferenceInput, GenericFunctionInstantiationRequest,
     infer_generic_function_call, recursive_generic_function_instantiation,
+    validate_generic_function_bound_evidence,
 };
 use crate::compiler_frontend::ast::receiver_methods::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -182,6 +183,13 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                     type_environment: type_interner.environment_mut_for_derived_types(),
                     string_table,
                 })?;
+                let selected_evidence = validate_generic_function_bound_evidence(
+                    template,
+                    inference.key.type_arguments.as_ref(),
+                    scope_context,
+                    type_interner.environment(),
+                    member_location.clone(),
+                )?;
 
                 if scope_context.is_generic_function_instantiation_active(&inference.key) {
                     return Err(recursive_generic_function_instantiation(
@@ -192,6 +200,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                 }
 
                 let request = GenericFunctionInstantiationRequest {
+                    declaration_identity: template.declaration_identity.clone(),
+                    evidence: selected_evidence,
                     key: inference.key,
                     instance_path: inference.instance_path.clone(),
                     call_location: member_location.clone(),

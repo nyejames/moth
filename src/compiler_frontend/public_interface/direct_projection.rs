@@ -163,6 +163,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             trait_roots,
             trait_environment,
             trait_evidence_environment,
+            const_templates_by_name,
         } = public_interface_projection_input;
 
         let trait_environment = trait_environment.ok_or_else(|| {
@@ -318,6 +319,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
         let declarations = project_declaration_records(
             export_seed.export_bindings(),
             &root_table,
+            &const_templates_by_name,
             &type_context,
             &mut state,
         )?;
@@ -350,12 +352,13 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
 
         // Consume the seed: the module origin and export bindings move into the draft and the
         // directly-defined nominal origin index is dropped.
-        let (module_origin, export_bindings, _) = export_seed.into_parts();
+        let (module_origin, export_bindings, binding_exports, _) = export_seed.into_parts();
 
         Ok(PublicInterfaceDraftBuildResult {
             draft: PublicInterfaceDraft {
                 module_origin,
                 export_bindings,
+                binding_exports,
                 declarations,
                 reusable_evidence,
             },
@@ -434,14 +437,25 @@ struct DeclarationRecordProjectionState<'a, 'b> {
 fn project_declaration_records<'a>(
     export_bindings: &'a [ExportBinding],
     root_table: &'a crate::compiler_frontend::ast::ResolvedPublicTypeRootTable,
+    const_templates_by_name: &'a FxHashMap<
+        String,
+        crate::compiler_frontend::folded_value::PublicConstTemplate,
+    >,
     type_context: &DeclarationTypeProjectionContext<'_>,
     state: &mut DeclarationRecordProjectionState<'a, '_>,
 ) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
     let mut root_index = RootIndex::new(&root_table.roots, type_context.string_table)?;
+
     let mut declarations = Vec::new();
     let mut seen_origins: FxHashSet<OriginDeclarationId> = FxHashSet::default();
 
     for binding in export_bindings {
+        // Provider-owned bindings stay in the draft for publication closure. They must not
+        // consume local roots or trait records during direct projection.
+        if binding.origin().module_origin() != binding.exporting_module() {
+            continue;
+        }
+
         // One declaration record per unique origin. A second binding for the same origin is
         // preserved in the export-bindings list but does not produce a second record.
         if !seen_origins.insert(binding.origin().clone()) {
@@ -450,7 +464,7 @@ fn project_declaration_records<'a>(
 
         match binding.origin() {
             OriginDeclarationId::Function(function_origin) => {
-                let root = root_index.take(binding.public_name())?;
+                let root = root_index.take_for_binding(binding)?;
                 let crate::compiler_frontend::ast::ResolvedPublicTypeRootKind::Function {
                     signature,
                     generic_parameter_list_id,
@@ -477,7 +491,7 @@ fn project_declaration_records<'a>(
             }
             OriginDeclarationId::Type(type_origin) => match type_origin.category() {
                 OriginTypeCategory::Struct => {
-                    let root = root_index.take(binding.public_name())?;
+                    let root = root_index.take_for_binding(binding)?;
                     let crate::compiler_frontend::ast::ResolvedPublicTypeRootKind::Struct {
                         type_id,
                         fields,
@@ -512,7 +526,7 @@ fn project_declaration_records<'a>(
                     });
                 }
                 OriginTypeCategory::Choice => {
-                    let root = root_index.take(binding.public_name())?;
+                    let root = root_index.take_for_binding(binding)?;
                     let crate::compiler_frontend::ast::ResolvedPublicTypeRootKind::Choice {
                         type_id,
                     } = &root.kind
@@ -545,7 +559,7 @@ fn project_declaration_records<'a>(
                     });
                 }
                 OriginTypeCategory::TransparentAlias => {
-                    let root = root_index.take(binding.public_name())?;
+                    let root = root_index.take_for_binding(binding)?;
                     let crate::compiler_frontend::ast::ResolvedPublicTypeRootKind::TransparentAlias {
                         target_type_id,
                     } = &root.kind
@@ -570,7 +584,7 @@ fn project_declaration_records<'a>(
                 }
             },
             OriginDeclarationId::Constant(_) => {
-                let root = root_index.take(binding.public_name())?;
+                let root = root_index.take_for_binding(binding)?;
                 let crate::compiler_frontend::ast::ResolvedPublicTypeRootKind::Constant { type_id } =
                     &root.kind
                 else {
@@ -583,11 +597,15 @@ fn project_declaration_records<'a>(
                     type_context.type_environment,
                     type_context.type_projection_context,
                 )?;
-                let folded_value = fold_constant_value(
-                    &root.path,
-                    state.module_constants_by_path,
-                    state.folded_value_context,
-                )?;
+                let folded_value =
+                    match const_templates_by_name.get(binding.origin().defining_name()) {
+                        Some(template) => PublicFoldedValue::ConstTemplate(template.clone()),
+                        None => fold_constant_value(
+                            &root.path,
+                            state.module_constants_by_path,
+                            state.folded_value_context,
+                        )?,
+                    };
                 declarations.push(PublicDeclarationRecord {
                     origin: binding.origin().clone(),
                     semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
@@ -674,15 +692,20 @@ fn fold_constant_value(
     module_constants_by_path: &mut FxHashMap<&InternedPath, &Declaration>,
     context: &FoldedValueJoinContext,
 ) -> Result<PublicFoldedValue, CompilerError> {
-    let declaration = module_constants_by_path
-        .remove(defining_path)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "public-interface draft join: a constant export binding has no matching finalized \
-                 module constant declaration at its defining path; the folded value cannot be \
-                 projected without the donor-local AST expression",
-            )
-        })?;
+    let Some(declaration) = module_constants_by_path.remove(defining_path) else {
+        let defining_path = defining_path.to_path_buf(context.string_table);
+        let mut available_paths = module_constants_by_path
+            .keys()
+            .map(|path| path.to_path_buf(context.string_table))
+            .collect::<Vec<_>>();
+        available_paths.sort();
+        return Err(CompilerError::compiler_error(format!(
+            "public-interface draft join: constant export binding {defining_path:?} has no \
+             matching finalized module constant declaration; available defining paths are \
+             {available_paths:?} and the folded value cannot be projected without the \
+             donor-local AST expression"
+        )));
+    };
 
     convert_expression_to_folded_value(
         &declaration.value,

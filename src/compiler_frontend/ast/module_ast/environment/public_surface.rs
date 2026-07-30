@@ -376,13 +376,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &self,
         trait_definition: &crate::compiler_frontend::traits::definitions::ResolvedTraitDefinition,
         public_root_file: &InternedPath,
+        trait_environment: &TraitEnvironment,
     ) -> bool {
         match trait_definition.visibility {
             TraitVisibility::Core => true,
-            TraitVisibility::Source { .. } => self.source_path_is_public_from_root_file(
-                &trait_definition.canonical_path,
-                public_root_file,
-            ),
+            TraitVisibility::Source { .. } => trait_environment
+                .paths_for(trait_definition.id)
+                .iter()
+                .any(|path| self.source_path_is_public_from_root_file(path, public_root_file)),
         }
     }
 
@@ -461,7 +462,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         )?;
 
         let subject_is_nameable = trait_environment.get(subject_id).is_some_and(|definition| {
-            self.public_trait_definition_is_nameable(definition, public_root_file)
+            self.public_trait_definition_is_nameable(
+                definition,
+                public_root_file,
+                trait_environment,
+            )
         });
 
         for incompatible_trait in &incompatibility.incompatible_traits {
@@ -476,7 +481,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 trait_environment
                     .get(incompatible_id)
                     .is_some_and(|definition| {
-                        self.public_trait_definition_is_nameable(definition, public_root_file)
+                        self.public_trait_definition_is_nameable(
+                            definition,
+                            public_root_file,
+                            trait_environment,
+                        )
                     });
 
             if subject_is_nameable != incompatible_is_nameable {

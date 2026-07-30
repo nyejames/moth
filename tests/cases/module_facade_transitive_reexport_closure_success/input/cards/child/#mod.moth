@@ -1,0 +1,17 @@
+export:
+    HiddenLabel = |
+        text String,
+    |
+
+    PublicCard = |
+        label HiddenLabel,
+    |
+
+    make_card |text String| -> PublicCard:
+        return PublicCard(HiddenLabel(text))
+    ;
+
+    render_card |card PublicCard| -> String:
+        return card.label.text
+    ;
+;

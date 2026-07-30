@@ -25,7 +25,6 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
-use crate::compiler_frontend::validated_generic_template_metadata::ValidatedGenericTemplateStore;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -140,7 +139,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
             root_activity: ModuleRootActivity::default(),
             doc_fragments: vec![],
             rendered_path_usages: vec![],
-            validated_generic_templates: ValidatedGenericTemplateStore::default(),
+            materialisation_context: None,
         },
     };
 
@@ -215,7 +214,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
             },
             doc_fragments: vec![],
             rendered_path_usages: vec![],
-            validated_generic_templates: ValidatedGenericTemplateStore::default(),
+            materialisation_context: None,
         },
     };
 
@@ -224,95 +223,4 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         Err(error) => error,
     };
     assert!(error.msg.contains("has no owning package"));
-}
-
-#[test]
-fn pre_provider_handoff_discards_validated_generic_template_store_before_remap() {
-    use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
-    use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-    use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
-    use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StablePackageIdentity};
-    use crate::compiler_frontend::semantic_identity::{
-        OriginFunctionId, StableModuleOriginIdentity,
-    };
-    use crate::compiler_frontend::symbols::interned_path::InternedPath;
-    use crate::compiler_frontend::symbols::string_interning::StringTable;
-    use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
-    use crate::compiler_frontend::validated_generic_template_metadata::{
-        ValidatedGenericTemplateArtefact, ValidatedGenericTemplateStore,
-    };
-
-    let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("identity", &mut string_table);
-    let module_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("test-project"),
-        "shapes".to_owned(),
-        ModuleRootRole::Normal,
-    );
-    let origin = OriginFunctionId::new_free(module_origin, "identity".to_owned());
-
-    let template = GenericFunctionTemplate {
-        function_path: path.to_owned(),
-        source_file: InternedPath::new(),
-        generic_parameter_list_id: GenericParameterListId(0),
-        signature: FunctionSignature::default(),
-        body_tokens: FileTokens::new(path, vec![]),
-        declaration_location: SourceLocation::default(),
-    };
-
-    let store =
-        ValidatedGenericTemplateStore::from_artefacts(vec![ValidatedGenericTemplateArtefact {
-            origin: origin.clone(),
-            template,
-        }]);
-
-    let mut module = Module {
-        executable: ModuleExecutable {
-            hir: minimal_hir_module(InternedPath::new()),
-            type_environment: TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(),
-        },
-        link_facts: ModuleLinkFacts {
-            external_package_registry: Arc::new(ExternalPackageRegistry::new()),
-            external_import_candidates: vec![],
-            functions: collect_module_function_link_facts(&minimal_hir_module(InternedPath::new()))
-                .expect("test HIR should produce function link facts"),
-        },
-        metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::from("src/#page.moth"),
-            warnings: vec![],
-            const_top_level_fragments: vec![],
-            root_activity: ModuleRootActivity::default(),
-            doc_fragments: vec![],
-            rendered_path_usages: vec![],
-            validated_generic_templates: store,
-        },
-    };
-
-    // The store is carried in metadata with one artefact keyed by the exact origin.
-    assert_eq!(module.metadata.validated_generic_templates.len(), 1);
-    assert_eq!(
-        module.metadata.validated_generic_templates.artefacts()[0].origin,
-        origin
-    );
-
-    // The pre-provider project-compilation handoff discards the unconsumed store before
-    // string-table remap so its donor-local `StringId`s never reach backends. This mirrors the
-    // production boundary in `compile_single_file_frontend` and `compile_directory_frontend`.
-    module.metadata.discard_validated_generic_templates();
-    assert!(
-        module.metadata.validated_generic_templates.is_empty(),
-        "the pre-provider handoff discards the store before backend remap"
-    );
-
-    // Remap runs only after the store is empty, so no unremappable template state remains.
-    let mut merged_string_table = StringTable::new();
-    merged_string_table.intern("prefix");
-    let remap = merged_string_table.merge_from(&string_table);
-    module.remap_string_ids(&remap);
-
-    assert!(
-        module.metadata.validated_generic_templates.is_empty(),
-        "remap must not resurrect the discarded store"
-    );
 }

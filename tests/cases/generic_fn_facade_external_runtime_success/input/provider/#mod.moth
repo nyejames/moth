@@ -1,0 +1,7 @@
+import @runtime.js {external_label}
+
+export:
+    label type T |value T| -> String:
+        return external_label()
+    ;
+;

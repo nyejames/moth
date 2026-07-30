@@ -1,0 +1,8 @@
+import @provider { Card }
+
+render type Item is CASTABLE_TO_STRING |item Item| -> String:
+    text String = cast item
+    return text
+;
+
+[:cast_generic_imported_user_evidence_success [render(Card("provider"))]]

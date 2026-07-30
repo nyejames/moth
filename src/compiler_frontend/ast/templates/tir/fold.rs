@@ -31,7 +31,7 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 };
 use crate::compiler_frontend::ast::templates::tir::fold_cache::TirFoldCacheKey;
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    ExpressionSiteId, TemplateIrId, TemplateIrNodeId, TemplateWrapperSetId,
+    ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateWrapperSetId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
     TemplateIr, TemplateIrBranch, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
@@ -39,7 +39,9 @@ use crate::compiler_frontend::ast::templates::tir::node::{
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirSlotResolutionKind, TirWrapperApplicationMode, TirWrapperContext,
 };
-use crate::compiler_frontend::ast::templates::tir::preparation::PreparedFold;
+use crate::compiler_frontend::ast::templates::tir::preparation::{
+    PreparedFold, PreparedTemplate, TemplateHelperKind,
+};
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateWrapperReference,
@@ -60,6 +62,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::type_coercion::string::{
     FoldedStringPiece, fold_expression_kind_to_string,
 };
+use std::cell::RefCell;
 
 // -------------------------
 //  Capacity helpers
@@ -149,9 +152,20 @@ fn reject_slot_insert_template(kind: &TemplateType) -> Result<(), TemplateError>
 ///      complete view identity without expanding `TemplateFoldContext`.
 struct FoldTraversalInput<'view, 'store> {
     view: &'view TirView<'store>,
+    const_template_projection: Option<&'view ConstTemplateProjectionState>,
 }
 
 impl<'view, 'store> FoldTraversalInput<'view, 'store> {
+    fn with_view<'next>(&self, view: &'next TirView<'store>) -> FoldTraversalInput<'next, 'store>
+    where
+        'view: 'next,
+    {
+        FoldTraversalInput {
+            view,
+            const_template_projection: self.const_template_projection,
+        }
+    }
+
     /// Resolves one expression site through the active exact view.
     ///
     /// WHAT: delegates expression lookup to the shared module-local view.
@@ -163,6 +177,26 @@ impl<'view, 'store> FoldTraversalInput<'view, 'store> {
     ) -> Result<Option<&'store Expression>, TemplateError> {
         Ok(self.view.effective_expression_for_site(site_id)?)
     }
+}
+
+/// AST-local result used to project a folded const-template value into a public interface.
+///
+/// The rendered text contains deterministic marker strings at unresolved slot positions. The
+/// paired occurrence vector remains donor-local and must be consumed before the TIR store is
+/// dropped.
+pub(crate) struct FoldedConstTemplatePattern {
+    pub(crate) pieces: Vec<FoldedConstTemplatePiece>,
+}
+
+pub(crate) enum FoldedConstTemplatePiece {
+    Text(String),
+    Slot(SlotOccurrenceId),
+}
+
+struct ConstTemplateProjectionState {
+    marker_prefix: String,
+    slot_occurrences: RefCell<Vec<SlotOccurrenceId>>,
+    allowed_slot_insert_root: Option<TemplateIrId>,
 }
 
 /// Mutable output state shared by recursive TIR fold walkers.
@@ -242,6 +276,149 @@ pub(crate) fn fold_prepared_template(
     fold_exact_view(&view, fold_context)
 }
 
+/// Folds a prepared const-template value while preserving unresolved slot positions.
+///
+/// This is a projection mode of the canonical reducer, not a second template interpreter. All
+/// expression, control-flow, formatting, child-view and wrapper behavior stays in the ordinary
+/// fold path. Marker IDs and slot occurrences are AST-local and are consumed immediately by the
+/// public-interface const-template projector.
+pub(crate) fn fold_prepared_const_template_pattern(
+    prepared: PreparedTemplate,
+    view: TirView<'_>,
+    fold_context: &mut TemplateFoldContext<'_>,
+) -> Result<FoldedConstTemplatePattern, TemplateError> {
+    match prepared {
+        PreparedTemplate::Foldable(prepared) if prepared.identity != view.identity() => {
+            return Err(CompilerError::compiler_error(
+                "TIR const-template projection preparation identity does not match the supplied view.",
+            )
+            .into());
+        }
+        PreparedTemplate::Foldable(_) => {}
+        PreparedTemplate::Helper(TemplateHelperKind::SlotInsert) => {}
+        PreparedTemplate::Helper(TemplateHelperKind::LoopControl) => {
+            return Err(CompilerError::compiler_error(
+                "TIR const-template projection cannot publish a loop-control helper.",
+            )
+            .into());
+        }
+        PreparedTemplate::Runtime(_) => {
+            return Err(CompilerError::compiler_error(
+                "TIR const-template projection received a runtime preparation.",
+            )
+            .into());
+        }
+    }
+
+    if !view.phase().is_at_least(TemplateTirPhase::Composed) {
+        return Err(CompilerError::compiler_error(format!(
+            "fold_prepared_const_template_pattern: root {} at phase {} has not reached Composed",
+            view.root_ref(),
+            view.phase()
+        ))
+        .into());
+    }
+
+    let allowed_slot_insert_root =
+        matches!(view.root_template()?.kind, TemplateType::SlotInsert(_))
+            .then_some(view.root_ref());
+
+    for marker_nonce in 0_u64.. {
+        let projection = ConstTemplateProjectionState {
+            marker_prefix: format!("\0MOTH_CONST_SLOT_{marker_nonce}_"),
+            slot_occurrences: RefCell::new(Vec::new()),
+            allowed_slot_insert_root,
+        };
+        let result = fold_exact_view_with_projection(&view, fold_context, Some(&projection))?;
+        let rendered = fold_result_output_string(&result, fold_context)?;
+        let slot_occurrences = projection.slot_occurrences.into_inner();
+
+        if const_template_markers_match(&rendered, &projection.marker_prefix, &slot_occurrences) {
+            return Ok(FoldedConstTemplatePattern {
+                pieces: split_const_template_pattern(
+                    rendered,
+                    &projection.marker_prefix,
+                    &slot_occurrences,
+                ),
+            });
+        }
+    }
+
+    unreachable!("the finite folded output must admit a collision-free slot marker nonce")
+}
+
+fn split_const_template_pattern(
+    rendered: String,
+    marker_prefix: &str,
+    slot_occurrences: &[SlotOccurrenceId],
+) -> Vec<FoldedConstTemplatePiece> {
+    let mut pieces = Vec::new();
+    let mut remainder = rendered.as_str();
+
+    for occurrence in slot_occurrences {
+        let marker = const_template_slot_marker(marker_prefix, *occurrence);
+        let position = remainder
+            .find(&marker)
+            .expect("validated const-template slot marker must remain present");
+        if position > 0 {
+            pieces.push(FoldedConstTemplatePiece::Text(
+                remainder[..position].to_owned(),
+            ));
+        }
+        pieces.push(FoldedConstTemplatePiece::Slot(*occurrence));
+        remainder = &remainder[position + marker.len()..];
+    }
+
+    if !remainder.is_empty() {
+        pieces.push(FoldedConstTemplatePiece::Text(remainder.to_owned()));
+    }
+
+    pieces
+}
+
+fn fold_result_output_string(
+    result: &TemplateFoldResult,
+    fold_context: &TemplateFoldContext<'_>,
+) -> Result<String, TemplateError> {
+    let output = match result.emission {
+        TemplateEmission::NoOutput => String::new(),
+        TemplateEmission::Output(value) => fold_context.string_table.resolve(value).to_owned(),
+        TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
+            return Err(CompilerError::compiler_error(
+                "TIR const-template projection produced an unconsumed loop-control signal.",
+            )
+            .into());
+        }
+    };
+
+    Ok(output)
+}
+
+fn const_template_markers_match(
+    rendered: &str,
+    marker_prefix: &str,
+    slot_occurrences: &[SlotOccurrenceId],
+) -> bool {
+    let mut remainder = rendered;
+
+    for occurrence in slot_occurrences {
+        let marker = const_template_slot_marker(marker_prefix, *occurrence);
+        let Some(position) = remainder.find(&marker) else {
+            return false;
+        };
+        if remainder[..position].contains(marker_prefix) {
+            return false;
+        }
+        remainder = &remainder[position + marker.len()..];
+    }
+
+    !remainder.contains(marker_prefix)
+}
+
+fn const_template_slot_marker(marker_prefix: &str, occurrence: SlotOccurrenceId) -> String {
+    format!("{marker_prefix}{}\0", occurrence.index())
+}
+
 /// Folds one exact Composed-or-later view, consulting the phase-local cache.
 ///
 /// WHAT: validates the view's structural and overlay authority before looking
@@ -254,6 +431,14 @@ pub(crate) fn fold_prepared_template(
 fn fold_exact_view(
     view: &TirView<'_>,
     fold_context: &mut TemplateFoldContext<'_>,
+) -> Result<TemplateFoldResult, TemplateError> {
+    fold_exact_view_with_projection(view, fold_context, None)
+}
+
+fn fold_exact_view_with_projection(
+    view: &TirView<'_>,
+    fold_context: &mut TemplateFoldContext<'_>,
+    const_template_projection: Option<&ConstTemplateProjectionState>,
 ) -> Result<TemplateFoldResult, TemplateError> {
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
         return Err(CompilerError::compiler_error(format!(
@@ -297,7 +482,10 @@ fn fold_exact_view(
     // finalization, doc-fragment, and HIR-handoff callers.
     increment_ast_counter(AstCounter::TirViewFoldsAttempted);
 
-    if bindings_empty && let Some(cached) = fold_context.fold_cache.get(&cache_key) {
+    if const_template_projection.is_none()
+        && bindings_empty
+        && let Some(cached) = fold_context.fold_cache.get(&cache_key)
+    {
         increment_ast_counter(AstCounter::TirFoldCacheHits);
         return Ok(cached.clone());
     }
@@ -322,10 +510,13 @@ fn fold_exact_view(
 
     // View-native fold: pass the exact view to the reducer so it reads
     // effective expressions and slot resolutions without cloning the store.
-    let fold_input = FoldTraversalInput { view };
+    let fold_input = FoldTraversalInput {
+        view,
+        const_template_projection,
+    };
     let result = fold_tir_template_with_view(store, root, fold_context, &fold_input)?;
 
-    if bindings_empty {
+    if const_template_projection.is_none() && bindings_empty {
         fold_context.fold_cache.insert(cache_key, result.clone());
     }
 
@@ -351,7 +542,12 @@ fn fold_tir_template_with_view(
         .get_template(template_id)
         .cloned()
         .ok_or_else(|| missing_template_diagnostic(template_id))?;
-    reject_slot_insert_template(&template.kind)?;
+    if fold_input
+        .const_template_projection
+        .is_none_or(|projection| projection.allowed_slot_insert_root != Some(template_id))
+    {
+        reject_slot_insert_template(&template.kind)?;
+    }
 
     if template.runtime_slot_plan.is_some() {
         return Err(CompilerError::compiler_error(
@@ -529,6 +725,19 @@ fn fold_tir_node_into_buffer(
                     )?;
                 }
                 return Ok(None);
+            }
+
+            if let Some(projection) = fold_input.const_template_projection {
+                let marker = const_template_slot_marker(
+                    &projection.marker_prefix,
+                    placeholder.occurrence_id,
+                );
+                projection
+                    .slot_occurrences
+                    .borrow_mut()
+                    .push(placeholder.occurrence_id);
+                output_state.output_buffer.push_str(&marker);
+                output_state.emitted_output = true;
             }
             // Missing, unresolved, or uncovered slots intentionally fold to no
             // output.
@@ -775,9 +984,13 @@ fn fold_template_reference(
         }
     };
 
-    let child_fold_input = FoldTraversalInput { view: &child_view };
+    let child_fold_input = fold_input.with_view(&child_view);
     if child_view.phase().is_at_least(TemplateTirPhase::Composed) {
-        fold_exact_view(&child_view, fold_context)
+        fold_exact_view_with_projection(
+            &child_view,
+            fold_context,
+            fold_input.const_template_projection,
+        )
     } else {
         fold_tir_template_with_view(store, child_root, fold_context, &child_fold_input)
     }
@@ -791,9 +1004,13 @@ fn fold_resolved_slot_source(
 ) -> Result<TemplateFoldResult, TemplateError> {
     let parent_view = fold_input.view;
     let source_view = parent_view.resolved_slot_source(source)?;
-    let source_fold_input = FoldTraversalInput { view: &source_view };
+    let source_fold_input = fold_input.with_view(&source_view);
     if source_view.phase().is_at_least(TemplateTirPhase::Composed) {
-        fold_exact_view(&source_view, fold_context)
+        fold_exact_view_with_projection(
+            &source_view,
+            fold_context,
+            fold_input.const_template_projection,
+        )
     } else {
         fold_tir_template_with_view(store, source, fold_context, &source_fold_input)
     }
@@ -1041,9 +1258,7 @@ fn fold_tir_wrapper_around_child_output(
 
     let parent_view = fold_input.view;
     let wrapper_view = parent_view.wrapper(*wrapper_reference)?;
-    let wrapper_fold_input = FoldTraversalInput {
-        view: &wrapper_view,
-    };
+    let wrapper_fold_input = fold_input.with_view(&wrapper_view);
 
     fold_tir_wrapper_with_input(
         wrapper_store,
@@ -1237,7 +1452,7 @@ fn fold_tir_wrapper_node_with_child_output(
 
             let parent_view = fold_input.view;
             let child_view = parent_view.structural_child(*reference)?;
-            let child_fold_input = FoldTraversalInput { view: &child_view };
+            let child_fold_input = fold_input.with_view(&child_view);
             let child_emission = fold_tir_wrapper_node_to_emission(
                 store,
                 child_template.root,
@@ -2087,7 +2302,7 @@ fn fold_tir_aggregate_wrapper_child_template(
 
     let parent_view = fold_input.view;
     let child_view = parent_view.structural_child(*reference)?;
-    let child_fold_input = FoldTraversalInput { view: &child_view };
+    let child_fold_input = fold_input.with_view(&child_view);
     fold_tir_aggregate_wrapper_node(
         store,
         template.root,

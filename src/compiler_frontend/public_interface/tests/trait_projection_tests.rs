@@ -245,6 +245,33 @@ fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
 }
 
 #[test]
+fn aliased_trait_binding_joins_the_defining_trait_root() {
+    let mut string_table = StringTable::new();
+    let mut env = TypeEnvironment::new();
+    let this_id = this_type(&mut env, &mut string_table);
+    let root = trait_root("Shape", this_id, Vec::new(), &mut string_table);
+    let origin = trait_origin("Shape");
+    let binding = ExportBinding::new(
+        module_origin(),
+        "PublicShape".to_owned(),
+        OriginDeclarationId::Trait(origin.clone()),
+    );
+    let trait_origins = trait_origins_map(vec![("Shape", origin)], &mut string_table);
+
+    let surfaces = build_traits(
+        &[root],
+        vec![binding],
+        &FxHashMap::default(),
+        &trait_origins,
+        &env,
+        &string_table,
+    )
+    .expect("an alias preserves the defining trait root identity");
+
+    assert_eq!(surfaces.len(), 1);
+}
+
+#[test]
 fn projects_self_type_for_direct_this_type_parameter_and_return_occurrences() {
     let mut string_table = StringTable::new();
     let mut env = TypeEnvironment::new();
@@ -1069,6 +1096,7 @@ fn builder_carries_incompatibilities_on_trait_record() {
             trait_roots: vec![trait_root],
             trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
             trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+            const_templates_by_name: FxHashMap::default(),
         },
         public_source_nominal_type_origins: &nominal_origins,
         public_source_trait_origins: &trait_origins,

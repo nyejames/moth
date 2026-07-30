@@ -1008,7 +1008,7 @@ fn reactive_mutable_call_invalidations(
             &roots,
             statement_id,
             ReactiveInvalidationKind::MutableCallArgument {
-                target: target.clone(),
+                target: Box::new(target.clone()),
                 argument_index,
             },
             argument_location,

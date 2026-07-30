@@ -1,0 +1,23 @@
+export:
+    DISPLAY_TEXT must:
+        display |This| -> String
+    ;
+
+    Label = |
+        text String,
+    |
+
+    LabelBox type Item is DISPLAY_TEXT = |
+        value Item,
+    |
+
+    make_label |text String| -> Label:
+        return Label(text)
+    ;
+;
+
+display |this Label| -> String:
+    return this.text
+;
+
+Label must DISPLAY_TEXT

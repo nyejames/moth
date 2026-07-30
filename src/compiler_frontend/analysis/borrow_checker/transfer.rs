@@ -22,7 +22,9 @@ use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
+};
 use rustc_hash::FxHashMap;
 
 use access::{
@@ -37,6 +39,9 @@ pub(super) struct BorrowTransferContext<'a> {
     pub external_package_registry: &'a ExternalPackageRegistry,
     pub public_call_summaries: &'a FxHashMap<FunctionId, PublicCallSummary>,
     pub imported_call_summaries: &'a FxHashMap<OriginFunctionId, PublicCallSummary>,
+    pub module_private_call_summaries:
+        &'a FxHashMap<ModulePrivateExecutableIdentity, PublicCallSummary>,
+    pub generated_call_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
     pub diagnostics: BorrowDiagnostics<'a>,
 }
 

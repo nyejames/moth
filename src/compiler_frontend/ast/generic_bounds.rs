@@ -5,6 +5,7 @@
 //! WHY: nominal generic instances are keyed only by constructor plus type arguments. Until
 //! only reusable canonical/compiler-owned evidence may satisfy those bounds.
 
+use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidGenericInstantiationReason,
 };
@@ -12,7 +13,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::import_environment::{
-    FileVisibility, SourceDeclarationTarget,
+    FileVisibility, NamespaceRecord, NamespaceTypeMember, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -30,6 +31,10 @@ pub(crate) struct GenericBoundEvidenceContext<'a> {
     pub(crate) trait_environment: Option<&'a TraitEnvironment>,
     pub(crate) trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
     pub(crate) visible_trait_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
+    pub(crate) visible_source_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
+    pub(crate) visible_type_alias_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
+    pub(crate) visible_namespace_records: Option<&'a FxHashMap<StringId, NamespaceRecord>>,
+    pub(crate) resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
 }
 
 impl<'a> GenericBoundEvidenceContext<'a> {
@@ -38,14 +43,29 @@ impl<'a> GenericBoundEvidenceContext<'a> {
         trait_environment: &'a TraitEnvironment,
         trait_evidence_environment: &'a TraitEvidenceEnvironment,
         visibility: &'a FileVisibility,
-        _source_file_scope: &'a InternedPath,
+        resolved_type_aliases: &'a FxHashMap<InternedPath, ResolvedTypeAnnotation>,
     ) -> Self {
         Self {
             type_environment,
             trait_environment: Some(trait_environment),
             trait_evidence_environment: Some(trait_evidence_environment),
             visible_trait_names: Some(&visibility.visible_trait_names),
+            visible_source_names: Some(&visibility.visible_source_names),
+            visible_type_alias_names: Some(&visibility.visible_type_alias_names),
+            visible_namespace_records: Some(&visibility.visible_namespace_records),
+            resolved_type_aliases: Some(resolved_type_aliases),
         }
+    }
+
+    pub(crate) fn evidence_target_is_visible(&self, type_id: TypeId) -> bool {
+        evidence_target_is_visible(
+            type_id,
+            self.type_environment,
+            self.visible_source_names,
+            self.visible_type_alias_names,
+            self.visible_namespace_records,
+            self.resolved_type_aliases,
+        )
     }
 }
 
@@ -174,6 +194,7 @@ fn validate_single_bound(
     }
 
     let has_reusable_evidence = trait_is_visible
+        && context.evidence_target_is_visible(concrete_type_id)
         && (evidence_environment
             .builtin_for(concrete_type_id, trait_id)
             .is_some()
@@ -203,6 +224,85 @@ fn validate_single_bound(
         },
         location.clone(),
     )))
+}
+
+pub(crate) fn evidence_target_is_visible(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+    visible_source_names: Option<&FxHashMap<StringId, SourceDeclarationTarget>>,
+    visible_type_alias_names: Option<&FxHashMap<StringId, SourceDeclarationTarget>>,
+    visible_namespace_records: Option<&FxHashMap<StringId, NamespaceRecord>>,
+    resolved_type_aliases: Option<&FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
+) -> bool {
+    if matches!(
+        type_environment.get(type_id),
+        Some(TypeDefinition::Builtin(_))
+    ) {
+        return true;
+    }
+
+    let no_file_visibility = visible_source_names.is_none()
+        && visible_type_alias_names.is_none()
+        && visible_namespace_records.is_none();
+    if no_file_visibility {
+        return true;
+    }
+
+    let target_matches = |target: &SourceDeclarationTarget| {
+        source_target_resolves_to_type(target, type_id, type_environment, resolved_type_aliases)
+    };
+
+    if visible_source_names
+        .into_iter()
+        .flat_map(|names| names.values())
+        .any(target_matches)
+        || visible_type_alias_names
+            .into_iter()
+            .flat_map(|names| names.values())
+            .any(target_matches)
+    {
+        return true;
+    }
+
+    visible_namespace_records
+        .into_iter()
+        .flat_map(|records| records.values())
+        .flat_map(|record| record.type_members.values())
+        .any(|member| match member {
+            NamespaceTypeMember::SourceDeclaration(target) => target_matches(target),
+            NamespaceTypeMember::ExternalSymbol(_) => false,
+        })
+}
+
+fn source_target_resolves_to_type(
+    target: &SourceDeclarationTarget,
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+    resolved_type_aliases: Option<&FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
+) -> bool {
+    if let SourceDeclarationTarget::Imported { origin, .. } = target
+        && let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Type(origin) =
+            origin
+        && matches!(
+            type_environment.canonical_identity_for_type_id(type_id),
+            Some(crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::SourceNominal(type_origin))
+                if type_origin == origin
+        )
+    {
+        return true;
+    }
+
+    if type_environment
+        .nominal_path(type_id)
+        .is_some_and(|path| path == target.local_path())
+    {
+        return true;
+    }
+
+    resolved_type_aliases
+        .and_then(|aliases| aliases.get(target.local_path()))
+        .and_then(|annotation| annotation.type_id)
+        == Some(type_id)
 }
 
 fn generic_parameter_declares_bound(
@@ -239,5 +339,5 @@ fn trait_is_visible(
 
     visible_trait_names
         .values()
-        .any(|target| target.local_path() == &trait_definition.canonical_path)
+        .any(|target| trait_environment.has_path(trait_id, target.local_path()))
 }

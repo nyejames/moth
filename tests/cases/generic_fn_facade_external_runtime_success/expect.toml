@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["./_moth/js/glue/module-", "__moth_generated_fn_0"]

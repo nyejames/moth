@@ -1,0 +1,19 @@
+export:
+    DISPLAY_TEXT must:
+        display |This| -> String
+    ;
+
+    Label = |
+        text String,
+    |
+
+    make_label |text String| -> Label:
+        return Label(text)
+    ;
+;
+
+display |this Label| -> String:
+    return this.text
+;
+
+Label must DISPLAY_TEXT

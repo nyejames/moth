@@ -20,7 +20,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    parse_single_file_ast, parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
 };
 
 fn parse_function_diagnostic_payload(source: &str) -> DiagnosticPayload {
@@ -221,10 +221,12 @@ fn parses_generic_function_declaration_without_emitting_executable_function() {
 }
 
 #[test]
-fn parses_same_file_generic_function_calls_as_concrete_instances() {
-    let (ast, string_table) = parse_single_file_ast(
+fn same_file_generic_calls_emit_requests_without_eager_function_bodies() {
+    let (build_result, string_table) = parse_single_file_ast_build_result(
         "identity type T |value T| -> T:\n    return value\n;\n\nvalue = identity(1)\n",
-    );
+    )
+    .expect("source should parse into a request-only AST");
+    let ast = build_result.ast;
 
     let generic_template_emitted = ast.nodes.iter().any(|node| match &node.kind {
         NodeKind::Function(path, ..) => path.name_str(&string_table) == Some("identity"),
@@ -248,62 +250,35 @@ fn parses_same_file_generic_function_calls_as_concrete_instances() {
         panic!("expected variable initializer to call the concrete generic instance")
     };
 
-    let (instance_path, signature, body) = ast
-        .nodes
-        .iter()
-        .find_map(|node| match &node.kind {
-            NodeKind::Function(path, signature, body) if path == name => {
-                Some((path, signature, body))
-            }
-            _ => None,
-        })
-        .expect("generic call should emit the concrete function used by the call site");
-
-    assert_eq!(signature.parameters[0].value.diagnostic_type, DataType::Int);
-    assert_eq!(
-        signature.returns[0].value,
-        FunctionReturn::Value(DataType::Int)
-    );
     assert!(
-        body.iter()
-            .any(|node| matches!(node.kind, NodeKind::Return(..))),
-        "concrete generic instance should parse the template body"
+        !ast.nodes
+            .iter()
+            .any(|node| matches!(&node.kind, NodeKind::Function(path, ..) if path == name)),
+        "generic calls must not materialise concrete bodies inside the requester AST"
     );
-    assert_eq!(name, instance_path);
-    assert_eq!(result_type_ids, &signature.success_return_type_ids());
+    let [request] = build_result.deferred_generic_requests.as_slice() else {
+        panic!("one generic call should emit one deferred request")
+    };
+    assert_eq!(name, &request.instance_path);
+    assert_eq!(request.key.type_arguments.as_ref(), result_type_ids);
     assert_eq!(declaration.value.diagnostic_type, DataType::Int);
 }
 
 #[test]
-fn parses_generic_fallible_function_instances() {
-    let (ast, _string_table) = parse_single_file_ast(
+fn fallible_generic_calls_remain_request_only() {
+    let (build_result, _string_table) = parse_single_file_ast_build_result(
         "raise type E |err E| -> E!:\n    return! err\n;\n\nrecover || -> String:\n    raise(Error(\"boom\")) catch |err|:\n        return err.message\n    ;\n    return \"unreachable\"\n;\n\nvalue = recover()\n",
-    );
+    )
+    .expect("fallible generic call should emit a deferred request");
 
-    let (signature, body) = ast
-        .nodes
-        .iter()
-        .find_map(|node| match &node.kind {
-            NodeKind::Function(_, signature, body)
-                if signature
-                    .returns
-                    .first()
-                    .is_some_and(|slot| slot.channel == ReturnChannel::Error) =>
-            {
-                Some((signature, body))
-            }
-            _ => None,
-        })
-        .expect("generic fallible call should emit a concrete function instance");
-
-    assert_eq!(signature.returns.len(), 1);
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Error);
+    let [request] = build_result.deferred_generic_requests.as_slice() else {
+        panic!("one fallible generic call should emit one deferred request")
+    };
     assert!(
-        matches!(
-            body.first().map(|node| &node.kind),
-            Some(NodeKind::ReturnError(_))
+        !build_result.ast.nodes.iter().any(
+            |node| matches!(&node.kind, NodeKind::Function(path, ..) if path == &request.instance_path)
         ),
-        "generic instance should parse return! against the concrete error slot"
+        "fallible generic bodies must be materialised by the build-owned worklist"
     );
 }
 

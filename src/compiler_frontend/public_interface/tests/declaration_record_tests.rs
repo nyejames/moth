@@ -268,7 +268,7 @@ fn constant_root(
 }
 
 fn export_binding(name: &str, origin: OriginDeclarationId) -> ExportBinding {
-    ExportBinding::new(module_origin("functions"), name.to_owned(), origin)
+    ExportBinding::new(origin.module_origin().clone(), name.to_owned(), origin)
 }
 
 fn nominal_origins_map(
@@ -436,6 +436,7 @@ fn build_draft_with_constants(
         trait_roots: Vec::new(),
         trait_environment: Some(Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
     let registry = ExternalPackageRegistry::new();
     PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
@@ -1735,6 +1736,7 @@ fn project_struct_with_receiver_method(
         trait_roots: Vec::new(),
         trait_environment: Some(Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
+        const_templates_by_name: FxHashMap::default(),
     };
     let registry = ExternalPackageRegistry::new();
     let declarations = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {

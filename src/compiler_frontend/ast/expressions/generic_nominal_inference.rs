@@ -160,6 +160,19 @@ pub(crate) fn infer_generic_nominal_constructor(
                 .file_visibility
                 .as_ref()
                 .map(|visibility| &visibility.visible_trait_names),
+            visible_source_names: context
+                .file_visibility
+                .as_ref()
+                .map(|visibility| &visibility.visible_source_names),
+            visible_type_alias_names: context
+                .file_visibility
+                .as_ref()
+                .map(|visibility| &visibility.visible_type_alias_names),
+            visible_namespace_records: context
+                .file_visibility
+                .as_ref()
+                .map(|visibility| &visibility.visible_namespace_records),
+            resolved_type_aliases: context.shared.resolved_type_aliases.as_deref(),
         };
         validate_nominal_generic_bound_evidence(
             instance_type_id,

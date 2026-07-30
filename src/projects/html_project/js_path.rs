@@ -76,6 +76,18 @@ pub(crate) fn compile_html_module_js(
             String,
         >,
     >,
+    module_private_function_names: Arc<
+        std::collections::HashMap<
+            crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
+            String,
+        >,
+    >,
+    generated_function_names: Arc<
+        std::collections::HashMap<
+            crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+            String,
+        >,
+    >,
     input: &HtmlModuleCompileInput<'_>,
     string_table: &mut StringTable,
     output_path: PathBuf,
@@ -85,6 +97,8 @@ pub(crate) fn compile_html_module_js(
         Arc::clone(&input.external_package_registry),
         input.reachability.backend_selection().clone(),
         Arc::clone(&source_function_names),
+        Arc::clone(&module_private_function_names),
+        Arc::clone(&generated_function_names),
     );
 
     let mut js_module = {
@@ -107,6 +121,8 @@ pub(crate) fn compile_html_module_js(
                 Arc::clone(&linked.module.link_facts.external_package_registry),
                 linked.reachability.backend_selection().clone(),
                 Arc::clone(&source_function_names),
+                Arc::clone(&module_private_function_names),
+                Arc::clone(&generated_function_names),
             );
             let linked_js = lower_hir_to_js(
                 &linked.module.executable.hir,
@@ -122,6 +138,22 @@ pub(crate) fn compile_html_module_js(
                 .hir
                 .function_ids_by_origin
                 .values()
+                .chain(
+                    linked
+                        .module
+                        .executable
+                        .hir
+                        .function_ids_by_private_origin
+                        .values(),
+                )
+                .chain(
+                    linked
+                        .module
+                        .executable
+                        .hir
+                        .function_ids_by_generated
+                        .values(),
+                )
                 .filter_map(|function_id| linked_js.function_name_by_id.get(function_id).cloned())
                 .collect::<Vec<_>>();
             isolated_modules.push((linked_js.source, exported_names));
@@ -129,16 +161,29 @@ pub(crate) fn compile_html_module_js(
                 .referenced_external_functions
                 .extend(linked_js.referenced_external_functions);
         }
-        let entry_start_name = input
+        let mut entry_exported_names = input
+            .hir_module
+            .function_ids_by_origin
+            .values()
+            .chain(input.hir_module.function_ids_by_private_origin.values())
+            .chain(input.hir_module.function_ids_by_generated.values())
+            .filter_map(|function_id| js_module.function_name_by_id.get(function_id).cloned())
+            .collect::<Vec<_>>();
+        if let Some(start_name) = input
             .hir_module
             .start_function
             .and_then(|function_id| js_module.function_name_by_id.get(&function_id).cloned())
-            .into_iter()
-            .collect();
-        isolated_modules.push((std::mem::take(&mut js_module.source), entry_start_name));
+        {
+            entry_exported_names.push(start_name);
+        }
+        isolated_modules.push((std::mem::take(&mut js_module.source), entry_exported_names));
         js_module.source = assemble_isolated_module_sources(
             isolated_modules,
-            source_function_names.values().cloned(),
+            source_function_names
+                .values()
+                .chain(module_private_function_names.values())
+                .chain(generated_function_names.values())
+                .cloned(),
         );
     }
 

@@ -77,6 +77,7 @@ fn collect_canonical_type_origins(
 ) {
     match identity {
         CanonicalTypeIdentity::Builtin(_)
+        | CanonicalTypeIdentity::ModulePrivateNominal(_)
         | CanonicalTypeIdentity::ExternalOpaque(_)
         | CanonicalTypeIdentity::GenericParameter(_) => {}
         CanonicalTypeIdentity::SourceNominal(origin) => {
@@ -137,6 +138,7 @@ fn collect_folded_type_origins(value: &PublicFoldedValue, origins: &mut FxHashSe
         | PublicFoldedValue::Bool(_)
         | PublicFoldedValue::Char(_)
         | PublicFoldedValue::String(_)
+        | PublicFoldedValue::ConstTemplate(_)
         | PublicFoldedValue::OptionNone => {}
     }
 }
@@ -250,6 +252,70 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             self.nominal_type_ids_by_path
                 .insert(local_path.clone(), type_id);
+            self.type_environment
+                .register_nominal_path_alias(local_path.clone(), type_id)?;
+
+            let (generic_parameters, kind) = match &record.semantics {
+                PublicDeclarationSemantics::Struct(semantics) => (
+                    &semantics.generic_parameters,
+                    crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind::Struct,
+                ),
+                PublicDeclarationSemantics::Choice(semantics) => (
+                    &semantics.generic_parameters,
+                    crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind::Choice,
+                ),
+                _ => continue,
+            };
+            if !generic_parameters.is_empty() {
+                let parameters = GenericParameterList {
+                    parameters: generic_parameters
+                        .iter()
+                        .enumerate()
+                        .map(|(index, parameter)| GenericParameter {
+                            id: TypeParameterId(index as u32),
+                            name: string_table.intern(parameter.identity.authored_name()),
+                            location: Default::default(),
+                            trait_bounds: Vec::new(),
+                        })
+                        .collect(),
+                };
+                let metadata =
+                    crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata {
+                        kind,
+                        parameters,
+                        declaration_location: Default::default(),
+                    };
+                self.module_symbols
+                    .generic_declarations_by_path
+                    .insert(local_path.clone(), metadata.clone());
+
+                let internal_path = self
+                    .type_environment
+                    .nominal_path(type_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Imported generic nominal has no canonical local path",
+                        )
+                    })?;
+                self.module_symbols
+                    .generic_declarations_by_path
+                    .insert(internal_path.clone(), metadata);
+
+                if let PublicDeclarationSemantics::Struct(_) = &record.semantics {
+                    let fields = self
+                        .resolved_struct_fields_by_path
+                        .get(&internal_path)
+                        .cloned()
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Imported generic struct has no projected field template",
+                            )
+                        })?;
+                    self.resolved_struct_fields_by_path
+                        .insert(local_path.clone(), fields);
+                }
+            }
             declarations.push(Declaration {
                 id: local_path,
                 value: Expression::new(
@@ -301,7 +367,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         reachable
     }
 
-    fn register_imported_generic_parameters(
+    pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn register_imported_generic_parameters(
         &mut self,
         parameters: &[crate::compiler_frontend::public_interface::PublicGenericParameterSurface],
         string_table: &mut StringTable,
@@ -311,6 +377,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     > {
         if parameters.is_empty() {
             return Ok(None);
+        }
+
+        if let Some(existing) = self
+            .imported_generic_parameter_registrations
+            .iter()
+            .find(|registration| registration.surfaces == parameters)
+        {
+            return Ok(Some(existing.list_id));
         }
 
         let parsed = GenericParameterList {
@@ -350,6 +424,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             self.imported_generic_parameter_type_ids
                 .insert(parameter.identity.clone(), type_id);
         }
+
+        self.imported_generic_parameter_registrations
+            .push(ImportedGenericParameterRegistration {
+                surfaces: parameters.to_vec(),
+                list_id: registered.list_id,
+                canonical_by_local: registered.canonical_by_local.clone(),
+            });
 
         Ok(Some(registered.list_id))
     }

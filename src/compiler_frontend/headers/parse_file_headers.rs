@@ -234,6 +234,7 @@ pub fn bind_module_headers(
             &headers,
             resolver,
             external_package_registry,
+            source_provider_imports,
             string_table,
         )
         .map_err(|boxed_diagnostic| {

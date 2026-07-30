@@ -111,6 +111,9 @@ pub(crate) enum PublicFoldedValue {
     Char(char),
     /// A folded template string or a plain string literal, resolved to an owned `String`.
     String(String),
+    /// A provider-folded template transducer that still contains unresolved composition slots.
+    /// No donor-local TIR identity crosses this owned value.
+    ConstTemplate(PublicConstTemplate),
     /// An ordered homogeneous collection of folded values.
     Collection(Vec<PublicFoldedValue>),
     /// A const record: ordered owned field names with recursively owned field values.
@@ -134,6 +137,84 @@ pub(crate) enum PublicFoldedValue {
     OptionSome(Box<PublicFoldedValue>),
     /// An absent option value.
     OptionNone,
+}
+
+impl PublicFoldedValue {
+    /// Visit every canonical type identity retained by this folded value.
+    ///
+    /// Most folded leaves are intrinsically typed by their enclosing declaration. Choice values
+    /// additionally retain their nominal identity, including when nested in records or options.
+    pub(crate) fn visit_type_identities(&self, visitor: &mut impl FnMut(&CanonicalTypeIdentity)) {
+        match self {
+            Self::Collection(values) => {
+                for value in values {
+                    value.visit_type_identities(visitor);
+                }
+            }
+            Self::Record(fields) => {
+                for field in fields {
+                    field.value.visit_type_identities(visitor);
+                }
+            }
+            Self::Choice {
+                type_identity,
+                fields,
+                ..
+            } => {
+                type_identity.visit(visitor);
+                for field in fields {
+                    field.value.visit_type_identities(visitor);
+                }
+            }
+            Self::Range { start, end } => {
+                start.visit_type_identities(visitor);
+                end.visit_type_identities(visitor);
+            }
+            Self::OptionSome(value) => value.visit_type_identities(visitor),
+            Self::Int(_)
+            | Self::Float(_)
+            | Self::Bool(_)
+            | Self::Char(_)
+            | Self::String(_)
+            | Self::ConstTemplate(_)
+            | Self::OptionNone => {}
+        }
+    }
+}
+
+/// Owned public value for a const template whose unresolved slots remain composable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PublicConstTemplate {
+    pub(crate) kind: PublicConstTemplateKind,
+    pub(crate) pieces: Vec<PublicConstTemplatePiece>,
+    pub(crate) conditional_child_wrappers: Vec<PublicConstTemplate>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PublicConstTemplateKind {
+    Wrapper,
+    SlotInsert(PublicTemplateSlotKey),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PublicConstTemplatePiece {
+    Text(String),
+    Slot(PublicConstTemplateSlot),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PublicTemplateSlotKey {
+    Default,
+    Named(String),
+    Positional(usize),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PublicConstTemplateSlot {
+    pub(crate) key: PublicTemplateSlotKey,
+    pub(crate) applied_child_wrappers: Vec<PublicConstTemplate>,
+    pub(crate) child_wrappers: Vec<PublicConstTemplate>,
+    pub(crate) skip_parent_child_wrappers: bool,
 }
 
 // ===========================================================================

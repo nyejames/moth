@@ -12,10 +12,12 @@ use super::definitions::{
     ExternalTypeDef, ExternalTypeSpec,
 };
 use super::ids::{
-    ExternalConstantId, ExternalFunctionId, ExternalPackageId, ExternalSymbolId, ExternalTypeId,
+    CanonicalBindingSymbolIdentity, ExternalConstantId, ExternalFunctionId, ExternalPackageId,
+    ExternalSymbolId, ExternalTypeId,
 };
 use super::{ExternalSymbolPath, ExternalSymbolPathError};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::return_compiler_error;
@@ -39,7 +41,7 @@ impl ExternalPackageSymbolKey {
     }
 }
 
-/// Atomic reverse-identity record for one registered external type.
+/// Atomic reverse-identity record for one registered external symbol.
 ///
 /// WHAT: carries the build-local owning package handle plus the owned structured symbol path
 /// for a single `ExternalTypeId`. The stable identity exposed to callers remains the package
@@ -50,7 +52,7 @@ impl ExternalPackageSymbolKey {
 /// `resolve_type_package_and_symbol_path` reads through this record and the package table in O(1)
 /// without scanning the package surface map.
 #[derive(Debug, Clone)]
-struct ExternalTypeReverseIdentity {
+struct ExternalSymbolReverseIdentity {
     package_id: ExternalPackageId,
     symbol_path: ExternalSymbolPath,
 }
@@ -81,13 +83,8 @@ pub struct ExternalPackageRegistry {
     type_ids_by_package_symbol: HashMap<ExternalPackageSymbolKey, ExternalTypeId>,
     /// Package-scoped constant lookup: (package_id, symbol_path) -> ExternalConstantId.
     constant_ids_by_package_symbol: HashMap<ExternalPackageSymbolKey, ExternalConstantId>,
-    /// Reverse lookup: function ID -> package ID.
-    ///
-    /// WHAT: tracks which package each external function belongs to so diagnostics can name
-    /// the package when a backend does not support a function.
-    /// WHY: `ExternalFunctionDef` does not store its package ID; this map keeps the
-    /// registry as the single owner of package membership.
-    function_package_by_id: HashMap<ExternalFunctionId, ExternalPackageId>,
+    /// Atomic reverse identities for functions, types and constants.
+    function_reverse_identity_by_id: HashMap<ExternalFunctionId, ExternalSymbolReverseIdentity>,
     /// Atomic reverse-identity lookup: type ID -> owning package handle plus symbol path.
     ///
     /// WHAT: one record keyed by `ExternalTypeId` carrying the build-local package handle and
@@ -97,7 +94,8 @@ pub struct ExternalPackageRegistry {
     /// the build-local `ExternalPackageId` or `ExternalTypeId`. One atomic record keeps the
     /// registry as the single owner of type reverse identity, makes duplicate-ExternalTypeId
     /// rejection mutation-free and keeps clone consistency in one place.
-    type_reverse_identity_by_id: HashMap<ExternalTypeId, ExternalTypeReverseIdentity>,
+    type_reverse_identity_by_id: HashMap<ExternalTypeId, ExternalSymbolReverseIdentity>,
+    constant_reverse_identity_by_id: HashMap<ExternalConstantId, ExternalSymbolReverseIdentity>,
     /// Prelude symbols that are auto-imported into every module.
     /// Bare-name lookup is only valid for the prelude.
     prelude_symbols_by_name: HashMap<&'static str, ExternalSymbolId>,
@@ -128,8 +126,9 @@ impl Clone for ExternalPackageRegistry {
             function_ids_by_package_symbol: self.function_ids_by_package_symbol.clone(),
             type_ids_by_package_symbol: self.type_ids_by_package_symbol.clone(),
             constant_ids_by_package_symbol: self.constant_ids_by_package_symbol.clone(),
-            function_package_by_id: self.function_package_by_id.clone(),
+            function_reverse_identity_by_id: self.function_reverse_identity_by_id.clone(),
             type_reverse_identity_by_id: self.type_reverse_identity_by_id.clone(),
+            constant_reverse_identity_by_id: self.constant_reverse_identity_by_id.clone(),
             prelude_symbols_by_name: self.prelude_symbols_by_name.clone(),
             prelude_namespace_aliases_by_name: self.prelude_namespace_aliases_by_name.clone(),
             next_package_id: self.next_package_id,
@@ -220,6 +219,15 @@ impl ExternalPackageRegistry {
         )?;
 
         let key = ExternalPackageSymbolKey::new(package_id, path);
+        if let Some(existing_identity) = self.function_reverse_identity_by_id.get(&id) {
+            return Err(self.duplicate_symbol_id_error(
+                "function",
+                id,
+                existing_identity,
+                &package_path_str,
+                &key.path,
+            ));
+        }
         if self.function_ids_by_package_symbol.contains_key(&key) {
             return_compiler_error!(
                 "External function '{}' is already registered in package '{}'.",
@@ -234,8 +242,14 @@ impl ExternalPackageRegistry {
             .expect("package that was just looked up disappeared during function registration");
         package.function_ids.insert(key.path.clone(), id);
         self.functions_by_id.insert(id, function);
-        self.function_ids_by_package_symbol.insert(key, id);
-        self.function_package_by_id.insert(id, package_id);
+        self.function_ids_by_package_symbol.insert(key.clone(), id);
+        self.function_reverse_identity_by_id.insert(
+            id,
+            ExternalSymbolReverseIdentity {
+                package_id,
+                symbol_path: key.path,
+            },
+        );
         Ok(())
     }
 
@@ -329,7 +343,7 @@ impl ExternalPackageRegistry {
         self.type_ids_by_package_symbol.insert(key.clone(), id);
         self.type_reverse_identity_by_id.insert(
             id,
-            ExternalTypeReverseIdentity {
+            ExternalSymbolReverseIdentity {
                 package_id,
                 symbol_path: key.path,
             },
@@ -385,6 +399,15 @@ impl ExternalPackageRegistry {
         )?;
 
         let key = ExternalPackageSymbolKey::new(package_id, path);
+        if let Some(existing_identity) = self.constant_reverse_identity_by_id.get(&id) {
+            return Err(self.duplicate_symbol_id_error(
+                "constant",
+                id,
+                existing_identity,
+                &package_path_str,
+                &key.path,
+            ));
+        }
         if self.constant_ids_by_package_symbol.contains_key(&key) {
             return_compiler_error!(
                 "External constant '{}' is already registered in package '{}'.",
@@ -399,7 +422,14 @@ impl ExternalPackageRegistry {
             .expect("package that was just looked up disappeared during constant registration");
         package.constant_ids.insert(key.path.clone(), id);
         self.constants_by_id.insert(id, constant);
-        self.constant_ids_by_package_symbol.insert(key, id);
+        self.constant_ids_by_package_symbol.insert(key.clone(), id);
+        self.constant_reverse_identity_by_id.insert(
+            id,
+            ExternalSymbolReverseIdentity {
+                package_id,
+                symbol_path: key.path,
+            },
+        );
         Ok(())
     }
 
@@ -443,6 +473,28 @@ impl ExternalPackageRegistry {
             );
         }
         Ok(())
+    }
+
+    fn duplicate_symbol_id_error(
+        &self,
+        category: &str,
+        id: impl std::fmt::Debug,
+        existing_identity: &ExternalSymbolReverseIdentity,
+        new_package_path: &str,
+        new_symbol_path: &ExternalSymbolPath,
+    ) -> CompilerError {
+        let existing_package_path = self
+            .packages
+            .get(&existing_identity.package_id)
+            .map(|package| package.path.as_str())
+            .unwrap_or("<missing-package>");
+
+        CompilerError::compiler_error(format!(
+            "External {category} id {id:?} is already registered as \
+             '{existing_package_path}.{}'; it cannot be reused as \
+             '{new_package_path}.{new_symbol_path}'.",
+            existing_identity.symbol_path,
+        ))
     }
 
     /// Returns true if any symbol (function, type, or constant) is registered at the path.
@@ -696,6 +748,44 @@ impl ExternalPackageRegistry {
             })
     }
 
+    /// Resolves a build-local symbol ID to its canonical binding identity.
+    ///
+    /// WHAT: returns the declaring package path and structured package-local symbol path.
+    /// WHY: public source interfaces must not retain `ExternalSymbolId`, whose dynamically
+    /// assigned variants are meaningful only inside one registry construction.
+    pub(crate) fn canonical_symbol_identity(
+        &self,
+        symbol_id: ExternalSymbolId,
+    ) -> Option<CanonicalBindingSymbolIdentity> {
+        let reverse_identity = match symbol_id {
+            ExternalSymbolId::Function(id) => self.function_reverse_identity_by_id.get(&id)?,
+            ExternalSymbolId::Type(id) => self.type_reverse_identity_by_id.get(&id)?,
+            ExternalSymbolId::Constant(id) => self.constant_reverse_identity_by_id.get(&id)?,
+        };
+        let package = self.packages.get(&reverse_identity.package_id)?;
+
+        Some(CanonicalBindingSymbolIdentity {
+            package: StablePackageIdentity::binding(package.metadata.origin, &package.path),
+            symbol_path: reverse_identity.symbol_path.clone(),
+            category: symbol_id.category(),
+        })
+    }
+
+    /// Resolves a canonical binding identity through this registry's local IDs.
+    pub(crate) fn resolve_canonical_symbol(
+        &self,
+        identity: &CanonicalBindingSymbolIdentity,
+    ) -> Option<ExternalSymbolId> {
+        let package = self.get_package(identity.package.name())?;
+        if package.metadata.origin != identity.package.origin() {
+            return None;
+        }
+
+        let symbol_id =
+            self.resolve_package_symbol_by_path(identity.package.name(), &identity.symbol_path)?;
+        (symbol_id.category() == identity.category).then_some(symbol_id)
+    }
+
     /// Resolves any symbol at a one-component path within a specific package.
     pub fn resolve_package_symbol(
         &self,
@@ -829,7 +919,7 @@ impl ExternalPackageRegistry {
     /// WHAT: reverse lookup from stable function ID to its declaring package path.
     /// WHY: diagnostics need to name the package when a backend does not support a function.
     pub fn resolve_function_package(&self, id: ExternalFunctionId) -> Option<&str> {
-        let package_id = self.function_package_by_id.get(&id)?;
+        let package_id = &self.function_reverse_identity_by_id.get(&id)?.package_id;
         self.packages
             .get(package_id)
             .map(|package| package.path.as_str())
@@ -845,12 +935,9 @@ impl ExternalPackageRegistry {
         &self,
         id: ExternalFunctionId,
     ) -> Option<&ExternalSymbolPath> {
-        let package_id = self.function_package_by_id.get(&id)?;
-        let package = self.packages.get(package_id)?;
-
-        package
-            .function_symbol_ids()
-            .find_map(|(path, function_id)| (*function_id == id).then_some(path))
+        self.function_reverse_identity_by_id
+            .get(&id)
+            .map(|identity| &identity.symbol_path)
     }
 
     /// Returns the package ID that owns the given external function ID.
@@ -859,25 +946,46 @@ impl ExternalPackageRegistry {
     /// WHY: backend glue generation needs the package ID to find runtime assets and to
     ///      construct deterministic wrapper names.
     pub fn resolve_function_package_id(&self, id: ExternalFunctionId) -> Option<ExternalPackageId> {
-        self.function_package_by_id.get(&id).copied()
+        self.function_reverse_identity_by_id
+            .get(&id)
+            .map(|identity| identity.package_id)
     }
 
     /// Returns the owned stable external type identity for a build-local `ExternalTypeId`.
     ///
-    /// WHAT: O(1) reverse lookup from a stable type ID to the owning package path and the
-    /// structured package-local symbol path. Both are borrowed from registry-owned storage so
-    /// the caller can construct an owned canonical identity without embedding `ExternalPackageId`
-    /// or `ExternalTypeId`.
-    /// WHY: canonical binding-backed type identity embeds the owned package path and symbol path,
-    /// never the build-local IDs. A missing entry means the type was never registered through the
-    /// single registration path, which is an inconsistent-registry invariant, not a user failure.
-    pub fn resolve_type_package_and_symbol_path(
+    /// WHAT: O(1) reverse lookup from a stable type ID to the owning stable package identity and
+    /// structured package-local symbol path. The caller can construct an owned canonical identity
+    /// without embedding `ExternalPackageId` or `ExternalTypeId`.
+    /// WHY: package path alone cannot distinguish identically named packages from different
+    /// origins. A missing entry means the type was never registered through the single
+    /// registration path, which is an inconsistent-registry invariant, not a user failure.
+    pub(crate) fn resolve_type_package_and_symbol_path(
         &self,
         id: ExternalTypeId,
-    ) -> Option<(&str, &ExternalSymbolPath)> {
+    ) -> Option<(StablePackageIdentity, &ExternalSymbolPath)> {
         let reverse_identity = self.type_reverse_identity_by_id.get(&id)?;
         let package = self.packages.get(&reverse_identity.package_id)?;
-        Some((package.path.as_str(), &reverse_identity.symbol_path))
+        Some((
+            StablePackageIdentity::binding(package.metadata.origin, &package.path),
+            &reverse_identity.symbol_path,
+        ))
+    }
+
+    /// Resolves an opaque type through its exact stable package identity.
+    ///
+    /// The origin check prevents an independently constructed registry from accepting a
+    /// same-spelling package supplied by a different owner.
+    pub(crate) fn resolve_canonical_package_type_by_path(
+        &self,
+        package_identity: &StablePackageIdentity,
+        path: &ExternalSymbolPath,
+    ) -> Option<(ExternalTypeId, &ExternalTypeDef)> {
+        let package = self.get_package(package_identity.name())?;
+        if package.metadata.origin != package_identity.origin() {
+            return None;
+        }
+
+        self.resolve_package_type_by_path(package_identity.name(), path)
     }
 
     /// Checks whether an import path should be treated as a virtual package import

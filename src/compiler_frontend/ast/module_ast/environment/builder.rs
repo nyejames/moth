@@ -18,6 +18,13 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::ast::templates::template::{
+    SlotKey, Style, Template, TemplateSegmentOrigin, TemplateType,
+};
+use crate::compiler_frontend::ast::templates::tir::{
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateTirPhase, TemplateTirReference,
+    TemplateViewContext, TemplateWrapperReference, TirSlotPlaceholder, summarize_existing_root,
+};
 use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
@@ -43,12 +50,15 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, GenericParameterScope, TypeParameterId,
 };
 use crate::compiler_frontend::datatypes::ids::{
-    FunctionTypeKey, NominalTypeId, TypeId, builtin_type_ids,
+    FunctionTypeKey, GenericParameterId, NominalTypeId, TypeId, builtin_type_ids,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
-use crate::compiler_frontend::folded_value::{PublicFoldedField, PublicFoldedValue};
+use crate::compiler_frontend::folded_value::{
+    PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
+    PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue, PublicTemplateSlotKey,
+};
 use crate::compiler_frontend::headers::import_environment::{
     FileVisibility, HeaderImportEnvironment,
 };
@@ -61,7 +71,8 @@ use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::public_interface::{
     PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationSemantics,
-    PublicFunctionCategory, PublicFunctionSemantics, PublicStructSemantics,
+    PublicFunctionCategory, PublicGenericParameterSurface, PublicParameterTypeSlot,
+    PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -85,6 +96,47 @@ mod import_projection;
 #[cfg(test)]
 pub(crate) use import_projection::imported_nominal_path;
 
+/// Collect the set of source declaration paths re-exported through the root's `export:` block
+/// from private files in the same module.
+///
+/// WHAT: iterates the header-built public export maps and collects every `PublicExportTarget::Source`
+/// path whose canonical source file belongs to the active module. These are declarations from
+/// private files re-exported through the root's public surface.
+/// WHY: the resolved public type-root table needs to include re-exported declarations so the
+/// public-interface draft builder can project their semantic facts into the published interface.
+fn collect_reexport_target_paths(
+    active_root_source: &InternedPath,
+    module_symbols: &ModuleSymbols,
+) -> FxHashSet<InternedPath> {
+    let mut paths = FxHashSet::default();
+
+    let Some(module_root) = module_symbols
+        .file_module_membership
+        .get(active_root_source)
+    else {
+        return paths;
+    };
+    for entries in module_symbols.module_root_public_exports.values() {
+        for entry in entries {
+            let crate::compiler_frontend::headers::module_symbols::PublicExportTarget::Source(path) =
+                &entry.target
+            else {
+                continue;
+            };
+            let Some(target_source) = module_symbols.canonical_source_by_symbol_path.get(path)
+            else {
+                continue;
+            };
+
+            if module_symbols.file_module_membership.get(target_source) == Some(module_root) {
+                paths.insert(path.clone());
+            }
+        }
+    }
+
+    paths
+}
+
 /// Combined transient resolved public-surface outputs built during environment construction.
 ///
 /// WHAT: bundles the type-only root table and the direct trait-root vector so
@@ -92,6 +144,14 @@ pub(crate) use import_projection::imported_nominal_path;
 struct ResolvedPublicSurfaceOutputs {
     type_roots: ResolvedPublicTypeRootTable,
     trait_roots: Vec<ResolvedPublicTraitRoot>,
+}
+
+/// One imported generic list registered before provider trait identities receive local handles.
+#[derive(Clone)]
+struct ImportedGenericParameterRegistration {
+    surfaces: Vec<PublicGenericParameterSurface>,
+    list_id: crate::compiler_frontend::datatypes::ids::GenericParameterListId,
+    canonical_by_local: FxHashMap<TypeParameterId, GenericParameterId>,
 }
 
 pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
@@ -131,7 +191,8 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
         crate::compiler_frontend::canonical_type_identity::ExportedGenericParameterIdentity,
         TypeId,
     >,
-    projected_imported_functions_by_local_path:
+    imported_generic_parameter_registrations: Vec<ImportedGenericParameterRegistration>,
+    pub(super) projected_imported_functions_by_local_path:
         FxHashMap<InternedPath, AstImportedFunctionContract>,
     imported_struct_definitions: Vec<AstImportedStructDefinition>,
     imported_choice_definitions: Vec<AstChoiceDefinition>,
@@ -160,6 +221,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             nominal_type_ids_by_path: FxHashMap::default(),
             imported_type_ids_by_origin: FxHashMap::default(),
             imported_generic_parameter_type_ids: FxHashMap::default(),
+            imported_generic_parameter_registrations: Vec::new(),
             projected_imported_functions_by_local_path: FxHashMap::default(),
             imported_struct_definitions: Vec::new(),
             imported_choice_definitions: Vec::new(),
@@ -205,6 +267,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.project_imported_constant_declarations(string_table)
             .map_err(|error| self.error_messages(error, string_table))?;
         self.project_imported_function_declarations(string_table)?;
+        self.project_imported_receiver_method_declarations(string_table)?;
 
         // ----------------------
         //  Resolve type aliases
@@ -241,6 +304,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // resolved receiver methods.
         let trait_resolution_start = Instant::now();
         let trait_environment = self.resolve_trait_definitions(sorted_headers, string_table)?;
+        self.resolve_imported_generic_parameter_bounds(&trait_environment)
+            .map_err(|error| self.error_messages(error, string_table))?;
         timer_log!(
             trait_resolution_start,
             "AST/environment/trait definitions resolved in: "
@@ -312,6 +377,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.type_environment,
             string_table,
         )?;
+        self.project_imported_trait_evidence(
+            &trait_environment,
+            &mut trait_evidence_environment,
+            string_table,
+        )
+        .map_err(|error| self.error_messages(error, string_table))?;
 
         // ---------------------------
         //  Validate trait evidence
@@ -370,9 +441,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ---------------------------------------------
         // WHAT: retains one transient AST-owned table of directly-defined active-root public
         // type roots and their attached receiver methods from the same already-resolved facts
-        // used by public-surface validation. Donor-local TypeIds stay inside the Ast handoff
-        // and never enter a cross-module artefact.
+        // used by public-surface validation. Re-exported declarations from private files targeted
+        // by public export entries are also included. Donor-local TypeIds stay inside the Ast
+        // handoff and never enter a cross-module artefact.
         let public_type_roots_start = Instant::now();
+
+        // Build the set of re-exported source declaration paths targeted by public export entries.
+        // These are declarations from private files re-exported through the root's `export:`
+        // block. They are not in the active root file, so the directly-defined pass excludes them.
+        let reexport_target_paths =
+            collect_reexport_target_paths(&self.context.entry_dir, &self.module_symbols);
+
         let resolved_public_type_roots =
             build_resolved_public_type_roots(BuildResolvedPublicTypeRootsInput {
                 sorted_headers,
@@ -386,6 +465,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 trait_environment: &trait_environment,
                 type_environment: &self.type_environment,
                 string_table,
+                reexport_target_paths: &reexport_target_paths,
             })
             .map_err(|error| self.error_messages(error, string_table))?;
         timer_log!(
@@ -396,9 +476,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         // Build the transient direct public trait-root vector from the same sorted headers.
         // The type-root table stays type-only; trait-root facts live in their own owner.
-        let resolved_public_trait_roots =
-            build_resolved_public_trait_roots(sorted_headers, &trait_environment, string_table)
-                .map_err(|error| self.error_messages(error, string_table))?;
+        let resolved_public_trait_roots = build_resolved_public_trait_roots(
+            sorted_headers,
+            &reexport_target_paths,
+            &trait_environment,
+            string_table,
+        )
+        .map_err(|error| self.error_messages(error, string_table))?;
 
         benchmark_timer_log!(
             environment_start,
@@ -683,7 +767,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                 // Public generic signatures are consumed through the public export surface alone,
                 // so every bound trait must be available from that same surface.
-                if self.public_trait_definition_is_nameable(trait_definition, public_root_file) {
+                if self.public_trait_definition_is_nameable(
+                    trait_definition,
+                    public_root_file,
+                    trait_environment,
+                ) {
                     continue;
                 }
 

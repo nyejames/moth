@@ -7,7 +7,9 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::semantic_identity::{
+    ModulePrivateExecutableIdentity, OriginFunctionId,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -31,6 +33,18 @@ pub(crate) struct FunctionOriginSeed {
     pub(crate) origin: OriginFunctionId,
 }
 
+/// Stable executable seed for a module-private function required by a generated sidecar.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PrivateFunctionOriginSeed {
+    pub(crate) path: InternedPath,
+    pub(crate) origin: ModulePrivateExecutableIdentity,
+}
+
+pub(crate) enum HirStableFunctionOrigin {
+    Public(OriginFunctionId),
+    ModulePrivate(ModulePrivateExecutableIdentity),
+}
+
 /// Provider-independent stable-origin lookup retained only during one HIR lowering.
 ///
 /// WHAT: maps exact declaration paths to stable origins and tracks which seeds a lowered
@@ -40,6 +54,7 @@ pub(crate) struct FunctionOriginSeed {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HirFunctionOriginLookup {
     by_path: FxHashMap<InternedPath, OriginFunctionId>,
+    private_by_path: FxHashMap<InternedPath, ModulePrivateExecutableIdentity>,
     consumed_paths: FxHashSet<InternedPath>,
 }
 
@@ -67,8 +82,34 @@ impl HirFunctionOriginLookup {
 
         Ok(Self {
             by_path,
+            private_by_path: FxHashMap::default(),
             consumed_paths: FxHashSet::default(),
         })
+    }
+
+    pub(crate) fn from_public_and_private_seeds(
+        public_seeds: Vec<FunctionOriginSeed>,
+        private_seeds: Vec<PrivateFunctionOriginSeed>,
+    ) -> Result<Self, CompilerError> {
+        let mut lookup = Self::from_seeds(public_seeds)?;
+        let mut private_origins = FxHashSet::default();
+        for seed in private_seeds {
+            if lookup.by_path.contains_key(&seed.path)
+                || lookup.private_by_path.contains_key(&seed.path)
+            {
+                return Err(CompilerError::compiler_error(
+                    "HIR function-origin lowering received duplicate declaration paths",
+                ));
+            }
+            if !private_origins.insert(seed.origin.clone()) {
+                return Err(CompilerError::compiler_error(format!(
+                    "HIR function-origin lowering received duplicate stable origin {:?}",
+                    seed.origin
+                )));
+            }
+            lookup.private_by_path.insert(seed.path, seed.origin);
+        }
+        Ok(lookup)
     }
 
     /// Consume the stable origin seed for one declaration path, marking it matched.
@@ -78,10 +119,17 @@ impl HirFunctionOriginLookup {
     /// implicit start).
     /// WHY: tracking consumption lets the lowering boundary detect unused seeds without keeping a
     /// second parallel origin set.
-    pub(crate) fn consume_origin_for(&mut self, path: &InternedPath) -> Option<OriginFunctionId> {
-        let origin = self.by_path.get(path)?;
+    pub(crate) fn consume_origin_for(
+        &mut self,
+        path: &InternedPath,
+    ) -> Option<HirStableFunctionOrigin> {
+        if let Some(origin) = self.by_path.get(path) {
+            self.consumed_paths.insert(path.clone());
+            return Some(HirStableFunctionOrigin::Public(origin.clone()));
+        }
+        let origin = self.private_by_path.get(path)?;
         self.consumed_paths.insert(path.clone());
-        Some(origin.clone())
+        Some(HirStableFunctionOrigin::ModulePrivate(origin.clone()))
     }
 
     /// Reject any concrete origin seed that no lowered function consumed.
@@ -94,6 +142,7 @@ impl HirFunctionOriginLookup {
         let unused_seed_count = self
             .by_path
             .keys()
+            .chain(self.private_by_path.keys())
             .filter(|path| !self.consumed_paths.contains(*path))
             .count();
         if unused_seed_count > 0 {

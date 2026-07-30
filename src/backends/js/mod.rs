@@ -31,7 +31,9 @@ pub(crate) use symbols::{builtin_error_code_js_field_name, builtin_error_message
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::HirBackendSelection;
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Policy controlling which HIR functions are emitted in a JS bundle.
@@ -83,6 +85,10 @@ pub struct JsLoweringConfig {
     pub external_module_export_glue_enabled: bool,
     /// Build-owned stable source-call symbol plan shared by every module in one entry assembly.
     pub source_function_names: Arc<HashMap<OriginFunctionId, String>>,
+    /// Build-owned symbols for private executables linked into generated sidecars.
+    pub module_private_function_names: Arc<HashMap<ModulePrivateExecutableIdentity, String>>,
+    /// Collision-free build-owned symbols for generated executables.
+    pub generated_function_names: Arc<HashMap<GeneratedFunctionIdentity, String>>,
 }
 
 impl JsLoweringConfig {
@@ -101,6 +107,8 @@ impl JsLoweringConfig {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_module_export_glue_enabled: false,
             source_function_names: Arc::new(HashMap::new()),
+            module_private_function_names: Arc::new(HashMap::new()),
+            generated_function_names: Arc::new(HashMap::new()),
         }
     }
 
@@ -115,12 +123,16 @@ impl JsLoweringConfig {
         external_package_registry: Arc<ExternalPackageRegistry>,
         selection: HirBackendSelection,
         source_function_names: Arc<HashMap<OriginFunctionId, String>>,
+        module_private_function_names: Arc<HashMap<ModulePrivateExecutableIdentity, String>>,
+        generated_function_names: Arc<HashMap<GeneratedFunctionIdentity, String>>,
     ) -> Self {
         let mut config = Self::direct_js(release_build);
         config.function_emission_policy = JsFunctionEmissionPolicy::Selected(selection);
         config.external_package_registry = external_package_registry;
         config.external_module_export_glue_enabled = true;
         config.source_function_names = source_function_names;
+        config.module_private_function_names = module_private_function_names;
+        config.generated_function_names = generated_function_names;
         config
     }
 

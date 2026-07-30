@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::function_calls::parse_generic_call_arguments_typed;
+use crate::compiler_frontend::ast::generic_bounds::evidence_target_is_visible;
 use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     cannot_infer_generic_function_arguments, conflicting_generic_function_argument,
     missing_generic_function_trait_evidence, recursive_generic_function_instantiation,
@@ -118,7 +119,7 @@ fn parse_generic_function_call(
         type_environment: type_interner.environment_mut_for_derived_types(),
         string_table,
     })?;
-    validate_generic_function_bound_evidence(
+    let selected_evidence = validate_generic_function_bound_evidence(
         template,
         inference.key.type_arguments.as_ref(),
         context,
@@ -174,6 +175,8 @@ fn parse_generic_function_call(
     })?;
 
     context.record_generic_function_instantiation_request(GenericFunctionInstantiationRequest {
+        declaration_identity: template.declaration_identity.clone(),
+        evidence: selected_evidence,
         key: inference.key,
         instance_path: inference.instance_path.clone(),
         call_location: call_location.clone(),
@@ -488,34 +491,59 @@ pub(crate) fn infer_generic_function_call(
     })
 }
 
-fn validate_generic_function_bound_evidence(
+pub(crate) fn validate_generic_function_bound_evidence(
     template: &GenericFunctionTemplate,
     type_arguments: &[TypeId],
     context: &ScopeContext,
     type_environment: &TypeEnvironment,
     call_location: SourceLocation,
-) -> Result<(), ExpressionParseError> {
+) -> Result<Box<[crate::compiler_frontend::traits::ids::TraitEvidenceId]>, ExpressionParseError> {
     let Some(parameter_list) =
         type_environment.generic_parameters(template.generic_parameter_list_id)
     else {
-        return Ok(());
+        return Ok(Box::new([]));
     };
 
     let trait_environment = context.trait_environment();
     let evidence_environment = context.trait_evidence_environment();
 
+    let mut selected_evidence = Vec::new();
     for (parameter, concrete_type_id) in parameter_list.parameters.iter().zip(type_arguments) {
         for trait_id in &parameter.trait_bounds {
             let trait_is_visible = context.trait_id_is_visible(*trait_id);
-            let has_reusable_evidence = trait_is_visible
-                && (evidence_environment
-                    .builtin_for(*concrete_type_id, *trait_id)
-                    .is_some()
-                    || evidence_environment
-                        .canonical_for(*concrete_type_id, *trait_id)
-                        .is_some());
+            let evidence_is_visible = trait_is_visible
+                && evidence_target_is_visible(
+                    *concrete_type_id,
+                    type_environment,
+                    context
+                        .shared
+                        .file_visibility
+                        .as_deref()
+                        .map(|visibility| &visibility.visible_source_names),
+                    context
+                        .shared
+                        .file_visibility
+                        .as_deref()
+                        .map(|visibility| &visibility.visible_type_alias_names),
+                    context
+                        .shared
+                        .file_visibility
+                        .as_deref()
+                        .map(|visibility| &visibility.visible_namespace_records),
+                    context.shared.resolved_type_aliases.as_deref(),
+                );
+            let evidence_id = evidence_is_visible
+                .then(|| {
+                    evidence_environment
+                        .builtin_for(*concrete_type_id, *trait_id)
+                        .or_else(|| {
+                            evidence_environment.canonical_for(*concrete_type_id, *trait_id)
+                        })
+                })
+                .flatten();
 
-            if has_reusable_evidence {
+            if let Some(evidence_id) = evidence_id {
+                selected_evidence.push(evidence_id);
                 continue;
             }
 
@@ -535,7 +563,7 @@ fn validate_generic_function_bound_evidence(
         }
     }
 
-    Ok(())
+    Ok(selected_evidence.into_boxed_slice())
 }
 
 impl<'a> GenericCallExpectedContext<'a> {

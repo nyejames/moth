@@ -22,7 +22,6 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{build_ast, entry_and_start, lower_hir};
-use crate::compiler_frontend::validated_generic_template_metadata::ValidatedGenericTemplateStore;
 use std::sync::Arc;
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -160,7 +159,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
             rendered_path_usages: Vec::new(),
-            validated_generic_templates: ValidatedGenericTemplateStore::default(),
+            materialisation_context: None,
         },
     };
 

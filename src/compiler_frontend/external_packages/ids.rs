@@ -7,7 +7,11 @@
 //! repeating package-scoped name resolution.
 
 use crate::compiler_frontend::hir::ids::FunctionId;
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::semantic_identity::{
+    ModulePrivateExecutableIdentity, OriginFunctionId, StablePackageIdentity,
+};
+
+use super::ExternalSymbolPath;
 
 pub const CORE_IO_PACKAGE_PATH: &str = "@core/io";
 pub const IO_NAMESPACE_NAME: &str = "io";
@@ -115,10 +119,50 @@ pub enum ExternalSymbolId {
     Constant(ExternalConstantId),
 }
 
+/// Stable declaration category for an external package symbol.
+///
+/// WHAT: identifies the namespace lane of a binding-backed symbol without retaining its
+/// build-local `ExternalSymbolId`.
+/// WHY: source-module interfaces re-export binding-backed symbols by owned package and symbol
+/// path. They still need the declaration category so publication can validate the surface and
+/// consumers can resolve the symbol through their own registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExternalSymbolCategory {
+    Function,
+    Type,
+    Constant,
+}
+
+/// Canonical cross-build identity of one binding-backed package symbol.
+///
+/// WHAT: owns the stable package origin/path, structured package-local symbol path and
+/// declaration category without retaining a registry-local symbol or package ID.
+/// WHY: source interfaces and generated artefacts must resolve binding targets against an
+/// independently constructed registry while rejecting a same-spelling package from another
+/// origin.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CanonicalBindingSymbolIdentity {
+    pub(crate) package: StablePackageIdentity,
+    pub(crate) symbol_path: ExternalSymbolPath,
+    pub(crate) category: ExternalSymbolCategory,
+}
+
+impl ExternalSymbolId {
+    pub fn category(self) -> ExternalSymbolCategory {
+        match self {
+            Self::Function(_) => ExternalSymbolCategory::Function,
+            Self::Type(_) => ExternalSymbolCategory::Type,
+            Self::Constant(_) => ExternalSymbolCategory::Constant,
+        }
+    }
+}
+
 /// Call target for a function invocation in HIR.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CallTarget {
     Local(FunctionId),
     CrossModule(OriginFunctionId),
+    ModulePrivate(ModulePrivateExecutableIdentity),
+    Generated(crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity),
     External(ExternalFunctionId),
 }

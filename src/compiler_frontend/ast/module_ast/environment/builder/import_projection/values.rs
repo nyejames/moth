@@ -82,6 +82,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             PublicFoldedValue::String(value) => {
                 ExpressionKind::StringSlice(string_table.intern(value))
             }
+            PublicFoldedValue::ConstTemplate(template) => {
+                let template_ir_store = Rc::clone(&self.context.template_ir_store);
+                ExpressionKind::Template(Box::new(materialize_public_const_template(
+                    template,
+                    &template_ir_store,
+                    string_table,
+                    Default::default(),
+                )?))
+            }
             PublicFoldedValue::Collection(values) => {
                 let element_type_id = self
                     .type_environment
@@ -234,5 +243,145 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             });
         }
         Ok(projected)
+    }
+}
+
+fn materialize_public_const_template(
+    template: &PublicConstTemplate,
+    store_handle: &Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
+    string_table: &mut StringTable,
+    location: crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+) -> Result<Template, CompilerError> {
+    let mut store = store_handle.borrow_mut();
+    let root =
+        materialize_public_const_template_in_store(template, &mut store, string_table, &location)?;
+
+    Ok(Template {
+        tir_reference: TemplateTirReference {
+            root,
+            phase: TemplateTirPhase::Finalized,
+            context: TemplateViewContext::default(),
+        },
+        location,
+    })
+}
+
+fn materialize_public_const_template_in_store(
+    template: &PublicConstTemplate,
+    store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
+    string_table: &mut StringTable,
+    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrId, CompilerError> {
+    let mut children = Vec::with_capacity(template.pieces.len());
+
+    for piece in &template.pieces {
+        let node = match piece {
+            PublicConstTemplatePiece::Text(text) => {
+                let text_id = string_table.intern(text);
+                store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::Text {
+                        text: text_id,
+                        byte_len: u32::try_from(text.len()).map_err(|_| {
+                            CompilerError::compiler_error(
+                                "Imported const-template text exceeds the TIR byte-length range.",
+                            )
+                        })?,
+                        origin: TemplateSegmentOrigin::Head,
+                    },
+                    location.clone(),
+                ))
+            }
+            PublicConstTemplatePiece::Slot(slot) => {
+                let placeholder =
+                    materialize_public_const_template_slot(slot, store, string_table, location)?;
+                store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::Slot { placeholder },
+                    location.clone(),
+                ))
+            }
+        };
+        children.push(node);
+    }
+
+    let root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence { children },
+        location.clone(),
+    ));
+    let kind = match &template.kind {
+        PublicConstTemplateKind::Wrapper => TemplateType::String,
+        PublicConstTemplateKind::SlotInsert(key) => {
+            TemplateType::SlotInsert(materialize_public_slot_key(key, string_table))
+        }
+    };
+    let summary = summarize_existing_root(store, root);
+    let mut template_ir = TemplateIr::new(root, Style::default(), kind, summary, location.clone());
+    let conditional_wrappers = materialize_public_wrapper_references(
+        &template.conditional_child_wrappers,
+        store,
+        string_table,
+        location,
+    )?;
+    if !conditional_wrappers.is_empty() {
+        template_ir.conditional_child_wrapper_set =
+            Some(store.push_or_reuse_wrapper_set(conditional_wrappers));
+    }
+
+    Ok(store.push_template(template_ir))
+}
+
+fn materialize_public_const_template_slot(
+    slot: &PublicConstTemplateSlot,
+    store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
+    string_table: &mut StringTable,
+    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+) -> Result<TirSlotPlaceholder, CompilerError> {
+    let applied = materialize_public_wrapper_references(
+        &slot.applied_child_wrappers,
+        store,
+        string_table,
+        location,
+    )?;
+    let child =
+        materialize_public_wrapper_references(&slot.child_wrappers, store, string_table, location)?;
+    let applied_set = (!applied.is_empty()).then(|| store.push_or_reuse_wrapper_set(applied));
+    let child_set = (!child.is_empty()).then(|| store.push_or_reuse_wrapper_set(child));
+
+    Ok(TirSlotPlaceholder::with_wrapper_sets(
+        materialize_public_slot_key(&slot.key, string_table),
+        store.next_slot_occurrence_id(),
+        location.clone(),
+        applied_set,
+        child_set,
+        slot.skip_parent_child_wrappers,
+    ))
+}
+
+fn materialize_public_wrapper_references(
+    wrappers: &[PublicConstTemplate],
+    store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
+    string_table: &mut StringTable,
+    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+) -> Result<Vec<TemplateWrapperReference>, CompilerError> {
+    let mut references = Vec::with_capacity(wrappers.len());
+    for wrapper in wrappers {
+        let root =
+            materialize_public_const_template_in_store(wrapper, store, string_table, location)?;
+        references.push(TemplateWrapperReference::new(
+            root,
+            TemplateTirPhase::Finalized,
+            TemplateViewContext::default(),
+        ));
+    }
+    Ok(references)
+}
+
+fn materialize_public_slot_key(
+    key: &PublicTemplateSlotKey,
+    string_table: &mut StringTable,
+) -> SlotKey {
+    match key {
+        PublicTemplateSlotKey::Default => SlotKey::Default,
+        PublicTemplateSlotKey::Named(name) => SlotKey::Named(string_table.intern(name)),
+        PublicTemplateSlotKey::Positional(position) => SlotKey::Positional(*position),
     }
 }

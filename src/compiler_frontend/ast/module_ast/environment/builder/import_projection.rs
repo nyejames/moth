@@ -10,6 +10,7 @@ use super::*;
 mod callable;
 mod canonical;
 mod nominal;
+mod traits;
 mod values;
 
 #[cfg(test)]

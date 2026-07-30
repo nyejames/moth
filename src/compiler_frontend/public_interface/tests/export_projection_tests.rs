@@ -12,6 +12,7 @@
 //! WHY: these are construction invariants owned by `compiler_frontend::public_interface::export_projection`,
 //! so they own a focused test beside the module rather than an end-to-end case.
 
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
@@ -19,8 +20,8 @@ use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_te
 use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::prepare_single_file;
 use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
 use crate::compiler_frontend::public_interface::{
-    DirectExportSeed, build_direct_export_seed, build_public_source_nominal_origin_index,
-    build_public_source_trait_origin_index,
+    DirectExportSeed, SourceProviderImportSet, build_direct_export_seed,
+    build_public_source_nominal_origin_index, build_public_source_trait_origin_index,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, FunctionOriginKind, ModuleRootRole, OriginDeclarationId, OriginTraitId,
@@ -79,6 +80,8 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
         file_id,
         &headers.headers,
         &headers.module_symbols,
+        &SourceProviderImportSet::default(),
+        &ExternalPackageRegistry::default(),
         &string_table,
     )
     .expect("the direct export seed must build for valid headers")
@@ -252,6 +255,8 @@ fn active_origin_missing_from_table_fails_internally() {
         file_id,
         &headers.headers,
         &headers.module_symbols,
+        &SourceProviderImportSet::default(),
+        &ExternalPackageRegistry::default(),
         &string_table,
     );
 
@@ -301,6 +306,8 @@ fn out_of_range_active_root_file_id_fails_internally() {
         FileId(999),
         &headers.headers,
         &headers.module_symbols,
+        &SourceProviderImportSet::default(),
+        &ExternalPackageRegistry::default(),
         &string_table,
     );
 
@@ -379,6 +386,8 @@ fn conflicting_public_header_ownership_fails_internally() {
         active_file_id,
         &headers.headers,
         &headers.module_symbols,
+        &SourceProviderImportSet::default(),
+        &ExternalPackageRegistry::default(),
         &string_table,
     );
 
@@ -424,6 +433,8 @@ fn zero_public_exports_still_validates_active_origin() {
         file_id,
         &headers.headers,
         &headers.module_symbols,
+        &SourceProviderImportSet::default(),
+        &ExternalPackageRegistry::default(),
         &string_table,
     );
 

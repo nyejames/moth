@@ -7,7 +7,7 @@
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::FrontendBuildProfile;
-use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
+use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput, AstBuildResult};
 use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -37,9 +37,9 @@ pub(crate) fn test_project_path_resolver() -> ProjectPathResolver {
     .expect("test path resolver should be valid")
 }
 
-pub(crate) fn parse_single_file_ast_result(
+pub(crate) fn parse_single_file_ast_build_result(
     source: &str,
-) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+) -> Result<(AstBuildResult, StringTable), Box<CompilerDiagnostic>> {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
@@ -143,7 +143,14 @@ pub(crate) fn parse_single_file_ast_result(
         }
     })?;
 
-    Ok((build_result.ast, string_table))
+    Ok((build_result, string_table))
+}
+
+pub(crate) fn parse_single_file_ast_result(
+    source: &str,
+) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+    parse_single_file_ast_build_result(source)
+        .map(|(build_result, string_table)| (build_result.ast, string_table))
 }
 
 pub(crate) fn parse_single_file_ast(source: &str) -> (Ast, StringTable) {

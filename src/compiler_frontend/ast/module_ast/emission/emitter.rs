@@ -88,6 +88,10 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
         FxHashMap<InternedPath, FoldedConstTemplateResult>,
     /// Concrete generic function instances emitted while lowering visible calls.
     pub(in crate::compiler_frontend::ast) generic_instance_count: usize,
+    /// Imported generic calls are inferred here but materialised by the build-owned sidecar
+    /// worklist from the declaring module's retained context.
+    pub(in crate::compiler_frontend::ast) deferred_generic_requests:
+        Vec<GenericFunctionInstantiationRequest>,
 }
 
 #[cfg(test)]
@@ -199,6 +203,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     generic_function_instantiation_requests: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
     generic_function_instances_by_key:
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
+    deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
 }
 
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
@@ -217,7 +222,25 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             compatibility_cache: TypeCompatibilityCache::new(),
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
             generic_function_instances_by_key: FxHashMap::default(),
+            deferred_generic_requests: Vec::new(),
         }
+    }
+
+    pub(in crate::compiler_frontend::ast) fn emit_generated_request(
+        mut self,
+        request: GenericFunctionInstantiationRequest,
+        string_table: &mut StringTable,
+    ) -> Result<AstEmission, CompilerMessages> {
+        self.emit_generic_function_instance(request, &[], string_table)?;
+        self.defer_requested_generic_function_instances();
+
+        Ok(AstEmission {
+            ast: self.ast,
+            warnings: self.warnings,
+            const_templates_by_path: self.const_templates_by_path,
+            generic_instance_count: self.generic_function_instances_by_key.len(),
+            deferred_generic_requests: self.deferred_generic_requests,
+        })
     }
 
     /// Emits AST nodes for each header kind (functions, structs, templates).
@@ -421,7 +444,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             }
         }
 
-        self.emit_requested_generic_function_instances(Vec::new(), string_table)?;
+        self.defer_requested_generic_function_instances();
 
         #[cfg(feature = "detailed_timers")]
         {
@@ -480,6 +503,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             warnings: self.warnings,
             const_templates_by_path: self.const_templates_by_path,
             generic_instance_count: self.generic_function_instances_by_key.len(),
+            deferred_generic_requests: self.deferred_generic_requests,
         })
     }
 
@@ -487,31 +511,32 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     //  Emit function bodies
     // --------------------------
 
-    /// Drains pending generic-instantiation requests and emits each one.
+    /// Move inferred generic calls into the build-owned worklist without parsing their bodies.
     ///
-    /// WHAT: repeated in a loop because emitting one instance may queue further nested instances.
-    /// WHY: generic function bodies can call other generic functions, so one pass is insufficient.
-    fn emit_requested_generic_function_instances(
-        &mut self,
-        active_stack: Vec<GenericFunctionInstanceKey>,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        loop {
-            let requests = {
-                let mut pending = self.generic_function_instantiation_requests.borrow_mut();
-                if pending.is_empty() {
-                    break;
-                }
+    /// The dedicated generated-function materialiser invokes `emit_generic_function_instance`
+    /// for one selected request. Ordinary module emission only records stable requests, including
+    /// nested calls discovered while that selected generated body is parsed.
+    fn defer_requested_generic_function_instances(&mut self) {
+        let requests =
+            std::mem::take(&mut *self.generic_function_instantiation_requests.borrow_mut());
 
-                std::mem::take(&mut *pending)
-            };
-
-            for request in requests {
-                self.emit_generic_function_instance(request, &active_stack, string_table)?;
+        for request in requests {
+            if self
+                .generic_function_instances_by_key
+                .contains_key(&request.key)
+            {
+                continue;
             }
-        }
 
-        Ok(())
+            self.generic_function_instances_by_key.insert(
+                request.key.clone(),
+                GenericFunctionInstance {
+                    instance_path: request.instance_path.clone(),
+                    key: request.key.clone(),
+                },
+            );
+            self.deferred_generic_requests.push(request);
+        }
     }
 
     /// Rebuilds the body-local generic type context from canonical type metadata.
@@ -647,6 +672,17 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             ));
         };
 
+        let Some(mut token_stream) = template.body_tokens.clone() else {
+            let instance = GenericFunctionInstance {
+                instance_path: request.instance_path.clone(),
+                key: request.key.clone(),
+            };
+            self.generic_function_instances_by_key
+                .insert(request.key.clone(), instance);
+            self.deferred_generic_requests.push(request);
+            return Ok(());
+        };
+
         let Some(mapping) = concrete_argument_mapping(
             template.generic_parameter_list_id,
             request.key.type_arguments.as_ref(),
@@ -716,7 +752,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Parse body and materialize nested instances
         // --------------------------
-        let mut token_stream = template.body_tokens.to_owned();
         token_stream.src_path = request.instance_path.clone();
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
@@ -762,9 +797,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             ));
         }
 
-        // Materialize nested instances before marking this one complete so direct or indirect
-        // recursive generic instantiation is diagnosed while the active stack is still visible.
-        self.emit_requested_generic_function_instances(active_instance_stack, string_table)?;
+        // Nested calls remain stable requests. The build-owned worklist materialises their
+        // bodies, records dependency edges and detects indirect request cycles.
+        self.defer_requested_generic_function_instances();
 
         // --------------------------
         //  Register instance and emit AST node

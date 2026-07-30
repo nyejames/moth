@@ -33,6 +33,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolPath;
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId,
+    StableModuleOriginIdentity, StablePackageIdentity,
 };
 
 // ---------------------------------------------------------------------------
@@ -54,10 +55,13 @@ use crate::compiler_frontend::semantic_identity::{
 /// target `TypeId` before producing a canonical identity, so there is no alias variant here.
 /// Exported generic parameters project through the generic-parameter origin resolver so open
 /// exported type shapes recurse through the same projection owner as closed types.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CanonicalTypeIdentity {
     Builtin(CanonicalBuiltinType),
     SourceNominal(OriginTypeId),
+    /// Artefact-scoped nominal identity used only by generated requests and sidecars.
+    /// Public-interface projection never constructs this variant.
+    ModulePrivateNominal(ModulePrivateNominalIdentity),
     ExternalOpaque(ExternalOpaqueTypeIdentity),
     Collection(CollectionTypeIdentity),
     OrderedMap(OrderedMapTypeIdentity),
@@ -67,8 +71,72 @@ pub(crate) enum CanonicalTypeIdentity {
     GenericParameter(ExportedGenericParameterIdentity),
 }
 
+impl CanonicalTypeIdentity {
+    /// Visit this identity and every recursively contained canonical type exactly once per
+    /// structural occurrence.
+    ///
+    /// Canonical type consumers use this owner instead of each reimplementing the option,
+    /// collection, map, fallible and generic-instance recursion rules.
+    pub(crate) fn visit(&self, visitor: &mut impl FnMut(&CanonicalTypeIdentity)) {
+        visitor(self);
+
+        match self {
+            Self::Collection(collection) => collection.element().visit(visitor),
+            Self::OrderedMap(map) => {
+                map.key().visit(visitor);
+                map.value().visit(visitor);
+            }
+            Self::Option(inner) => inner.visit(visitor),
+            Self::FallibleCarrier(carrier) => {
+                carrier.success().visit(visitor);
+                carrier.error().visit(visitor);
+            }
+            Self::GenericInstance(instance) => {
+                for argument in instance.arguments() {
+                    argument.visit(visitor);
+                }
+            }
+            Self::Builtin(_)
+            | Self::SourceNominal(_)
+            | Self::ModulePrivateNominal(_)
+            | Self::ExternalOpaque(_)
+            | Self::GenericParameter(_) => {}
+        }
+    }
+}
+
+/// Stable identity for a private nominal within one declaring module artefact.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct ModulePrivateNominalIdentity {
+    module_origin: StableModuleOriginIdentity,
+    defining_path: String,
+    category: OriginTypeCategory,
+}
+
+impl ModulePrivateNominalIdentity {
+    pub(crate) fn new(
+        module_origin: StableModuleOriginIdentity,
+        defining_path: String,
+        category: OriginTypeCategory,
+    ) -> Self {
+        Self {
+            module_origin,
+            defining_path,
+            category,
+        }
+    }
+
+    pub(crate) fn category(&self) -> OriginTypeCategory {
+        self.category
+    }
+
+    pub(crate) fn defining_path(&self) -> &str {
+        &self.defining_path
+    }
+}
+
 /// Builtin canonical type identity, including seeded scalar, `None`, and `Error` identities.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CanonicalBuiltinType {
     Bool,
     Int,
@@ -85,30 +153,30 @@ pub(crate) enum CanonicalBuiltinType {
 
 /// Binding-backed opaque external type identity.
 ///
-/// WHAT: owned stable package path and structured external symbol path. Never
+/// WHAT: owned stable package origin/path and structured external symbol path. Never
 /// `ExternalPackageId` or `ExternalTypeId` alone.
-/// WHY: a binding-backed type is identified by where it lives in its package namespace, not by a
-/// build-local ID. Two builds that register the same opaque type under the same package and
-/// symbol path produce the same canonical identity.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// WHY: a binding-backed type is identified by both the package provenance and where it lives in
+/// that package namespace, not by a build-local ID or path spelling alone. Two independently
+/// built registries may use the same package and symbol paths for packages from different origins.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ExternalOpaqueTypeIdentity {
-    package_path: String,
+    package: StablePackageIdentity,
     symbol_path: ExternalSymbolPath,
 }
 
 impl ExternalOpaqueTypeIdentity {
-    /// Construct the owned stable identity from a package path and structured symbol path.
+    /// Construct the owned stable identity from a package identity and structured symbol path.
     ///
     /// Compiler-internal: only the projection owner builds these from a registry reverse lookup.
-    pub(crate) fn new(package_path: String, symbol_path: ExternalSymbolPath) -> Self {
+    pub(crate) fn new(package: StablePackageIdentity, symbol_path: ExternalSymbolPath) -> Self {
         Self {
-            package_path,
+            package,
             symbol_path,
         }
     }
 
-    pub(crate) fn package_path(&self) -> &str {
-        &self.package_path
+    pub(crate) fn package(&self) -> &StablePackageIdentity {
+        &self.package
     }
 
     pub(crate) fn symbol_path(&self) -> &ExternalSymbolPath {
@@ -120,7 +188,7 @@ impl ExternalOpaqueTypeIdentity {
 ///
 /// `fixed_capacity` is `None` for growable `{T}` and `Some(cap)` for fixed `{N T}`. Fixed
 /// capacity is semantic identity, not an allocation hint, so the two shapes are distinct.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CollectionTypeIdentity {
     element: Box<CanonicalTypeIdentity>,
     fixed_capacity: Option<usize>,
@@ -148,7 +216,7 @@ impl CollectionTypeIdentity {
 
 /// Ordered map canonical identity. Key and value are stored directly so `{K = V}` order is
 /// preserved.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct OrderedMapTypeIdentity {
     key: Box<CanonicalTypeIdentity>,
     value: Box<CanonicalTypeIdentity>,
@@ -175,7 +243,7 @@ impl OrderedMapTypeIdentity {
 }
 
 /// Fallible carrier canonical identity. Success and error are stored in order.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct FallibleCarrierTypeIdentity {
     success: Box<CanonicalTypeIdentity>,
     error: Box<CanonicalTypeIdentity>,
@@ -206,7 +274,7 @@ impl FallibleCarrierTypeIdentity {
 /// WHAT: keyed by the stable base `OriginTypeId` plus recursively canonical concrete arguments.
 /// WHY: two instances of the same generic nominal with the same canonical arguments share one
 /// canonical identity across module boundaries.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct GenericInstanceTypeIdentity {
     base: OriginTypeId,
     arguments: Box<[CanonicalTypeIdentity]>,
@@ -243,12 +311,12 @@ impl GenericInstanceTypeIdentity {
 /// existing origin vocabulary: `OriginFunctionId` for free functions and `OriginTypeId` for
 /// nominal types. The inner enum is private so no crate caller can bypass the validating
 /// constructors.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct GenericDeclarationOrigin {
     inner: GenericDeclarationOriginInner,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum GenericDeclarationOriginInner {
     FreeFunction(OriginFunctionId),
     NominalType(OriginTypeId),
@@ -299,7 +367,7 @@ impl GenericDeclarationOrigin {
 /// declaration origin and position, not by donor-local `GenericParameterId` values that differ
 /// across module compilations. Two parameters with the same owner, position and authored name
 /// share one identity even when their module-local `GenericParameterId` allocations differ.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ExportedGenericParameterIdentity {
     declaration_origin: GenericDeclarationOrigin,
     position: u32,
@@ -351,10 +419,29 @@ impl ExportedGenericParameterIdentity {
 /// spelling are semantically distinct: the source trait's identity derives from its
 /// owning module origin, while the core trait's identity is a stable compiler-owned
 /// semantic classifier.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CanonicalTraitIdentity {
     Source(OriginTraitId),
     Core(CanonicalCoreTraitIdentity),
+    /// Artefact-scoped trait identity used only by generated requests and sidecars.
+    /// Public-interface projection never constructs this variant.
+    ModulePrivate(ModulePrivateTraitIdentity),
+}
+
+/// Stable identity for a private trait within one declaring module artefact.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct ModulePrivateTraitIdentity {
+    module_origin: StableModuleOriginIdentity,
+    defining_path: String,
+}
+
+impl ModulePrivateTraitIdentity {
+    pub(crate) fn new(module_origin: StableModuleOriginIdentity, defining_path: String) -> Self {
+        Self {
+            module_origin,
+            defining_path,
+        }
+    }
 }
 
 /// Compiler-owned core trait canonical identity.
@@ -366,7 +453,7 @@ pub(crate) enum CanonicalTraitIdentity {
 /// WHY: core traits are identified by their stable semantic classification, not by a
 /// module-local `TraitId` or a source spelling. Two builds that register the same core
 /// cast trait produce the same canonical identity regardless of `TraitId` allocation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CanonicalCoreTraitIdentity {
     Displayable,
     Castable {
@@ -385,7 +472,7 @@ pub(crate) enum CanonicalCoreTraitIdentity {
 /// donor-local `TypeId` or `TraitId` handles. Keeping the pair in one owned hashable value
 /// makes duplicate detection and cross-module comparison operate on one identity rather than
 /// two adjacent pseudo-key fields.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CanonicalEvidenceIdentity {
     target_type_identity: CanonicalTypeIdentity,
     trait_identity: CanonicalTraitIdentity,
@@ -411,6 +498,11 @@ impl CanonicalEvidenceIdentity {
     pub(crate) fn trait_identity(&self) -> &CanonicalTraitIdentity {
         &self.trait_identity
     }
+
+    /// The canonical identity of the conforming target type.
+    pub(crate) fn target_type_identity(&self) -> &CanonicalTypeIdentity {
+        &self.target_type_identity
+    }
 }
 
 /// Stable cross-module identity for one trait requirement.
@@ -423,7 +515,7 @@ impl CanonicalEvidenceIdentity {
 /// WHY: reusable conformance evidence maps each requirement to the stable receiver-method
 /// origin that implements it. The mapping key must be stable across local allocation changes
 /// so a cross-module consumer can compare requirement identities without donor-local IDs.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct StableTraitRequirementIdentity {
     trait_identity: CanonicalTraitIdentity,
     requirement_name: String,
@@ -446,6 +538,10 @@ impl StableTraitRequirementIdentity {
     /// The owned defining requirement name as authored in the trait declaration.
     pub(crate) fn requirement_name(&self) -> &str {
         &self.requirement_name
+    }
+
+    pub(crate) fn trait_identity(&self) -> &CanonicalTraitIdentity {
+        &self.trait_identity
     }
 }
 
@@ -611,7 +707,7 @@ pub(crate) fn project_type_id_to_canonical_identity(
             Ok(CanonicalTypeIdentity::SourceNominal(origin))
         }
         TypeDefinition::External(def) => {
-            let (package_path, symbol_path) = context
+            let (package, symbol_path) = context
                 .external_registry
                 .resolve_type_package_and_symbol_path(def.type_id)
                 .ok_or_else(|| {
@@ -624,7 +720,7 @@ pub(crate) fn project_type_id_to_canonical_identity(
                     ))
                 })?;
             Ok(CanonicalTypeIdentity::ExternalOpaque(
-                ExternalOpaqueTypeIdentity::new(package_path.to_owned(), symbol_path.clone()),
+                ExternalOpaqueTypeIdentity::new(package, symbol_path.clone()),
             ))
         }
         TypeDefinition::Constructed(constructed) => {

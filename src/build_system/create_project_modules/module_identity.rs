@@ -228,6 +228,23 @@ impl ModuleIdentityTable {
         ModuleRootTable::from_records(normal_records)
     }
 
+    /// Derive the complete root table for semantic compilation inside one package boundary.
+    ///
+    /// Package scheduling compiles normal and support modules directly. Its resolver therefore
+    /// needs every indexed root for membership and same-directory content preparation, while the
+    /// narrower project import resolver continues to expose only normal child-module roots.
+    pub(crate) fn derive_compilation_root_table(&self) -> ModuleRootTable {
+        let records = self
+            .records
+            .iter()
+            .map(|record| {
+                ModuleRootRecord::new(record.root_directory.clone(), record.root_file.clone())
+            })
+            .collect();
+
+        ModuleRootTable::from_records(records)
+    }
+
     /// All module identities in deterministic canonical logical path order.
     pub(crate) fn module_ids(&self) -> impl Iterator<Item = ModuleId> + '_ {
         (0..self.records.len()).map(ModuleId)

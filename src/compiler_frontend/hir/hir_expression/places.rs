@@ -577,6 +577,12 @@ impl<'a> HirBuilder<'a> {
                 SourceFunctionTarget::Imported { origin, .. } => {
                     Ok(CallTarget::CrossModule(origin.clone()))
                 }
+                SourceFunctionTarget::Generated { identity, .. } => {
+                    Ok(CallTarget::Generated(identity.clone()))
+                }
+                SourceFunctionTarget::ModulePrivate { identity, .. } => {
+                    Ok(CallTarget::ModulePrivate(identity.clone()))
+                }
                 SourceFunctionTarget::Local(_) => Err(CompilerError::compiler_error(
                     "Imported function contract carried a local function target",
                 )),

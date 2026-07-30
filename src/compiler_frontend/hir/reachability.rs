@@ -20,7 +20,9 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::semantic_identity::OriginFunctionId;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
+};
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -33,6 +35,8 @@ use std::collections::VecDeque;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HirReachability {
     pub(crate) reachable_cross_module_functions: FxHashSet<OriginFunctionId>,
+    pub(crate) reachable_module_private_functions: FxHashSet<ModulePrivateExecutableIdentity>,
+    pub(crate) reachable_generated_functions: FxHashSet<GeneratedFunctionIdentity>,
     pub(crate) reachable_external_functions: FxHashSet<ExternalFunctionId>,
     pub(crate) reachable_external_calls: Vec<ReachableExternalCall>,
     pub(crate) reachable_map_uses: Vec<ReachableMapUse>,
@@ -88,6 +92,8 @@ struct HirSelectedFunctionBlocks {
 struct HirBlockRuntimeFacts {
     direct_user_calls: Vec<FunctionId>,
     direct_cross_module_calls: Vec<OriginFunctionId>,
+    direct_module_private_calls: Vec<ModulePrivateExecutableIdentity>,
+    direct_generated_calls: Vec<GeneratedFunctionIdentity>,
     reachable_external_functions: FxHashSet<ExternalFunctionId>,
     reachable_external_calls: Vec<ReachableExternalCall>,
     reachable_map_uses: Vec<ReachableMapUse>,
@@ -461,6 +467,10 @@ impl HirReachability {
     fn merge(&mut self, direct: &HirBlockRuntimeFacts) {
         self.reachable_cross_module_functions
             .extend(direct.direct_cross_module_calls.iter().cloned());
+        self.reachable_module_private_functions
+            .extend(direct.direct_module_private_calls.iter().cloned());
+        self.reachable_generated_functions
+            .extend(direct.direct_generated_calls.iter().cloned());
         self.reachable_external_functions
             .extend(direct.reachable_external_functions.iter().copied());
         self.reachable_external_calls
@@ -595,6 +605,24 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         self.direct_facts
                             .direct_cross_module_calls
                             .push(origin.clone());
+                    }
+                }
+                CallTarget::ModulePrivate(identity) => {
+                    if !self
+                        .direct_facts
+                        .direct_module_private_calls
+                        .contains(identity)
+                    {
+                        self.direct_facts
+                            .direct_module_private_calls
+                            .push(identity.clone());
+                    }
+                }
+                CallTarget::Generated(identity) => {
+                    if !self.direct_facts.direct_generated_calls.contains(identity) {
+                        self.direct_facts
+                            .direct_generated_calls
+                            .push(identity.clone());
                     }
                 }
                 CallTarget::External(function_id) => {

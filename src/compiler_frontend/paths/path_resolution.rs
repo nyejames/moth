@@ -113,6 +113,24 @@ impl ProjectPathResolver {
         self
     }
 
+    /// Derive a resolver scoped to one independently compiled source-package boundary.
+    ///
+    /// Source/package imports still use the shared indexed namespace and registered package
+    /// surfaces. Compile-time paths, root membership and portable source paths use the package's
+    /// own root so a Builder or dependency package never acquires the consuming project's path
+    /// context.
+    pub(crate) fn for_source_package_boundary(
+        &self,
+        package_root: PathBuf,
+        module_roots: ModuleRootTable,
+    ) -> Self {
+        let mut resolver = self.clone();
+        resolver.project_root = package_root.clone();
+        resolver.entry_root = package_root;
+        resolver.module_roots = module_roots;
+        resolver
+    }
+
     /// WHAT: exposes the canonical entry root for module discovery and diagnostics.
     /// WHY: callers need one canonical source of truth after config parsing.
     pub(crate) fn entry_root(&self) -> &Path {

@@ -11,6 +11,10 @@ use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalCoreTraitIdentity, CanonicalTraitIdentity,
+};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -25,7 +29,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
 pub(crate) const DISPLAYABLE_TRAIT_NAME: &str = "DISPLAYABLE";
-const DISPLAYABLE_REQUIREMENT_NAME: &str = "display";
+pub(crate) const DISPLAYABLE_REQUIREMENT_NAME: &str = "display";
 const TRAIT_THIS_NAME: &str = "This";
 
 /// Optional per-core-trait classifier recorded beside compiler-owned trait
@@ -72,6 +76,8 @@ pub(crate) enum CoreTraitKind {
 pub(crate) struct TraitEnvironment {
     definitions: Vec<ResolvedTraitDefinition>,
     ids_by_path: FxHashMap<InternedPath, TraitId>,
+    paths_by_id: FxHashMap<TraitId, Vec<InternedPath>>,
+    ids_by_canonical_identity: FxHashMap<CanonicalTraitIdentity, TraitId>,
     core_traits_by_name: FxHashMap<&'static str, TraitId>,
     core_trait_kinds: FxHashMap<TraitId, CoreTraitKind>,
     incompatible_traits: FxHashMap<TraitId, Vec<TraitId>>,
@@ -175,6 +181,10 @@ impl TraitEnvironment {
         };
 
         self.ids_by_path.insert(path, id);
+        self.paths_by_id
+            .entry(id)
+            .or_default()
+            .push(definition.canonical_path.clone());
         self.core_traits_by_name.insert(trait_name, id);
         self.definitions.push(definition);
         id
@@ -192,6 +202,18 @@ impl TraitEnvironment {
     ///      keeps `TraitId` as the only public handle.
     pub(crate) fn record_core_trait_kind(&mut self, trait_id: TraitId, kind: CoreTraitKind) {
         self.core_trait_kinds.insert(trait_id, kind);
+        let canonical_identity = match kind {
+            CoreTraitKind::Displayable => CanonicalCoreTraitIdentity::Displayable,
+            CoreTraitKind::Castable {
+                target,
+                fallibility,
+            } => CanonicalCoreTraitIdentity::Castable {
+                target,
+                fallibility,
+            },
+        };
+        self.ids_by_canonical_identity
+            .insert(CanonicalTraitIdentity::Core(canonical_identity), trait_id);
     }
 
     /// Records a symmetric incompatibility relation between two traits.
@@ -326,12 +348,94 @@ impl TraitEnvironment {
         let id = definition.id;
         self.ids_by_path
             .insert(definition.canonical_path.clone(), id);
+        self.paths_by_id
+            .entry(id)
+            .or_default()
+            .push(definition.canonical_path.clone());
         self.definitions.push(definition);
         None
     }
 
+    /// Registers another consumer-local spelling for an existing trait.
+    ///
+    /// Imported aliases share one canonical trait identity and one dense `TraitId`. Retaining
+    /// every bound path lets visibility and public-surface checks compare the exact local import
+    /// target without treating an alias as another trait definition.
+    pub(crate) fn register_path(
+        &mut self,
+        path: InternedPath,
+        trait_id: TraitId,
+    ) -> Result<(), CompilerError> {
+        if let Some(existing_id) = self.ids_by_path.get(&path) {
+            if *existing_id == trait_id {
+                return Ok(());
+            }
+
+            return Err(CompilerError::compiler_error(
+                "A trait path resolved to two different trait identities.",
+            ));
+        }
+
+        self.ids_by_path.insert(path.clone(), trait_id);
+        self.paths_by_id.entry(trait_id).or_default().push(path);
+        Ok(())
+    }
+
+    pub(crate) fn has_path(&self, trait_id: TraitId, path: &InternedPath) -> bool {
+        self.paths_by_id
+            .get(&trait_id)
+            .is_some_and(|paths| paths.contains(path))
+    }
+
+    pub(crate) fn paths_for(&self, trait_id: TraitId) -> &[InternedPath] {
+        self.paths_by_id
+            .get(&trait_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Joins one stable cross-module trait identity to its consumer-local dense handle.
+    pub(crate) fn register_canonical_identity(
+        &mut self,
+        identity: CanonicalTraitIdentity,
+        trait_id: TraitId,
+    ) -> Result<(), CompilerError> {
+        if let Some(existing_id) = self.ids_by_canonical_identity.get(&identity) {
+            if *existing_id == trait_id {
+                return Ok(());
+            }
+
+            return Err(CompilerError::compiler_error(
+                "A canonical trait identity resolved to two consumer-local trait definitions.",
+            ));
+        }
+
+        self.ids_by_canonical_identity.insert(identity, trait_id);
+        Ok(())
+    }
+
+    pub(crate) fn id_for_canonical_identity(
+        &self,
+        identity: &CanonicalTraitIdentity,
+    ) -> Option<TraitId> {
+        self.ids_by_canonical_identity.get(identity).copied()
+    }
+
+    pub(crate) fn canonical_identity_for_id(
+        &self,
+        trait_id: TraitId,
+    ) -> Option<&CanonicalTraitIdentity> {
+        self.ids_by_canonical_identity
+            .iter()
+            .find_map(|(identity, candidate)| (*candidate == trait_id).then_some(identity))
+    }
+
     pub(crate) fn get(&self, id: TraitId) -> Option<&ResolvedTraitDefinition> {
         self.definitions.get(id.0 as usize)
+    }
+
+    pub(crate) fn definitions(&self) -> impl Iterator<Item = &ResolvedTraitDefinition> {
+        self.definitions.iter()
     }
 
     pub(crate) fn id_for_path(&self, path: &InternedPath) -> Option<TraitId> {

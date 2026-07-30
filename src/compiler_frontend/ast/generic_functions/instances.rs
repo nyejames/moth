@@ -6,6 +6,7 @@
 //! `TypeId` arguments, not by rendered names or local import aliases.
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -29,6 +30,11 @@ pub(crate) struct GenericFunctionInstance {
 /// module-level AST node list where the specialized function body belongs.
 #[derive(Debug, Clone)]
 pub(crate) struct GenericFunctionInstantiationRequest {
+    /// Imported public contracts already carry their origin. Local requests receive either a
+    /// public origin or an artefact-scoped private identity before worklist canonicalisation.
+    pub(crate) declaration_identity: Option<GeneratedDeclarationIdentity>,
+    /// Ordered local evidence selections, canonicalized when the stable request is installed.
+    pub(crate) evidence: Box<[crate::compiler_frontend::traits::ids::TraitEvidenceId]>,
     pub(crate) key: GenericFunctionInstanceKey,
     pub(crate) instance_path: InternedPath,
     pub(crate) call_location: SourceLocation,

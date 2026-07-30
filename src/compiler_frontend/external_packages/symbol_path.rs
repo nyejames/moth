@@ -40,7 +40,7 @@ pub enum ExternalSymbolPathError {
 /// ordinary flat package symbol; multi-component paths are nested namespace symbols.
 /// WHY: the registry needs to store and look up symbols by their full path to support
 /// nested namespaces without flattening them into a single string.
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ExternalSymbolPath {
     components: Vec<String>,
 }

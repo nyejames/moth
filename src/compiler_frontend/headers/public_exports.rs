@@ -35,6 +35,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 };
 use crate::compiler_frontend::headers::types::{Header, HeaderExportMode};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::public_interface::SourceProviderImportSet;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -92,6 +93,7 @@ pub(super) fn build_public_exports(
     headers: &[Header],
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
+    source_provider_imports: &SourceProviderImportSet<'_>,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
     // Pass 1: collect public authored declarations for all root files.
@@ -107,12 +109,14 @@ pub(super) fn build_public_exports(
         module_symbols,
         resolver,
         external_package_registry,
+        source_provider_imports,
         string_table,
     )?;
     build_module_root_public_imports(
         module_symbols,
         resolver,
         external_package_registry,
+        source_provider_imports,
         string_table,
     )?;
 
@@ -184,6 +188,7 @@ fn build_source_package_public_imports(
     module_symbols: &mut ModuleSymbols,
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
+    source_provider_imports: &SourceProviderImportSet<'_>,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
     for (prefix, root_file) in resolver.source_package_public_surface_files() {
@@ -213,11 +218,12 @@ fn build_source_package_public_imports(
                 }
 
                 let export_name = public_export_name(import)?;
-                let target = resolve_public_export_import(
+                let target = resolve_public_export_import_or_provider(
                     module_symbols,
                     import,
                     &root_file_interned,
                     external_package_registry,
+                    source_provider_imports,
                     string_table,
                 )?;
 
@@ -302,6 +308,7 @@ fn build_module_root_public_imports(
     module_symbols: &mut ModuleSymbols,
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
+    source_provider_imports: &SourceProviderImportSet<'_>,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
     let root_sources: Vec<_> = module_symbols
@@ -354,11 +361,12 @@ fn build_module_root_public_imports(
             }
 
             let export_name = public_export_name(&import)?;
-            let target = resolve_public_export_import(
+            let target = resolve_public_export_import_or_provider(
                 module_symbols,
                 &import,
                 &root_source,
                 external_package_registry,
+                source_provider_imports,
                 string_table,
             )?;
 
@@ -376,6 +384,30 @@ fn build_module_root_public_imports(
     }
 
     Ok(())
+}
+
+fn resolve_public_export_import_or_provider(
+    module_symbols: &ModuleSymbols,
+    import: &crate::compiler_frontend::headers::types::FileImport,
+    exporting_source: &InternedPath,
+    external_package_registry: &ExternalPackageRegistry,
+    source_provider_imports: &SourceProviderImportSet<'_>,
+    string_table: &mut StringTable,
+) -> PublicExportDataResult<PublicExportTarget> {
+    if source_provider_imports
+        .resolve(exporting_source, import, string_table)
+        .is_some()
+    {
+        return Ok(PublicExportTarget::Source(import.provider.path.clone()));
+    }
+
+    resolve_public_export_import(
+        module_symbols,
+        import,
+        exporting_source,
+        external_package_registry,
+        string_table,
+    )
 }
 
 fn reject_public_export_target_if_source_receiver_method(

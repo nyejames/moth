@@ -99,12 +99,20 @@ struct DependencyGraph<'a> {
     source_order_by_path: FxHashMap<InternedPath, usize>,
     ordered_paths: Vec<InternedPath>,
     source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
+    provider_interface_paths: &'a FxHashMap<
+        InternedPath,
+        crate::compiler_frontend::public_interface::PublicDeclarationRecord,
+    >,
 }
 
 impl<'a> DependencyGraph<'a> {
     fn from_headers(
         headers: Vec<Header>,
         source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
+        provider_interface_paths: &'a FxHashMap<
+            InternedPath,
+            crate::compiler_frontend::public_interface::PublicDeclarationRecord,
+        >,
         _string_table: &StringTable,
     ) -> Self {
         let mut headers_by_path: FxHashMap<InternedPath, Header> =
@@ -127,6 +135,7 @@ impl<'a> DependencyGraph<'a> {
             source_order_by_path,
             ordered_paths,
             source_package_public_exports,
+            provider_interface_paths,
         }
     }
 
@@ -150,6 +159,11 @@ impl<'a> DependencyGraph<'a> {
         if self.headers_by_path.contains_key(requested_path) {
             return Some(ResolvedGraphPath::Header(requested_path.to_owned()));
         }
+        if self.provider_interface_paths.contains_key(requested_path) {
+            return Some(ResolvedGraphPath::ProviderInterface(
+                requested_path.to_owned(),
+            ));
+        }
 
         // Source-backed package public imports can use a public prefix path that differs from the
         // concrete root-file header path. Accept those public edges without treating them as
@@ -170,7 +184,8 @@ impl<'a> DependencyGraph<'a> {
     ) -> Option<usize> {
         let resolved_path = match self.resolve_requested_path(requested_path, string_table)? {
             ResolvedGraphPath::Header(path) => path,
-            ResolvedGraphPath::SourcePackagePublicExport(_) => return None,
+            ResolvedGraphPath::ProviderInterface(_)
+            | ResolvedGraphPath::SourcePackagePublicExport(_) => return None,
         };
 
         self.source_order_by_path.get(&resolved_path).copied()
@@ -231,6 +246,13 @@ impl<'a> DependencyGraph<'a> {
                     kind: DependencyEdgeKind::SourcePackagePublicExport,
                 }
             }
+            Some(ResolvedGraphPath::ProviderInterface(resolved_path)) => ResolvedDependencyEdge {
+                requested_path: requested_path.to_owned(),
+                resolved_path: Some(resolved_path),
+                location,
+                source_order,
+                kind: DependencyEdgeKind::ProviderInterface,
+            },
             None if self.is_same_file_symbol_hint(requested_path, &header.source_file) => {
                 ResolvedDependencyEdge {
                     requested_path: requested_path.to_owned(),
@@ -295,6 +317,7 @@ struct ResolvedDependencyEdge {
 
 enum DependencyEdgeKind {
     GraphHeader,
+    ProviderInterface,
     SourcePackagePublicExport,
     SameFileSymbolHint,
     Missing,
@@ -302,6 +325,7 @@ enum DependencyEdgeKind {
 
 enum ResolvedGraphPath {
     Header(InternedPath),
+    ProviderInterface(InternedPath),
     SourcePackagePublicExport(InternedPath),
 }
 
@@ -363,6 +387,7 @@ pub fn resolve_module_dependencies(
         let graph = DependencyGraph::from_headers(
             top_level_headers,
             &module_symbols.source_package_public_exports,
+            &import_environment.imported_declarations_by_local_path,
             string_table,
         );
         let mut diagnostic_bag = DiagnosticBag::new();
@@ -448,7 +473,8 @@ fn visit_node(
 
     let resolved_path = match resolved_graph_path {
         ResolvedGraphPath::Header(path) => path,
-        ResolvedGraphPath::SourcePackagePublicExport(path) => {
+        ResolvedGraphPath::ProviderInterface(path)
+        | ResolvedGraphPath::SourcePackagePublicExport(path) => {
             tracker.visited.insert(path);
             return Ok(());
         }
@@ -526,7 +552,7 @@ fn visit_dependency_edge(
             )
         }
 
-        DependencyEdgeKind::SourcePackagePublicExport => {
+        DependencyEdgeKind::ProviderInterface | DependencyEdgeKind::SourcePackagePublicExport => {
             if let Some(resolved_path) = edge.resolved_path {
                 tracker.visited.insert(resolved_path);
             }
