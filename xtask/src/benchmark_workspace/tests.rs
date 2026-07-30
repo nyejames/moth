@@ -1,7 +1,8 @@
 use super::*;
 use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest,
-    BenchmarkManifestError, BenchmarkRunner, BenchmarkWorkload, CliBenchmarkCommand,
+    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
+    BenchmarkManifest, BenchmarkManifestError, BenchmarkRunner, BenchmarkWorkload,
+    CliBenchmarkCommand,
 };
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -11,6 +12,7 @@ fn make_workload(id: &str, entry: &str, entry_kind: BenchmarkEntryKind) -> Bench
         id: id.to_owned(),
         entry: PathBuf::from(entry),
         entry_kind,
+        fingerprint_mode: BenchmarkFingerprintMode::FullTree,
         fingerprint_roots: vec![PathBuf::from(entry)],
         fingerprint_excludes: Vec::new(),
     }

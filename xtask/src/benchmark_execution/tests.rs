@@ -11,8 +11,9 @@ use super::{
 };
 use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric};
 use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest, BenchmarkRunner,
-    BenchmarkWorkload, CliBenchmarkCommand, FrontendBenchmarkProfile,
+    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
+    BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload, CliBenchmarkCommand,
+    FrontendBenchmarkProfile,
 };
 use crate::benchmark_status::BenchmarkDiagnosticStatus;
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
@@ -613,6 +614,7 @@ impl CliFixture {
             } else {
                 BenchmarkEntryKind::Directory
             },
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: vec![PathBuf::from(entry)],
             fingerprint_excludes: Vec::new(),
         }

@@ -1,8 +1,9 @@
 use super::select_profile_cases;
 use crate::benchmark_execution::BenchmarkExecutionContext;
 use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest, BenchmarkRunner,
-    BenchmarkWorkload, CliBenchmarkCommand, FrontendBenchmarkProfile,
+    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
+    BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload, CliBenchmarkCommand,
+    FrontendBenchmarkProfile,
 };
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use std::path::PathBuf;
@@ -35,6 +36,7 @@ fn manifest() -> BenchmarkManifest {
             id: "fixture".to_owned(),
             entry: "fixture.moth".into(),
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: vec!["fixture.moth".into()],
             fingerprint_excludes: Vec::new(),
         }],
@@ -77,6 +79,7 @@ fn observation_and_samply_receive_one_resolved_invocation() {
             id: "fixture".to_owned(),
             entry: "fixture.moth".into(),
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: vec!["fixture.moth".into()],
             fingerprint_excludes: Vec::new(),
         }],

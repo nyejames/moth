@@ -13,7 +13,19 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const BENCHMARK_MANIFEST_PATH: &str = "benchmarks/manifest.toml";
-pub(crate) const BENCHMARK_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub(crate) const BENCHMARK_MANIFEST_SCHEMA_VERSION: u32 = 2;
+
+/// Authored fingerprint boundary mode for one workload.
+///
+/// `full_tree` means the complete entry file or directory forms the authored
+/// source boundary, minus explicit generated-output excludes. `partitioned`
+/// means an author deliberately lists disjoint roots under one directory entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum BenchmarkFingerprintMode {
+    FullTree,
+    Partitioned,
+}
 
 /// A fully validated benchmark inventory in manifest order.
 #[derive(Debug, Clone)]
@@ -40,6 +52,7 @@ pub(crate) struct BenchmarkWorkload {
     pub(crate) id: String,
     pub(crate) entry: PathBuf,
     pub(crate) entry_kind: BenchmarkEntryKind,
+    pub(crate) fingerprint_mode: BenchmarkFingerprintMode,
     pub(crate) fingerprint_roots: Vec<PathBuf>,
     pub(crate) fingerprint_excludes: Vec<PathBuf>,
 }
@@ -219,6 +232,7 @@ struct RawBenchmarkManifest {
 struct RawBenchmarkWorkload {
     id: String,
     entry: String,
+    fingerprint_mode: BenchmarkFingerprintMode,
     fingerprint_roots: Vec<String>,
     fingerprint_excludes: Vec<String>,
 }
@@ -415,19 +429,21 @@ fn validate_manifest(
             )?;
             fingerprint_roots.push(root_path);
         }
+
+        // Validate fingerprint roots against the declared boundary mode.
+        validate_fingerprint_mode(
+            manifest_path,
+            &raw_workload.id,
+            raw_workload.fingerprint_mode,
+            &entry,
+            &fingerprint_roots,
+        )?;
+
         if fingerprint_roots.is_empty() {
             return Err(invalid(
                 manifest_path,
                 format!("workload '{}'", raw_workload.id),
                 "fingerprint_roots must not be empty",
-            ));
-        }
-
-        if !entry_is_covered(&entry.canonical, &fingerprint_roots) {
-            return Err(invalid(
-                manifest_path,
-                format!("workload '{}'", raw_workload.id),
-                "entry is not covered by any fingerprint root",
             ));
         }
 
@@ -439,6 +455,7 @@ fn validate_manifest(
                 &raw_workload.id,
                 &exclude,
                 &fingerprint_roots,
+                &fingerprint_excludes,
             )?;
             fingerprint_excludes.push(exclude_path);
         }
@@ -451,6 +468,7 @@ fn validate_manifest(
             } else {
                 BenchmarkEntryKind::File
             },
+            fingerprint_mode: raw_workload.fingerprint_mode,
             fingerprint_roots: fingerprint_roots
                 .into_iter()
                 .map(|root| root.relative)
@@ -716,6 +734,7 @@ fn validate_fingerprint_exclude(
     workload_id: &str,
     authored_path: &str,
     fingerprint_roots: &[ValidatedWorkloadPath],
+    seen_excludes: &[PathBuf],
 ) -> Result<PathBuf, BenchmarkManifestError> {
     const FIELD: &str = "fingerprint exclude";
 
@@ -725,6 +744,28 @@ fn validate_fingerprint_exclude(
         FIELD,
         authored_path,
     )?;
+
+    // Reject duplicate excludes.
+    if seen_excludes.iter().any(|seen| seen == &relative_path) {
+        return Err(invalid(
+            manifest_path,
+            format!("workload '{workload_id}'"),
+            format!("duplicate fingerprint exclude '{authored_path}'"),
+        ));
+    }
+
+    // Reject an exclude equal to a declared root.
+    if fingerprint_roots
+        .iter()
+        .any(|root| root.relative == relative_path)
+    {
+        return Err(invalid(
+            manifest_path,
+            format!("workload '{workload_id}'"),
+            format!("fingerprint exclude '{authored_path}' is equal to a declared root"),
+        ));
+    }
+
     let containing_root = fingerprint_roots
         .iter()
         .filter(|root| {
@@ -742,6 +783,23 @@ fn validate_fingerprint_exclude(
             ),
         ));
     };
+
+    // Reject an exclude that contains another declared root.
+    for root in fingerprint_roots {
+        if root.relative != containing_root.relative
+            && root.relative.starts_with(&relative_path)
+            && relative_path != root.relative
+        {
+            return Err(invalid(
+                manifest_path,
+                format!("workload '{workload_id}'"),
+                format!(
+                    "fingerprint exclude '{authored_path}' contains another declared root '{}'",
+                    root.relative.display()
+                ),
+            ));
+        }
+    }
 
     let absolute_path = repository_root.join(&relative_path);
     let existing_path = nearest_existing_path(&absolute_path).map_err(|source| {
@@ -795,12 +853,117 @@ fn workload_path_error(
     }
 }
 
-fn entry_is_covered(entry: &Path, roots: &[ValidatedWorkloadPath]) -> bool {
-    roots.iter().any(|root| {
-        root.canonical == entry
-            || root.canonical.starts_with(entry)
-            || entry.starts_with(&root.canonical)
-    })
+/// Validate fingerprint roots against the declared boundary mode.
+///
+/// `full_tree` requires exactly one root that resolves to the entry itself.
+/// `partitioned` requires every root to be a strict descendant of the entry
+/// directory and rejects overlapping or duplicate roots.
+fn validate_fingerprint_mode(
+    manifest_path: &Path,
+    workload_id: &str,
+    mode: BenchmarkFingerprintMode,
+    entry: &ValidatedWorkloadPath,
+    roots: &[ValidatedWorkloadPath],
+) -> Result<(), BenchmarkManifestError> {
+    match mode {
+        BenchmarkFingerprintMode::FullTree => {
+            validate_full_tree(manifest_path, workload_id, entry, roots)
+        }
+        BenchmarkFingerprintMode::Partitioned => {
+            validate_partitioned(manifest_path, workload_id, entry, roots)
+        }
+    }
+}
+
+fn validate_full_tree(
+    manifest_path: &Path,
+    workload_id: &str,
+    entry: &ValidatedWorkloadPath,
+    roots: &[ValidatedWorkloadPath],
+) -> Result<(), BenchmarkManifestError> {
+    if roots.len() != 1 {
+        return Err(invalid(
+            manifest_path,
+            format!("workload '{workload_id}'"),
+            "full_tree mode requires exactly one fingerprint root",
+        ));
+    }
+
+    let root = &roots[0];
+    if root.canonical != entry.canonical {
+        return Err(invalid(
+            manifest_path,
+            format!("workload '{workload_id}'"),
+            "full_tree mode requires the fingerprint root to resolve to the entry",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_partitioned(
+    manifest_path: &Path,
+    workload_id: &str,
+    entry: &ValidatedWorkloadPath,
+    roots: &[ValidatedWorkloadPath],
+) -> Result<(), BenchmarkManifestError> {
+    if !entry.is_directory {
+        return Err(invalid(
+            manifest_path,
+            format!("workload '{workload_id}'"),
+            "partitioned mode requires a directory entry",
+        ));
+    }
+
+    if roots.is_empty() {
+        return Err(invalid(
+            manifest_path,
+            format!("workload '{workload_id}'"),
+            "partitioned mode requires at least one fingerprint root",
+        ));
+    }
+
+    // Reject duplicate logical or canonical roots.
+    for (i, left) in roots.iter().enumerate() {
+        for (j, right) in roots.iter().enumerate().skip(i + 1) {
+            if left.relative == right.relative || left.canonical == right.canonical {
+                return Err(invalid(
+                    manifest_path,
+                    format!("workload '{workload_id}'"),
+                    "partitioned mode rejects duplicate fingerprint roots",
+                ));
+            }
+        }
+    }
+
+    for root in roots {
+        // Every root must be a strict descendant of the entry directory.
+        if root.canonical == entry.canonical || !root.canonical.starts_with(&entry.canonical) {
+            return Err(invalid(
+                manifest_path,
+                format!("workload '{workload_id}'"),
+                "partitioned mode requires every root to be a strict descendant of the entry directory",
+            ));
+        }
+
+        // Reject root pairs where either root contains the other.
+        for other in roots {
+            if other.relative == root.relative {
+                continue;
+            }
+            if root.canonical.starts_with(&other.canonical)
+                || other.canonical.starts_with(&root.canonical)
+            {
+                return Err(invalid(
+                    manifest_path,
+                    format!("workload '{workload_id}'"),
+                    "partitioned mode rejects ancestor or descendant root pairs",
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn nearest_existing_path(path: &Path) -> io::Result<PathBuf> {

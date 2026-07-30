@@ -2,7 +2,6 @@ use super::*;
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use std::fs::{self, File};
 use tempfile::tempdir;
-
 fn write_manifest(repository_root: &Path, contents: &str) -> PathBuf {
     let manifest_path = repository_root.join("manifest.toml");
     fs::write(&manifest_path, contents).expect("manifest should be writable");
@@ -19,11 +18,12 @@ fn create_entry(repository_root: &Path, relative_path: &str) {
 
 fn minimal_manifest(entry: &str, case_id: &str) -> String {
     format!(
-        r#"schema = 1
+        r#"schema = 2
 
 [[workload]]
 id = "workload"
 entry = "{entry}"
+fingerprint_mode = "full_tree"
 fingerprint_roots = ["{entry}"]
 fingerprint_excludes = []
 
@@ -44,17 +44,19 @@ args = []
 
 fn two_workload_manifest(first_entry: &str, second_entry: &str) -> String {
     format!(
-        r#"schema = 1
+        r#"schema = 2
 
 [[workload]]
 id = "first_workload"
 entry = "{first_entry}"
+fingerprint_mode = "full_tree"
 fingerprint_roots = ["{first_entry}"]
 fingerprint_excludes = []
 
 [[workload]]
 id = "second_workload"
 entry = "{second_entry}"
+fingerprint_mode = "full_tree"
 fingerprint_roots = ["{second_entry}"]
 fingerprint_excludes = []
 
@@ -88,17 +90,19 @@ fn valid_manifest_preserves_source_order_and_resolves_workloads() {
     let directory = tempdir().expect("temporary repository should exist");
     create_entry(directory.path(), "first.moth");
     create_entry(directory.path(), "second.moth");
-    let contents = r#"schema = 1
+    let contents = r#"schema = 2
 
 [[workload]]
 id = "first_workload"
 entry = "first.moth"
+fingerprint_mode = "full_tree"
 fingerprint_roots = ["first.moth"]
 fingerprint_excludes = []
 
 [[workload]]
 id = "second_workload"
 entry = "second.moth"
+fingerprint_mode = "full_tree"
 fingerprint_roots = ["second.moth"]
 fingerprint_excludes = []
 
@@ -212,6 +216,7 @@ struct ExpectedWorkload {
     id: &'static str,
     entry: &'static str,
     entry_kind: BenchmarkEntryKind,
+    fingerprint_mode: BenchmarkFingerprintMode,
     roots: &'static [&'static str],
     excludes: &'static [&'static str],
 }
@@ -241,6 +246,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "root_single_file",
             entry: "benchmark-root-single-file.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmark-root-single-file.moth"],
             excludes: &[],
         },
@@ -248,6 +254,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "speed_test",
             entry: "benchmarks/speed-test.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/speed-test.moth"],
             excludes: &[],
         },
@@ -255,6 +262,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "docs",
             entry: "docs",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::Partitioned,
             roots: &["docs/config.moth", "docs/src"],
             excludes: &[],
         },
@@ -262,6 +270,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "template_stress",
             entry: "benchmarks/template-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/template-stress.moth"],
             excludes: &[],
         },
@@ -269,6 +278,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "type_stress",
             entry: "benchmarks/type-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/type-stress.moth"],
             excludes: &[],
         },
@@ -276,6 +286,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "fold_stress",
             entry: "benchmarks/fold-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/fold-stress.moth"],
             excludes: &[],
         },
@@ -283,6 +294,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "pattern_stress",
             entry: "benchmarks/pattern-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/pattern-stress.moth"],
             excludes: &[],
         },
@@ -290,6 +302,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "collection_stress",
             entry: "benchmarks/collection-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/collection-stress.moth"],
             excludes: &[],
         },
@@ -297,6 +310,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "environment_stress",
             entry: "benchmarks/environment-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/environment-stress.moth"],
             excludes: &[],
         },
@@ -304,6 +318,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "one_module_kitchen_sink",
             entry: "benchmarks/adversarial/one-module-kitchen-sink.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/one-module-kitchen-sink.moth"],
             excludes: &[],
         },
@@ -311,6 +326,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "deep_scope_churn",
             entry: "benchmarks/adversarial/deep-scope-churn.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/deep-scope-churn.moth"],
             excludes: &[],
         },
@@ -318,6 +334,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "template_render_plan_churn",
             entry: "benchmarks/adversarial/template-render-plan-churn.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/template-render-plan-churn.moth"],
             excludes: &[],
         },
@@ -325,6 +342,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "constant_dag_churn",
             entry: "benchmarks/adversarial/constant-dag-churn.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/constant-dag-churn.moth"],
             excludes: &[],
         },
@@ -332,6 +350,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "expression_rpn_churn",
             entry: "benchmarks/adversarial/expression-rpn-churn.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/expression-rpn-churn.moth"],
             excludes: &[],
         },
@@ -339,6 +358,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "generic_trait_churn",
             entry: "benchmarks/adversarial/generic-trait-churn.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/generic-trait-churn.moth"],
             excludes: &[],
         },
@@ -346,6 +366,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "collection_map_borrow_churn",
             entry: "benchmarks/adversarial/collection-map-borrow-churn.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/collection-map-borrow-churn.moth"],
             excludes: &[],
         },
@@ -353,6 +374,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "module_graph",
             entry: "benchmarks/module-graph",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/module-graph"],
             excludes: &[
                 "benchmarks/module-graph/dev",
@@ -363,6 +385,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "import_fanout",
             entry: "benchmarks/import-fanout",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/import-fanout"],
             excludes: &[
                 "benchmarks/import-fanout/dev",
@@ -373,6 +396,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "external_js_imports",
             entry: "benchmarks/external-js-imports",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/external-js-imports"],
             excludes: &[
                 "benchmarks/external-js-imports/dev",
@@ -383,6 +407,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "module_root_stress",
             entry: "benchmarks/module-root-stress",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/module-root-stress"],
             excludes: &[
                 "benchmarks/module-root-stress/dev",
@@ -393,6 +418,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "import_external_churn",
             entry: "benchmarks/adversarial/import-external-churn",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/import-external-churn"],
             excludes: &[
                 "benchmarks/adversarial/import-external-churn/dev",
@@ -403,6 +429,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "borrow_stress",
             entry: "benchmarks/borrow-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/borrow-stress.moth"],
             excludes: &[],
         },
@@ -410,6 +437,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "module_root_role_mix",
             entry: "benchmarks/module-root-role-mix",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/module-root-role-mix"],
             excludes: &[
                 "benchmarks/module-root-role-mix/scratch",
@@ -420,6 +448,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "tiny_one_file",
             entry: "benchmarks/parallelism/tiny-one-file",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/tiny-one-file"],
             excludes: &[
                 "benchmarks/parallelism/tiny-one-file/dev",
@@ -430,6 +459,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "tiny_two_files",
             entry: "benchmarks/parallelism/tiny-two-files",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/tiny-two-files"],
             excludes: &[
                 "benchmarks/parallelism/tiny-two-files/dev",
@@ -440,6 +470,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "tiny_seven_files",
             entry: "benchmarks/parallelism/tiny-seven-files",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/tiny-seven-files"],
             excludes: &[
                 "benchmarks/parallelism/tiny-seven-files/dev",
@@ -450,6 +481,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "tiny_eight_files",
             entry: "benchmarks/parallelism/tiny-eight-files",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/tiny-eight-files"],
             excludes: &[
                 "benchmarks/parallelism/tiny-eight-files/dev",
@@ -460,6 +492,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "many_tiny_files",
             entry: "benchmarks/parallelism/many-tiny-files",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/many-tiny-files"],
             excludes: &[
                 "benchmarks/parallelism/many-tiny-files/dev",
@@ -470,6 +503,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "many_medium_files",
             entry: "benchmarks/parallelism/many-medium-files",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/many-medium-files"],
             excludes: &[
                 "benchmarks/parallelism/many-medium-files/dev",
@@ -480,6 +514,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "many_markdown_assets",
             entry: "benchmarks/parallelism/many-markdown-assets",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/many-markdown-assets"],
             excludes: &[
                 "benchmarks/parallelism/many-markdown-assets/dev",
@@ -490,6 +525,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "many_modules_one_file_each",
             entry: "benchmarks/parallelism/many-modules-one-file-each",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/many-modules-one-file-each"],
             excludes: &[
                 "benchmarks/parallelism/many-modules-one-file-each/dev",
@@ -500,6 +536,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             id: "few_modules_many_files_each",
             entry: "benchmarks/parallelism/few-modules-many-files-each",
             entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/parallelism/few-modules-many-files-each"],
             excludes: &[
                 "benchmarks/parallelism/few-modules-many-files-each/dev",
@@ -923,6 +960,7 @@ fn repository_manifest_has_complete_ordered_authority() {
         assert_eq!(actual.id, expected.id);
         assert_eq!(actual.entry, PathBuf::from(expected.entry));
         assert_eq!(actual.entry_kind, expected.entry_kind);
+        assert_eq!(actual.fingerprint_mode, expected.fingerprint_mode);
         assert_eq!(
             actual.fingerprint_roots,
             expected.roots.iter().map(PathBuf::from).collect::<Vec<_>>()
@@ -1209,6 +1247,7 @@ fn missing_custom_named_exclude_under_directory_root_loads() {
     let directory = tempdir().expect("temporary repository should exist");
     create_entry(directory.path(), "project/main.moth");
     let contents = minimal_manifest("project/main.moth", "first_case")
+        .replace(r#"entry = "project/main.moth""#, r#"entry = "project""#)
         .replace(
             "fingerprint_roots = [\"project/main.moth\"]",
             "fingerprint_roots = [\"project\"]",
@@ -1232,6 +1271,7 @@ fn exclude_equal_to_root_or_below_file_root_fails() {
     let directory = tempdir().expect("temporary repository should exist");
     create_entry(directory.path(), "project/main.moth");
     let equal_root = minimal_manifest("project/main.moth", "first_case")
+        .replace(r#"entry = "project/main.moth""#, r#"entry = "project""#)
         .replace(
             "fingerprint_roots = [\"project/main.moth\"]",
             "fingerprint_roots = [\"project\"]",
@@ -1246,7 +1286,7 @@ fn exclude_equal_to_root_or_below_file_root_fails() {
     assert!(
         equal_root_error
             .to_string()
-            .contains("must be a strict descendant of a declared directory root")
+            .contains("is equal to a declared root")
     );
 
     let below_file_root = minimal_manifest("project/main.moth", "first_case").replace(
@@ -1274,6 +1314,7 @@ fn missing_exclude_through_symlink_outside_root_fails() {
     symlink(outside.path(), directory.path().join("project/output-link"))
         .expect("symlink should be creatable");
     let contents = minimal_manifest("project/main.moth", "first_case")
+        .replace(r#"entry = "project/main.moth""#, r#"entry = "project""#)
         .replace(
             "fingerprint_roots = [\"project/main.moth\"]",
             "fingerprint_roots = [\"project\"]",
@@ -1357,4 +1398,239 @@ fn workload_path_io_error_renders_complete_context() {
     assert!(rendered.contains("workload 'workload'"));
     assert!(rendered.contains("entry 'missing.moth'"));
     assert!(rendered.contains(&source.to_string()));
+}
+
+// ------------------------
+//  Phase 3: Fingerprint boundary mode tests
+// ------------------------
+
+fn full_tree_manifest(entry: &str, case_id: &str) -> String {
+    format!(
+        r#"schema = 2
+
+[[workload]]
+id = "workload"
+entry = "{entry}"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["{entry}"]
+fingerprint_excludes = []
+
+[[case]]
+id = "{case_id}"
+workload = "workload"
+group = "core"
+quick = false
+expectation = "clean"
+
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+"#
+    )
+}
+
+fn partitioned_manifest(entry: &str, roots: &[&str], case_id: &str) -> String {
+    let roots_str = roots
+        .iter()
+        .map(|r| format!("\"{r}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"schema = 2
+
+[[workload]]
+id = "workload"
+entry = "{entry}"
+fingerprint_mode = "partitioned"
+fingerprint_roots = [{roots_str}]
+fingerprint_excludes = []
+
+[[case]]
+id = "{case_id}"
+workload = "workload"
+group = "core"
+quick = false
+expectation = "clean"
+
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+"#
+    )
+}
+
+#[test]
+fn file_full_tree_exact_root_accepted() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "fixture.moth");
+    let path = write_manifest(
+        directory.path(),
+        &full_tree_manifest("fixture.moth", "case"),
+    );
+    load_manifest_at(&path, directory.path()).expect("file full-tree should load");
+}
+
+#[test]
+fn file_full_tree_extra_root_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "fixture.moth");
+    create_entry(directory.path(), "other.moth");
+    let contents = full_tree_manifest("fixture.moth", "case").replace(
+        "fingerprint_roots = [\"fixture.moth\"]",
+        "fingerprint_roots = [\"fixture.moth\", \"other.moth\"]",
+    );
+    let path = write_manifest(directory.path(), &contents);
+    load_manifest_at(&path, directory.path())
+        .expect_err("file full-tree with extra root should fail");
+}
+
+#[test]
+fn file_full_tree_exclude_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "fixture.moth");
+    let contents = full_tree_manifest("fixture.moth", "case").replace(
+        "fingerprint_excludes = []",
+        "fingerprint_excludes = [\"fixture.moth\"]",
+    );
+    let path = write_manifest(directory.path(), &contents);
+    load_manifest_at(&path, directory.path())
+        .expect_err("file full-tree with exclude equal to root should fail");
+}
+
+#[test]
+fn directory_full_tree_exact_entry_root_accepted() {
+    let directory = tempdir().expect("temporary repository should exist");
+    fs::create_dir_all(directory.path().join("project")).expect("directory should be creatable");
+    create_entry(directory.path(), "project/main.moth");
+    let path = write_manifest(directory.path(), &full_tree_manifest("project", "case"));
+    load_manifest_at(&path, directory.path()).expect("directory full-tree should load");
+}
+
+#[test]
+fn directory_full_tree_nested_only_root_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    fs::create_dir_all(directory.path().join("project")).expect("directory should be creatable");
+    create_entry(directory.path(), "project/main.moth");
+    let contents = full_tree_manifest("project", "case").replace(
+        "fingerprint_roots = [\"project\"]",
+        "fingerprint_roots = [\"project/main.moth\"]",
+    );
+    let path = write_manifest(directory.path(), &contents);
+    load_manifest_at(&path, directory.path())
+        .expect_err("directory full-tree with nested-only root should fail");
+}
+
+#[test]
+fn partitioned_file_entry_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "fixture.moth");
+    let path = write_manifest(
+        directory.path(),
+        &partitioned_manifest("fixture.moth", &["fixture.moth"], "case"),
+    );
+    load_manifest_at(&path, directory.path()).expect_err("partitioned file entry should fail");
+}
+
+#[test]
+fn partitioned_disjoint_roots_accepted() {
+    let directory = tempdir().expect("temporary repository should exist");
+    fs::create_dir_all(directory.path().join("project")).expect("directory should be creatable");
+    create_entry(directory.path(), "project/config.moth");
+    create_entry(directory.path(), "project/src/main.moth");
+    let path = write_manifest(
+        directory.path(),
+        &partitioned_manifest("project", &["project/config.moth", "project/src"], "case"),
+    );
+    load_manifest_at(&path, directory.path()).expect("partitioned disjoint roots should load");
+}
+
+#[test]
+fn partitioned_root_outside_entry_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "outside.moth");
+    fs::create_dir_all(directory.path().join("project")).expect("directory should be creatable");
+    let path = write_manifest(
+        directory.path(),
+        &partitioned_manifest("project", &["outside.moth"], "case"),
+    );
+    load_manifest_at(&path, directory.path())
+        .expect_err("partitioned root outside entry should fail");
+}
+
+#[test]
+fn partitioned_duplicate_roots_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    fs::create_dir_all(directory.path().join("project")).expect("directory should be creatable");
+    create_entry(directory.path(), "project/main.moth");
+    let path = write_manifest(
+        directory.path(),
+        &partitioned_manifest(
+            "project",
+            &["project/main.moth", "project/main.moth"],
+            "case",
+        ),
+    );
+    load_manifest_at(&path, directory.path()).expect_err("partitioned duplicate roots should fail");
+}
+
+#[test]
+fn partitioned_ancestor_descendant_roots_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    fs::create_dir_all(directory.path().join("project/src/nested"))
+        .expect("directory should be creatable");
+    create_entry(directory.path(), "project/src/main.moth");
+    let path = write_manifest(
+        directory.path(),
+        &partitioned_manifest("project", &["project/src", "project/src/nested"], "case"),
+    );
+    load_manifest_at(&path, directory.path())
+        .expect_err("partitioned ancestor/descendant roots should fail");
+}
+
+#[test]
+fn exclude_containing_another_root_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    fs::create_dir_all(directory.path().join("project/src"))
+        .expect("directory should be creatable");
+    create_entry(directory.path(), "project/config.moth");
+    create_entry(directory.path(), "project/src/main.moth");
+    let contents = partitioned_manifest("project", &["project/config.moth", "project/src"], "case")
+        .replace(
+            "fingerprint_excludes = []",
+            "fingerprint_excludes = [\"project/src\"]",
+        );
+    let path = write_manifest(directory.path(), &contents);
+    load_manifest_at(&path, directory.path())
+        .expect_err("exclude containing another root should fail");
+}
+
+#[test]
+fn exclude_under_no_directory_root_rejected() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "fixture.moth");
+    let contents = full_tree_manifest("fixture.moth", "case").replace(
+        "fingerprint_excludes = []",
+        "fingerprint_excludes = [\"other\"]",
+    );
+    let path = write_manifest(directory.path(), &contents);
+    load_manifest_at(&path, directory.path())
+        .expect_err("exclude under no directory root should fail");
+}
+
+#[test]
+fn non_existent_generated_descendant_exclude_accepted() {
+    let directory = tempdir().expect("temporary repository should exist");
+    fs::create_dir_all(directory.path().join("project")).expect("directory should be creatable");
+    create_entry(directory.path(), "project/main.moth");
+    let contents = full_tree_manifest("project", "case")
+        .replace(r#"entry = "project""#, r#"entry = "project""#)
+        .replace(
+            "fingerprint_excludes = []",
+            "fingerprint_excludes = [\"project/dev\"]",
+        );
+    let path = write_manifest(directory.path(), &contents);
+    load_manifest_at(&path, directory.path())
+        .expect("non-existent generated descendant exclude should be accepted");
 }

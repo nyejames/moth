@@ -3,7 +3,8 @@
 use super::*;
 use crate::bench_types::{BenchmarkCaseObservations, BenchmarkCaseResult, BenchmarkComparison};
 use crate::benchmark_manifest::{
-    BenchmarkEntryKind, BenchmarkExpectation, CliBenchmarkCommand, FrontendBenchmarkProfile,
+    BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode, CliBenchmarkCommand,
+    FrontendBenchmarkProfile,
 };
 use std::fs;
 use tempfile::{TempDir, tempdir};
@@ -58,6 +59,7 @@ fn manifest(
             } else {
                 BenchmarkEntryKind::Directory
             },
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: roots.iter().map(PathBuf::from).collect(),
             fingerprint_excludes: excludes.iter().map(PathBuf::from).collect(),
         }],
@@ -534,6 +536,7 @@ fn bulk_api_preserves_manifest_workload_order() {
                 id: "first".to_owned(),
                 entry: "first.moth".into(),
                 entry_kind: BenchmarkEntryKind::File,
+                fingerprint_mode: BenchmarkFingerprintMode::FullTree,
                 fingerprint_roots: vec!["first.moth".into()],
                 fingerprint_excludes: vec![],
             },
@@ -541,6 +544,7 @@ fn bulk_api_preserves_manifest_workload_order() {
                 id: "second".to_owned(),
                 entry: "second.moth".into(),
                 entry_kind: BenchmarkEntryKind::File,
+                fingerprint_mode: BenchmarkFingerprintMode::FullTree,
                 fingerprint_roots: vec!["second.moth".into()],
                 fingerprint_excludes: vec![],
             },
@@ -608,6 +612,6 @@ fn versioned_fingerprint_has_stable_hex_encoding() {
 
     assert_eq!(
         fingerprint(&manifest).to_string(),
-        "7c690422fa4ffc640620ee17d5928c0b"
+        "ace848d733d762a176f3563329c7008a"
     );
 }

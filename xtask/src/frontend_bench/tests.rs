@@ -3,8 +3,8 @@ use moth::benchmarking::{
 };
 
 use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest, BenchmarkRunner,
-    BenchmarkWorkload, FrontendBenchmarkProfile,
+    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
+    BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload, FrontendBenchmarkProfile,
 };
 use crate::frontend_bench::{report_to_observations, run_one_frontend_case};
 
@@ -109,6 +109,7 @@ fn frontend_case_uses_typed_dev_profile_and_workload_entry() {
             id: "fixture".to_string(),
             entry: "fixture".into(),
             entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: vec!["fixture".into()],
             fingerprint_excludes: vec![],
         }],

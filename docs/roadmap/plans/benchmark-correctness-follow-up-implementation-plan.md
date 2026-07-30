@@ -31,13 +31,13 @@ WORK_ID: bench-followup
 WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
 BASE_REVISION: 9af62e5a9
 STATUS: active
-CURRENT_SLICE: Phase 2 - detect repository mutation and fix persistence ordering
-COMPLETED: Phase 1 - entry kind enum, run workspace, one invocation authority, profile invocation, removed speed-test.html
-NEXT_ACTION: implement Phase 2A (benchmark repository snapshots)
-VALIDATION: cargo test --package xtask (509 passed), cargo fmt, bench-validate (4 pre-existing compiler failures from canonical module compilation)
+CURRENT_SLICE: Phase 3 - make fingerprint boundaries explicit
+COMPLETED: Phase 1 (output isolation), Phase 2 (repository mutation detection and persistence ordering)
+NEXT_ACTION: implement Phase 3A (schema 2 fingerprint mode)
+VALIDATION: cargo test --package xtask (519 passed), cargo fmt
 AUDITS: none
 BLOCKERS: pre-existing compiler failures in docs_check, docs_frontend, module_root_role_mix_frontend, few_modules_many_files_each_frontend
-NOTES: Pre-existing failures are from canonical module compilation phase 5, not benchmark changes. speed-test.html no longer reappears.
+NOTES: Pre-existing failures are from canonical module compilation phase 5, not benchmark changes.
 ```
 
 Update this block after each accepted phase. Keep it concise. Git history remains the durable implementation record, so do not append command transcripts or worker journals.
