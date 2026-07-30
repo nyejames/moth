@@ -1,7 +1,7 @@
 //! Tests for profile artifact layout and file writing.
 
 use super::*;
-use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric};
+use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric, GitRevision};
 use crate::profile::observations::ProfileObservation;
 use crate::profile::options::ProfileFilterMode;
 use crate::profile::parse::ProfileShapeDump;
@@ -87,9 +87,13 @@ fn profile_run_paths_manifest_and_index_are_in_root() {
 #[test]
 fn filter_label_returns_correct_strings() {
     // Tested indirectly through formatting, but verify the mapping.
+    let git_revision = GitRevision {
+        commit: Some("abc1234".to_string()),
+        dirty: None,
+    };
     let manifest = format_run_manifest_json(
         "test-run",
-        Some("abc1234"),
+        Some(&git_revision),
         ProfileFilterMode::Terse,
         None,
         &[],
@@ -107,15 +111,19 @@ fn display_label_returns_correct_strings() {
 
 #[test]
 fn format_run_manifest_json_with_empty_cases() {
+    let git_revision = GitRevision {
+        commit: Some("abc1234".to_string()),
+        dirty: None,
+    };
     let json = format_run_manifest_json(
         "2026-06-18T10-30-abc1234",
-        Some("abc1234"),
+        Some(&git_revision),
         ProfileFilterMode::Normal,
         Some(500.0),
         &[],
     );
 
-    assert!(json.contains(r#""format_version": 2"#));
+    assert!(json.contains(r#""format_version": 3"#));
     assert!(json.contains(r#""run_id": "2026-06-18T10-30-abc1234""#));
     assert!(json.contains(r#""commit": "abc1234""#));
     assert!(json.contains(r#""filter": "normal""#));
@@ -128,6 +136,7 @@ fn format_run_manifest_json_with_empty_cases() {
 fn format_run_manifest_json_with_null_commit() {
     let json = format_run_manifest_json("test-run", None, ProfileFilterMode::Terse, None, &[]);
     assert!(json.contains(r#""commit": null"#));
+    assert!(json.contains(r#""git_dirty": null"#));
     assert!(json.contains(r#""samply_rate_hz": null"#));
 }
 
@@ -135,6 +144,7 @@ fn format_run_manifest_json_with_null_commit() {
 fn format_run_manifest_json_with_cases() {
     let cases = vec![ProfileCaseManifest {
         case_id: "check_foo_bst".to_string(),
+        identity: None,
         group_name: "core".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
@@ -145,9 +155,13 @@ fn format_run_manifest_json_with_cases() {
         summary_path: "cases/check_foo_bst/summary.md".to_string(),
     }];
 
+    let git_revision = GitRevision {
+        commit: Some("abc".to_string()),
+        dirty: None,
+    };
     let json = format_run_manifest_json(
         "test-run",
-        Some("abc"),
+        Some(&git_revision),
         ProfileFilterMode::Deep,
         None,
         &cases,
@@ -185,6 +199,7 @@ fn format_observations_json_matches_plan_schema() {
 fn format_index_md_lists_cases() {
     let cases = vec![ProfileCaseManifest {
         case_id: "check_foo_bst".to_string(),
+        identity: None,
         group_name: "core".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
@@ -364,6 +379,7 @@ fn write_run_manifest_creates_valid_file() {
 
     let cases = vec![ProfileCaseManifest {
         case_id: "test_case".to_string(),
+        identity: None,
         group_name: "core".to_string(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
@@ -374,10 +390,14 @@ fn write_run_manifest_creates_valid_file() {
         summary_path: "cases/test_case/summary.md".to_string(),
     }];
 
+    let git_revision = GitRevision {
+        commit: Some("abc1234".to_string()),
+        dirty: None,
+    };
     write_run_manifest(
         &run_paths,
         "test-run",
-        Some("abc1234"),
+        Some(&git_revision),
         ProfileFilterMode::Terse,
         None,
         &cases,
@@ -385,7 +405,7 @@ fn write_run_manifest_creates_valid_file() {
     .expect("write manifest");
 
     let content = std::fs::read_to_string(run_paths.manifest_path()).expect("read manifest");
-    assert!(content.contains(r#""format_version": 2"#));
+    assert!(content.contains(r#""format_version": 3"#));
     assert!(content.contains(r#""case_id": "test_case""#));
 }
 

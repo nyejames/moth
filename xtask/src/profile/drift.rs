@@ -23,7 +23,7 @@
 
 use crate::bench_types::BenchmarkMetric;
 
-use super::history::{HistoryHotFunction, ProfileHistoryRecord};
+use super::history::{HistoryHotFunction, PROFILE_PROTOCOL_VERSION, ProfileHistoryRecord};
 
 // ---------------------------------------------------------------------------
 //  Drift thresholds
@@ -68,6 +68,10 @@ const COUNTER_MIN_ABSOLUTE_DELTA: f64 = 5.0;
 pub struct DriftReport {
     /// Previous run id, if a comparable record was found.
     pub previous_run_id: Option<String>,
+    /// Case IDs whose source fingerprint changed (workload changed).
+    pub workload_changed_case_ids: Vec<String>,
+    /// Case IDs whose source matches but measurement fingerprint changed.
+    pub measurement_changed_case_ids: Vec<String>,
     /// Significant function increases (inclusive pct grew).
     pub function_increases: Vec<FunctionDrift>,
     /// Significant function decreases (inclusive pct shrank).
@@ -160,6 +164,7 @@ pub fn find_comparable_previous<'a>(
             && record.system_uuid == system_uuid
             && record.filter_mode == filter_mode
             && record.sample_rate_hz == sample_rate_hz
+            && record.profile_protocol_version == PROFILE_PROTOCOL_VERSION
     })
 }
 
@@ -185,16 +190,34 @@ pub fn compute_drift(
     let mut ignored_function_count = 0usize;
     let mut ignored_stage_count = 0usize;
     let mut ignored_counter_count = 0usize;
+    let mut workload_changed_case_ids = Vec::new();
+    let mut measurement_changed_case_ids = Vec::new();
 
     for current in current_cases {
-        // Match stable authored identity plus the runner facts used by profiling.
-        let Some(previous_case) = previous.cases.iter().find(|prev| {
-            prev.case_id == current.case_id
-                && prev.command == current.command
-                && prev.args == current.args
-        }) else {
+        // Match by stable authored case ID.
+        let Some(previous_case) = previous
+            .cases
+            .iter()
+            .find(|prev| prev.case_id == current.case_id)
+        else {
             continue;
         };
+
+        // Compare identity to classify the case.
+        match (&current.identity, &previous_case.identity) {
+            (Some(current_id), Some(previous_id)) => {
+                if current_id.source_fingerprint != previous_id.source_fingerprint {
+                    workload_changed_case_ids.push(current.case_id.clone());
+                    continue;
+                }
+                if current_id.measurement_fingerprint != previous_id.measurement_fingerprint {
+                    measurement_changed_case_ids.push(current.case_id.clone());
+                    continue;
+                }
+            }
+            // Legacy records without identity are not comparable.
+            _ => continue,
+        }
 
         let current_wall = current_wall_times
             .get(&current.case_id)
@@ -310,6 +333,8 @@ pub fn compute_drift(
 
     DriftReport {
         previous_run_id: Some(previous.run_id.clone()),
+        workload_changed_case_ids,
+        measurement_changed_case_ids,
         function_increases,
         function_decreases,
         stage_movements,
@@ -324,6 +349,8 @@ pub fn compute_drift(
 pub fn no_previous_drift_report() -> DriftReport {
     DriftReport {
         previous_run_id: None,
+        workload_changed_case_ids: Vec::new(),
+        measurement_changed_case_ids: Vec::new(),
         function_increases: Vec::new(),
         function_decreases: Vec::new(),
         stage_movements: Vec::new(),
@@ -350,9 +377,11 @@ pub fn no_previous_drift_report() -> DriftReport {
 pub struct DriftCaseInput {
     /// Authored case ID from the typed benchmark manifest.
     pub case_id: String,
-    /// The command executed.
+    /// Typed measurement identity from the current run.
+    pub identity: Option<crate::bench_types::BenchmarkMeasurementIdentity>,
+    /// The command executed (descriptive fact, not comparison authority).
     pub command: String,
-    /// Arguments passed to the command.
+    /// Arguments passed to the command (descriptive fact, not comparison authority).
     pub args: Vec<String>,
     /// Stage timings from the observation pass.
     pub stage_timings: Vec<BenchmarkMetric>,
@@ -528,6 +557,27 @@ pub fn format_drift_markdown(report: &DriftReport) -> String {
     }
     lines.push(String::new());
 
+    // Identity changes.
+    if !report.workload_changed_case_ids.is_empty() {
+        lines.push("## Workload changed".to_string());
+        lines.push(String::new());
+        lines.push(format!(
+            "Cases with changed source inputs (not comparable): {}",
+            report.workload_changed_case_ids.join(", ")
+        ));
+        lines.push(String::new());
+    }
+
+    if !report.measurement_changed_case_ids.is_empty() {
+        lines.push("## Measurement changed".to_string());
+        lines.push(String::new());
+        lines.push(format!(
+            "Cases with changed runner or protocol (not comparable): {}",
+            report.measurement_changed_case_ids.join(", ")
+        ));
+        lines.push(String::new());
+    }
+
     // Significant increases.
     lines.push("## Significant increases".to_string());
     lines.push(String::new());
@@ -645,6 +695,23 @@ pub fn format_drift_summary_section(report: &DriftReport) -> String {
         }
     }
     lines.push(String::new());
+
+    // Identity changes.
+    if !report.workload_changed_case_ids.is_empty() {
+        lines.push(format!(
+            "Workload changed: {} (new baseline required)",
+            report.workload_changed_case_ids.join(", ")
+        ));
+        lines.push(String::new());
+    }
+
+    if !report.measurement_changed_case_ids.is_empty() {
+        lines.push(format!(
+            "Measurement changed: {} (new baseline required)",
+            report.measurement_changed_case_ids.join(", ")
+        ));
+        lines.push(String::new());
+    }
 
     // Top function increases (up to 3).
     let increases: Vec<_> = report.function_increases.iter().take(3).collect();

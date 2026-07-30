@@ -1,21 +1,30 @@
 //! Tests for profile history storage and retrieval.
 
 use super::*;
-use crate::bench_types::BenchmarkMetric;
+use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric, GitRevision};
 
 /// Build a test history record with one case.
 fn test_record(run_id: &str) -> ProfileHistoryRecord {
     ProfileHistoryRecord {
         format_version: HISTORY_FORMAT_VERSION,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: run_id.to_string(),
         timestamp: "June 18th - 10:30".to_string(),
-        commit: Some("abc1234".to_string()),
+        git_revision: Some(GitRevision {
+            commit: Some("abc1234".to_string()),
+            dirty: None,
+        }),
         system_uuid: "TEST-UUID-001".to_string(),
         system_display: "Test System".to_string(),
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
             case_id: "check_foo_bst".to_string(),
+            identity: Some(BenchmarkMeasurementIdentity {
+                workload_id: "fixture".to_string(),
+                source_fingerprint: "abc123".to_string(),
+                measurement_fingerprint: "def456".to_string(),
+            }),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -49,15 +58,24 @@ fn test_record(run_id: &str) -> ProfileHistoryRecord {
 fn test_record_b(run_id: &str) -> ProfileHistoryRecord {
     ProfileHistoryRecord {
         format_version: HISTORY_FORMAT_VERSION,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: run_id.to_string(),
         timestamp: "June 18th - 11:00".to_string(),
-        commit: Some("def5678".to_string()),
+        git_revision: Some(GitRevision {
+            commit: Some("def5678".to_string()),
+            dirty: None,
+        }),
         system_uuid: "TEST-UUID-001".to_string(),
         system_display: "Test System".to_string(),
         filter_mode: "terse".to_string(),
         sample_rate_hz: Some(1000.0),
         cases: vec![HistoryCaseRecord {
             case_id: "check_foo_bst".to_string(),
+            identity: Some(BenchmarkMeasurementIdentity {
+                workload_id: "fixture".to_string(),
+                source_fingerprint: "def567".to_string(),
+                measurement_fingerprint: "ghi789".to_string(),
+            }),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -224,11 +242,16 @@ fn roundtrip_preserves_null_commit() {
     let path = temp_dir.path().join("profile-runs.jsonl");
 
     let mut record = test_record("2026-06-18T10-30-unknown");
-    record.commit = None;
+    record.git_revision = Some(GitRevision {
+        commit: None,
+        dirty: Some(false),
+    });
     append_profile_run(&path, &record).expect("append");
 
     let records = read_profile_runs(&path).expect("read");
-    assert!(records[0].commit.is_none());
+    let git_revision = records[0].git_revision.as_ref().unwrap();
+    assert!(git_revision.commit.is_none());
+    assert_eq!(git_revision.dirty, Some(false));
 }
 
 #[test]
@@ -294,7 +317,7 @@ fn format_record_as_jsonl_produces_valid_json() {
     assert!(json.starts_with('{'));
     assert!(json.ends_with('}'));
     // Must contain expected fields.
-    assert!(json.contains(r#""format_version":2"#));
+    assert!(json.contains(r#""format_version":3"#));
     assert!(json.contains(r#""case_id":"check_foo_bst""#));
     assert!(!json.contains(r#""case_name""#));
     assert!(json.contains(r#""run_id":"2026-06-18T10-30-abc1234""#));

@@ -13,8 +13,8 @@ use crate::bench_observations::{
 };
 use crate::bench_types::BenchmarkCaseObservations;
 use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkExpectation, BenchmarkManifest, BenchmarkManifestError,
-    BenchmarkRunner, CliBenchmarkInvocation,
+    BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest,
+    BenchmarkManifestError, BenchmarkRunner, CliBenchmarkInvocation,
 };
 use crate::benchmark_status::{BenchmarkDiagnosticStatus, BenchmarkStatusError};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
@@ -309,6 +309,15 @@ fn execute_frontend_case(
     context: &BenchmarkExecutionContext<'_>,
     case: &BenchmarkCase,
 ) -> Result<BenchmarkCaseExecution, BenchmarkCaseFailure> {
+    // Register compiler output directories for cleanup so the frontend build
+    // does not leave artifacts in the repository after the run.
+    if let Some(workload) = context.manifest.workload_for(case) {
+        if workload.entry_kind == BenchmarkEntryKind::Directory {
+            let entry_path = context.manifest.repository_root.join(&workload.entry);
+            context.workspace.register_directory_artifacts(&entry_path);
+        }
+    }
+
     let report = run_one_frontend_case(context.manifest, case).map_err(|message| {
         case_failure(
             context,

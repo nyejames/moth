@@ -1,7 +1,8 @@
 use super::*;
 use crate::bench_history::{LocalCaseRecord, LocalMetricRecord, LocalRunRecord};
 use crate::bench_types::{
-    BENCHMARK_PROTOCOL_VERSION, BenchmarkChangeKind, BenchmarkMetric, BenchmarkSystem,
+    BENCHMARK_PROTOCOL_VERSION, BenchmarkChangeKind, BenchmarkMeasurementIdentity, BenchmarkMetric,
+    BenchmarkSystem, GitRevision,
 };
 use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
 use crate::profile::history::{HistoryCaseRecord, HistoryHotFunction, ProfileHistoryRecord};
@@ -368,15 +369,20 @@ fn metric(name: &str, value: f64) -> LocalMetricRecord {
 fn test_profile_record(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord {
     ProfileHistoryRecord {
         format_version: 1,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: run_id.to_string(),
         timestamp: "June 18th - 10:30".to_string(),
-        commit: Some("abc1234".to_string()),
+        git_revision: Some(GitRevision {
+            commit: Some("abc1234".to_string()),
+            dirty: None,
+        }),
         system_uuid: system_uuid.to_string(),
         system_display: "Test System".to_string(),
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
             case_id: "check_foo_bst".to_string(),
+            identity: Some(test_identity()),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -405,19 +411,33 @@ fn test_profile_record(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord 
     }
 }
 
+/// Build a test identity for drift comparison.
+fn test_identity() -> BenchmarkMeasurementIdentity {
+    BenchmarkMeasurementIdentity {
+        workload_id: "foo".to_string(),
+        source_fingerprint: "aaaa1111aaaa1111".to_string(),
+        measurement_fingerprint: "bbbb2222bbbb2222".to_string(),
+    }
+}
+
 /// Build a second profile record with different hotspot data for drift testing.
 fn test_profile_record_shifted(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord {
     ProfileHistoryRecord {
         format_version: 1,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: run_id.to_string(),
         timestamp: "June 18th - 11:00".to_string(),
-        commit: Some("def5678".to_string()),
+        git_revision: Some(GitRevision {
+            commit: Some("def5678".to_string()),
+            dirty: None,
+        }),
         system_uuid: system_uuid.to_string(),
         system_display: "Test System".to_string(),
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
             case_id: "check_foo_bst".to_string(),
+            identity: Some(test_identity()),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -499,6 +519,7 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
     // Debug: verify compute_drift finds the function drift.
     let drift_cases = vec![crate::profile::drift::DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {

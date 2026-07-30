@@ -289,3 +289,71 @@ fn frontend_cases_cannot_request_a_cli_invocation() {
             .contains("case does not declare a CLI runner")
     );
 }
+
+#[test]
+fn directory_entry_compiler_output_is_cleaned_on_drop() {
+    let directory = tempdir().expect("temporary repository should exist");
+    let entry_path = directory.path().join("project");
+    std::fs::create_dir_all(&entry_path).expect("project directory should be creatable");
+    std::fs::write(entry_path.join("main.moth"), "value = 42\n")
+        .expect("project fixture should be writable");
+
+    // Simulate compiler output from a directory-entry build.
+    std::fs::create_dir_all(entry_path.join("dev")).expect("dev output should be creatable");
+    std::fs::write(entry_path.join("dev/index.html"), "<html/>")
+        .expect("dev artifact should be writable");
+    std::fs::create_dir_all(entry_path.join("release"))
+        .expect("release output should be creatable");
+
+    let manifest = make_manifest(
+        directory.path(),
+        vec![make_workload(
+            "project",
+            "project",
+            BenchmarkEntryKind::Directory,
+        )],
+        vec![cli_case(
+            "project_check",
+            0,
+            CliBenchmarkCommand::Check,
+            &[],
+        )],
+    );
+
+    {
+        let workspace = BenchmarkExecutionWorkspace::create(directory.path())
+            .expect("workspace should be creatable");
+        let _invocation = workspace
+            .resolve_cli_invocation(&manifest, &manifest.cases[0])
+            .expect("invocation should resolve");
+
+        assert!(entry_path.join("dev").is_dir());
+        assert!(entry_path.join("release").is_dir());
+    }
+
+    // After the workspace is dropped, compiler output directories must be gone.
+    assert!(!entry_path.join("dev").exists());
+    assert!(!entry_path.join("release").exists());
+}
+
+#[test]
+fn register_directory_artifacts_only_tracks_existing_dirs() {
+    let directory = tempdir().expect("temporary repository should exist");
+    let entry_path = directory.path().join("project");
+    std::fs::create_dir_all(&entry_path).expect("project directory should be creatable");
+    std::fs::write(entry_path.join("main.moth"), "value = 42\n")
+        .expect("project fixture should be writable");
+
+    // Only create the dev directory, not release.
+    std::fs::create_dir_all(entry_path.join("dev")).expect("dev output should be creatable");
+
+    {
+        let workspace = BenchmarkExecutionWorkspace::create(directory.path())
+            .expect("workspace should be creatable");
+        workspace.register_directory_artifacts(&entry_path);
+    }
+
+    // dev is cleaned up, release was never created.
+    assert!(!entry_path.join("dev").exists());
+    assert!(!entry_path.join("release").exists());
+}

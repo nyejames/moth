@@ -24,7 +24,7 @@
 //!   (see `summary.rs`)
 
 use crate::bench_time::BenchmarkTimestamp;
-use crate::bench_types::BenchmarkMetric;
+use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,7 +38,7 @@ use super::parse::ProfileShapeDump;
 const OBSERVATIONS_FORMAT_VERSION: u32 = 2;
 
 /// Current on-disk format version for the root run manifest.
-const RUN_MANIFEST_FORMAT_VERSION: u32 = 2;
+const RUN_MANIFEST_FORMAT_VERSION: u32 = 3;
 
 /// Current on-disk format version for per-case hotspot data.
 const HOTSPOTS_FORMAT_VERSION: u32 = 1;
@@ -97,6 +97,7 @@ pub(crate) struct ProfileCasePaths {
 /// phases can discover cases without scanning directories.
 pub(crate) struct ProfileCaseManifest {
     pub(crate) case_id: String,
+    pub(crate) identity: Option<BenchmarkMeasurementIdentity>,
     pub(crate) group_name: String,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
@@ -257,12 +258,12 @@ pub(crate) fn write_profile_shape_dump(
 pub(crate) fn write_run_manifest(
     run_paths: &ProfileRunPaths,
     run_id: &str,
-    commit: Option<&str>,
+    git_revision: Option<&crate::bench_types::GitRevision>,
     filter: ProfileFilterMode,
     samply_rate_hz: Option<f64>,
     cases: &[ProfileCaseManifest],
 ) -> Result<(), String> {
-    let json = format_run_manifest_json(run_id, commit, filter, samply_rate_hz, cases);
+    let json = format_run_manifest_json(run_id, git_revision, filter, samply_rate_hz, cases);
     fs::write(run_paths.manifest_path(), json).map_err(|e| {
         format!(
             "Failed to write run-manifest.json '{}': {}",
@@ -398,14 +399,25 @@ fn append_bullets(lines: &mut Vec<String>, items: &[String]) {
 /// Format run-manifest.json as manual JSON.
 fn format_run_manifest_json(
     run_id: &str,
-    commit: Option<&str>,
+    git_revision: Option<&crate::bench_types::GitRevision>,
     filter: ProfileFilterMode,
     samply_rate_hz: Option<f64>,
     cases: &[ProfileCaseManifest],
 ) -> String {
-    let commit_json = match commit {
-        Some(c) => format!("\"{}\"", escape(c)),
-        None => "null".to_string(),
+    let (commit_json, git_dirty_json) = match git_revision {
+        Some(revision) => {
+            let commit = match &revision.commit {
+                Some(c) => format!("\"{}\"", escape(c)),
+                None => "null".to_string(),
+            };
+            let dirty = match revision.dirty {
+                Some(true) => "true".to_string(),
+                Some(false) => "false".to_string(),
+                None => "null".to_string(),
+            };
+            (commit, dirty)
+        }
+        None => ("null".to_string(), "null".to_string()),
     };
 
     let samply_json = match samply_rate_hz {
@@ -423,10 +435,23 @@ fn format_run_manifest_json(
                 .collect::<Vec<_>>()
                 .join(",");
 
+            let identity_json = match &case.identity {
+                Some(identity) => format!(
+                    ",\n      \"workload_id\": \"{}\",\n      \"source_fingerprint\": \"{}\",\n      \"measurement_fingerprint\": \"{}\"",
+                    escape(&identity.workload_id),
+                    escape(&identity.source_fingerprint),
+                    escape(&identity.measurement_fingerprint),
+                ),
+                None => format!(
+                    ",\n      \"workload_id\": null,\n      \"source_fingerprint\": null,\n      \"measurement_fingerprint\": null"
+                ),
+            };
+
             format!(
-                "    {{\n      \"case_id\": \"{}\",\n      \"group_name\": \"{}\",\n      \"command\": \"{}\",\n      \"args\": [{}],\n      \"observation_wall_ms\": {},\n      \"profile_path\": \"{}\",\n      \"stdout_path\": \"{}\",\n      \"stderr_path\": \"{}\",\n      \"summary_path\": \"{}\"\n    }}",
+                "    {{\n      \"case_id\": \"{}\",\n      \"group_name\": \"{}\"{},,\n      \"command\": \"{}\",\n      \"args\": [{}],\n      \"observation_wall_ms\": {},\n      \"profile_path\": \"{}\",\n      \"stdout_path\": \"{}\",\n      \"stderr_path\": \"{}\",\n      \"summary_path\": \"{}\"\n    }}",
                 escape(&case.case_id),
                 escape(&case.group_name),
+                identity_json,
                 escape(&case.command),
                 args_json,
                 case.observation_wall_ms,
@@ -439,11 +464,12 @@ fn format_run_manifest_json(
         .collect();
 
     format!(
-        "{{\n  \"format_version\": {},\n  \"run_id\": \"{}\",\n  \"timestamp\": \"{}\",\n  \"commit\": {},\n  \"filter\": \"{}\",\n  \"samply_rate_hz\": {},\n  \"cases\": [\n{}\n  ]\n}}",
+        "{{\n  \"format_version\": {},\n  \"run_id\": \"{}\",\n  \"timestamp\": \"{}\",\n  \"commit\": {},\n  \"git_dirty\": {},\n  \"filter\": \"{}\",\n  \"samply_rate_hz\": {},\n  \"cases\": [\n{}\n  ]\n}}",
         RUN_MANIFEST_FORMAT_VERSION,
         escape(run_id),
         escape(&BenchmarkTimestamp::now().format_run_header()),
         commit_json,
+        git_dirty_json,
         filter.display_label(),
         samply_json,
         cases_json.join(",\n"),

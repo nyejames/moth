@@ -1,23 +1,37 @@
 //! Tests for profile drift detection and reporting.
 
 use super::*;
-use crate::bench_types::BenchmarkMetric;
+use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric, GitRevision};
 use crate::profile::history::{HistoryCaseRecord, HistoryHotFunction, ProfileHistoryRecord};
 use std::collections::HashMap;
+
+/// Build a test identity matching on both sides of drift comparison.
+fn test_identity() -> BenchmarkMeasurementIdentity {
+    BenchmarkMeasurementIdentity {
+        workload_id: "foo".to_string(),
+        source_fingerprint: "aaaa1111aaaa1111".to_string(),
+        measurement_fingerprint: "bbbb2222bbbb2222".to_string(),
+    }
+}
 
 /// Build a test previous record with one case.
 fn test_previous_record() -> ProfileHistoryRecord {
     ProfileHistoryRecord {
         format_version: 1,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: "2026-06-18T10-30-abc1234".to_string(),
         timestamp: "June 18th - 10:30".to_string(),
-        commit: Some("abc1234".to_string()),
+        git_revision: Some(GitRevision {
+            commit: Some("abc1234".to_string()),
+            dirty: None,
+        }),
         system_uuid: "TEST-UUID-001".to_string(),
         system_display: "Test System".to_string(),
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
             case_id: "check_foo_bst".to_string(),
+            identity: Some(test_identity()),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -67,6 +81,7 @@ fn test_previous_record() -> ProfileHistoryRecord {
 fn test_current_increased() -> DriftCaseInput {
     DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![
@@ -104,6 +119,7 @@ fn test_current_increased() -> DriftCaseInput {
 fn test_current_decreased() -> DriftCaseInput {
     DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![
@@ -141,6 +157,7 @@ fn test_current_decreased() -> DriftCaseInput {
 fn test_current_noise() -> DriftCaseInput {
     DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
@@ -228,6 +245,7 @@ fn low_sample_count_function_is_ignored() {
     // Create current with very low sample count.
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
@@ -257,6 +275,7 @@ fn share_only_drift_when_wall_moves_opposite() {
     // Function pct increases but wall time decreases significantly.
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
@@ -374,6 +393,7 @@ fn significant_counter_increase_detected() {
     let previous = test_previous_record();
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
@@ -402,6 +422,7 @@ fn tiny_absolute_counter_is_noise_even_if_percentage_large() {
     }];
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
@@ -429,9 +450,10 @@ fn finds_matching_previous_by_system_and_filter() {
     let records = vec![
         ProfileHistoryRecord {
             format_version: 1,
+            profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
             run_id: "2026-06-17T10-00-old".to_string(),
             timestamp: "old".to_string(),
-            commit: None,
+            git_revision: None,
             system_uuid: "UUID-A".to_string(),
             system_display: "System A".to_string(),
             filter_mode: "terse".to_string(),
@@ -440,9 +462,10 @@ fn finds_matching_previous_by_system_and_filter() {
         },
         ProfileHistoryRecord {
             format_version: 1,
+            profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
             run_id: "2026-06-18T10-00-current".to_string(),
             timestamp: "current".to_string(),
-            commit: None,
+            git_revision: None,
             system_uuid: "UUID-A".to_string(),
             system_display: "System A".to_string(),
             filter_mode: "terse".to_string(),
@@ -466,9 +489,10 @@ fn finds_matching_previous_by_system_and_filter() {
 fn skips_current_run_id() {
     let records = vec![ProfileHistoryRecord {
         format_version: 1,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: "2026-06-18T10-00-current".to_string(),
         timestamp: "current".to_string(),
-        commit: None,
+        git_revision: None,
         system_uuid: "UUID-A".to_string(),
         system_display: "System A".to_string(),
         filter_mode: "terse".to_string(),
@@ -490,9 +514,10 @@ fn skips_current_run_id() {
 fn skips_different_system_uuid() {
     let records = vec![ProfileHistoryRecord {
         format_version: 1,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: "2026-06-17T10-00-old".to_string(),
         timestamp: "old".to_string(),
-        commit: None,
+        git_revision: None,
         system_uuid: "UUID-B".to_string(),
         system_display: "System B".to_string(),
         filter_mode: "terse".to_string(),
@@ -514,9 +539,10 @@ fn skips_different_system_uuid() {
 fn skips_different_filter_mode() {
     let records = vec![ProfileHistoryRecord {
         format_version: 1,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: "2026-06-17T10-00-old".to_string(),
         timestamp: "old".to_string(),
-        commit: None,
+        git_revision: None,
         system_uuid: "UUID-A".to_string(),
         system_display: "System A".to_string(),
         filter_mode: "normal".to_string(),
@@ -538,9 +564,10 @@ fn skips_different_filter_mode() {
 fn matches_sample_rate_when_present() {
     let records = vec![ProfileHistoryRecord {
         format_version: 1,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: "2026-06-17T10-00-old".to_string(),
         timestamp: "old".to_string(),
-        commit: None,
+        git_revision: None,
         system_uuid: "UUID-A".to_string(),
         system_display: "System A".to_string(),
         filter_mode: "terse".to_string(),
@@ -562,9 +589,10 @@ fn matches_sample_rate_when_present() {
 fn skips_different_sample_rate() {
     let records = vec![ProfileHistoryRecord {
         format_version: 1,
+        profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: "2026-06-17T10-00-old".to_string(),
         timestamp: "old".to_string(),
-        commit: None,
+        git_revision: None,
         system_uuid: "UUID-A".to_string(),
         system_display: "System A".to_string(),
         filter_mode: "terse".to_string(),
@@ -587,9 +615,10 @@ fn finds_latest_matching_record() {
     let records = vec![
         ProfileHistoryRecord {
             format_version: 1,
+            profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
             run_id: "2026-06-16T10-00-oldest".to_string(),
             timestamp: "oldest".to_string(),
-            commit: None,
+            git_revision: None,
             system_uuid: "UUID-A".to_string(),
             system_display: "System A".to_string(),
             filter_mode: "terse".to_string(),
@@ -598,9 +627,10 @@ fn finds_latest_matching_record() {
         },
         ProfileHistoryRecord {
             format_version: 1,
+            profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
             run_id: "2026-06-17T10-00-middle".to_string(),
             timestamp: "middle".to_string(),
-            commit: None,
+            git_revision: None,
             system_uuid: "UUID-A".to_string(),
             system_display: "System A".to_string(),
             filter_mode: "terse".to_string(),
@@ -628,6 +658,8 @@ fn finds_latest_matching_record() {
 fn no_previous_report_has_no_items() {
     let report = no_previous_drift_report();
     assert!(report.previous_run_id.is_none());
+    assert!(report.workload_changed_case_ids.is_empty());
+    assert!(report.measurement_changed_case_ids.is_empty());
     assert!(report.function_increases.is_empty());
     assert!(report.function_decreases.is_empty());
     assert!(report.stage_movements.is_empty());
@@ -690,6 +722,7 @@ fn no_comparable_case_produces_empty_report() {
     let previous = test_previous_record();
     let current = vec![DriftCaseInput {
         case_id: "nonexistent_case".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["missing.moth".to_string()],
         stage_timings: vec![],
@@ -715,6 +748,7 @@ fn function_only_in_current_is_ignored() {
     let previous = test_previous_record();
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
+        identity: Some(test_identity()),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![],

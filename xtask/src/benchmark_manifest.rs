@@ -927,7 +927,7 @@ fn validate_partitioned(
 
     // Reject duplicate logical or canonical roots.
     for (i, left) in roots.iter().enumerate() {
-        for (j, right) in roots.iter().enumerate().skip(i + 1) {
+        for (_j, right) in roots.iter().enumerate().skip(i + 1) {
             if left.relative == right.relative || left.canonical == right.canonical {
                 return Err(invalid(
                     manifest_path,

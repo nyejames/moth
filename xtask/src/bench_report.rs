@@ -1115,6 +1115,7 @@ fn format_top_drift_item(
                 .collect();
 
             DriftCaseInput {
+                identity: case.identity.clone(),
                 case_id: case.case_id.clone(),
                 command: case.command.clone(),
                 args: case.args.clone(),

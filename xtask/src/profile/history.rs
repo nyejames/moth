@@ -22,7 +22,7 @@
 //! - Agent summaries and enriched per-case summaries (see `summary.rs`)
 
 use crate::bench_system::{SystemIdentityMode, load_or_create_system};
-use crate::bench_types::BenchmarkMetric;
+use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric, GitRevision};
 use std::fs;
 use std::path::Path;
 
@@ -31,8 +31,14 @@ use super::json::escape;
 /// Path to the profile history file, relative to repo root.
 pub const PROFILE_RUNS_JSONL_PATH: &str = "benchmarks/local-data/profile-runs.jsonl";
 
+/// Profile measurement and comparison protocol version.
+///
+/// Increment this only when measurement methodology, identity semantics, or
+/// drift comparison rules change enough to make direct comparison invalid.
+pub const PROFILE_PROTOCOL_VERSION: u32 = 1;
+
 /// Current on-disk format version for profile history records.
-const HISTORY_FORMAT_VERSION: u32 = 2;
+const HISTORY_FORMAT_VERSION: u32 = 3;
 
 // ---------------------------------------------------------------------------
 //  Data model
@@ -50,12 +56,14 @@ const HISTORY_FORMAT_VERSION: u32 = 2;
 pub struct ProfileHistoryRecord {
     /// Schema version for forward compatibility.
     pub format_version: u32,
+    /// Profile measurement and comparison protocol version.
+    pub profile_protocol_version: u32,
     /// Run identifier (e.g., "2026-06-18T10-30-abc1234").
     pub run_id: String,
     /// ISO-style timestamp string.
     pub timestamp: String,
-    /// Short commit hash, if available.
-    pub commit: Option<String>,
+    /// Start repository revision captured before compiler construction.
+    pub git_revision: Option<GitRevision>,
     /// Stable system UUID from `benchmarks/local-data/system.toml`.
     pub system_uuid: String,
     /// Human-readable system display name.
@@ -80,6 +88,8 @@ pub struct ProfileHistoryRecord {
 pub struct HistoryCaseRecord {
     /// Authored case ID from the typed benchmark manifest.
     pub case_id: String,
+    /// Typed measurement identity covering source and measurement fingerprints.
+    pub identity: Option<BenchmarkMeasurementIdentity>,
     /// Group name for the case.
     pub group_name: String,
     /// The command executed (e.g., "check", "build").
@@ -219,7 +229,7 @@ pub fn read_profile_runs(path: &Path) -> Result<Vec<ProfileHistoryRecord>, Strin
 pub fn build_history_record(
     run_id: &str,
     timestamp: &str,
-    commit: Option<&str>,
+    git_revision: &GitRevision,
     filter_mode: &str,
     sample_rate_hz: Option<f64>,
     cases: Vec<HistoryCaseRecord>,
@@ -232,9 +242,10 @@ pub fn build_history_record(
 
     Ok(ProfileHistoryRecord {
         format_version: HISTORY_FORMAT_VERSION,
+        profile_protocol_version: PROFILE_PROTOCOL_VERSION,
         run_id: run_id.to_string(),
         timestamp: timestamp.to_string(),
-        commit: commit.map(|s| s.to_string()),
+        git_revision: Some(git_revision.clone()),
         system_uuid,
         system_display,
         filter_mode: filter_mode.to_string(),
@@ -255,12 +266,29 @@ fn format_record_as_jsonl(record: &ProfileHistoryRecord) -> String {
     let mut parts = Vec::new();
 
     parts.push(format!(r#""format_version":{}"#, record.format_version));
+    parts.push(format!(
+        r#""profile_protocol_version":{}"#,
+        record.profile_protocol_version
+    ));
     parts.push(format!(r#""run_id":"{}""#, escape(&record.run_id)));
     parts.push(format!(r#""timestamp":"{}""#, escape(&record.timestamp)));
 
-    match &record.commit {
-        Some(c) => parts.push(format!(r#""commit":"{}""#, escape(c))),
-        None => parts.push(r#""commit":null"#.to_string()),
+    match &record.git_revision {
+        Some(revision) => {
+            match &revision.commit {
+                Some(commit) => parts.push(format!(r#""commit":"{}""#, escape(commit))),
+                None => parts.push(r#""commit":null"#.to_string()),
+            }
+            match revision.dirty {
+                Some(true) => parts.push(r#""git_dirty":true"#.to_string()),
+                Some(false) => parts.push(r#""git_dirty":false"#.to_string()),
+                None => parts.push(r#""git_dirty":null"#.to_string()),
+            }
+        }
+        None => {
+            parts.push(r#""commit":null"#.to_string());
+            parts.push(r#""git_dirty":null"#.to_string());
+        }
     }
 
     parts.push(format!(
@@ -292,6 +320,26 @@ fn format_case_record_json(case: &HistoryCaseRecord) -> String {
     let mut parts = Vec::new();
 
     parts.push(format!(r#""case_id":"{}""#, escape(&case.case_id)));
+
+    if let Some(identity) = &case.identity {
+        parts.push(format!(
+            r#""workload_id":"{}""#,
+            escape(&identity.workload_id)
+        ));
+        parts.push(format!(
+            r#""source_fingerprint":"{}""#,
+            escape(&identity.source_fingerprint)
+        ));
+        parts.push(format!(
+            r#""measurement_fingerprint":"{}""#,
+            escape(&identity.measurement_fingerprint)
+        ));
+    } else {
+        parts.push(r#""workload_id":null"#.to_string());
+        parts.push(r#""source_fingerprint":null"#.to_string());
+        parts.push(r#""measurement_fingerprint":null"#.to_string());
+    }
+
     parts.push(format!(r#""group_name":"{}""#, escape(&case.group_name)));
     parts.push(format!(r#""command":"{}""#, escape(&case.command)));
 
@@ -367,7 +415,8 @@ fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
 
     let run_id = extract_string_field(line, "run_id").ok_or("missing run_id")?;
     let timestamp = extract_string_field(line, "timestamp").ok_or("missing timestamp")?;
-    let commit = extract_string_field(line, "commit");
+
+    let git_revision = build_git_revision_from_line(line);
     let system_uuid =
         extract_string_field(line, "system_uuid").unwrap_or_else(|| "unknown".to_string());
     let system_display =
@@ -376,9 +425,20 @@ fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
         extract_string_field(line, "filter_mode").unwrap_or_else(|| "terse".to_string());
     let sample_rate_hz = extract_f64_field(line, "sample_rate_hz");
 
-    let cases = match format_version {
-        1 => extract_cases_array(line, parse_legacy_v1_case_object)?,
-        HISTORY_FORMAT_VERSION => extract_cases_array(line, parse_case_object)?,
+    let (profile_protocol_version, cases) = match format_version {
+        1 => {
+            let cases = extract_cases_array(line, parse_legacy_v1_case_object)?;
+            (0, cases)
+        }
+        2 => {
+            let cases = extract_cases_array(line, parse_legacy_v2_case_object)?;
+            (0, cases)
+        }
+        HISTORY_FORMAT_VERSION => {
+            let protocol_version = extract_u32_field(line, "profile_protocol_version").unwrap_or(0);
+            let cases = extract_cases_array(line, parse_case_object)?;
+            (protocol_version, cases)
+        }
         _ => {
             return Err(format!(
                 "unsupported profile history format_version {format_version}"
@@ -388,15 +448,51 @@ fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
 
     Ok(ProfileHistoryRecord {
         format_version,
+        profile_protocol_version,
         run_id,
         timestamp,
-        commit,
+        git_revision,
         system_uuid,
         system_display,
         filter_mode,
         sample_rate_hz,
         cases,
     })
+}
+
+/// Build a `GitRevision` from the `commit` and `git_dirty` fields in a JSONL line.
+fn build_git_revision_from_line(line: &str) -> Option<GitRevision> {
+    let commit = extract_string_field(line, "commit");
+
+    // Extract `git_dirty` as a boolean, handling both bare JSON true/false and null.
+    let dirty = extract_bool_field(line, "git_dirty");
+
+    if commit.is_none() && dirty.is_none() {
+        None
+    } else {
+        Some(GitRevision { commit, dirty })
+    }
+}
+
+/// Extract a boolean field value from a JSON object line.
+fn extract_bool_field(line: &str, field: &str) -> Option<bool> {
+    let key = format!(r#""{}":"#, field);
+    let start = line.find(&key)? + key.len();
+    let rest = &line[start..];
+
+    let mut idx = 0;
+    while idx < rest.len() && rest.as_bytes()[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+
+    let remaining = &rest[idx..];
+    if remaining.starts_with("true") {
+        Some(true)
+    } else if remaining.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// Extract the "cases" array from a JSON object line.
@@ -419,20 +515,50 @@ fn extract_cases_array(
         .collect()
 }
 
-/// Parse a single case JSON object into a `HistoryCaseRecord`.
+/// Parse a single v3 case JSON object into a `HistoryCaseRecord`.
 fn parse_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
     let case_id = extract_string_field(obj, "case_id").ok_or("case missing case_id")?;
-    parse_case_fields(obj, case_id)
+    let identity = build_identity_from_case_object(obj);
+    parse_case_fields(obj, case_id, identity)
 }
 
-/// Adapt the sole profile-history v1 identity field into the current domain.
+/// Adapt the v2 case shape into the current domain with no identity.
+fn parse_legacy_v2_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
+    let case_id = extract_string_field(obj, "case_id").ok_or("case missing case_id")?;
+    parse_case_fields(obj, case_id, None)
+}
+
+/// Adapt the v1 case shape, which used `case_name` instead of `case_id`.
 fn parse_legacy_v1_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
     let legacy_case_name =
         extract_string_field(obj, "case_name").ok_or("legacy v1 case missing case_name")?;
-    parse_case_fields(obj, legacy_case_name)
+    parse_case_fields(obj, legacy_case_name, None)
 }
 
-fn parse_case_fields(obj: &str, case_id: String) -> Result<HistoryCaseRecord, String> {
+/// Build a `BenchmarkMeasurementIdentity` from the identity fields in a case
+/// JSON object, returning `None` when any field is missing or empty.
+fn build_identity_from_case_object(obj: &str) -> Option<BenchmarkMeasurementIdentity> {
+    let workload_id = extract_string_field(obj, "workload_id")?;
+    let source_fingerprint = extract_string_field(obj, "source_fingerprint")?;
+    let measurement_fingerprint = extract_string_field(obj, "measurement_fingerprint")?;
+
+    if workload_id.is_empty() || source_fingerprint.is_empty() || measurement_fingerprint.is_empty()
+    {
+        return None;
+    }
+
+    Some(BenchmarkMeasurementIdentity {
+        workload_id,
+        source_fingerprint,
+        measurement_fingerprint,
+    })
+}
+
+fn parse_case_fields(
+    obj: &str,
+    case_id: String,
+    identity: Option<BenchmarkMeasurementIdentity>,
+) -> Result<HistoryCaseRecord, String> {
     let group_name =
         extract_string_field(obj, "group_name").unwrap_or_else(|| "ungrouped".to_string());
     let command = extract_string_field(obj, "command").ok_or("case missing command")?;
@@ -449,6 +575,7 @@ fn parse_case_fields(obj: &str, case_id: String) -> Result<HistoryCaseRecord, St
 
     Ok(HistoryCaseRecord {
         case_id,
+        identity,
         group_name,
         command,
         args,

@@ -31,13 +31,13 @@ WORK_ID: bench-followup
 WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
 BASE_REVISION: 9af62e5a9
 STATUS: active
-CURRENT_SLICE: Phase 4 checkpoint - review before Phase 5
-COMPLETED: Phase 1 (output isolation), Phase 2 (repository mutation detection), Phase 3 (explicit fingerprint boundaries), Phase 4 (split source and measurement identity)
-NEXT_ACTION: Phase 4 checkpoint review, then Phase 5 (profile history identity-safe)
-VALIDATION: cargo test --package xtask (532 passed), cargo fmt, bench-validate (4 pre-existing failures only), bench-check (pre-existing docs_check failure only)
+CURRENT_SLICE: Phase 6 - documentation corrections
+COMPLETED: Phase 1 (output isolation), Phase 2 (repository mutation detection), Phase 3 (explicit fingerprint boundaries), Phase 4 (split source and measurement identity), Phase 5 (profile history identity-safe), artifact cleanup (compiler output dirs cleaned on drop)
+NEXT_ACTION: Phase 6 (documentation corrections), then Phase 7 (clean baselines)
+VALIDATION: cargo test --package xtask (534 passed), cargo fmt, bench-check (pre-existing docs_check failure only, artifacts cleaned)
 AUDITS: none
 BLOCKERS: pre-existing compiler failures in docs_check, docs_frontend, module_root_role_mix_frontend, few_modules_many_files_each_frontend
-NOTES: Phase 4 complete. Source/measurement fingerprint split, protocol v2, history v7 with v6 legacy adapter, BenchmarkMeasurementIdentity, comparison distinguishes workload vs measurement changes.
+NOTES: Phase 5 complete. Profile protocol v1, history format v3 with v1/v2 legacy adapters. Drift matches by identity, reports workload/measurement changes. Silent history failures removed. Compiler output dirs (dev/release) cleaned on workspace drop, preserving tracked dirs.
 ```
 
 Update this block after each accepted phase. Keep it concise. Git history remains the durable implementation record, so do not append command transcripts or worker journals.

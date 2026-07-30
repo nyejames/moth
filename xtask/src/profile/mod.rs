@@ -39,9 +39,11 @@ pub(crate) mod summary;
 pub(crate) use options::{ProfileOptions, ProfileParseResult, parse_profile_args};
 
 use crate::bench_time::BenchmarkTimestamp;
+use crate::bench_types::BenchmarkMeasurementIdentity;
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
+use crate::benchmark_fingerprint::compute_benchmark_fingerprints;
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, BenchmarkRunner, load_benchmark_manifest,
 };
@@ -88,6 +90,10 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     // Load and filter benchmark cases.
     let manifest = load_benchmark_manifest().map_err(|error| error.to_string())?;
     let selected_cases = select_profile_cases(&manifest, options.case_filter.as_deref())?;
+
+    // Compute fingerprints once for the whole run.
+    let fingerprints =
+        compute_benchmark_fingerprints(&manifest).map_err(|error| error.to_string())?;
 
     // Capture repository state before compiler construction or preflight.
     let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
@@ -245,6 +251,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         // Build manifest entry for this case.
         case_manifests.push(ProfileCaseManifest {
             case_id: case.id.clone(),
+            identity: build_case_identity(&manifest, &selected_cases, &fingerprints, &case.id),
             group_name: case.group_name.clone(),
             command: invocation.command.as_str().to_owned(),
             args: invocation.args.clone(),
@@ -286,7 +293,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     write_run_manifest(
         &run_paths,
         &run_paths.run_id,
-        commit.as_deref(),
+        Some(&git_revision),
         options.filter,
         options.samply_rate_hz,
         &case_manifests,
@@ -325,12 +332,13 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     // Compute drift against the latest comparable previous record.
     let drift_report = if options.filter != ProfileFilterMode::RawIndex {
         let history_path = std::path::Path::new(PROFILE_RUNS_JSONL_PATH);
-        let previous_records = history::read_profile_runs(history_path).unwrap_or_default();
+        let previous_records =
+            history::read_profile_runs(history_path).map_err(|error| error.to_string())?;
 
         let system = crate::bench_system::load_or_create_system(
             crate::bench_system::SystemIdentityMode::ReadOnly,
         )
-        .unwrap_or(None);
+        .map_err(|error| error.to_string())?;
         let system_uuid = system
             .as_ref()
             .map(|s| s.system_uuid.as_str())
@@ -364,8 +372,16 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
                         })
                         .collect();
 
+                    let identity = build_case_identity(
+                        &manifest,
+                        &selected_cases,
+                        &fingerprints,
+                        &observation.case_id,
+                    );
+
                     drift_cases.push(DriftCaseInput {
                         case_id: observation.case_id.clone(),
+                        identity,
                         command: observation.command.clone(),
                         args: observation.command_args.clone(),
                         stage_timings: observation.observations.stage_timings.clone(),
@@ -427,8 +443,17 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
                         .map(|f| f.bucket_label.clone())
                         .unwrap_or_else(|| "unknown".to_string());
 
+                    // Build typed identity from the computed fingerprints.
+                    let identity = build_case_identity(
+                        &manifest,
+                        &selected_cases,
+                        &fingerprints,
+                        &observation.case_id,
+                    );
+
                     HistoryCaseRecord {
                         case_id: observation.case_id.clone(),
+                        identity,
                         group_name: observation.group_name.clone(),
                         command: observation.command.clone(),
                         args: observation.command_args.clone(),
@@ -451,7 +476,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         let history_record = history::build_history_record(
             &run_paths.run_id,
             &timestamp,
-            commit.as_deref(),
+            &git_revision,
             options.filter.display_label(),
             options.samply_rate_hz,
             history_cases,
@@ -502,6 +527,31 @@ fn select_profile_cases(
             case.id
         )),
     }
+}
+
+/// Build typed measurement identity for one profile case.
+///
+/// WHAT: Joins the case's workload and measurement fingerprints from the
+/// pre-computed `BenchmarkFingerprints` to produce a `BenchmarkMeasurementIdentity`.
+/// WHY: Profile history must carry the same identity shape as normal benchmark
+/// history so drift comparison can distinguish source changes from measurement
+/// changes without a parallel identity system.
+fn build_case_identity(
+    manifest: &BenchmarkManifest,
+    selected_cases: &[BenchmarkCase],
+    fingerprints: &crate::benchmark_fingerprint::BenchmarkFingerprints,
+    case_id: &str,
+) -> Option<BenchmarkMeasurementIdentity> {
+    let case = selected_cases.iter().find(|c| c.id == case_id)?;
+    let workload = manifest.workload_for(case)?;
+    let source_fingerprint = fingerprints.workloads.get(case.workload_index)?;
+    let measurement_fingerprint = fingerprints.cases.get(case.case_index)?;
+
+    Some(BenchmarkMeasurementIdentity {
+        workload_id: workload.id.clone(),
+        source_fingerprint: source_fingerprint.to_string(),
+        measurement_fingerprint: measurement_fingerprint.to_string(),
+    })
 }
 
 fn print_symbolication_smoke_diagnostic(
