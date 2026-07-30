@@ -338,7 +338,8 @@ fn case_record(
     LocalCaseRecord {
         case_id: name.to_string(),
         workload_id: Some(format!("{name}_workload")),
-        workload_fingerprint: Some(format!("{name}_fingerprint")),
+        source_fingerprint: Some(format!("{name}_source_fp")),
+        measurement_fingerprint: Some(format!("{name}_measurement_fp")),
         group_name: "test".to_string(),
         runner: BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Check,

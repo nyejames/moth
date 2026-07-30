@@ -56,8 +56,11 @@ fn make_grouped_case_with_stddev(
 ) -> BenchmarkCaseResult {
     BenchmarkCaseResult {
         case_id: name.to_string(),
-        workload_id: Some(format!("{name}_workload")),
-        workload_fingerprint: Some(format!("{name}_fingerprint")),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: format!("{name}_workload"),
+            source_fingerprint: format!("{name}_source_fp"),
+            measurement_fingerprint: format!("{name}_measurement_fp"),
+        }),
         group_name: group_name.to_string(),
         runner: BenchmarkRunner::Cli {
             command: crate::benchmark_manifest::CliBenchmarkCommand::Check,
@@ -77,8 +80,11 @@ fn make_case_with_observations(
 ) -> BenchmarkCaseResult {
     BenchmarkCaseResult {
         case_id: name.to_string(),
-        workload_id: Some(format!("{name}_workload")),
-        workload_fingerprint: Some(format!("{name}_fingerprint")),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: format!("{name}_workload"),
+            source_fingerprint: format!("{name}_source_fp"),
+            measurement_fingerprint: format!("{name}_measurement_fp"),
+        }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
             command: crate::benchmark_manifest::CliBenchmarkCommand::Check,
@@ -248,9 +254,9 @@ fn stable_id_and_equal_fingerprint_are_comparable() {
 #[test]
 fn changed_fingerprint_is_excluded_and_reported_without_speed_delta() {
     let mut current_first = make_case("first", 80.0);
-    current_first.workload_fingerprint = Some("first_changed".to_string());
+    current_first.identity.as_mut().unwrap().source_fingerprint = "first_changed".to_string();
     let mut current_second = make_case("second", 250.0);
-    current_second.workload_fingerprint = Some("second_changed".to_string());
+    current_second.identity.as_mut().unwrap().source_fingerprint = "second_changed".to_string();
     let current = vec![current_first, current_second];
     let previous = vec![make_case("first", 100.0), make_case("second", 200.0)];
 
@@ -273,7 +279,7 @@ fn changed_fingerprint_is_excluded_and_reported_without_speed_delta() {
 fn timing_delta_uses_only_comparable_unchanged_workloads() {
     let comparable = make_case("comparable", 120.0);
     let mut changed = make_case("changed", 10.0);
-    changed.workload_fingerprint = Some("changed_fingerprint_v2".to_string());
+    changed.identity.as_mut().unwrap().source_fingerprint = "changed_fingerprint_v2".to_string();
     let current = vec![comparable, changed];
     let previous = vec![
         make_case("comparable", 100.0),
@@ -332,7 +338,7 @@ fn quick_subset_filters_intentional_previous_cases() {
 #[test]
 fn case_set_and_workload_changes_are_reported_separately() {
     let mut changed = make_case("shared", 80.0);
-    changed.workload_fingerprint = Some("changed_fingerprint".to_string());
+    changed.identity.as_mut().unwrap().source_fingerprint = "changed_fingerprint".to_string();
     let current = vec![changed, make_case("added", 50.0)];
     let previous = vec![make_case("shared", 100.0), make_case("removed", 60.0)];
 

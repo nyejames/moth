@@ -1,7 +1,10 @@
 //! Focused contracts for deterministic workload identity and filesystem policy.
 
 use super::*;
-use crate::bench_types::{BenchmarkCaseObservations, BenchmarkCaseResult, BenchmarkComparison};
+use crate::bench_types::{
+    BenchmarkCaseObservations, BenchmarkCaseResult, BenchmarkComparison,
+    BenchmarkMeasurementIdentity,
+};
 use crate::benchmark_manifest::{
     BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode, CliBenchmarkCommand,
     FrontendBenchmarkProfile,
@@ -42,6 +45,7 @@ fn manifest(
         .enumerate()
         .map(|(index, runner)| BenchmarkCase {
             id: format!("case_{index}"),
+            case_index: index,
             workload_index: 0,
             group_name: "test".to_owned(),
             quick: false,
@@ -79,11 +83,18 @@ fn standard_manifest(repository_root: &Path) -> BenchmarkManifest {
     )
 }
 
-fn fingerprint(manifest: &BenchmarkManifest) -> WorkloadFingerprint {
+fn source_fingerprint(manifest: &BenchmarkManifest) -> SourceWorkloadFingerprint {
     let fingerprints =
-        compute_workload_fingerprints(manifest).expect("workload fingerprint should compute");
-    assert_eq!(fingerprints.len(), manifest.workloads.len());
-    fingerprints[0]
+        compute_benchmark_fingerprints(manifest).expect("benchmark fingerprints should compute");
+    assert_eq!(fingerprints.workloads.len(), manifest.workloads.len());
+    fingerprints.workloads[0]
+}
+
+fn measurement_fingerprint(manifest: &BenchmarkManifest) -> CaseMeasurementFingerprint {
+    let fingerprints =
+        compute_benchmark_fingerprints(manifest).expect("benchmark fingerprints should compute");
+    assert_eq!(fingerprints.cases.len(), manifest.cases.len());
+    fingerprints.cases[0]
 }
 
 fn repository_with_files(files: &[(&str, &[u8])]) -> TempDir {
@@ -108,8 +119,8 @@ fn directory_enumeration_order_does_not_change_fingerprint() {
     ]);
 
     assert_eq!(
-        fingerprint(&standard_manifest(first.path())),
-        fingerprint(&standard_manifest(second.path()))
+        source_fingerprint(&standard_manifest(first.path())),
+        source_fingerprint(&standard_manifest(second.path()))
     );
 }
 
@@ -117,11 +128,11 @@ fn directory_enumeration_order_does_not_change_fingerprint() {
 fn changing_file_bytes_changes_fingerprint() {
     let repository = repository_with_files(&[("project/main.moth", b"before")]);
     let manifest = standard_manifest(repository.path());
-    let before = fingerprint(&manifest);
+    let before = source_fingerprint(&manifest);
 
     write_file(repository.path(), "project/main.moth", b"after");
 
-    assert_ne!(before, fingerprint(&manifest));
+    assert_ne!(before, source_fingerprint(&manifest));
 }
 
 #[test]
@@ -131,7 +142,7 @@ fn renaming_file_changes_fingerprint() {
         ("project/old-name.moth", b"same bytes"),
     ]);
     let manifest = standard_manifest(repository.path());
-    let before = fingerprint(&manifest);
+    let before = source_fingerprint(&manifest);
 
     fs::rename(
         repository.path().join("project/old-name.moth"),
@@ -139,7 +150,7 @@ fn renaming_file_changes_fingerprint() {
     )
     .expect("test file should be renameable");
 
-    assert_ne!(before, fingerprint(&manifest));
+    assert_ne!(before, source_fingerprint(&manifest));
 }
 
 #[test]
@@ -169,10 +180,10 @@ fn runner_command_profile_and_args_change_fingerprint() {
     );
 
     let fingerprints = [
-        fingerprint(&check),
-        fingerprint(&build),
-        fingerprint(&check_with_args),
-        fingerprint(&frontend),
+        measurement_fingerprint(&check),
+        measurement_fingerprint(&build),
+        measurement_fingerprint(&check_with_args),
+        measurement_fingerprint(&frontend),
     ];
     for (index, fingerprint) in fingerprints.iter().enumerate() {
         assert!(
@@ -195,42 +206,54 @@ fn changed_runner_args_change_fingerprint_and_prevent_comparison() {
         &["project/dev"],
         vec![cli_runner(CliBenchmarkCommand::Check, &["--terse"])],
     );
-    let previous_fingerprint = fingerprint(&previous_manifest).to_string();
-    let current_fingerprint = fingerprint(&current_manifest).to_string();
-    assert_ne!(current_fingerprint, previous_fingerprint);
+    let shared_source_fingerprint = source_fingerprint(&previous_manifest).to_string();
+    let previous_measurement_fingerprint = measurement_fingerprint(&previous_manifest).to_string();
+    let current_measurement_fingerprint = measurement_fingerprint(&current_manifest).to_string();
+    assert_ne!(
+        current_measurement_fingerprint,
+        previous_measurement_fingerprint
+    );
 
-    let make_result =
-        |runner: BenchmarkRunner, workload_fingerprint: String, mean_ms: f64| BenchmarkCaseResult {
-            case_id: "stable_case".to_string(),
-            workload_id: Some("workload".to_string()),
-            workload_fingerprint: Some(workload_fingerprint),
-            group_name: "test".to_string(),
-            runner,
-            mean_ms,
-            median_ms: mean_ms,
-            stddev_ms: 0.0,
-            observations: BenchmarkCaseObservations::default(),
-        };
+    let make_result = |runner: BenchmarkRunner,
+                       source_fp: String,
+                       measurement_fp: String,
+                       mean_ms: f64| BenchmarkCaseResult {
+        case_id: "stable_case".to_string(),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: "workload".to_string(),
+            source_fingerprint: source_fp,
+            measurement_fingerprint: measurement_fp,
+        }),
+        group_name: "test".to_string(),
+        runner,
+        mean_ms,
+        median_ms: mean_ms,
+        stddev_ms: 0.0,
+        observations: BenchmarkCaseObservations::default(),
+    };
     let current = vec![make_result(
         current_manifest.cases[0].runner.clone(),
-        current_fingerprint,
+        shared_source_fingerprint.clone(),
+        current_measurement_fingerprint,
         80.0,
     )];
     let previous = vec![make_result(
         previous_manifest.cases[0].runner.clone(),
-        previous_fingerprint,
+        shared_source_fingerprint,
+        previous_measurement_fingerprint,
         100.0,
     )];
 
     let comparison = BenchmarkComparison::new(&current, Some(&previous));
 
     assert_eq!(comparison.compared_case_count, 0);
-    assert_eq!(comparison.workload_changed_case_ids, ["stable_case"]);
+    assert_eq!(comparison.workload_changed_case_ids.len(), 0);
+    assert_eq!(comparison.measurement_changed_case_ids, ["stable_case"]);
     assert_eq!(comparison.overall_mean_delta_ms, None);
 }
 
 #[test]
-fn every_shared_workload_runner_is_hashed_in_manifest_order() {
+fn every_case_measurement_fingerprint_is_isolated_from_siblings() {
     let repository = repository_with_files(&[("project/main.moth", b"main")]);
     let check_then_build = manifest(
         repository.path(),
@@ -260,11 +283,17 @@ fn every_shared_workload_runner_is_hashed_in_manifest_order() {
         vec![cli_runner(CliBenchmarkCommand::Check, &[])],
     );
 
+    // Swapping runner order changes every case's measurement fingerprint.
     assert_ne!(
-        fingerprint(&check_then_build),
-        fingerprint(&build_then_check)
+        measurement_fingerprint(&check_then_build),
+        measurement_fingerprint(&build_then_check)
     );
-    assert_ne!(fingerprint(&check_then_build), fingerprint(&check_only));
+    // Case 0 with the same runner and source has the same measurement
+    // fingerprint regardless of how many sibling cases exist.
+    assert_eq!(
+        measurement_fingerprint(&check_then_build),
+        measurement_fingerprint(&check_only)
+    );
 }
 
 #[test]
@@ -310,9 +339,18 @@ fn entry_and_ordered_root_exclude_declarations_change_fingerprint() {
         runner(),
     );
 
-    assert_ne!(fingerprint(&base), fingerprint(&changed_entry));
-    assert_ne!(fingerprint(&base), fingerprint(&reversed_roots));
-    assert_ne!(fingerprint(&excludes), fingerprint(&reversed_excludes));
+    assert_ne!(
+        source_fingerprint(&base),
+        source_fingerprint(&changed_entry)
+    );
+    assert_ne!(
+        source_fingerprint(&base),
+        source_fingerprint(&reversed_roots)
+    );
+    assert_ne!(
+        source_fingerprint(&excludes),
+        source_fingerprint(&reversed_excludes)
+    );
 }
 
 #[test]
@@ -333,7 +371,10 @@ fn length_prefixed_arguments_avoid_concatenation_ambiguity() {
         vec![cli_runner(CliBenchmarkCommand::Check, &["a", "bc"])],
     );
 
-    assert_ne!(fingerprint(&first), fingerprint(&second));
+    assert_ne!(
+        measurement_fingerprint(&first),
+        measurement_fingerprint(&second)
+    );
 }
 
 #[test]
@@ -343,12 +384,12 @@ fn excluded_output_changes_do_not_change_fingerprint() {
         ("project/dev/output.html", b"before"),
     ]);
     let manifest = standard_manifest(repository.path());
-    let before = fingerprint(&manifest);
+    let before = source_fingerprint(&manifest);
 
     write_file(repository.path(), "project/dev/output.html", b"after");
     write_file(repository.path(), "project/dev/nested/new.js", b"new");
 
-    assert_eq!(before, fingerprint(&manifest));
+    assert_eq!(before, source_fingerprint(&manifest));
 }
 
 #[test]
@@ -359,7 +400,7 @@ fn excludes_use_exact_component_prefixes() {
         ("project/dev-output/output.html", b"included before"),
     ]);
     let manifest = standard_manifest(repository.path());
-    let before = fingerprint(&manifest);
+    let before = source_fingerprint(&manifest);
 
     write_file(
         repository.path(),
@@ -367,18 +408,18 @@ fn excludes_use_exact_component_prefixes() {
         b"included after",
     );
 
-    assert_ne!(before, fingerprint(&manifest));
+    assert_ne!(before, source_fingerprint(&manifest));
 }
 
 #[test]
 fn adding_an_included_file_changes_fingerprint() {
     let repository = repository_with_files(&[("project/main.moth", b"main")]);
     let manifest = standard_manifest(repository.path());
-    let before = fingerprint(&manifest);
+    let before = source_fingerprint(&manifest);
 
     write_file(repository.path(), "project/added.moth", b"added");
 
-    assert_ne!(before, fingerprint(&manifest));
+    assert_ne!(before, source_fingerprint(&manifest));
 }
 
 #[test]
@@ -392,12 +433,12 @@ fn missing_root_returns_contextual_typed_error() {
         vec![cli_runner(CliBenchmarkCommand::Check, &[])],
     );
 
-    let error =
-        compute_workload_fingerprints(&manifest).expect_err("missing fingerprint root should fail");
+    let error = compute_benchmark_fingerprints(&manifest)
+        .expect_err("missing fingerprint root should fail");
 
     assert!(matches!(
         error,
-        WorkloadFingerprintError::RootAccess {
+        BenchmarkFingerprintError::RootAccess {
             workload_id,
             path,
             source,
@@ -418,12 +459,12 @@ fn fully_excluded_file_set_fails() {
         vec![cli_runner(CliBenchmarkCommand::Check, &[])],
     );
 
-    let error = compute_workload_fingerprints(&manifest)
+    let error = compute_benchmark_fingerprints(&manifest)
         .expect_err("a workload with no included files should fail");
 
     assert!(matches!(
         error,
-        WorkloadFingerprintError::EmptyFileSet { workload_id }
+        BenchmarkFingerprintError::EmptyFileSet { workload_id }
             if workload_id == "workload"
     ));
 }
@@ -443,11 +484,11 @@ fn repository_relative_path_escape_fails() {
     );
 
     let error =
-        compute_workload_fingerprints(&manifest).expect_err("repository path escape should fail");
+        compute_benchmark_fingerprints(&manifest).expect_err("repository path escape should fail");
 
     assert!(matches!(
         error,
-        WorkloadFingerprintError::InvalidLogicalPath { workload_id, .. }
+        BenchmarkFingerprintError::InvalidLogicalPath { workload_id, .. }
             if workload_id == "workload"
     ));
 }
@@ -465,12 +506,12 @@ fn symlink_escape_fails() {
     )
     .expect("test symlink should be creatable");
 
-    let error = compute_workload_fingerprints(&standard_manifest(repository.path()))
+    let error = compute_benchmark_fingerprints(&standard_manifest(repository.path()))
         .expect_err("symlink escape should fail");
 
     assert!(matches!(
         error,
-        WorkloadFingerprintError::Symlink { workload_id, path }
+        BenchmarkFingerprintError::Symlink { workload_id, path }
             if workload_id == "workload" && path == Path::new("project/escape.moth")
     ));
 }
@@ -490,12 +531,12 @@ fn in_repository_symlink_fails() {
     )
     .expect("test symlink should be creatable");
 
-    let error = compute_workload_fingerprints(&standard_manifest(repository.path()))
+    let error = compute_benchmark_fingerprints(&standard_manifest(repository.path()))
         .expect_err("in-repository symlink should fail");
 
     assert!(matches!(
         error,
-        WorkloadFingerprintError::Symlink { workload_id, path }
+        BenchmarkFingerprintError::Symlink { workload_id, path }
             if workload_id == "workload" && path == Path::new("project/alias.moth")
     ));
 }
@@ -517,12 +558,12 @@ fn symlink_inside_excluded_subtree_is_ignored() {
     .expect("test symlink should be creatable");
 
     let manifest = standard_manifest(repository.path());
-    let with_excluded_symlink = fingerprint(&manifest);
+    let with_excluded_symlink = source_fingerprint(&manifest);
 
     fs::remove_file(repository.path().join("project/dev/nested/alias.moth"))
         .expect("test symlink should be removable");
 
-    assert_eq!(with_excluded_symlink, fingerprint(&manifest));
+    assert_eq!(with_excluded_symlink, source_fingerprint(&manifest));
 }
 
 #[test]
@@ -552,6 +593,7 @@ fn bulk_api_preserves_manifest_workload_order() {
         cases: vec![
             BenchmarkCase {
                 id: "second_case".to_owned(),
+                case_index: 0,
                 workload_index: 1,
                 group_name: "test".to_owned(),
                 quick: false,
@@ -560,6 +602,7 @@ fn bulk_api_preserves_manifest_workload_order() {
             },
             BenchmarkCase {
                 id: "first_case".to_owned(),
+                case_index: 1,
                 workload_index: 0,
                 group_name: "test".to_owned(),
                 quick: false,
@@ -571,7 +614,7 @@ fn bulk_api_preserves_manifest_workload_order() {
         repository_root: repository.path().to_owned(),
     };
     let fingerprints =
-        compute_workload_fingerprints(&bulk_manifest).expect("bulk fingerprints should compute");
+        compute_benchmark_fingerprints(&bulk_manifest).expect("bulk fingerprints should compute");
     let first_only = manifest(
         repository.path(),
         "first.moth",
@@ -588,8 +631,11 @@ fn bulk_api_preserves_manifest_workload_order() {
     );
 
     assert_eq!(
-        fingerprints,
-        [fingerprint(&first_only), fingerprint(&second_only)]
+        fingerprints.workloads,
+        [
+            source_fingerprint(&first_only),
+            source_fingerprint(&second_only)
+        ]
     );
 }
 
@@ -611,7 +657,7 @@ fn versioned_fingerprint_has_stable_hex_encoding() {
     );
 
     assert_eq!(
-        fingerprint(&manifest).to_string(),
-        "ace848d733d762a176f3563329c7008a"
+        source_fingerprint(&manifest).to_string(),
+        "6c7e9ae6a2156e7c273c3c3ab1234807"
     );
 }

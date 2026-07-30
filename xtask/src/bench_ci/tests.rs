@@ -114,6 +114,7 @@ fn cases() -> Vec<BenchmarkCase> {
 fn cli_case(id: &str, quick: bool) -> BenchmarkCase {
     BenchmarkCase {
         id: id.to_owned(),
+        case_index: 0,
         workload_index: 0,
         group_name: "core".to_owned(),
         quick,
@@ -128,6 +129,7 @@ fn cli_case(id: &str, quick: bool) -> BenchmarkCase {
 fn frontend_case(id: &str, quick: bool) -> BenchmarkCase {
     BenchmarkCase {
         id: id.to_owned(),
+        case_index: 0,
         workload_index: 0,
         group_name: "core".to_owned(),
         quick,

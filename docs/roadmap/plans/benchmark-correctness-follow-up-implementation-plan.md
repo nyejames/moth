@@ -31,13 +31,13 @@ WORK_ID: bench-followup
 WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
 BASE_REVISION: 9af62e5a9
 STATUS: active
-CURRENT_SLICE: Phase 3 - make fingerprint boundaries explicit
-COMPLETED: Phase 1 (output isolation), Phase 2 (repository mutation detection and persistence ordering)
-NEXT_ACTION: implement Phase 3A (schema 2 fingerprint mode)
-VALIDATION: cargo test --package xtask (519 passed), cargo fmt
+CURRENT_SLICE: Phase 4 checkpoint - review before Phase 5
+COMPLETED: Phase 1 (output isolation), Phase 2 (repository mutation detection), Phase 3 (explicit fingerprint boundaries), Phase 4 (split source and measurement identity)
+NEXT_ACTION: Phase 4 checkpoint review, then Phase 5 (profile history identity-safe)
+VALIDATION: cargo test --package xtask (532 passed), cargo fmt, bench-validate (4 pre-existing failures only), bench-check (pre-existing docs_check failure only)
 AUDITS: none
 BLOCKERS: pre-existing compiler failures in docs_check, docs_frontend, module_root_role_mix_frontend, few_modules_many_files_each_frontend
-NOTES: Pre-existing failures are from canonical module compilation phase 5, not benchmark changes.
+NOTES: Phase 4 complete. Source/measurement fingerprint split, protocol v2, history v7 with v6 legacy adapter, BenchmarkMeasurementIdentity, comparison distinguishes workload vs measurement changes.
 ```
 
 Update this block after each accepted phase. Keep it concise. Git history remains the durable implementation record, so do not append command transcripts or worker journals.

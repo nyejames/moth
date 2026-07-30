@@ -43,6 +43,7 @@ fn manifest() -> BenchmarkManifest {
         cases: vec![
             BenchmarkCase {
                 id: "cli_case".to_owned(),
+                case_index: 0,
                 workload_index: 0,
                 group_name: "core".to_owned(),
                 quick: false,
@@ -54,6 +55,7 @@ fn manifest() -> BenchmarkManifest {
             },
             BenchmarkCase {
                 id: "frontend_case".to_owned(),
+                case_index: 1,
                 workload_index: 0,
                 group_name: "core".to_owned(),
                 quick: false,
@@ -85,6 +87,7 @@ fn observation_and_samply_receive_one_resolved_invocation() {
         }],
         cases: vec![BenchmarkCase {
             id: "cli_case".to_owned(),
+            case_index: 0,
             workload_index: 0,
             group_name: "core".to_owned(),
             quick: false,

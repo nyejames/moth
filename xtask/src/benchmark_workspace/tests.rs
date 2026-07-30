@@ -26,6 +26,7 @@ fn cli_case(
 ) -> BenchmarkCase {
     BenchmarkCase {
         id: id.to_owned(),
+        case_index: 0,
         workload_index,
         group_name: "core".to_owned(),
         quick: false,
@@ -256,6 +257,7 @@ fn frontend_cases_cannot_request_a_cli_invocation() {
 
     let frontend_case = BenchmarkCase {
         id: "frontend_case".to_owned(),
+        case_index: 0,
         workload_index: 0,
         group_name: "core".to_owned(),
         quick: false,

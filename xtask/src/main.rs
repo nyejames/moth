@@ -32,6 +32,7 @@ mod bench_time;
 mod bench_types;
 mod bench_validate;
 mod benchmark_execution;
+mod benchmark_fingerprint;
 mod benchmark_manifest;
 mod benchmark_repository;
 mod benchmark_status;
@@ -41,7 +42,6 @@ mod frontend_bench;
 mod mode;
 mod process_runner;
 mod profile;
-mod workload_fingerprint;
 
 use bench::run_benchmarks;
 use bench_ci::run_bench_ci;

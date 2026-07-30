@@ -1,6 +1,8 @@
 use super::*;
 use crate::bench_time::BenchmarkTimestamp;
-use crate::bench_types::{BenchmarkSystem, GitRevision, SuiteStats, calculate_group_stats};
+use crate::bench_types::{
+    BenchmarkMeasurementIdentity, BenchmarkSystem, GitRevision, SuiteStats, calculate_group_stats,
+};
 use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;
@@ -20,8 +22,11 @@ fn cli_runner() -> BenchmarkRunner {
 fn benchmark_case() -> BenchmarkCaseResult {
     BenchmarkCaseResult {
         case_id: "speed_test_check".to_string(),
-        workload_id: Some("speed_test".to_string()),
-        workload_fingerprint: Some("0123456789abcdef0123456789abcdef".to_string()),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: "speed_test".to_string(),
+            source_fingerprint: "0123456789abcdef0123456789abcdef".to_string(),
+            measurement_fingerprint: "fedcba9876543210fedcba9876543210".to_string(),
+        }),
         group_name: "core".to_string(),
         runner: cli_runner(),
         mean_ms: 40.0,
@@ -110,14 +115,18 @@ fn v6_roundtrip_preserves_protocol_revision_runner_and_workload_identity() {
     assert_eq!(parsed.cases[0].case_id, "speed_test_check");
     assert_eq!(parsed.cases[0].workload_id.as_deref(), Some("speed_test"));
     assert_eq!(
-        parsed.cases[0].workload_fingerprint.as_deref(),
+        parsed.cases[0].source_fingerprint.as_deref(),
         Some("0123456789abcdef0123456789abcdef")
+    );
+    assert_eq!(
+        parsed.cases[0].measurement_fingerprint.as_deref(),
+        Some("fedcba9876543210fedcba9876543210")
     );
     assert_eq!(parsed.cases[0].runner, cli_runner());
 
     let json = fs::read_to_string(path).expect("record should be readable");
-    assert!(json.contains(r#""format_version":6"#));
-    assert!(json.contains(r#""benchmark_protocol_version":1"#));
+    assert!(json.contains(r#""format_version":7"#));
+    assert!(json.contains(r#""benchmark_protocol_version":2"#));
     assert!(json.contains(r#""git_dirty":true"#));
     assert!(json.contains(r#""case_id":"speed_test_check""#));
     assert!(json.contains(r#""workload_id":"speed_test""#));
@@ -161,7 +170,8 @@ fn v1_adapter_preserves_historical_name_and_assigns_protocol_zero() {
     assert_eq!(record.git_dirty, None);
     assert_eq!(record.cases[0].case_id, "check_benchmarks_speed-test_bst");
     assert_eq!(record.cases[0].workload_id, None);
-    assert_eq!(record.cases[0].workload_fingerprint, None);
+    assert_eq!(record.cases[0].source_fingerprint, None);
+    assert_eq!(record.cases[0].measurement_fingerprint, None);
     assert_eq!(record.cases[0].median_ms, 40.0);
     assert_eq!(record.groups[0].name, "core");
 }
@@ -224,7 +234,7 @@ fn old_records_never_match_current_protocol() {
     let latest = find_latest_matching_run(&records, "sys-a", BenchmarkSuiteKind::EndToEndCli, None)
         .expect("current protocol record should match");
 
-    assert_eq!(latest.format_version, 6);
+    assert_eq!(latest.format_version, 7);
 }
 
 #[test]
@@ -284,7 +294,7 @@ fn future_and_malformed_versions_are_skipped_without_hiding_valid_records() {
 
     let records = read_local_runs(&path).expect("history should remain readable");
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].format_version, 6);
+    assert_eq!(records[0].format_version, 7);
 }
 
 #[test]

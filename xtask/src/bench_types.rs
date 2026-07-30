@@ -12,7 +12,7 @@ use std::num::NonZeroUsize;
 ///
 /// Increment this only when measurement methodology or workload fingerprint
 /// semantics change enough to make direct comparisons invalid.
-pub const BENCHMARK_PROTOCOL_VERSION: u32 = 1;
+pub const BENCHMARK_PROTOCOL_VERSION: u32 = 2;
 
 /// Selects which manifest cases proceed to measured benchmark iterations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,15 +152,28 @@ impl BenchmarkSuiteKind {
     }
 }
 
+/// Typed identity for one benchmark case measurement.
+///
+/// Combines the workload identity with the case measurement fingerprint so
+/// comparisons can distinguish source changes from runner/expectation changes
+/// without loose optional strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BenchmarkMeasurementIdentity {
+    /// Authored workload identity from the manifest.
+    pub workload_id: String,
+    /// Source workload fingerprint, absent only for adapted legacy history.
+    pub source_fingerprint: String,
+    /// Case measurement fingerprint covering source, protocol, runner and expectation.
+    pub measurement_fingerprint: String,
+}
+
 /// A single benchmark case result after measured iterations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BenchmarkCaseResult {
     /// Authored stable benchmark case identity.
     pub case_id: String,
-    /// Authored workload identity, absent only for adapted legacy history.
-    pub workload_id: Option<String>,
-    /// Deterministic workload fingerprint, absent only for adapted legacy history.
-    pub workload_fingerprint: Option<String>,
+    /// Typed measurement identity, absent only for adapted legacy history.
+    pub identity: Option<BenchmarkMeasurementIdentity>,
     /// Public grouping used by summaries to give absolute context.
     pub group_name: String,
     /// Typed runner declaration, including CLI command/profile and authored args.
@@ -364,7 +377,7 @@ pub struct BenchmarkComparison {
     pub overall_mean_delta_ms: Option<f64>,
     /// Named classification of the change.
     pub change_kind: BenchmarkChangeKind,
-    /// Number of current cases with matching stable IDs and workload fingerprints.
+    /// Number of current cases with matching stable IDs and identical identity.
     pub compared_case_count: usize,
     /// Number of current cases.
     pub current_case_count: usize,
@@ -378,10 +391,14 @@ pub struct BenchmarkComparison {
     pub unchanged_case_count: usize,
     /// True when cases were added or removed between the two runs.
     pub case_set_changed: bool,
-    /// Number of matching stable IDs whose workloads changed.
+    /// Number of matching stable IDs whose source workload changed.
     pub workload_changed_case_count: usize,
-    /// Workload-changed stable IDs in current manifest order.
+    /// Source-changed stable IDs in current manifest order.
     pub workload_changed_case_ids: Vec<String>,
+    /// Number of matching stable IDs whose source matches but measurement changed.
+    pub measurement_changed_case_count: usize,
+    /// Measurement-changed stable IDs in current manifest order.
+    pub measurement_changed_case_ids: Vec<String>,
     /// Per-case comparisons for overlapping cases.
     pub cases: Vec<BenchmarkCaseComparison>,
     /// Per-current-group comparison counts and average movement.
@@ -419,13 +436,23 @@ impl BenchmarkComparison {
         thresholds: &BenchmarkThresholds,
     ) -> Self {
         let Some(previous_cases) = previous else {
-            return Self::baseline(current.len(), 0, false, Vec::new(), current, None);
+            return Self::baseline(
+                current.len(),
+                0,
+                false,
+                Vec::new(),
+                Vec::new(),
+                current,
+                None,
+            );
         };
 
         let matched_cases = match_cases(current, previous_cases, thresholds);
         let cases = matched_cases.comparable;
         let workload_changed_case_ids = matched_cases.workload_changed_case_ids;
+        let measurement_changed_case_ids = matched_cases.measurement_changed_case_ids;
         let workload_changed_case_count = workload_changed_case_ids.len();
+        let measurement_changed_case_count = measurement_changed_case_ids.len();
         let case_set_changed = case_ids_changed(current, previous_cases);
 
         if cases.is_empty() {
@@ -434,6 +461,7 @@ impl BenchmarkComparison {
                 previous_cases.len(),
                 case_set_changed,
                 workload_changed_case_ids,
+                measurement_changed_case_ids,
                 current,
                 Some(previous_cases),
             );
@@ -478,6 +506,8 @@ impl BenchmarkComparison {
             case_set_changed,
             workload_changed_case_count,
             workload_changed_case_ids,
+            measurement_changed_case_count,
+            measurement_changed_case_ids,
             cases,
             groups,
         };
@@ -491,6 +521,7 @@ impl BenchmarkComparison {
         previous_case_count: usize,
         case_set_changed: bool,
         workload_changed_case_ids: Vec<String>,
+        measurement_changed_case_ids: Vec<String>,
         current: &[BenchmarkCaseResult],
         previous: Option<&[BenchmarkCaseResult]>,
     ) -> Self {
@@ -510,6 +541,8 @@ impl BenchmarkComparison {
             case_set_changed,
             workload_changed_case_count: workload_changed_case_ids.len(),
             workload_changed_case_ids,
+            measurement_changed_case_count: measurement_changed_case_ids.len(),
+            measurement_changed_case_ids,
             cases: Vec::new(),
             groups,
             current_suite_average_ms: Self::mean_of_case_means(current),
@@ -586,6 +619,10 @@ impl BenchmarkComparison {
             self.workload_changed_case_ids.len(),
             self.workload_changed_case_count
         );
+        debug_assert_eq!(
+            self.measurement_changed_case_ids.len(),
+            self.measurement_changed_case_count
+        );
     }
 
     /// Format the run-entry summary line for display in monthly summaries.
@@ -644,10 +681,17 @@ impl BenchmarkComparison {
             }
         };
 
-        if self.workload_changed_case_count == 0 {
+        if self.workload_changed_case_count == 0 && self.measurement_changed_case_count == 0 {
             timing_line
         } else {
-            format!("{timing_line}; {}", self.format_workload_changed_segment())
+            let mut segments = Vec::new();
+            if self.workload_changed_case_count > 0 {
+                segments.push(self.format_workload_changed_segment());
+            }
+            if self.measurement_changed_case_count > 0 {
+                segments.push(self.format_measurement_changed_segment());
+            }
+            format!("{timing_line}; {}", segments.join("; "))
         }
     }
 
@@ -692,6 +736,21 @@ impl BenchmarkComparison {
         )
     }
 
+    fn format_measurement_changed_segment(&self) -> String {
+        let case_label = if self.measurement_changed_case_count == 1 {
+            "case"
+        } else {
+            "cases"
+        };
+
+        format!(
+            "measurement changed: {} {} ({})",
+            self.measurement_changed_case_count,
+            case_label,
+            self.measurement_changed_case_ids.join(", ")
+        )
+    }
+
     /// Compare a quick current subset against only the same previous IDs.
     ///
     /// Intentional selection differences do not become removals, while a
@@ -718,6 +777,7 @@ impl BenchmarkComparison {
 struct MatchedCases {
     comparable: Vec<BenchmarkCaseComparison>,
     workload_changed_case_ids: Vec<String>,
+    measurement_changed_case_ids: Vec<String>,
 }
 
 fn match_cases(
@@ -727,6 +787,7 @@ fn match_cases(
 ) -> MatchedCases {
     let mut cases = Vec::new();
     let mut workload_changed_case_ids = Vec::new();
+    let mut measurement_changed_case_ids = Vec::new();
 
     for current_case in current {
         let Some(previous_case) = previous
@@ -736,15 +797,25 @@ fn match_cases(
             continue;
         };
 
-        let workloads_match = matches!(
-            (
-                &current_case.workload_fingerprint,
-                &previous_case.workload_fingerprint
-            ),
-            (Some(current), Some(previous)) if current == previous
-        );
-        if !workloads_match {
+        let (current_identity, previous_identity) = match (
+            current_case.identity.as_ref(),
+            previous_case.identity.as_ref(),
+        ) {
+            (Some(current), Some(previous)) => (current, previous),
+            _ => {
+                // Adapted legacy records lack identity; skip them as
+                // incomparable rather than silently matching on missing data.
+                continue;
+            }
+        };
+
+        if current_identity.source_fingerprint != previous_identity.source_fingerprint {
             workload_changed_case_ids.push(current_case.case_id.clone());
+            continue;
+        }
+
+        if current_identity.measurement_fingerprint != previous_identity.measurement_fingerprint {
+            measurement_changed_case_ids.push(current_case.case_id.clone());
             continue;
         }
 
@@ -772,6 +843,7 @@ fn match_cases(
     MatchedCases {
         comparable: cases,
         workload_changed_case_ids,
+        measurement_changed_case_ids,
     }
 }
 

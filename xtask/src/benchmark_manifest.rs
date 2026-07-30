@@ -61,6 +61,7 @@ pub(crate) struct BenchmarkWorkload {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BenchmarkCase {
     pub(crate) id: String,
+    pub(crate) case_index: usize,
     pub(crate) workload_index: usize,
     pub(crate) group_name: String,
     pub(crate) quick: bool,
@@ -571,6 +572,7 @@ fn validate_manifest(
 
         cases.push(BenchmarkCase {
             id: raw_case.id,
+            case_index: cases.len(),
             workload_index,
             group_name: raw_case.group,
             quick: raw_case.quick,

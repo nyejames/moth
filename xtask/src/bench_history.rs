@@ -19,7 +19,7 @@ use std::path::Path;
 pub const RUNS_JSONL_PATH: &str = "benchmarks/local-data/runs.jsonl";
 
 /// Current on-disk format version.
-const FORMAT_VERSION: u32 = 6;
+const FORMAT_VERSION: u32 = 7;
 
 /// One benchmark run in the current in-memory history shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,7 +60,8 @@ pub struct LocalGroupRecord {
 pub struct LocalCaseRecord {
     pub case_id: String,
     pub workload_id: Option<String>,
-    pub workload_fingerprint: Option<String>,
+    pub source_fingerprint: Option<String>,
+    pub measurement_fingerprint: Option<String>,
     pub group_name: String,
     pub runner: BenchmarkRunner,
     pub mean_ms: f64,
@@ -129,10 +130,11 @@ fn parse_history_line(line: &str) -> Result<Option<LocalRunRecord>, String> {
         3 => adapt_v3(deserialize_legacy(value, 3)?)?,
         4 => adapt_v4(deserialize_legacy(value, 4)?)?,
         5 => adapt_v5(deserialize_legacy(value, 5)?)?,
-        6 => {
+        6 => adapt_v6(deserialize_legacy(value, 6)?)?,
+        7 => {
             let record: LocalRunRecord = serde_json::from_value(value)
-                .map_err(|error| format!("invalid v6 record: {error}"))?;
-            validate_v6_record(&record)?;
+                .map_err(|error| format!("invalid v7 record: {error}"))?;
+            validate_v7_record(&record)?;
             record
         }
         _ => return Err(format!("unsupported format_version {format_version}")),
@@ -148,34 +150,40 @@ where
     serde_json::from_value(value).map_err(|error| format!("invalid v{version} record: {error}"))
 }
 
-fn validate_v6_record(record: &LocalRunRecord) -> Result<(), String> {
+fn validate_v7_record(record: &LocalRunRecord) -> Result<(), String> {
     if record.format_version != FORMAT_VERSION {
         return Err(format!(
-            "v6 record declared format version {}",
+            "v7 record declared format version {}",
             record.format_version
         ));
     }
     if record.benchmark_protocol_version == 0 {
-        return Err("v6 record has legacy protocol version 0".to_string());
+        return Err("v7 record has legacy protocol version 0".to_string());
     }
 
     for case in &record.cases {
         if case.case_id.is_empty() {
-            return Err("v6 case has empty case_id".to_string());
+            return Err("v7 case has empty case_id".to_string());
         }
         if case.workload_id.as_deref().is_none_or(str::is_empty) {
             return Err(format!(
-                "v6 case '{}' has missing or empty workload_id",
+                "v7 case '{}' has missing or empty workload_id",
+                case.case_id
+            ));
+        }
+        if case.source_fingerprint.as_deref().is_none_or(str::is_empty) {
+            return Err(format!(
+                "v7 case '{}' has missing or empty source_fingerprint",
                 case.case_id
             ));
         }
         if case
-            .workload_fingerprint
+            .measurement_fingerprint
             .as_deref()
             .is_none_or(str::is_empty)
         {
             return Err(format!(
-                "v6 case '{}' has missing or empty workload_fingerprint",
+                "v7 case '{}' has missing or empty measurement_fingerprint",
                 case.case_id
             ));
         }
@@ -203,7 +211,7 @@ pub fn find_latest_matching_run<'a>(
 
 /// Append one completed current-format run.
 pub fn append_local_run(path: &Path, record: &LocalRunRecord) -> Result<(), String> {
-    validate_v6_record(record)?;
+    validate_v7_record(record)?;
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -327,8 +335,15 @@ pub fn to_local_record(run: &BenchmarkRun) -> LocalRunRecord {
 fn local_case_from_result(case: &BenchmarkCaseResult) -> LocalCaseRecord {
     LocalCaseRecord {
         case_id: case.case_id.clone(),
-        workload_id: case.workload_id.clone(),
-        workload_fingerprint: case.workload_fingerprint.clone(),
+        workload_id: case.identity.as_ref().map(|id| id.workload_id.clone()),
+        source_fingerprint: case
+            .identity
+            .as_ref()
+            .map(|id| id.source_fingerprint.clone()),
+        measurement_fingerprint: case
+            .identity
+            .as_ref()
+            .map(|id| id.measurement_fingerprint.clone()),
         group_name: case.group_name.clone(),
         runner: case.runner.clone(),
         mean_ms: case.mean_ms,
@@ -356,8 +371,7 @@ pub fn to_case_results(record: &LocalRunRecord) -> Vec<BenchmarkCaseResult> {
         .iter()
         .map(|case| BenchmarkCaseResult {
             case_id: case.case_id.clone(),
-            workload_id: case.workload_id.clone(),
-            workload_fingerprint: case.workload_fingerprint.clone(),
+            identity: build_identity_from_record(case),
             group_name: case.group_name.clone(),
             runner: case.runner.clone(),
             mean_ms: case.mean_ms,
@@ -405,9 +419,113 @@ fn benchmark_metric_from_local_metric(metric: &LocalMetricRecord) -> BenchmarkMe
     }
 }
 
+/// Build typed identity from a persisted record, returning None for legacy
+/// records that lack source or measurement fingerprints.
+fn build_identity_from_record(
+    case: &LocalCaseRecord,
+) -> Option<crate::bench_types::BenchmarkMeasurementIdentity> {
+    use crate::bench_types::BenchmarkMeasurementIdentity;
+
+    let workload_id = case.workload_id.clone()?;
+    let source_fingerprint = case.source_fingerprint.clone()?;
+    let measurement_fingerprint = case.measurement_fingerprint.clone()?;
+
+    if workload_id.is_empty() || source_fingerprint.is_empty() || measurement_fingerprint.is_empty()
+    {
+        return None;
+    }
+
+    Some(BenchmarkMeasurementIdentity {
+        workload_id,
+        source_fingerprint,
+        measurement_fingerprint,
+    })
+}
+
 // ------------------------
 //  Legacy format adapters
 // ------------------------
+
+/// V6 on-disk shape. V6 used a single mixed `workload_fingerprint` field that
+/// combined source bytes with runner declarations. It must never be relabeled
+/// as a source fingerprint; the adapter converts it to the current shape with
+/// `None` identity so comparisons skip these records as incomparable.
+#[derive(Debug, Deserialize)]
+struct LegacyV6Run {
+    format_version: u32,
+    benchmark_protocol_version: u32,
+    timestamp: String,
+    month_key: String,
+    commit: Option<String>,
+    git_dirty: Option<bool>,
+    system_uuid: String,
+    public_system_id: String,
+    display_name: String,
+    warmup_runs: usize,
+    measured_iterations: usize,
+    suite_kind: String,
+    primary_metric_name: String,
+    suite_average_ms: f64,
+    suite_case_spread_ms: f64,
+    thread_count: Option<u32>,
+    groups: Vec<LocalGroupRecord>,
+    cases: Vec<LegacyV6Case>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyV6Case {
+    case_id: String,
+    workload_id: Option<String>,
+    workload_fingerprint: Option<String>,
+    group_name: String,
+    runner: BenchmarkRunner,
+    mean_ms: f64,
+    median_ms: f64,
+    stddev_ms: f64,
+    stage_timings: Vec<LocalMetricRecord>,
+    counters: Vec<LocalMetricRecord>,
+}
+
+fn adapt_v6(legacy: LegacyV6Run) -> Result<LocalRunRecord, String> {
+    let cases = legacy
+        .cases
+        .into_iter()
+        .map(|case| LocalCaseRecord {
+            case_id: case.case_id,
+            workload_id: case.workload_id,
+            source_fingerprint: None,
+            measurement_fingerprint: None,
+            group_name: case.group_name,
+            runner: case.runner,
+            mean_ms: case.mean_ms,
+            median_ms: case.median_ms,
+            stddev_ms: case.stddev_ms,
+            stage_timings: case.stage_timings,
+            counters: case.counters,
+        })
+        .collect();
+
+    Ok(LocalRunRecord {
+        format_version: 6,
+        benchmark_protocol_version: legacy.benchmark_protocol_version,
+        timestamp: legacy.timestamp,
+        month_key: legacy.month_key,
+        commit: legacy.commit,
+        git_dirty: legacy.git_dirty,
+        system_uuid: legacy.system_uuid,
+        public_system_id: legacy.public_system_id,
+        display_name: legacy.display_name,
+        warmup_runs: legacy.warmup_runs,
+        measured_iterations: legacy.measured_iterations,
+        suite_kind: legacy.suite_kind,
+        primary_metric_name: legacy.primary_metric_name,
+        suite_average_ms: legacy.suite_average_ms,
+        suite_case_spread_ms: legacy.suite_case_spread_ms,
+        thread_count: legacy.thread_count,
+        groups: legacy.groups,
+        cases,
+    })
+}
 
 #[derive(Debug, Deserialize)]
 struct LegacyCommonRun {
@@ -735,7 +853,8 @@ fn legacy_case(data: LegacyCaseData) -> Result<LocalCaseRecord, String> {
     Ok(LocalCaseRecord {
         case_id: data.case_id,
         workload_id: None,
-        workload_fingerprint: None,
+        source_fingerprint: None,
+        measurement_fingerprint: None,
         group_name: data.group_name,
         runner,
         mean_ms: data.mean_ms,
@@ -796,8 +915,7 @@ fn local_group_records_from_cases(cases: &[LocalCaseRecord]) -> Vec<LocalGroupRe
         .iter()
         .map(|case| BenchmarkCaseResult {
             case_id: case.case_id.clone(),
-            workload_id: None,
-            workload_fingerprint: None,
+            identity: None,
             group_name: case.group_name.clone(),
             runner: case.runner.clone(),
             mean_ms: case.mean_ms,

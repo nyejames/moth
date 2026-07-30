@@ -19,20 +19,21 @@ use crate::bench_system::{SystemIdentityMode, load_or_create_system};
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
-    BenchmarkChangeKind, BenchmarkComparison, BenchmarkMetric, BenchmarkRecording, BenchmarkRun,
-    BenchmarkRunPolicy, BenchmarkSelection, BenchmarkSuiteKind, BenchmarkThresholds, GitRevision,
-    SuiteStats, calculate_group_stats, calculate_mean, calculate_median, calculate_stage_movement,
-    calculate_stddev, format_stage_movement_line, format_top_current_stages,
+    BenchmarkChangeKind, BenchmarkComparison, BenchmarkMeasurementIdentity, BenchmarkMetric,
+    BenchmarkRecording, BenchmarkRun, BenchmarkRunPolicy, BenchmarkSelection, BenchmarkSuiteKind,
+    BenchmarkThresholds, GitRevision, SuiteStats, calculate_group_stats, calculate_mean,
+    calculate_median, calculate_stage_movement, calculate_stddev, format_stage_movement_line,
+    format_top_current_stages,
 };
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, average_case_observations, execute_case, run_preflighted_suite,
 };
+use crate::benchmark_fingerprint::{BenchmarkFingerprints, compute_benchmark_fingerprints};
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, FrontendBenchmarkProfile, load_benchmark_manifest,
 };
 use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
-use crate::workload_fingerprint::{WorkloadFingerprint, compute_workload_fingerprints};
 use std::num::NonZeroUsize;
 
 /// Run the complete frontend benchmark suite.
@@ -60,8 +61,8 @@ pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), 
     let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
         .map_err(|error| error.to_string())?;
 
-    let workload_fingerprints =
-        compute_workload_fingerprints(&manifest).map_err(|error| error.to_string())?;
+    let fingerprints =
+        compute_benchmark_fingerprints(&manifest).map_err(|error| error.to_string())?;
     let cases: Vec<BenchmarkCase> = manifest
         .frontend_cases()
         .filter(|case| policy.selects_case(case.quick))
@@ -87,7 +88,7 @@ pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), 
             run_frontend_cases(
                 &context,
                 &manifest,
-                &workload_fingerprints,
+                &fingerprints,
                 &cases,
                 policy.measured_iterations(),
             )
@@ -244,7 +245,7 @@ fn present_frontend_run(
 pub(crate) fn run_frontend_cases(
     context: &BenchmarkExecutionContext<'_>,
     manifest: &BenchmarkManifest,
-    workload_fingerprints: &[WorkloadFingerprint],
+    fingerprints: &BenchmarkFingerprints,
     cases: &[BenchmarkCase],
     measured_iterations: NonZeroUsize,
 ) -> Result<Vec<BenchmarkCaseResult>, String> {
@@ -261,7 +262,7 @@ pub(crate) fn run_frontend_cases(
         let result = build_frontend_case_result(
             context,
             manifest,
-            workload_fingerprints,
+            fingerprints,
             case,
             &durations,
             &observations,
@@ -347,7 +348,7 @@ pub(crate) fn report_to_observations(
 fn build_frontend_case_result(
     context: &BenchmarkExecutionContext<'_>,
     manifest: &BenchmarkManifest,
-    workload_fingerprints: &[WorkloadFingerprint],
+    fingerprints: &BenchmarkFingerprints,
     case: &BenchmarkCase,
     durations: &[f64],
     observations: &[BenchmarkCaseObservations],
@@ -360,14 +361,24 @@ fn build_frontend_case_result(
     let workload = manifest
         .workload_for(case)
         .ok_or_else(|| format!("Benchmark case '{}' has no workload.", case.id))?;
-    let workload_fingerprint = workload_fingerprints
+    let source_fingerprint = fingerprints
+        .workloads
         .get(case.workload_index)
-        .ok_or_else(|| format!("Benchmark case '{}' has no workload fingerprint.", case.id))?;
+        .ok_or_else(|| format!("Benchmark case '{}' has no source fingerprint.", case.id))?;
+    let measurement_fingerprint = fingerprints.cases.get(case.case_index).ok_or_else(|| {
+        format!(
+            "Benchmark case '{}' has no measurement fingerprint.",
+            case.id
+        )
+    })?;
 
     Ok(BenchmarkCaseResult {
         case_id: case.id.clone(),
-        workload_id: Some(workload.id.clone()),
-        workload_fingerprint: Some(workload_fingerprint.to_string()),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: workload.id.clone(),
+            source_fingerprint: source_fingerprint.to_string(),
+            measurement_fingerprint: measurement_fingerprint.to_string(),
+        }),
         group_name: case.group_name.clone(),
         runner: case.runner.clone(),
         mean_ms: mean,

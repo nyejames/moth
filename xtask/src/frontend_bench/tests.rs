@@ -143,6 +143,7 @@ fn frontend_case_uses_typed_dev_profile_and_workload_entry() {
 fn frontend_case() -> BenchmarkCase {
     BenchmarkCase {
         id: "frontend_fixture".to_string(),
+        case_index: 0,
         workload_index: 0,
         group_name: "core".to_string(),
         quick: false,

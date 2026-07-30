@@ -654,6 +654,7 @@ fn cli_case(
 ) -> BenchmarkCase {
     BenchmarkCase {
         id: id.to_owned(),
+        case_index: 0,
         workload_index,
         group_name: "core".to_owned(),
         quick: false,
@@ -668,6 +669,7 @@ fn cli_case(
 fn frontend_case(id: &str, workload_index: usize) -> BenchmarkCase {
     BenchmarkCase {
         id: id.to_owned(),
+        case_index: 0,
         workload_index,
         group_name: "core".to_owned(),
         quick: false,

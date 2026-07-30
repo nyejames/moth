@@ -14,6 +14,7 @@ use crate::bench_types::{
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
+use crate::benchmark_fingerprint::{BenchmarkFingerprints, compute_benchmark_fingerprints};
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, BenchmarkRunner, load_benchmark_manifest,
 };
@@ -21,7 +22,6 @@ use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_oper
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
 use crate::frontend_bench::{present_read_only_frontend_run, run_frontend_cases};
-use crate::workload_fingerprint::{WorkloadFingerprint, compute_workload_fingerprints};
 
 const BENCH_CI_MEASURED_ITERATIONS: usize = 3;
 
@@ -51,8 +51,8 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
 
     println!("Building release compiler...");
     let compiler = build_release_compiler_with_timers(&manifest.repository_root)?;
-    let workload_fingerprints =
-        compute_workload_fingerprints(&manifest).map_err(|error| error.to_string())?;
+    let fingerprints =
+        compute_benchmark_fingerprints(&manifest).map_err(|error| error.to_string())?;
     let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
     let context = BenchmarkExecutionContext::new(&manifest, compiler.as_path(), &workspace);
     let thread_count = effective_thread_count()?;
@@ -83,14 +83,7 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
                 policy.measured_iterations()
             );
 
-            measure_section(
-                section,
-                &context,
-                &manifest,
-                &workload_fingerprints,
-                cases,
-                policy,
-            )
+            measure_section(section, &context, &manifest, &fingerprints, cases, policy)
         },
         |section, case_results| {
             present_section(
@@ -118,7 +111,7 @@ fn measure_section(
     section: BenchCiSection,
     context: &BenchmarkExecutionContext<'_>,
     manifest: &BenchmarkManifest,
-    workload_fingerprints: &[WorkloadFingerprint],
+    fingerprints: &BenchmarkFingerprints,
     cases: &[BenchmarkCase],
     policy: BenchmarkRunPolicy,
 ) -> Result<Vec<BenchmarkCaseResult>, String> {
@@ -126,14 +119,14 @@ fn measure_section(
         BenchmarkSuiteKind::EndToEndCli => run_benchmark_cases(
             context,
             manifest,
-            workload_fingerprints,
+            fingerprints,
             cases,
             policy.measured_iterations(),
         ),
         BenchmarkSuiteKind::FrontendPhases => run_frontend_cases(
             context,
             manifest,
-            workload_fingerprints,
+            fingerprints,
             cases,
             policy.measured_iterations(),
         ),

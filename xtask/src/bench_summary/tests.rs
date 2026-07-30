@@ -3,8 +3,9 @@ use crate::bench_history::{LocalCaseRecord, LocalGroupRecord, LocalRunRecord};
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
-    BenchmarkChangeKind, BenchmarkComparison, BenchmarkMetric, BenchmarkRun, BenchmarkSuiteKind,
-    BenchmarkSystem, GitRevision, SuiteStats, calculate_group_stats,
+    BenchmarkChangeKind, BenchmarkComparison, BenchmarkMeasurementIdentity, BenchmarkMetric,
+    BenchmarkRun, BenchmarkSuiteKind, BenchmarkSystem, GitRevision, SuiteStats,
+    calculate_group_stats,
 };
 use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
 
@@ -15,8 +16,11 @@ fn benchmark_case(case_name: &str, mean_ms: f64) -> BenchmarkCaseResult {
 fn benchmark_group_case(case_name: &str, group_name: &str, mean_ms: f64) -> BenchmarkCaseResult {
     BenchmarkCaseResult {
         case_id: case_name.to_string(),
-        workload_id: Some(format!("{case_name}_workload")),
-        workload_fingerprint: Some(format!("{case_name}_fingerprint")),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: format!("{case_name}_workload"),
+            source_fingerprint: format!("{case_name}_source_fp"),
+            measurement_fingerprint: format!("{case_name}_measurement_fp"),
+        }),
         group_name: group_name.to_string(),
         runner: BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Check,
@@ -62,8 +66,15 @@ fn local_record_from_cases(cases: Vec<BenchmarkCaseResult>) -> LocalRunRecord {
             .into_iter()
             .map(|case| LocalCaseRecord {
                 case_id: case.case_id,
-                workload_id: case.workload_id,
-                workload_fingerprint: case.workload_fingerprint,
+                workload_id: case.identity.as_ref().map(|id| id.workload_id.clone()),
+                source_fingerprint: case
+                    .identity
+                    .as_ref()
+                    .map(|id| id.source_fingerprint.clone()),
+                measurement_fingerprint: case
+                    .identity
+                    .as_ref()
+                    .map(|id| id.measurement_fingerprint.clone()),
                 group_name: case.group_name,
                 runner: case.runner,
                 mean_ms: case.mean_ms,
@@ -109,7 +120,8 @@ fn local_record(average_ms: f64, case_spread_ms: f64) -> LocalRunRecord {
         cases: vec![LocalCaseRecord {
             case_id: "check_docs".to_string(),
             workload_id: Some("docs".to_string()),
-            workload_fingerprint: Some("docs_fingerprint".to_string()),
+            source_fingerprint: Some("docs_source_fp".to_string()),
+            measurement_fingerprint: Some("docs_measurement_fp".to_string()),
             group_name: "docs".to_string(),
             runner: BenchmarkRunner::Cli {
                 command: CliBenchmarkCommand::Check,
@@ -187,8 +199,11 @@ fn test_format_group_average_line() {
     let cases = vec![
         BenchmarkCaseResult {
             case_id: "a".to_string(),
-            workload_id: Some("a_workload".to_string()),
-            workload_fingerprint: Some("a_fingerprint".to_string()),
+            identity: Some(BenchmarkMeasurementIdentity {
+                workload_id: "a_workload".to_string(),
+                source_fingerprint: "a_source_fp".to_string(),
+                measurement_fingerprint: "a_measurement_fp".to_string(),
+            }),
             group_name: "core".to_string(),
             runner: BenchmarkRunner::Cli {
                 command: CliBenchmarkCommand::Check,
@@ -201,8 +216,11 @@ fn test_format_group_average_line() {
         },
         BenchmarkCaseResult {
             case_id: "b".to_string(),
-            workload_id: Some("b_workload".to_string()),
-            workload_fingerprint: Some("b_fingerprint".to_string()),
+            identity: Some(BenchmarkMeasurementIdentity {
+                workload_id: "b_workload".to_string(),
+                source_fingerprint: "b_source_fp".to_string(),
+                measurement_fingerprint: "b_measurement_fp".to_string(),
+            }),
             group_name: "docs".to_string(),
             runner: BenchmarkRunner::Cli {
                 command: CliBenchmarkCommand::Check,
@@ -352,8 +370,11 @@ fn test_generate_run_entry_baseline() {
 fn test_generate_run_entry_with_stage_movement() {
     let current = vec![BenchmarkCaseResult {
         case_id: "a".to_string(),
-        workload_id: Some("a_workload".to_string()),
-        workload_fingerprint: Some("a_fingerprint".to_string()),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: "a_workload".to_string(),
+            source_fingerprint: "a_source_fp".to_string(),
+            measurement_fingerprint: "a_measurement_fp".to_string(),
+        }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Check,
@@ -372,8 +393,11 @@ fn test_generate_run_entry_with_stage_movement() {
     }];
     let previous = vec![BenchmarkCaseResult {
         case_id: "a".to_string(),
-        workload_id: Some("a_workload".to_string()),
-        workload_fingerprint: Some("a_fingerprint".to_string()),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: "a_workload".to_string(),
+            source_fingerprint: "a_source_fp".to_string(),
+            measurement_fingerprint: "a_measurement_fp".to_string(),
+        }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Check,
@@ -402,8 +426,11 @@ fn test_generate_run_entry_with_stage_movement() {
 fn test_generate_run_entry_baseline_hides_stage_movement() {
     let current = vec![BenchmarkCaseResult {
         case_id: "a".to_string(),
-        workload_id: Some("a_workload".to_string()),
-        workload_fingerprint: Some("a_fingerprint".to_string()),
+        identity: Some(BenchmarkMeasurementIdentity {
+            workload_id: "a_workload".to_string(),
+            source_fingerprint: "a_source_fp".to_string(),
+            measurement_fingerprint: "a_measurement_fp".to_string(),
+        }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Check,

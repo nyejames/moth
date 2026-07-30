@@ -8,11 +8,11 @@
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
+use crate::benchmark_fingerprint::compute_benchmark_fingerprints;
 use crate::benchmark_manifest::load_benchmark_manifest;
 use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
-use crate::workload_fingerprint::compute_workload_fingerprints;
 
 /// Preflight all benchmark cases without recording history or summaries.
 pub fn validate_all_benchmarks() -> Result<(), String> {
@@ -23,8 +23,8 @@ pub fn validate_all_benchmarks() -> Result<(), String> {
         .map_err(|error| error.to_string())?;
 
     let compiler = build_release_compiler_with_timers(&manifest.repository_root)?;
-    let _workload_fingerprints =
-        compute_workload_fingerprints(&manifest).map_err(|error| error.to_string())?;
+    let _fingerprints =
+        compute_benchmark_fingerprints(&manifest).map_err(|error| error.to_string())?;
     let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
     let context = BenchmarkExecutionContext::new(&manifest, compiler.as_path(), &workspace);
 
