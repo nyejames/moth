@@ -1,385 +1,280 @@
-# Moth language documentation completion and compiler semantic realignment
+# Moth language migration closeout and compiler semantic realignment
 
-## 1. Purpose and required order
+## Current state
 
-This plan completes the focused language documentation migration and then realigns the compiler with the accepted language contract.
+```text
+STATUS: active
+CURRENT_STAGE: Stage A technical documentation closeout
+LAST_REVIEWED_DOCS_COMMIT: 604eb03c3b9b0ece7189990742109aec83934ec0
+NEXT_ACTION: repair the docs source module graph, then complete the remaining correctness audit
+STAGE_A_BLOCKER: docs release builds currently stop at the invalid docs style module layout
+STAGE_B: blocked until Stage A and the later writing-style pass are reviewed and accepted
+STAGE_C: blocked until compiler semantic realignment is complete
+```
 
-Commit `d707782fcb92a3e73dbc7ee9371820a6344e198f` is the reviewed documentation baseline. It added useful route scaffolding and established the accepted direction for strings, matching, Moth Templates collisions, memory and design scope. It did not complete the parity migration.
+Commit `604eb03c3b9b0ece7189990742109aec83934ec0` completed most of the bulk documentation migration. It added the missing Advanced memory detail, Project Structure concept pairs, Core package Basic and Advanced pages, Design Scope coverage and progress-matrix drift notes.
 
-The remaining work has three ordered stages:
+The remaining work is a closeout, not another bulk migration. It must correct the docs source graph, remove the remaining semantic contradictions, repair invalid examples, finish exact package and scope contracts, build the site and prove parity.
 
-1. **Stage A: documentation-only completion**
-   - correct contradictory references
-   - repair invalid examples
-   - restore information that was overcompressed in Advanced files
-   - finish missing source-facing owners
-   - complete the parity ledger and focused-reference index
-   - build and inspect the documentation
-2. **Stage B: compiler semantic realignment**
-   - remove obsolete syntax and implementation paths
-   - make current compiler behaviour match the completed documentation contract
-   - close the accepted non-deferred implementation gaps in this plan
-3. **Stage C: whole-language authority review and switch**
-   - run final parity review
-   - request explicit user approval
-   - update authority routing only in a separate approved patch
+Historical migration phases remain in Git history. Do not append implementation diaries or repeat completed work in this plan.
 
-**Stage B must not begin until Stage A has passed review.**
+## Required order
 
-Stage A may update the monolith, focused documentation, compiler-design wording, build-system wording, memory links, the progress matrix and generated documentation. It must not change Rust source, compiler tests, executable fixtures, manifests or build behaviour.
+Work proceeds in this order:
 
-Moth is early Alpha. Stage B removes obsolete design completely. It does not retain compatibility syntax, deprecation periods, legacy diagnostics, dormant adapters or redundant internal data shapes.
+1. **Stage A: technical documentation closeout**
+2. **Stage A review and acceptance**
+3. **Stage W: focused writing-style pass**
+4. **Stage W review and acceptance**
+5. **Stage B: compiler semantic realignment**
+6. **Stage C: final parity review and authority switch**
 
----
+Do not start Stage W while technical correctness remains open.
 
-## 2. Completed foundation removed from active work
+Do not start Stage B until the user has accepted both Stage A and Stage W.
 
-The following work is complete enough to treat as foundation rather than an active task:
-
-- the Basic and Advanced selector component
-- Basic as the default documentation level
-- independent concept selectors
-- stable page H1 and concept H2 structure
-- explicit Previous and Next navigation
-- focused pairs for the existing core language routes
-- the initial public Memory and Lifetimes route
-- the initial public Design Scope route
-- the accepted removal of general match capture from the documented design
-- the accepted removal of string relational ordering from the documented design
-- the accepted Moth Templates no-shadowing direction
-- the accepted template-based string concatenation direction
-- generated route creation for the new pages
-
-Historical migration batches, probe diaries and landed-route narratives remain in Git history. They are not repeated in this plan.
-
-The existing route files remain subject to final parity review. A route's existence does not prove that its Advanced content is complete or that adjacent references agree with it.
+Do not update `AGENTS.md` or declare the focused references authoritative before Stage C receives explicit approval.
 
 ---
 
-## 3. Authority and documentation rules
-
-### 3.1 Authority during this plan
+## Authority during this plan
 
 Use this order when sources disagree:
 
 1. Explicit user decisions recorded in this plan
-2. `docs/language-overview.md` as the maintained source-facing parity baseline
+2. `docs/language-overview.md` as the maintained compiler-facing parity baseline
 3. `docs/src/docs/codebase/memory-management/**` for formal memory semantics
-4. `docs/compiler-design-overview.md` for compiler stage and artefact contracts
-5. `docs/build-system-design.md` for project, package, builder and link architecture
-6. The progress matrix for current compiler and backend support
-7. Accepted roadmap plans for explicitly deferred implementation
-8. Compiler implementation and tests as evidence of current behaviour
+4. `docs/compiler-design-overview.md` for compiler stages and artefact contracts
+5. `docs/build-system-design.md` for project, module, package and builder architecture
+6. `docs/src/docs/progress/#page.moth` for current implementation support
+7. Accepted roadmap plans for deferred implementation
+8. Current compiler code and tests as evidence of behaviour
 9. Existing public pages as teaching material under review
 
-Implementation is not automatically language design. When accepted design and current implementation differ, Stage A documents the accepted contract and records the implementation gap accurately. Stage B then removes the gap.
+Implementation is not automatically language design. When current code conflicts with accepted design, document the accepted contract and record the implementation gap. Stage B then removes the drift.
 
-### 3.2 Responsibility split
+## Documentation ownership
 
-| Source | Responsibility |
-|---|---|
-| Unsuffixed focused `.mtf` files | Complete Advanced source syntax and observable semantics |
-| Paired `-basic.mtf` files | Beginner teaching consistent with Advanced |
-| Public `#page.moth` files | Composition, introductions, ordering, navigation and presentation |
-| `docs/language-overview.md` | Maintained parity baseline until authority switch |
-| Focused language index | Routing map to every final focused owner |
-| Memory references | Formal alias, lifetime, ownership and backend-neutral memory rules |
-| Compiler design | Stage ownership, semantic identities, IR and analysis contracts |
-| Build-system design | Project, config, package, builder, link and output contracts |
-| Progress matrix | Current implementation, rejection and backend coverage |
-| Roadmap | Accepted deferred work and implementation order |
+- Unsuffixed `.mtf` files own complete Advanced source syntax and observable semantics.
+- Paired `-basic.mtf` files teach a smaller accurate beginner surface.
+- `#page.moth` files own public composition, introductions, ordering and navigation.
+- The monolith remains maintained until Stage C.
+- Formal compiler, build-system and memory architecture stays in its dedicated owners.
+- The progress matrix owns current implementation and backend status.
+- The roadmap owns sequencing and genuinely deferred implementation.
 
-### 3.3 Advanced requirements
+Advanced files must remain directly readable and complete. Do not compress away source-observable legality, edge cases or rejected forms merely because formal architecture exists elsewhere.
 
-Each unsuffixed Advanced file must be directly readable without its page or Basic partner.
-
-It must contain, where relevant:
-
-- a concise contract
-- canonical syntax
-- exact semantic rules
-- type and inference boundaries
-- scope and receiving-context restrictions
-- access, mutation, copy and lifetime effects
-- observable evaluation-order guarantees
-- important edge cases
-- rejected forms
-- accepted deferred forms
-- outside-scope forms
-- links to adjacent language and architecture owners
-
-An Advanced file may summarise a formal compiler, build-system or memory authority. It must not omit source-observable legality merely because the analysis algorithm is documented elsewhere.
-
-### 3.4 Basic requirements
-
-Basic files teach the stable mental model and common current syntax.
-
-They must:
-
-- introduce terminology before using it
-- use complete, valid examples
-- avoid compiler-stage and backend internals
-- avoid exhaustive edge-case inventories
-- avoid presenting deferred syntax as current syntax
-- remain true when Advanced detail is omitted
-- link to Advanced rather than compressing complex behaviour into a false simplification
-
-### 3.5 Current design versus current compiler
-
-Stage A finishes the accepted language documentation before Stage B changes the compiler. Therefore some Advanced pages will temporarily describe accepted semantics that the current compiler does not yet enforce.
-
-For each such surface:
-
-- state the accepted language contract normatively
-- add one concise implementation-gap note in the Advanced owner
-- link to the progress matrix
-- update the progress matrix to describe the current drift accurately
-- do not repeat a status dashboard across every related page
-- do not claim "the compiler rejects" a form until Stage B actually makes it reject
-
-Basic pages should teach the accepted form and normally omit implementation archaeology.
-
-When Stage B lands, remove the temporary implementation-gap note and update the progress matrix in the same semantic slice.
-
-### 3.6 Editing constraints
-
-- Follow `docs/src/docs/codebase/style-guide/style-guide.mtf`.
-- Use straight apostrophes.
-- Avoid em dashes.
-- Use exact Moth syntax.
-- Label invalid examples clearly.
-- Keep every code example type coherent.
-- Do not address the reader as an agent or LLM.
-- Retain legitimate LLM-aware language and tooling discussion.
-- Do not generate Basic prose mechanically from Advanced prose.
-- Do not use automated multi-file prose replacement.
-- Search and read-only inventory tooling is allowed.
-- Do not edit generated HTML manually.
+Basic files must use current valid examples and must not present deferred syntax as available today.
 
 ---
 
-## 4. Accepted semantic decisions
+## Locked semantic decisions
 
-These decisions are final for both documentation and later compiler work.
+These decisions are final for this plan.
 
-### 4.1 Source-authored return-alias syntax is removed
+### Source-authored return aliases are removed
 
-Function signatures declare return value types and return channels only.
+Function return slots contain types and channels only. Source signatures have no borrowed, owned, move or parameter-alias return categories.
 
-Forms such as:
+The compiler infers freshness and alias summaries. Public interfaces may carry inferred summaries. External binding metadata may describe foreign return aliasing.
 
-```moth
-choose |first String, fallback String| -> first or fallback:
-    return first
-;
-```
+Stage B deletes source syntax and support that exists only for authored alias returns.
 
-are not Moth syntax.
+### `String` has one semantic surface
 
-Return aliasing remains compiler-owned semantic information:
+Quoted slices and template-produced strings share one semantic `String` type at typed boundaries.
 
-- source function summaries are inferred from validated bodies and calls
-- public interfaces may export inferred alias and freshness facts
-- external binding metadata may describe aliasing because foreign bodies are unavailable
-- the information is not a source type or signature category
+Construction still differs:
 
-Stage B removes all parser, AST and HIR support that exists only for source-authored alias returns.
+- quoted strings create deliberately restricted read-only slices
+- templates create owned strings and are the canonical concatenation and interpolation mechanism
 
-### 4.2 One semantic `String` surface
+Construction origin must not change equality, hashing, map-key legality, call compatibility or choice and option equality.
 
-Quoted slices and template-produced strings share one semantic `String` type at ordinary typed boundaries.
+Source `String + String` is invalid. Use `[left, right]`.
 
-They share:
+`String` supports `is` and `is not`. It does not support ordering operators or relational match patterns.
 
-- parameter and return compatibility
-- equality
-- choice and option payload equality
-- collection and map value use
-- `String` map-key use
-- casts
-- IO and external string-content boundaries
-- aliases and concrete generic use
-- template insertion
+### Full-match catch-all syntax
 
-Construction origin must not create hidden equality, hashing, map-key or call-compatibility rules.
+`else =>` is the only full-match catch-all.
 
-Quoted strings create deliberately restricted read-only slices. A mutable binding may be reassigned to another string, but that does not make the slice content mutable.
+A bare identifier is not a general capture pattern. Option `|name|` capture and declared choice payload captures remain valid.
 
-Templates create full owned string values and are the canonical source mechanism for concatenation, interpolation and structured text construction.
+### Moth Template implicit scope
 
-This plan does not add an in-place string mutation API or a second public `StringSlice` type.
+Same-directory module-root constants and `@html` constants do not shadow. A same-name visible constant is a collision diagnostic.
 
-### 4.3 `+` is numeric only
+### Assertions in examples
 
-Source-level string concatenation uses templates:
+`assert` is for impossible invariant failure, not expected recovery.
 
-```moth
-joined = [left, right]
-```
+A teaching example may use `assert(false, "message")` inside `catch` when the example setup makes failure impossible and a full recovery branch would obscure the topic.
 
-This is invalid in the accepted language:
+### Module and import topology
 
-```moth
-joined = left + right
-```
+Source imports resolve from the owning module root.
 
-Internal template lowering may use a string append or concatenation operation. That implementation detail does not make source `+` valid for strings.
+`@./...` has no supported meaning.
 
-### 4.4 `String` has equality but no ordering operators
-
-`String` supports `is` and `is not`.
-
-It does not support:
-
-- `<`
-- `<=`
-- `>`
-- `>=`
-- relational string match patterns
-
-Future text ordering belongs in explicit Core text APIs.
-
-### 4.5 `else =>` is the only full-match catch-all
-
-A bare identifier is not a general capture pattern.
-
-Valid binding patterns remain:
-
-- option present capture with `|name|`
-- declared choice payload captures
-- renamed choice payload captures with `as`
-
-An unknown bare name in choice pattern position is an unknown choice variant. A bare name in another full-match pattern position is invalid.
-
-### 4.6 Moth Templates implicit scope does not shadow
-
-A `.mtf` body may receive implicit compile-time constants from:
-
-- the HTML builder package
-- its same-directory module root public surface
-
-If both surfaces expose the same visible name, compilation fails with the ordinary visible-name collision model. Same-directory constants do not override `@html` constants.
-
-### 4.7 Assertions in teaching examples
-
-`assert` is Moth's explicit source-level invariant-failure or panic statement. It is not normal expected-failure handling.
-
-A documentation example may use `assert(false, "message")` inside a `catch` when:
-
-- failure has already been made impossible by the example's setup
-- the example is teaching another feature rather than error recovery
-- a full recovery branch would obscure the lesson
-
-For example:
-
-```moth
-~items.push(4) catch:
-    assert(false, "unexpected push failure")
-;
-```
-
-A value-producing handler may also terminate with an assertion:
-
-```moth
-first = items.get(0) catch:
-    assert(false, "index was checked")
-;
-```
-
-Rules for documentation examples:
-
-- use the current literal-message syntax
-- explain once in the Assertions docs that `assert` is unrecoverable
-- use `Error!`, postfix propagation or meaningful `catch` recovery when failure is expected
-- do not use assertions to hide a real runtime error path
-- do not claim assertion checks are debug-only or release-elided unless that build-profile contract is separately accepted and documented
+Normal sibling modules cannot import each other directly. Shared sibling APIs use scoped `+*.moth` support packages.
 
 ---
 
-## 5. Stage A: documentation-only completion
+# Stage A: technical documentation closeout
 
-Stage A is the next task. It blocks all compiler work in this plan.
+Stage A is documentation-only. It may change files under `docs/**`, generated docs and documentation indexes. It must not change Rust, tests, fixtures, manifests, scripts or compiler behaviour.
 
-### 5.1 Global semantic consistency pass
+Avoid broad stylistic rewriting during Stage A. Change prose only where correctness, completeness or immediate clarity requires it. The dedicated writing pass comes later.
 
-Perform a repository-wide review for every accepted decision in section 4.
+## A1. Repair the docs source module graph
 
-#### String consistency
+This is the first task because it blocks every docs check and release build.
 
-At minimum review and correct:
+### Convert the styles directory to a support package
+
+Do not convert `docs/src/styles/docs.moth` into a normal `#docs.moth` module. That would make `styles` a sibling normal module and preserve the invalid sibling-import topology.
+
+Replace it with a scoped support package:
 
 ```text
-docs/src/docs/language-overview/strings-and-characters.mtf
-docs/src/docs/language-overview/strings-and-characters-basic.mtf
-docs/src/docs/numbers/operators.mtf
-docs/src/docs/numbers/operators-basic.mtf
-docs/src/docs/functions/**
-docs/src/docs/choices/choice-equality.mtf
-docs/src/docs/errors/options.mtf
-docs/src/docs/collections/hash-maps.mtf
-docs/src/docs/templates/**
-docs/src/docs/generics/**
-docs/src/docs/traits/generic-trait-bounds.mtf
-docs/src/docs/packages/core/**
-docs/language-overview.md
-docs/compiler-design-overview.md
+docs/src/styles/+package.moth
 ```
 
-Required outcomes:
+Required shape:
 
-- no Advanced page says plain string slices can use `+`
-- no example joins strings with `+`
-- no page treats template strings as a distinct unsupported equality category
-- no page rejects template-produced values as `String` map keys
-- no page permits string ordering
-- the compiler-design document distinguishes internal template append from source binary operators
-- the Strings Advanced page distinguishes restricted quoted slices from owned template-produced strings without inventing two semantic types
-- current compiler drift is reported through one Advanced note and the progress matrix until Stage B lands
+- keep private imports outside `export:`
+- retain private helper declarations outside `export:` when consumers do not need them
+- place the actual shared style API inside one strict `export:` block
+- export only declarations used by documentation consumers or intentionally re-exported by `docs/src/#page.moth`
+- preserve `Palette`, shared themes, layout components, documentation-level controls and pagers where they remain public API
+- remove unused imports and declarations discovered by the move
+- do not add a compatibility module or forwarding file
 
-#### Pattern consistency
-
-Review the monolith, Branching pages, Options pages and generated output.
-
-Required outcomes:
-
-- no general capture is described as valid
-- `else =>` is the sole catch-all
-- relational patterns list only `Int`, `Float` and `Char`
-- unknown choice names are described consistently
-- current compiler acceptance of removed forms is recorded as an implementation gap until Stage B
-
-#### Moth Templates consistency
-
-Review the monolith, Moth Templates pages, package visibility wording and generated output.
-
-Required outcomes:
-
-- no page documents local-over-HTML precedence
-- collisions use the ordinary no-shadowing model
-- the example shows an actual invalid collision and its renamed correction
-- current compiler precedence behaviour is recorded as an implementation gap until Stage B
-
-### 5.2 Repair every invalid or misleading example
-
-Correct the examples introduced or exposed by the `d707...` review.
-
-Required corrections include:
-
-- mutable reassignment begins with `~=`
-- a value mutated through a receiver is held in a mutable binding
-- `push`, `get`, `set` and `remove` use `!`, meaningful `catch` or the assertion policy in section 4.7
-- postfix `!` appears only inside a compatible fallible function
-- symbolic `==` is not presented as a Moth operator
-- shared aliases are not named `copy_of`
-- invalid examples are commented or placed in clearly labelled invalid blocks
-- examples do not depend on undeclared values, imports, methods or result channels
-
-Recommended corrected forms:
+Update imports across `docs/src/**`:
 
 ```moth
-name ~= "Priya"
-name = "Aisha"
+import @styles { ... }
 ```
+
+Remove all `@styles/docs` imports.
+
+Update the grouped re-export in `docs/src/#page.moth` to use `@styles`.
+
+Update `index.md` for the moved source owner.
+
+### Canonicalise docs source imports
+
+Audit every Moth import under `docs/src/**`.
+
+Replace route-local forms such as:
+
+```moth
+import @./io
+import @./build-inputs
+```
+
+with the correct owning-module-root-relative import identity.
+
+Required outcomes:
+
+- zero supported docs imports use `@./...`
+- no import uses parent traversal
+- child module and support package boundaries are not bypassed
+- route-local `.mtf` sources resolve through their owning root
+- source imports are extensionless
+- generated public routes continue to import only exported provider surfaces
+
+### Unblock and iterate the compiler check
+
+After the graph conversion, run:
+
+```sh
+cargo run --quiet -- check docs --terse
+```
+
+Fix every newly exposed docs graph, import, visibility, API-only root or semantic error before moving on.
+
+Do not describe `styles/docs.moth` as the sole blocker until the check reaches completion.
+
+## A2. Complete semantic consistency
+
+### Uniform `String` cleanup
+
+Review at least:
+
+```text
+docs/language-overview.md
+docs/compiler-design-overview.md
+docs/src/docs/language-overview/**
+docs/src/docs/numbers/**
+docs/src/docs/functions/**
+docs/src/docs/choices/**
+docs/src/docs/errors/**
+docs/src/docs/collections/**
+docs/src/docs/templates/**
+docs/src/docs/generics/**
+docs/src/docs/traits/**
+docs/src/docs/packages/core/**
+```
+
+Required outcomes:
+
+- no page permits source string `+`
+- no example joins strings with `+`
+- no page lists templates as an unsupported equality payload
+- no page lists templates as a distinct invalid map-key type
+- all runtime `String` values share equality and map-key semantics
+- no page permits string ordering or relational string patterns
+- internal template append remains clearly separate from source binary operators
+- current compiler drift remains recorded in the progress matrix until Stage B lands
+
+Delete the remaining monolith and focused-reference contradictions rather than qualifying them.
+
+### Return contract cleanup
+
+Delete every remaining reference to an authored alias-candidate return slot.
+
+The Functions and Errors references must agree that:
+
+- success return slots contain types
+- one final fallible slot may carry a channel
+- source signatures have no alias candidate category
+- freshness and aliasing are inferred compiler facts
+
+Do not leave obsolete syntax as an edge case or legacy diagnostic note.
+
+### Pattern and Moth Template consistency
+
+Confirm across the monolith, focused pages and progress matrix that:
+
+- `else =>` is the only catch-all
+- bare general capture is removed from accepted design
+- relational patterns support only `Int`, `Float` and `Char`
+- Moth Template implicit names collide rather than shadow
+- each accepted-but-not-yet-implemented rule has one concise implementation-gap note
+
+Rewrite the Moth Template collision example as an explicit invalid example followed by a corrected renamed export.
+
+## A3. Repair examples and code profiles
+
+Every non-trivial example must be valid current Moth unless it is clearly labelled invalid or accepted deferred syntax.
+
+Correct the known defects:
+
+- mutable reassignment starts with `~=`
+- values used through mutable receivers are held in mutable bindings
+- `push`, `get`, `set` and `remove` use postfix `!`, meaningful `catch` or an allowed invariant assertion
+- postfix `!` appears only inside a compatible fallible function
+- Core IO construction does not use top-level `io.input.new()!`
+- project examples declare every referenced name
+- entry `config:` section records use `#=`
+- explanatory region notation uses a plain text code profile rather than Moth source highlighting
+- invalid examples are visibly labelled
+- shared aliases are not named as copies
+
+Use concise invariant handlers where appropriate:
 
 ```moth
 independent ~= copy original
@@ -395,184 +290,98 @@ first = original.get(0) catch:
 ;
 ```
 
-For every non-trivial new source example, provide one of:
+For each new or corrected non-trivial example, provide one of:
 
-- an existing compiler test or fixture that proves it
-- a temporary focused probe compiled during the patch
-- a clear `INVALID` label when it intentionally does not compile
+- an existing compiler fixture that proves the form
+- a temporary focused probe run during the patch
+- an explicit `INVALID` or `ACCEPTED DEFERRED` label
 
 Delete temporary probes before completion.
 
-### 5.3 Finish the Advanced Memory and Lifetimes route
+## A4. Correct Project Structure status and examples
 
-The public route exists. Its Advanced content is not yet complete enough to replace the monolith's source-facing memory section.
+The new Build Inputs, Entry Config and Project Package Facade pairs exist. Finish their contracts.
 
-#### `reference-semantics.mtf`
+Required corrections:
 
-Ensure it covers:
+- fix undeclared names in `entry-config.mtf`
+- use valid `html #= |...|` syntax inside entry config examples
+- keep `@project` explicit rather than implicitly injected
+- keep facade restrictions and project-context provenance precise
+- state that support roots and project facades reject top-level runtime work and fragments
+- preserve module-root-relative imports and support-package visibility
 
-- existing-value reads, bindings, arguments, returns and storage as shared access
-- non-lexical, control-flow-sensitive alias activity
-- branches, joins and loop conservatism at a source-observable level
-- no source reference constructors or lifetime annotations
-- backend representation not changing source semantics
+Build inputs, `@project` and entry-local `config:` remain queued implementation work.
 
-Do not reproduce borrow-checker algorithms or side-table layouts.
+Their Basic pages must not teach them as available current syntax. Either:
 
-#### `copy-and-exclusive-access.mtf`
+- remove the deferred surface from the beginner path for now, or
+- lead with an unmistakable accepted-deferred warning and use future-tense explanation
 
-Ensure it covers:
+Advanced pages may own the accepted end-state contract but must link to the progress matrix for current support.
 
-- the complete semantic deep-copy contract
-- preservation of internal alias topology
-- preservation of same-region cycles
-- no mutable sharing with the source graph
-- reactive sources copied as current values rather than reactive identity
-- non-copyable external resources producing diagnostics
-- valid copy places and rejected computed operands
-- mutable write-through aliases versus fresh mutable slots
-- `~place` as exclusive access rather than move syntax
-- fresh values satisfying ordinary mutable parameters without source `~`
-- temporaries remaining invalid mutable receivers
+## A5. Correct Core, Builder and external package contracts
 
-#### `lifetimes-and-result-shapes.mtf`
+Cross-check each Advanced package page against compiler package registration, the language monolith and the progress matrix.
 
-Add the source-facing contract for:
+### Core IO
 
-- mandatory lifetime-topology validation versus optional ownership optimisation
-- exactly one semantic lifetime owner for each allocation
-- the retained-edge outlives rule
-- lexical scope not defining allocation lifetime
-- nearest-existing-ancestor widening on one ordered owner chain
-- no lateral widening across independently ending sibling domains
-- fresh result roots that may retain legal older references
-- alias results and projection roots
-- independent result graphs
-- projections remaining rooted in their allocation family
-- return and multi-return alias consequences
-- same-region cycles versus invalid cross-region cycles
-- reactive and builder-owned lifecycle roots
-- restricted host bindings and future value-only WIT boundaries
-
-Keep region-solving algorithms and compiler artefact details in the formal memory references.
-
-Correct the Basic statement that every fresh value is independent. A fresh root may retain legal references. `copy` provides an independent graph.
-
-#### `declared-memory-groups.mtf`
-
-Preserve the complete accepted source contract, including:
-
-- runtime-executable-body-only placement
-- current or ancestor group targets only
-- no sibling, child, unrelated or named builder-lifecycle targets
-- groups not being values or types
-- group-name collision rules
-- closure on every control-flow exit
-- exact `into` declaration position
-- destination-scope visibility
-- straight-line ancestor placement restriction
-- conditional and loop alternatives
-- fresh, alias and independent placement eligibility
-- nested-group retained-edge rules
-- no extraction or unrestricted group-to-group adoption
-- invalid escapes and projection escapes
-- reassignment rules for group-owned mutable bindings
-- reactive-storage restrictions
-- hidden result destinations not becoming source signature parameters
-
-Correct Basic wording so group-owned values cannot outlive the group. Do not say they merely live "at least as long" as the group.
-
-### 5.4 Repair public links
-
-Audit source and generated links for the new Memory and Design Scope routes.
-
-In particular:
-
-- links from `docs/src/docs/memory/**` to public codebase pages must resolve under `/docs/codebase/**`
-- public pages must not link to repository Markdown through a broken site-relative path
-- use an explicit GitHub link when the destination has no public docs route
-- verify every `Read next` anchor after generation
-- verify Previous and Next links in both directions
-
-### 5.5 Complete the Functions return contract
-
-Expand the Advanced return owner to state:
-
-- return slots contain types and channels only
-- source code has no borrowed, owned, move or parameter-alias return annotation
-- returning an existing value follows ordinary shared-reference semantics
-- the compiler infers freshness and alias effects
-- public interfaces may carry inferred summaries
-- external bindings may carry explicit compiler-owned alias metadata
-- the summary lattice is not source syntax
-
-Remove every valid-looking source-authored alias-return example from all docs.
-
-### 5.6 Finish Project Structure and Packages
-
-The route scaffolding exists, but the final source-facing surface is incomplete.
-
-Provide complete Advanced ownership for:
-
-- self-contained `config.moth`
-- direct project `#Import`
-- source `#Import`
-- `@project`
-- entry-local `config:` blocks
-- normal `#*.moth` module roots
-- API-only `+*.moth` support roots
-- the project package facade
-- active versus dormant normal-root work
-- directory-based routes and builder-owned artefacts
-- module-root-relative imports
-- support-package visibility
-- dependency package boundaries
-- package origin and backing
-- external binding boundaries visible to authors
-
-Split concepts when a direct-readable Advanced file would otherwise become dense. Suggested pairs remain:
+Document the exact registered input surface:
 
 ```text
-build-inputs.mtf
-build-inputs-basic.mtf
-
-entry-config.mtf
-entry-config-basic.mtf
-
-project-package-facade.mtf
-project-package-facade-basic.mtf
+new
+update
+close
+key_down
+key_pressed
+key_released
+last_key_pressed
+last_key_released
+pointer_down
+pointer_pressed
+pointer_released
+pointer_x
+pointer_y
+last_pointer_pressed
+last_pointer_released
 ```
 
-Correct every claim that support-root runtime work or fragments merely remain inactive. Support roots and the project package facade reject top-level runtime work and page fragments.
+Remove invented or stale names such as `key_held`, `pointer_up` and `pointer_held` unless the compiler actually registers them at the reviewed checkpoint.
 
-Basic pages should teach the current simple project model. Accepted deferred config and package surfaces must be labelled clearly and kept out of the beginner path until implemented.
+Wrap fallible handle creation in a compatible function or local `catch` example.
 
-### 5.7 Convert Core, Builder and external package documentation
+### Core Math
 
-The existing Core package pages are useful, but they still mix teaching, exact contracts, current backend support and future roadmap in single-level pages.
+Remove backend-defined Float semantics.
 
-Convert or compose them into the same Basic and Advanced model.
+Moth-level non-finite results follow the checked numeric contract. If the current external lowering does not enforce that contract, document the implementation gap in the progress matrix and assign its correction to Stage B or a dedicated numeric plan.
 
-Advanced owners must cover:
+### Prelude
 
-- stable import roots and prelude policy
-- stable public functions, constants and opaque types
-- parameter, return, access and error contracts
-- source-backed versus binding-backed behaviour visible to authors
-- explicit close or teardown requirements
-- restricted host-value boundaries
-- unsupported source forms
-- deferred package API families
+Do not describe a different alias name as shadowing `io`.
 
-The progress matrix owns current target availability. The build-system design owns provider registration and linking. The memory references own retention and external-resource lifetime rules.
+A separate alias introduces another local namespace. A same-name collision follows the ordinary no-shadowing model.
 
-At minimum cover:
+### Core Text
+
+Define one backend-neutral unit for `text.length`.
+
+Audit the runtime helper, `Char` semantics and existing language design first. Do not canonise JavaScript UTF-16 length merely because it is the current lowering.
+
+If no accepted rule exists, stop this item and present the user with an explicit design decision. Do not mark Stage A complete while the public Advanced contract remains backend-dependent.
+
+Once decided:
+
+- document the exact unit in Basic and Advanced
+- record current implementation support in the progress matrix
+- assign any compiler or runtime correction to Stage B or a dedicated plan
+
+### Remaining package surfaces
+
+Audit and complete source-facing ownership for:
 
 ```text
-@core/io
 @core/collections
-@core/math
-@core/text
 @core/random
 @core/time
 @html
@@ -581,24 +390,31 @@ annotated project-local JavaScript bindings
 future value-only WIT imports
 ```
 
-### 5.8 Make Design Scope a complete focused owner
+Advanced package pages must state stable names, parameter access, return and error contracts, opaque resource rules, teardown requirements, unsupported source forms and deferred surfaces.
 
-The public Design Scope route must stop delegating exact completeness back to the monolith.
+The progress matrix owns backend availability. Package pages must not turn current JavaScript implementation details into backend-dependent language semantics.
 
-Advanced content must preserve:
+## A6. Complete the public Design Scope route
 
-- the exact deferred versus outside-scope distinction
-- every excluded language family
-- the rationale for each family
-- the constrained Moth mechanism used instead
-- source-visible lifetime, reference-category and ownership annotations as outside scope
-- backend-specific observable semantics as outside scope
-- expected failure through `Error!`, invariants through `assert` and explicit result-like domain values through ordinary choices
-- the distinction between deferred-feature diagnostics and outside-design-scope diagnostics
+The public route under `docs/src/docs/design-scope/**` must become the complete source-facing owner.
 
-Basic should explain the language's bias without reproducing the complete exclusion inventory.
+Do not rely on the codebase summary alone.
 
-### 5.9 Complete the focused-reference index and parity ledger
+Required outcomes:
+
+- `excluded-language-families.mtf` contains every outside-scope family and rationale
+- source-visible lifetime, reference-category and ownership annotations are included
+- backend-dependent observable semantics are included
+- first-class results, expected errors and invariant assertions remain distinguished
+- `deferred-and-outside-scope.mtf` preserves the distinct deferred-feature and outside-design-scope diagnostic lanes
+- the public Advanced pages stop sending readers back to the monolith for the missing exact list
+- the codebase summary links to the public owner without competing with it
+
+Basic pages should explain the language's bias without presenting the full exclusion inventory.
+
+## A7. Complete index, parity and link ownership
+
+### Focused language index
 
 Update:
 
@@ -606,292 +422,284 @@ Update:
 docs/src/docs/codebase/language/overview.mtf
 ```
 
-It must list the new Memory and Design Scope owners and every completed focused route.
+It must list:
 
-Add and maintain a section-level parity ledger in this plan or an explicitly approved companion file.
+- the public Memory and Lifetimes owners
+- the public Design Scope owners
+- Build Inputs, Entry Config and Project Package Facade pairs
+- Core package Basic and Advanced owners
+- every other focused owner completed during closeout
 
-Each row must record:
+Do not claim every listed file is in final shape until Stage A and Stage W are accepted.
 
-| Field | Meaning |
-|---|---|
-| Source heading or delegated authority | Original normative source |
-| Advanced owner | Final unsuffixed file |
-| Basic owner | Teaching file |
-| Public route | Importing page |
-| Related formal owner | Memory, compiler or build-system reference |
-| Advanced complete | Yes or no |
-| Basic complete | Yes or no |
-| Important examples preserved | Yes or no |
-| Implementation checked | Yes, no or not applicable |
-| Current discrepancy | Description or none |
-| Status | Current, implementation gap, deferred, rejected or outside scope |
+### Parity ledger
 
-A section is complete only when its Advanced owner is direct-read complete and its Basic partner remains true.
+Create a compact companion ledger:
 
-### 5.10 Stage A route checklist
-
-| Route or owner | Remaining documentation work |
-|---|---|
-| Language Basics | Correct mutable string example and final string wording |
-| Numbers | Remove plain-string `+` from Advanced |
-| Functions | Add final return and inferred-alias contract |
-| Branching | Retain accepted contract and mark temporary compiler drift |
-| Choices | Remove template as a distinct unsupported equality surface |
-| Errors and Options | Confirm uniform `String` and assertion wording |
-| Collections and Maps | Uniform `String` keys and complete memory semantics |
-| Templates | Canonical concatenation and source/internal append distinction |
-| Generics and Traits | Replace remaining string `+` examples |
-| Reactivity | Link to public Memory route and preserve metadata/type distinction |
-| Memory and Lifetimes | Expand Advanced source contract and repair Basic inaccuracies |
-| Project Structure | Add build inputs, entry config and facade ownership |
-| Packages and Imports | Correct support-root legality and complete package boundaries |
-| Core and Builder Packages | Convert to Basic and Advanced semantic owners |
-| Moth Templates | Rewrite collision example and mark temporary compiler drift |
-| Plain Markdown | Final boundary and link audit |
-| Design Scope | Become the complete exact focused owner |
-| Language monolith | Synchronise every accepted decision and gap note |
-| Compiler design | Remove source string-concatenation implication and preserve internal append |
-| Focused language index | List every final owner |
-| Progress matrix | Record every pending Stage B mismatch accurately |
-
-### 5.11 Stage A validation
-
-Stage A is documentation-only.
-
-Use the documentation-only final gate from the style guide:
-
-```sh
-moth build docs --release
+```text
+docs/roadmap/plans/docs-language-migration-parity-ledger.md
 ```
 
-or, when a suitable release compiler is unavailable:
+Record one row per monolith section or delegated formal authority with:
+
+- source heading or authority
+- Advanced owner
+- Basic owner
+- public route
+- related formal owner
+- examples preserved
+- current implementation status
+- remaining discrepancy
+- completion state
+
+The ledger is audit evidence, not a prose diary. Keep entries terse.
+
+### Links and route ownership
+
+Audit source links and generated hrefs for every changed route.
+
+Required outcomes:
+
+- progress links resolve to `/docs/progress/`, not a codebase path
+- public codebase links stay under `/docs/codebase/`
+- no public link targets a repository Markdown file through an invalid site-relative URL
+- `Read next` links and anchors resolve
+- Previous and Next links work in both directions
+- Basic pages link to the Advanced panel or route correctly
+- no route-local import or public link relies on `@./...`
+
+## A8. Complete Stage A validation
+
+After all corrections:
 
 ```sh
+cargo run --quiet -- check docs --terse
 cargo run --quiet -- build docs --release
 ```
 
-Targeted iteration may use:
+The release build is the required final gate. The check command is the fast preflight.
 
-```sh
-moth check docs
-```
+Then inspect:
 
-or focused compiler probes for examples.
+- every changed route
+- generated `docs/release/**` diffs
+- Basic as the default selection
+- independent selector behaviour
+- one H1 per page
+- heading and anchor stability
+- code highlighting
+- tables
+- links and pagers
+- narrow layout
+- dark mode
+- generated output provenance
 
-Do not run `just validate` merely for a strictly documentation-only patch.
+At minimum inspect the changed routes for:
 
-After the release build:
+- Memory and Lifetimes
+- Design Scope
+- Project Structure
+- Packages and Imports
+- every Core package page
+- Numbers
+- Functions
+- Branching
+- Choices
+- Collections and Maps
+- Moth Templates
 
-- inspect every changed route
-- inspect generated diffs
-- verify links and anchors
-- verify Basic is selected by default
-- verify selectors remain independent
-- verify one H1 per page
-- verify examples, tables and code highlighting
-- verify narrow layout and dark mode where route structure changed
-- confirm generated output came from source changes
-- confirm generated HTML was not edited manually
+Do not edit generated HTML manually.
 
-### 5.12 Stage A completion gate
+## Stage A acceptance gate
 
-Stage A is complete only when:
+Stage A is ready for user review only when:
 
-- no focused Advanced reference contradicts another accepted owner
-- no monolith rule contradicts the accepted decisions
-- no architecture document implies rejected source behaviour
-- every new and changed example is valid or clearly labelled invalid
-- the Advanced Memory route preserves the full source-facing legality surface
-- Project Structure, Packages and Core package contracts have focused owners
-- Design Scope is complete without delegating exactness back to the monolith
-- all public links resolve
-- the focused-reference index is current
+- docs source checking passes
+- the release build passes
+- the styles support package is canonical
+- no supported import uses `@./...`
+- no focused or monolith reference contradicts a locked semantic decision
+- examples are valid or clearly labelled
+- Core package contracts match registered APIs
+- no package page leaks backend-defined semantics into the language contract
+- the public Design Scope route is complete
+- the focused index is current
 - the parity ledger is complete
-- every current compiler mismatch is recorded in the progress matrix
-- the documentation release build passes
 - every changed route has been inspected
-- the review report contains no unresolved documentation ambiguity
+- the report states exact commands and remaining uncertainty
 
-Only then may Stage B begin.
+Stage A completion requires explicit user acceptance after review.
 
 ---
 
-## 6. Stage B: compiler semantic realignment
+# Stage W: writing-style pass
 
-Stage B begins only after Stage A approval. Each semantic slice updates compiler code, tests, focused docs, the monolith and the progress matrix together.
+Stage W begins only after Stage A technical correctness is complete, validated and accepted.
 
-### 6.1 Remove source-authored return aliases
+This is a separate documentation-only phase. Do not mix it into the technical closeout.
 
-Required outcomes:
+## Goals
+
+Review the complete focused language documentation for:
+
+- clear beginner progression in Basic files
+- complete direct-reading contracts in Advanced files
+- concise wording without semantic compression
+- consistent terminology
+- natural paragraph and sentence rhythm
+- precise headings and transitions
+- removal of accidental repetition
+- examples introduced before edge cases
+- clear separation of current, deferred, rejected and outside-scope behaviour
+- consistent British English and repository style-guide rules
+
+## Constraints
+
+- do not remove a normative rule to shorten a page
+- do not merge distinct edge cases into vague summary prose
+- do not move formal compiler, build-system or memory architecture into public language pages
+- do not turn Basic pages into status dashboards
+- do not change accepted semantics silently
+- flag any newly discovered design ambiguity before rewriting around it
+- keep the parity ledger updated when ownership moves
+
+## Validation
+
+Run the documentation release build again and inspect every route changed by the style pass.
+
+Stage W completion requires a separate user review and acceptance.
+
+---
+
+# Stage B: compiler semantic realignment
+
+Stage B begins only after Stage W acceptance.
+
+Each slice updates compiler code, tests, focused docs, the monolith and the progress matrix together. Moth is early Alpha. Remove obsolete paths completely and add no compatibility syntax or legacy diagnostics.
+
+## B1. Remove source-authored return aliases
 
 - delete parameter-name return parsing
-- delete alias-return syntax variants and helpers
-- remove alias-only diagnostics that no longer have another owner
-- simplify AST return representation
-- remove source-declared alias arrays from HIR
-- remove AST-to-HIR alias-candidate transfer
+- delete alias-candidate syntax variants and helpers
+- simplify AST and HIR return representations
+- remove source-declared return-alias arrays
 - retain inferred return-alias summaries
-- retain external binding alias metadata
-- compute same-module summaries deterministically or through a monotone fixed point
+- retain explicit foreign binding alias metadata
+- reuse the existing deterministic summary stabilisation infrastructure
 - treat recursive or unresolved cycles conservatively as unknown
-- export stable inferred summaries through public interfaces
-- add no compatibility parser or legacy diagnostic
+- add no compatibility parser
 
-Search-zero checks include:
+Search-zero checks include obsolete source-syntax owners such as `AliasCandidates` and alias-return parser helpers. General inferred and external alias metadata must remain.
 
-```text
-AliasCandidates
-parse_alias_return_item_syntax
-source-declared return_aliases
-```
+## B2. Unify compiler `String` semantics
 
-General inferred and external alias metadata must remain.
-
-### 6.2 Simplify the compiler `String` surface
-
-Required outcomes:
-
-- remove source `String + String` typing
-- remove compile-time string-add folding
-- make equality accept every runtime `String` regardless of source construction
-- make option and choice equality recurse through `String` consistently
+- reject source `String + String`
+- delete compile-time string-add folding
+- retain internal template append lowering
+- make equality accept every runtime `String`
+- make choice and option equality recurse through `String` consistently
 - make `String` map keys use uniform content equality and hashing
-- keep compile-time path values outside runtime string operators
-- remove value-shape checks that create hidden equality or map semantics
-- retain value metadata needed for template and reactive lowering
-- separate internal template append from source binary operators
-- remove backend comments and branches that advertise source string addition
+- remove value-shape checks that create hidden semantic types
+- keep only value metadata required for template and reactive lowering
+- update backend comments and validation
 
-Required tests include:
+## B3. Simplify full-match patterns
 
-- slice equality
-- template equality
-- slice versus template equality
-- `String?` equality
-- choice payload equality with both construction forms
-- map keys produced by both forms
-- source string `+` rejection
-- mutable binding reassignment of a slice
-- rejection of slice-content mutation
-- template concatenation through `[left, right]`
-
-### 6.3 Simplify patterns
-
-Required outcomes:
-
-- remove `String` from relational pattern subjects
+- remove `String` relational patterns
 - retain `Int`, `Float` and `Char`
 - delete general capture AST and HIR variants
-- delete whole-scrutinee capture scope construction
-- delete capture lowering, validation, display and backend paths
-- make unknown choice names diagnose as unknown variants
-- make bare names invalid for non-choice full matches
-- preserve option `|name|` and choice payload captures
+- delete capture scope, exhaustiveness and backend paths
+- diagnose unknown choice variants directly
+- keep option `|name|` and choice payload captures
 - keep `else =>` as the only catch-all
-- add no legacy general-capture diagnostic
+- add no legacy capture diagnostic
 
-Update unit tests, HIR tests, integration fixtures, backend tests and benchmarks.
+## B4. Align Moth Template collisions
 
-### 6.4 Align Moth Templates implicit collisions
-
-Required outcomes:
-
-- register implicit `@html` and same-directory constants through the ordinary visible-name registry
-- remove overwrite-based precedence
-- retain source locations for both collision participants
+- register `@html` and same-directory root constants through one visible-name registry
+- remove overwrite precedence
+- preserve both source locations
 - reject collisions before AST folding
 - keep unique constants from both surfaces visible
-- keep filtering to exported compile-time constants and const records
-- keep the generated `content` constant out of its own scope
 - replace precedence tests with collision tests
 
-### 6.5 Close accepted non-deferred gaps
+## B5. Close accepted non-deferred gaps
 
-Reproduce each gap against current `main` before changing it. Remove a row when it is already fixed and record the evidence.
+Reproduce each item before changing it:
 
-This plan owns these gaps when they still reproduce:
+1. option payload equality inside choices
+2. cross-choice inline predicate validation
+3. nested-block `return!` in error-only functions
+4. block value-producing `if` with `then`
+5. stored named template inserts
 
-1. **Option payload equality inside choices**
-   - `T?` supports equality when `T` supports equality
-   - recursive equality remains cycle safe
-2. **Cross-choice inline predicate validation**
-   - a choice variant must belong to the scrutinee's nominal choice
-3. **Nested-block `return!` in error-only functions**
-   - terminal from every legal nested control-flow block
-4. **Block value-producing `if` with `then`**
-   - reaches AST, HIR and backend lowering without infrastructure failure
-5. **Stored named template inserts**
-   - preserve slot identity when contributed through a binding
+Add focused unit, HIR and integration coverage as appropriate.
 
-Each correction needs focused success, rejection, HIR and integration coverage as appropriate.
+Any accepted semantic correction discovered during Stage A, including a Core Text length contract or checked external Float boundary, must be assigned here or to an explicitly approved dedicated plan before Stage C.
 
-### 6.6 Stage B validation
+## Stage B validation
 
-For every code-bearing semantic slice:
+For every code-bearing slice:
 
 ```sh
 cargo fmt
 just validate
-moth build docs --release
+cargo run --quiet -- build docs --release
 ```
 
-Use the equivalent Cargo docs build when necessary.
-
-Also audit that:
+Also verify:
 
 - obsolete variants and adapters are gone
 - `TypeId` remains semantic type authority
-- value metadata does not become a hidden second string type
-- inferred alias facts remain side-table or interface facts
-- borrow analysis does not mutate HIR
+- inferred alias summaries remain side-table or interface facts
+- borrow analysis does not rewrite HIR
+- internal template append is not source string addition
 - backends do not reinterpret removed source syntax
-- internal template append is not confused with source string addition
-- user-facing failures remain structured diagnostics
-- no compatibility shim survives
+- user failures remain structured diagnostics
+- the progress matrix matches current support
 
 ---
 
-## 7. Stage C: final parity and authority switch
+# Stage C: final parity and authority switch
 
 After Stage B:
 
-1. Audit every monolith section and delegated formal authority.
+1. Re-run the parity ledger against the monolith and delegated authorities.
 2. Audit every Advanced file as a direct reference.
-3. Audit every Basic file for truthfulness and learning quality.
+3. Audit every Basic file for truthful beginner teaching.
 4. Inspect every public route.
-5. Confirm every deferred and outside-scope surface has one owner.
-6. Confirm the progress matrix matches current implementation.
-7. Confirm the focused-reference index and parity ledger are complete.
-8. Present any remaining ambiguity or mismatch to the user.
+5. Confirm deferred and outside-scope ownership.
+6. Confirm the progress matrix matches the compiler.
+7. Present every remaining ambiguity or mismatch to the user.
 
-The final authority switch requires explicit user approval.
+The authority switch requires explicit user approval.
 
-Only that separate patch may:
+Only the separate approved switch patch may:
 
 - update `AGENTS.md`
 - declare focused references authoritative
 - decide whether `docs/language-overview.md` remains a consolidated legacy reference, becomes an index or is removed
 
-No earlier patch may imply that authority has switched.
-
 ---
 
-## 8. Required report for every slice
+# Required report for every slice
 
-### Scope
+Report:
 
-- stage and workstream covered
+## Scope
+
+- stage and workstream
 - starting commit and branch
 - authorities read
 
-### Files
+## Changes
 
 - source documentation changed
-- architecture or monolith files changed
-- compiler and test files changed, when Stage B
-- generated files changed
+- generated documentation changed
+- code and tests changed when Stage B applies
+- moved or deleted owners
 
-### Semantic result
+## Semantic result
 
 - accepted rule
 - valid forms
@@ -899,54 +707,27 @@ No earlier patch may imply that authority has switched.
 - current implementation status
 - deferred dependencies
 
-### Deletions and simplification
+## Parity
 
-For Stage B:
-
-- obsolete syntax removed
-- variants, helpers and diagnostics removed
-- similarly named retained concepts explained
-
-### Parity
-
-- monolith headings reviewed
-- Advanced owner for every rule
-- Basic owner for every concept
-- important examples preserved, replaced or intentionally removed
+- monolith sections reviewed
+- Advanced owner
+- Basic owner
+- examples preserved or replaced
 - parity-ledger rows updated
 
-### Validation
+## Validation
 
-Report exact results of:
+- exact commands
+- exact results
+- routes inspected
+- generated diff inspected
 
-- targeted example probes
-- documentation release build
-- route inspection
-- `cargo fmt` and `just validate` for Stage B
+## Remaining uncertainty
 
-Do not claim commands or inspection that did not occur.
+- unresolved design decisions
+- implementation conflicts
+- deferred dependencies
+- uninspected routes
+- incomplete parity rows
 
-### Remaining uncertainty
-
-Report every unresolved:
-
-- documentation ambiguity
-- implementation conflict
-- deferred dependency
-- incomplete parity row
-- route not inspected fully
-
-Do not hide uncertainty to declare a slice complete.
-
----
-
-## 9. Protected files and final constraints
-
-- `AGENTS.md` remains unchanged until the explicitly approved authority-switch patch.
-- Generated HTML is never edited manually.
-- Documentation prose is edited manually, file by file.
-- Compiler removals do not retain legacy compatibility paths.
-- The progress matrix remains the implementation-status authority.
-- The roadmap remains the deferred-work authority.
-- Formal memory, compiler and build-system architecture stays in its dedicated owners.
-- Focused Advanced language pages retain the complete source-facing projection needed by authors and compiler contributors.
+Do not claim a command, build or inspection that was not performed.
