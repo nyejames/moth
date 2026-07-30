@@ -30,14 +30,14 @@ docs/roadmap/plans/benchmark-correctness-follow-up-plan.md
 WORK_ID: bench-followup
 WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
 BASE_REVISION: 9af62e5a9
-STATUS: active
-CURRENT_SLICE: Phase 6 - documentation corrections
-COMPLETED: Phase 1 (output isolation), Phase 2 (repository mutation detection), Phase 3 (explicit fingerprint boundaries), Phase 4 (split source and measurement identity), Phase 5 (profile history identity-safe), artifact cleanup (compiler output dirs cleaned on drop)
-NEXT_ACTION: Phase 6 (documentation corrections), then Phase 7 (clean baselines)
-VALIDATION: cargo test --package xtask (534 passed), cargo fmt, bench-check (pre-existing docs_check failure only, artifacts cleaned)
-AUDITS: none
-BLOCKERS: pre-existing compiler failures in docs_check, docs_frontend, module_root_role_mix_frontend, few_modules_many_files_each_frontend
-NOTES: Phase 5 complete. Profile protocol v1, history format v3 with v1/v2 legacy adapters. Drift matches by identity, reports workload/measurement changes. Silent history failures removed. Compiler output dirs (dev/release) cleaned on workspace drop, preserving tracked dirs.
+STATUS: complete (Phases 1-6), Phase 7 deferred
+CURRENT_SLICE: none
+COMPLETED: Phase 1 (output isolation), Phase 2 (repository mutation detection), Phase 3 (explicit fingerprint boundaries), Phase 4 (split source and measurement identity), Phase 5 (profile history identity-safe), Phase 6 (documentation corrections), artifact cleanup
+NEXT_ACTION: Phase 7 (clean baselines) deferred until pre-existing compiler failures are fixed
+VALIDATION: cargo test --package xtask (534 passed), cargo fmt, bench-validate (4 pre-existing failures only), bench-check (pre-existing docs_check only, artifacts cleaned)
+AUDITS: final audit completed - all checklist items satisfied
+BLOCKERS: pre-existing compiler failures in docs_check, docs_frontend, module_root_role_mix_frontend, few_modules_many_files_each_frontend prevent Phase 7 baseline recording
+NOTES: Manifest schema 2, benchmark protocol 2, history format 7, profile protocol 1, profile history format 3. Compiler output dirs cleaned on workspace drop. All identity changes distinguish workload vs measurement changes.
 ```
 
 Update this block after each accepted phase. Keep it concise. Git history remains the durable implementation record, so do not append command transcripts or worker journals.

@@ -326,7 +326,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     }
 
     // ---------------------------------------------------------------
-    //  Phase 6: Profile history and drift reports
+    //  Profile history and drift reports
     // ---------------------------------------------------------------
 
     // Compute drift against the latest comparable previous record.

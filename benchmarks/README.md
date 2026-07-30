@@ -43,11 +43,14 @@ A workload names the source inputs that determine one compilation workload:
 [[workload]]
 id = "speed_test"
 entry = "benchmarks/speed-test.moth"
+fingerprint_mode = "full_tree"
 fingerprint_roots = ["benchmarks/speed-test.moth"]
 fingerprint_excludes = []
 ```
 
-`id` gives the workload a stable authored identity. `entry` selects the file or project passed to the runner. `fingerprint_roots` list every authored input boundary that affects compilation. `fingerprint_excludes` remove generated output trees inside those roots, such as `dev` and `release`.
+`id` gives the workload a stable authored identity. `entry` selects the file or project passed to the runner. `fingerprint_mode` selects how source identity is computed: `full_tree` uses one root equal to the entry, while `partitioned` uses disjoint strict-descendant roots under a directory entry. `fingerprint_roots` list every authored input boundary that affects compilation. `fingerprint_excludes` remove generated output trees inside those roots, such as `dev` and `release`.
+
+Directory-entry workloads declare `fingerprint_mode = "full_tree"` with the entry as the sole root, or `fingerprint_mode = "partitioned"` with disjoint roots under the entry. Schema 2 validates that full-tree roots equal the entry, partitioned roots are strict descendants, and no root or exclude overlaps another.
 
 Each case connects a workload to one typed runner:
 
@@ -82,9 +85,19 @@ profile = "dev"
 
 Case IDs identify measurements and reports. CLI profiling also selects cases by this ID. They don't derive from paths, commands or compiler names, so moving a fixture doesn't rename its history. Workload IDs let CLI and frontend cases share the same source identity.
 
-The workload fingerprint covers the benchmark protocol, runner declaration, authored root and exclude paths and every included file path and byte. A changed fingerprint marks the workload as changed. Comparison output never presents a speed delta for that case until a new matching fingerprint baseline exists.
+## Source and Measurement Identity
 
-Schema 1 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
+The source workload fingerprint covers the source fingerprint format version, manifest schema version, workload ID, entry logical path, entry kind, fingerprint mode, normalised root and exclude sets, and every included file path and byte. It does not hash runner declarations, `group` or `quick`. Changing source bytes invalidates every case attached to that workload.
+
+The case measurement fingerprint covers the measurement fingerprint format version, benchmark protocol version, the source workload fingerprint, workload ID, this case's runner kind, command or frontend profile, authored runner arguments and expectation. It does not hash sibling cases. Changing one case's runner changes only that case's measurement fingerprint.
+
+Comparison output distinguishes three states for each matching case ID:
+
+- **workload changed**: source fingerprint differs — no speed delta is reported.
+- **measurement changed**: source matches but measurement fingerprint differs — no speed delta is reported.
+- **timing comparable**: both match — speed deltas and stage movement are computed.
+
+Schema 2 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
 
 ## Execution Contract
 
@@ -104,9 +117,17 @@ A completed `check` or `build` emits exactly one machine status record:
 MOTH_BENCH status errors=<usize> warnings=<usize>
 ```
 
-The executor also requires stable `MOTH_BENCH timing` observations, including the matching `command.check.total` or `command.build.total` metric. Missing, duplicate or malformed status and timing records fail closed. A zero process status can't compensate for reported diagnostics, and a clean status can't compensate for a non-zero process status.
+The executor also requires stable `MOTH_BENCH timing` observations, including the matching `command.check.total` or `command.build.total` metric. Duplicate `MOTH_BENCH status` records are invalid. Malformed timing records are invalid. Repeated timing metric names inside one iteration are valid and summed. The required command total must exist. Measured iterations must expose the same timing metric set; missing or additional timing names across iterations fail the run. A zero process status can't compensate for reported diagnostics, and a clean status can't compensate for a non-zero process status.
 
 Frontend cases call the production in-process API. The same executor checks typed error and warning facts, a positive finite total duration and a non-empty stable stage set.
+
+## Output Isolation And Artifact Cleanup
+
+File-entry CLI cases run from isolated temporary directories under `target/benchmark-work/` so compiler output never writes into the tracked checkout. Directory-entry cases run from the repository root because their output folders are project-owned and excluded from workload fingerprints.
+
+After a benchmark run completes, the workspace cleans up compiler output directories (`dev/` and `release/`) left by directory-entry builds. Only untracked directories are removed; tracked generated output like `docs/release/` is preserved. This keeps the repository clean without relying on `.gitignore` alone.
+
+Repository state is captured before each run and verified after measurement. If the repository changed during a run — through source edits, commit changes, or unexpected file creation — history persistence is blocked. This prevents recording a baseline from a contaminated worktree.
 
 ## Timing And Counter Controls
 
@@ -193,6 +214,14 @@ just profile-build            # build the profiling binary (target/profiling/mot
 ```
 
 Run `just bench-report` first to identify which case and stage are worth profiling.
+
+### Profile drift compatibility
+
+Profile history uses its own protocol version (`PROFILE_PROTOCOL_VERSION`) and format version. Drift comparison selects a previous run only when system UUID, filter mode, sample rate, and profile protocol version all match. Case-level comparison uses source and measurement fingerprints — not command text — as the comparison authority.
+
+When a case's source fingerprint changed since the previous run, drift reports "workload changed" and the case does not contribute to function, stage, or counter drift. When the measurement fingerprint changed (e.g., runner or protocol changed), drift reports "measurement changed" with the same exclusion. Only cases with identical identity contribute to drift aggregates.
+
+Legacy profile history (format v1 and v2) remains readable but is never selected as a directly comparable previous run because it lacks current protocol version and identity.
 
 ## Measurement Model
 

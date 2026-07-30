@@ -80,8 +80,8 @@ pub(crate) struct ProfileCasePaths {
     pub(crate) profile_json: PathBuf,
     /// Path to hotspots.json within the case directory.
     ///
-    /// Written by Phase 4 after parsing the Samply profile. Contains
-    /// ranked function hotspots with percentage and millisecond estimates.
+    /// Written after parsing the Samply profile. Contains ranked function
+    /// hotspots with percentage and millisecond estimates.
     pub(crate) hotspots_json: PathBuf,
     /// Path to profile-shape.txt within the case directory.
     ///
