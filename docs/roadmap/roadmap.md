@@ -11,9 +11,8 @@ Use the [Progress Matrix](docs/src/docs/progress/#page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Docs migration work](./plans/docs-language-migration.md)
-- [Benchmark system follow up corrections](./plans/benchmark-correctness-follow-up-implementation-plan.md)
 - [Canonical module compilation and scoped packages](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
+- [Benchmark system follow up corrections - phase 7 onwards left](./plans/benchmark-correctness-follow-up-implementation-plan.md)
 
 ## Queued implementation chain
 
