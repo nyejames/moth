@@ -1,0 +1,60 @@
+The project package facade exposes a project's public API to external consumers. It is an API-only module compiled through the ordinary compiler pipeline with project-facade visibility supplied by Stage 0.
+
+### The facade root
+
+One optional project-root `+*.moth` file beside `config.moth` defines the external project package facade. The suffix after `+` is cosmetic.
+
+The facade may define and export its own legal API-only declarations: functions, structs, choices, type aliases, traits and compile-time constants.
+
+### Special assembly namespace
+
+Stage 0 gives the facade a special assembly namespace rooted at `entry_root`. Through that namespace it may reference the public interfaces of descendant modules below `entry_root`, regardless of ordinary lexical module visibility.
+
+### Facade restrictions
+
+The facade:
+
+- never bypasses an `export:` boundary
+- isn't visible to internal project modules
+- cannot import `@project`
+- cannot expose a semantic fact that depends on project-private context
+- rejects top-level runtime work and page fragments
+- has no implicit `start`
+- emits no route
+
+Support roots and the project package facade reject top-level runtime work and page fragments. They don't merely stay inactive.
+
+### Project package assembly
+
+The compiler produces an immutable facade module artefact and public interface. `ProjectPackageAssembly` is a separate link plan over:
+
+- the compiled facade artefact
+- selected descendant public interfaces
+- reachable generated functions
+- package runtime requirements permitted by the target
+
+Assembly never recompiles or mutates the facade.
+
+A project may be both an application and a package. Without the facade it has no externally consumable Moth package surface.
+
+The facade package identity comes from `project.name`.
+
+### External package eligibility
+
+The build system rejects any declaration whose public semantic facts or reachable executable implementation directly or transitively depend on private `@project`. This includes an exported function that calls a private project-dependent helper.
+
+The validator doesn't treat implementation-only dependence as a reusable package specialisation mechanism.
+
+### Dependency package facades
+
+A dependency package exposes its facade and immutable artefacts to consumers. Consumers never see the dependency's private `@project`.
+
+No declaration exposed through a dependency package facade may directly or transitively depend on that dependency's private `@project`. Private declarations may use the dependency's own `@project` only when no external package export can reach or expose them.
+
+Imported build-value namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs don't implicitly satisfy a dependency's `#Import` contracts.
+
+### Related concepts
+
+- For module root rules see @#module-roots (Module roots).
+- For package origins and backing see @../packages/#package-origins-and-backing (Package origins and backing).
+- For the full facade contract see @../../../../build-system-design.md (Build system design).

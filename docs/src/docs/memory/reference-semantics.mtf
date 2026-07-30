@@ -25,11 +25,31 @@ Alias activity is non-lexical and control-flow-sensitive. A shared alias blocks 
     ~items.push(42)    -- valid: view is no longer live
 ]
 
+### Branches, joins and loops
+
+Branches are analysed independently. At a control-flow join, alias activity is conservatively retained when any incoming path may still use the alias. Loops use fixed-point future-use reasoning, so an alias that survives one iteration stays live for the whole loop body.
+
 ### References are real
 
 Moth omits explicit reference types and lifetime syntax, not references themselves. The language doesn't expose reference type constructors, pointer syntax or lifetime annotations. References are implicit, compiler-tracked and safe.
 
 This is a source-semantic rule. Backends may use different representations (GC, handles, stack storage) as long as they preserve the same observable behaviour.
+
+### No source-level reference, move or lifetime syntax
+
+Moth has no source-level:
+
+- `&` or `&mut` reference type constructors
+- lifetime annotations or lifetime parameters
+- temporary-reference syntax
+- explicit move keyword or operator
+- separate borrowed and owned function signatures
+
+These are permanent design boundaries, not merely unimplemented features.
+
+### Backend representation doesn't change source semantics
+
+A backend may represent a shared alias as a pointer, a handle, a GC reference or direct scalar storage. The source rule stays fixed: ordinary binding creates shared access to the same value, never an implicit copy.
 
 ### Read next
 

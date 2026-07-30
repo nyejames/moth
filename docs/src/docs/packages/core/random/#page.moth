@@ -1,28 +1,49 @@
-import @html {center}
-import @styles/docs {navbar, title, section, codeblock, theme_head}
+import @./random {
+    content as random_advanced,
+}
 
-page_title #= "Core Random"
+import @./random-basic {
+    content as random_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Core random"
 page_description #= "Random number helpers in the Core package."
-page_head #= theme_head
+page_head #= language_theme_head
 
 #[navbar]
-#[title, center: CORE RANDOM]
 
 #[section, $md:
-    `@core/random` provides basic random number helpers for the HTML JavaScript path.
+    @../../../ (Documentation) / @../ (Core packages) / Core random
 
-    `random_float()` returns a `Float`.
-    `random_int(min, max)` returns an `Int` in the inclusive range from `min` to `max`.
-    If `min` is greater than `max`, the bounds are swapped.
+    # Core random
 
-    [codeblock, $code("moth"):
-        import @core/random {random_float, random_int}
+    `@core/random` provides random number helpers. Import it when you need
+    random `Float` or `Int` values.
+]
 
-        value = random_float()
-        die_roll = random_int(1, 6)
+#[section:
+    [doc_level:
+        [$insert("key"):random-helpers]
+        [$insert("title"):Random helpers]
+        [$insert("advanced"):[random_advanced]]
 
-        io.line([:roll=[die_roll] value=[value]])
+        [random_basic]
     ]
+]
 
-    Seeded random is deferred.
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../text/]
+        [$insert("previous_title"):Core text]
+        [$insert("next_path"):../time/]
+        [$insert("next_title"):Core time]
+    ]
 ]

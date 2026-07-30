@@ -2,12 +2,6 @@
 
 Accepted language and compiler design boundaries.
 
-## Authority
-
-`docs/language-overview.md` owns the complete compiler-facing language-scope
-list. This page is a compact summary of the main boundaries. The progress
-matrix reports current implementation and diagnostic coverage.
-
 ## Central bias
 
 - Keep the source language small, explicit and statically inspectable.
@@ -19,13 +13,10 @@ matrix reports current implementation and diagnostic coverage.
 
 ## Deferred versus outside scope
 
-- **Deferred implementation** fits accepted design but has not landed or is
-  incomplete.
-- **Outside scope** conflicts with the intended language model and needs an
-  explicit design change before implementation.
+- **Deferred implementation** fits accepted design but has not landed or is incomplete.
+- **Outside scope** conflicts with the intended language model and needs an explicit design change before implementation.
 
-The progress matrix reports whether a deferred surface is implemented today.
-This page explains whether the surface belongs in the language at all.
+The progress matrix reports whether a deferred surface is implemented today. This page explains whether the surface belongs in the language at all.
 
 ## Preferred constrained mechanisms
 
@@ -35,6 +26,8 @@ This page explains whether the surface belongs in the language at all.
 | Static reuse | Generic functions and explicit trait bounds |
 | Runtime heterogeneity | Choices |
 | Expected failure | `Error!`, postfix propagation and `catch` |
+| Invariant failure | `assert` |
+| Explicit result-like domain values | Ordinary choices |
 | Platform integration | Builder packages, external packages and source-backed packages |
 | Memory safety | GC baseline plus mandatory borrow and lifetime-region validation |
 | Mutation | Explicit exclusive access rather than implicit mutation |
@@ -42,30 +35,91 @@ This page explains whether the surface belongs in the language at all.
 | Declared bulk lifetimes | Accepted deferred `group` / `into` hard lifetime regions |
 | Performance | Hidden compiler and backend optimisation |
 
-## Major outside-scope families
+## Outside-scope families
 
-The exact list lives in `docs/language-overview.md`. Major families include:
+Each family below conflicts with the intended language model. A feature listed as outside scope should not be implemented unless the language philosophy changes first.
 
-- general-purpose macros and second compile-time languages
-- general closures, anonymous function values and broad higher-order polymorphism
-- dynamic trait values and erased runtime dispatch
-- broad trait or type-level programming systems
-- structural, blanket, conditional, negative or specialized conformance
-- operator overloading and general user-defined constraint systems
-- reflection, runtime type inspection and type-returning functions
-- higher-kinded types, partial type application and broad const generics
-- user-extensible builtin hashmap key semantics
-- public exceptions and competing broad result systems
-- source-visible lifetime, reference-category and ownership annotation systems
-- source-visible RC, retain/release, weak ownership and unrestricted dynamic shared ownership
-- backend-specific semantics leaking into the language
+### Compile-time language surface
 
-Diagnostics plus common-owner groups, `copy` and builder lifecycle roots are the intended replacement for source-level RC. Internal backend RC remains allowed for already-legal topology. See `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`.
+General-purpose macros, procedural macros, derive macros and AST macros create a second compile-time language and make code harder to inspect. Templates, constants and builder directives are the constrained compile-time surface.
+
+### General closures and higher-order polymorphism
+
+General closures, anonymous function values, generic function values and higher-order polymorphism add broad function-value semantics and solver pressure. Reactivity covers many closure-heavy template cases without adding general function values.
+
+### Dynamic trait values
+
+Dynamic trait values and trait objects require erased wrappers, runtime dispatch, dynamic-safety rules, backend-specific runtime support and a second meaning for trait names. Choices handle runtime heterogeneity. Generic trait bounds handle static reuse.
+
+### Trait-level programming
+
+Trait inheritance, trait aliases, trait composition, default methods, associated types and associated constants turn traits into a type-level programming system rather than simple method contracts.
+
+### Generic traits and generic trait methods
+
+Generic traits and generic trait methods make trait solving significantly more complex and create Rust-like abstraction patterns.
+
+### Structural and advanced conformance
+
+Blanket, conditional, negative and specialized conformance require coherence and specialization rules outside Moth's simplicity target. Structural conformance must not silently imply conformance from matching method shapes. `Type must TRAIT` stays explicit.
+
+### Constraint sublanguage
+
+Type-set constraints, union constraints, underlying-type constraints and user-defined numeric or operator constraints turn generic bounds into a constraint sublanguage. Generic bounds name traits only.
+
+### Operator overloading
+
+Operators stay compiler-owned and predictable. No source-visible operator overloading.
+
+### Cross-file and foreign receiver methods
+
+Source-authored receiver methods belong only to the same file as their nominal receiver type. Methods for builtins, imported types, dependency package types, external opaque types or types declared in another file must use free functions.
+
+### User-extensible map semantics
+
+User-defined `HASHABLE`, custom map hashers or comparers and user-defined keys for builtin maps stay outside the language. Builtin map syntax stays scalar-keyed. More sophisticated maps belong in packages as ordinary structs.
+
+### First-class result values
+
+First-class public `Result` values and result pattern matching stay outside the language. `Error!`, postfix `!` and `catch` form the error path. Authors can define ordinary choices when they want explicit result-like domain values.
+
+### Exceptions
+
+Expected failures use `Error!`. Invariants use `assert`. No public exception system.
+
+### Reflection and type introspection
+
+Reflection, runtime type IDs, compile-time type inspection and type-returning functions encourage generic meta-programming and weaken static readability.
+
+### Higher-kinded types
+
+Higher-kinded types, type functions, partial type application and parameterized type aliases introduce a type-level abstraction language.
+
+### User const generics
+
+User const generics beyond fixed collection capacity stay outside the language. Capacity syntax remains a small built-in collection feature, not a general type parameter system.
+
+### Source-visible memory annotation systems
+
+Source-visible lifetime, reference-category and ownership annotation systems stay outside the language. Moth omits explicit reference types and lifetime syntax, not references themselves. The compiler tracks ownership and lifetimes internally.
+
+### Source-visible RC and dynamic shared ownership
+
+Source-visible RC, retain/release, weak ownership, finalizers and unrestricted dynamic shared ownership stay outside the language. Internal backend RC remains allowed for already-legal topology. Diagnostics, common-owner groups, `copy` and builder lifecycle roots replace source-level RC.
+
+### Backend-specific semantics leaking into source
+
+Backend-specific observable semantics must not leak into the language. Source semantics stay backend-neutral. Backends receive validated topology and may not reconsider source legality.
+
+## Diagnostic distinction
+
+A deferred-feature diagnostic tells the author that accepted syntax hasn't landed yet. An outside-design-scope diagnostic tells the author that the form conflicts with the language model and won't be accepted without an explicit design change.
+
+Both use structured `CompilerDiagnostic`. The distinction matters because the remedy differs: a deferred feature needs implementation progress, while an outside-scope form needs a different approach or a language philosophy change.
 
 ## Review questions
 
-- Does this add a new source-language category when an existing constrained
-  mechanism is sufficient?
+- Does this add a new source-language category when an existing constrained mechanism is sufficient?
 - Does it make behaviour more implicit?
 - Does it need whole-program or solver-heavy reasoning?
 - Does it introduce runtime type or erased-dispatch machinery?
@@ -76,8 +130,7 @@ Diagnostics plus common-owner groups, `copy` and builder lifecycle roots are the
 
 ## Read next
 
-- `docs/language-overview.md`
-- `docs/src/docs/codebase/memory-management/overview.mtf`
-- `docs/compiler-design-overview.md`
-- `docs/src/docs/codebase/language/overview.mtf`
-- `docs/src/docs/progress/#page.moth`
+- `docs/language-overview.md` for the complete compiler-facing language reference
+- `docs/src/docs/codebase/memory-management/overview.mtf` for formal memory semantics
+- `docs/compiler-design-overview.md` for compiler stage and artefact contracts
+- `docs/src/docs/progress/#page.moth` for current implementation status

@@ -1,0 +1,71 @@
+`io` gives your program console output and input polling. The prelude makes `io` available without an import, so you can start writing output right away.
+
+### Writing to the console
+
+Console helpers take one string and write it to the output surface.
+
+[codeblock, $code("moth"):
+    io.print("loading...")
+    io.line("Hello")
+    io.debug("debug details")
+    io.warn("warning")
+    io.error("error")
+]
+
+`io.line` adds a trailing newline. `io.print` does not.
+
+### Formatting values
+
+Console helpers accept strings only. Use a template to interpolate values into text before output.
+
+[codeblock, $code("moth"):
+    name = "Priya"
+    io.line([: Hello, [name]])
+
+    count = 3
+    io.line([: count = [count]])
+]
+
+### Reading input
+
+Input polling lives under `io.input.*`. Create an input handle, poll it each frame, then close it when done.
+
+[codeblock, $code("moth"):
+    input ~= io.input.new()!
+
+    io.input.update(~input)
+
+    if io.input.key_pressed(input, "d"):
+        io.line("pressed d")
+    ;
+
+    io.input.close(~input)
+]
+
+`io.input.new()` can fail when the backend does not support input. `update` and `close` need mutable access, so they use `~`. Polling reads such as `key_pressed` use shared access.
+
+### Pointer input
+
+Pointer helpers report button state and coordinates.
+
+[codeblock, $code("moth"):
+    if io.input.pointer_down(input, "left"):
+        x = io.input.pointer_x(input)
+        y = io.input.pointer_y(input)
+
+        io.line([: pointer [x], [y]])
+    ;
+]
+
+Buttons use `"left"`, `"middle"` and `"right"`. Coordinates use `Float` values.
+
+### Remember
+
+- `io` comes available without an import through the prelude.
+- Console helpers accept strings only. Use templates to format other values.
+- Input handles stay opaque. Pass them to `io.input.*` functions.
+- Call `io.input.close(~input)` when you finish with an input handle.
+
+### Read next
+
+For the full contract including backend behaviour, teardown rules and deferred surfaces, see @./io (Core IO advanced).

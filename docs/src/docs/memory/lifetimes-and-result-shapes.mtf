@@ -1,6 +1,47 @@
-### Fresh results
+### Mandatory topology, optional optimisation
 
-A fresh result root has a new root allocation but may retain legal references. Fresh results include literals, templates, constructor calls and computed aggregates.
+Lifetime-region and escape validation runs mandatory and backend-independent. It proves every retained reference is legal under one lifetime owner. GC cannot bypass it.
+
+Optional ownership optimisation (final-use transfer, deterministic drops, stack or arena allocation, collector elision) layers over a topology already proven legal. When optimisation proof is unavailable, the value stays GC-managed without changing program behaviour.
+
+### One semantic lifetime owner
+
+Every runtime allocation has exactly one semantic lifetime owner. Multiple bindings, fields, elements or returned values may alias one allocation without becoming additional owners. The ownership bit records destruction responsibility only. It doesn't prove uniqueness.
+
+### The retained-edge outlives rule
+
+An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.
+
+[codeblock, $code("moth"):
+    R_value >= R_container
+]
+
+where `R_value` lives at least as long as `R_container`.
+
+Valid edges include a local retaining a longer-lived parameter, a child-group value retaining a parent-group value, or two fields of one page-owned aggregate sharing one page-owned child.
+
+Invalid edges include a longer-lived object retaining shorter-lived storage, a parent retaining a child-group value, or a returned local outliving its source region without independent storage.
+
+### Lexical scope doesn't define allocation lifetime
+
+Shared aliases may outlive the lexical binding that first named the storage. Escaping or retained aliases remain under one lifetime owner and must satisfy the stored-edge outlives rule. Lexical scope controls name visibility and control-flow exits, not allocation lifetime.
+
+### Nearest-existing-ancestor widening
+
+An ordinary allocation begins in the narrowest inferred region capable of owning its initial uses. The compiler may widen that allocation only to the nearest existing ancestor on the same ordered owner chain that outlives every retained observer.
+
+Widening follows one ordered owner chain only. The compiler must not widen farther than necessary or invent a page-, application- or process-lifetime owner merely to avoid a diagnostic.
+
+Siblings don't form one ordered chain. Independently ending lifetime domains cannot be laterally promoted across each other. Sharing across sibling domains requires one of:
+
+1. an already-existing common semantic owner
+2. an enclosing declared memory group
+3. a builder-declared common lifecycle
+4. independent storage created by `copy`
+
+### Fresh result roots
+
+A fresh result root has a new root allocation but may retain legal references to older allocations. Fresh results include literals, templates, constructor calls and computed aggregates.
 
 [codeblock, $code("moth"):
     name = "Priya"                    -- fresh string slice
@@ -8,9 +49,11 @@ A fresh result root has a new root allocation but may retain legal references. F
     items = {1, 2, 3}                 -- fresh collection
 ]
 
+A fresh result root may retain parameters or other pre-existing values only when every retained edge satisfies the destination lifetime's outlives constraints.
+
 ### Alias results
 
-An alias result reuses an existing root or projection. Shared bindings, field access and shared function returns produce alias results.
+An alias result reuses an existing root or projection. Shared bindings, field access and shared function returns produce alias results. An alias result stays tied to its existing lifetime owner and cannot become new group-owned storage through `into`.
 
 [codeblock, $code("moth"):
     original = load_items()
@@ -18,9 +61,13 @@ An alias result reuses an existing root or projection. Shared bindings, field ac
     first = original.get(0)           -- alias result (shared access)
 ]
 
-### Independent results
+### Projection roots
 
-An independent result graph has no retained Moth reference to pre-existing storage. `copy` produces independent results.
+Interior projections remain rooted in their containing allocation family. Returning, storing or escaping a projection retains that family. A projection doesn't silently become an independent allocation or independent copy.
+
+### Independent result graphs
+
+An independent result graph has no retained Moth reference to pre-existing storage. `copy` produces independent results. WIT value-only lifting produces independent results. An independent graph may enter an unrelated destination lifetime without retained-edge constraints to its source graph.
 
 ### Aggregate storage
 
@@ -28,9 +75,31 @@ Existing values stored in structs, choices, collections, maps, tuples, templates
 
 Maps own their entry structure while keys and values follow the same shared/copy/inferred-transfer rules. Map lookup keys are borrowed. `get` returns a shared alias. `remove` returns the removed value under normal lifetime and ownership rules.
 
+### Return and multi-return aliasing
+
+Function lifetime summaries cover fresh result roots, parameter aliases, projection aliases, result-to-result aliases, retained-parameter constraints and required outlives relationships.
+
+Multiple return values may alias one allocation when they remain under one caller lifetime owner. A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination.
+
+### Cycles
+
+Cross-region cycles are invalid. Every strongly connected allocation graph must belong to one lifetime region. Same-region cycles are lifetime-safe.
+
+### Reactive and builder-owned lifetimes
+
+Reactive subscriptions are read-only dependencies, not active borrow lifetimes. Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.
+
+### External boundaries
+
+External bindings use closed semantic boundary profiles. They don't expose arbitrary user-defined lifetime graphs.
+
+WIT value-only V1 imports lower shared reads into independent component values and lift results into independent Moth result graphs. No Moth alias, lifetime owner or destruction responsibility crosses the component boundary.
+
+Restricted host-binding profiles let ordinary Moth values cross by value, while host code may not retain references into ordinary Moth storage and opaque handles represent foreign identities rather than Moth reference types.
+
 ### Optional inferred transfer
 
-There is no move syntax and no ordinary mandatory-consuming value operation. Inferred transfer is optional. When safe transfer isn't proven on every relevant path, the operation remains a borrow.
+Moth has no move syntax and no ordinary mandatory-consuming value operation. Inferred transfer is optional. When safe transfer isn't proven on every relevant path, the operation remains a borrow.
 
 Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site. Parameter access mode remains separate from optional ownership effect.
 

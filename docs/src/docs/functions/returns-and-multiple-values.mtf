@@ -54,3 +54,17 @@ That slot must be last.
 
 `return!`, postfix propagation and `catch` are documented by
 @../errors (Errors, options and assertions).
+
+### Return contract
+
+Return slots contain types and channels only. Source code has no borrowed,
+owned, move or parameter-alias return annotation.
+
+Returning an existing value follows ordinary shared-reference semantics. The
+compiler infers freshness and alias effects from validated bodies and calls.
+Public interfaces may carry those inferred summaries. External bindings may
+carry explicit compiler-owned alias metadata because their foreign bodies are
+unavailable.
+
+The alias and freshness summary lattice is compiler-owned semantic information.
+It is not source syntax, a source type or a signature category.

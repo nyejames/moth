@@ -1,0 +1,54 @@
+`@core/random` provides random number helpers. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
+
+`@core/random` carries Core origin with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+
+### Import roots
+
+Import individual symbols or the whole namespace:
+
+[codeblock, $code("moth"):
+    import @core/random {random_float, random_int}
+
+    import @core/random
+
+    value = random.random_float()
+    die_roll = random.random_int(1, 6)
+]
+
+### Functions
+
+| Function | Parameters | Returns |
+|---|---|---|
+| `random_float()` | none | `Float` |
+| `random_int(min, max)` | `Int, Int` | `Int` |
+
+`random_float()` returns a `Float` in the range `[0.0, 1.0)`.
+
+`random_int(min, max)` returns an `Int` in the inclusive range from `min` to `max`. If `min` exceeds `max`, the bounds swap.
+
+Both functions stay infallible at the Moth level. They do not return through `Error!`.
+
+### Access and return contracts
+
+All parameters use shared access. No function requires mutable access. Both functions return fresh values.
+
+### Backend behaviour
+
+HTML-JS lowers `random_float` to `Math.random()`. `random_int` lowers to a JavaScript runtime helper that handles the inclusive range and bound swapping.
+
+HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+
+### Unsupported source forms
+
+- Direct symbol-path imports such as `import @core/random/random_int` face rejection. Use grouped or namespace imports.
+- Named arguments lack support. Binding-backed calls stay positional-only.
+- The package does not expose receiver methods, opaque types, constants or `Error!` channels.
+
+### Deferred surfaces
+
+Seeded random and non-JS lowerings remain deferred. See @../../../../progress (progress matrix) for current status.
+
+### Related concepts
+
+- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For import path rules see @../../#import-paths (Import paths).

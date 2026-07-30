@@ -43,5 +43,5 @@ Borrow validation records source dependencies and conservative invalidation fact
 
 ### Related concepts
 
-- For access and aliasing see @../bindings (Values and bindings) and @../codebase/memory-management/access-and-aliasing (Access and aliasing).
+- For access and aliasing see @../bindings (Values and bindings) and @../memory/#reference-semantics (Reference semantics).
 - For reactive sources see @#reactive-sources (Reactive sources).

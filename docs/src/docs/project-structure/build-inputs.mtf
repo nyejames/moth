@@ -1,0 +1,76 @@
+Build inputs let config and source declare named primitive values that resolve before module AST compilation. They feed project identity, feature flags and environment-specific settings into ordinary compile-time constants.
+
+### Direct project `#Import` fields
+
+A direct primitive or optional field of `project` may declare a build-input contract using `#Import of T`. Nested project fields cannot declare imports.
+
+Accepted imported-value types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
+
+[codeblock, $code("moth"):
+    project #= |
+        name = "moth_docs",
+        version #Import of String = "0.1.0",
+        channel #Import of String? = none,
+        entry_root = "src",
+    |
+]
+
+`#Import` is constant-source syntax. It isn't a source import or a wrapper type.
+
+A direct project `#Import` value resolves in this order:
+
+1. explicit CLI or programmatic build input
+2. builder-provided primitive global
+3. the folded declaration default
+4. a structured missing-input diagnostic
+
+Resolution happens during config compilation before Stage 0 applies fields such as `entry_root`.
+
+A fixed direct project field is not an import contract. When a same-name source `#Import` uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree on required or default state and the normalised default value.
+
+### Source `#Import` contracts
+
+Source `#Import` is intentionally narrow so every project-wide contract can be validated before module AST compilation.
+
+A source declaration may use only the accepted primitive or optional types listed for project fields.
+
+A source default must be self-contained. The only accepted forms are:
+
+- a `String` literal
+- a signed `Int` literal
+- a signed `Float` literal
+- a `Bool` literal
+- a `Char` literal
+- `none` for an optional contract
+- a matching primitive literal for an optional contract
+
+Source defaults cannot contain a name, template, operator expression, call, cast, field projection, collection, record or another imported value. Stage 0 doesn't run a second general constant evaluator before AST.
+
+[codeblock, $code("moth"):
+    api_url #Import of String = "https://api.example.com"
+    max_retries #Import of Int = 3
+    debug_mode #Import of Bool = false
+]
+
+### Project-wide resolution order
+
+Same-name contracts must agree on primitive type, optionality, required or default state and the normalised default value. Different defaults are conflicting contracts.
+
+The project-wide resolution order is:
+
+1. a compatible fixed direct project field, which is authoritative and cannot be overridden
+2. a resolved direct project `#Import` field
+3. explicit CLI or programmatic input for a source-only contract
+4. a builder-provided primitive global
+5. the shared source default
+6. a missing-input diagnostic
+
+Unknown explicit inputs are diagnosed only after every selected source contract is known.
+
+The resolved value enters module AST as an ordinary folded constant. It creates no runtime wrapper or HIR category.
+
+### Related concepts
+
+- For the config file see @#project-config (Project config).
+- For `@project` see @#entry-config (Entry config).
+- For the full build-input contract see @../../../../build-system-design.md (Build system design).

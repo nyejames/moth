@@ -875,7 +875,7 @@ HIR does not:
 - model exact lifetimes
 - assemble routes or project artefacts
 
-Plain binary operations remain valid for booleans, comparisons and string concatenation. Runtime scalar arithmetic and unary negation lower through explicit checked numeric statements. HIR validation rejects arithmetic that survives in the wrong representation.
+Plain binary operations remain valid for booleans and comparisons. Runtime template string construction lowers through explicit string append operations. Runtime scalar arithmetic and unary negation lower through explicit checked numeric statements. HIR validation rejects arithmetic that survives in the wrong representation.
 
 #### HIR validation
 

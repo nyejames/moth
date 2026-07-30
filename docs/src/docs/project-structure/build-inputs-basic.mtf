@@ -1,0 +1,38 @@
+Build inputs let you declare named values that resolve before the compiler
+processes your source modules. They feed settings like version strings and
+feature flags into ordinary compile-time constants.
+
+### A simple build input
+
+[codeblock, $code("moth"):
+    project #= |
+        name = "my_project",
+        version #Import of String = "0.1.0",
+        entry_root = "src",
+    |
+]
+
+The `#Import of String` part tells the build system that `version` can be
+overridden from the command line. When no override arrives, the default `"0.1.0"`
+applies.
+
+### Source-level build inputs
+
+Any source module can declare its own build input the same way:
+
+[codeblock, $code("moth"):
+    api_url #Import of String = "https://api.example.com"
+]
+
+The build system validates every contract before module compilation. Same-name
+contracts must agree on type and default value.
+
+### Accepted types
+
+Build inputs accept `String`, `Int`, `Float`, `Bool`, `Char` and optional forms
+of those types. Defaults must be plain literal values, not expressions or
+templates.
+
+### Related concepts
+
+- For the config file see @#project-config (Project config).

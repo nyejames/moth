@@ -1,42 +1,49 @@
-import @html {center}
-import @styles/docs {navbar, title, section, codeblock, theme_head}
+import @./collections {
+    content as collections_advanced,
+}
 
-page_title #= "Core Collections"
+import @./collections-basic {
+    content as collections_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Core collections"
 page_description #= "Ordered collection literals and common collection methods."
-page_head #= theme_head
+page_head #= language_theme_head
 
 #[navbar]
-#[title, center: CORE COLLECTIONS]
 
 #[section, $md:
-    Collections are ordered, zero-indexed groups of one element type.
-    Non-empty literals infer their element type from their items.
-    Empty literals need an explicit collection type.
-    Growable collections use `{T}`, while fixed collections use `{N T}`
-    with a compile-time maximum length.
+    @../../../ (Documentation) / @../ (Core packages) / Core collections
 
-    [codeblock, $code("moth"):
-        values ~= {1, 2, 3}
-        empty_values ~{Int} = {}
-        fixed_values ~{2 Int} = {}
+    # Core collections
+
+    Collections hold ordered groups of values. You create them with literals
+    and work with them through built-in methods backed by `@core/collections`.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):collection-methods]
+        [$insert("title"):Collection methods]
+        [$insert("advanced"):[collections_advanced]]
+
+        [collections_basic]
     ]
+]
 
-    Common methods are compiler-owned and use receiver syntax:
-
-    [codeblock, $code("moth"):
-        ~values.push(4) catch:
-        ;
-
-        first = values.get(0) catch:
-            then 0
-        ;
-
-        ~values.set(1, 99) catch:
-        ;
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../io/]
+        [$insert("previous_title"):Core IO]
+        [$insert("next_path"):../math/]
+        [$insert("next_title"):Core math]
     ]
-
-    `get`, `set`, `push`, and `remove` are fallible.
-    `length` is infallible.
-    See @../../../collections (Collections) for the language rules around mutability, fixed capacity,
-    and empty literal typing.
 ]

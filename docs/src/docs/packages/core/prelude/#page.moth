@@ -1,28 +1,49 @@
-import @html {center}
-import @styles/docs {navbar, title, section, codeblock, theme_head}
+import @./prelude {
+    content as prelude_advanced,
+}
+
+import @./prelude-basic {
+    content as prelude_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
 
 page_title #= "Prelude policy"
 page_description #= "The small implicit surface available without explicit imports."
-page_head #= theme_head
+page_head #= language_theme_head
 
 #[navbar]
-#[title, center: PRELUDE POLICY]
 
 #[section, $md:
-    The prelude is visibility policy, not an `@core/prelude` package. It defines the tiny set of names available without an explicit import.
-    It keeps common output and builtin error handling convenient without making every Core package global.
+    @../../../ (Documentation) / @../ (Core packages) / Prelude policy
 
-    The `io` namespace is available in normal source files and exposes Core IO helpers such as `io.line(...)`.
-    Compiler-owned `Error` is also available for `Error!` flows.
+    # Prelude policy
 
-    [codeblock, $code("moth"):
-        io.line("Hello from the prelude")
+    The prelude gives you a few names without an import. It keeps common
+    output convenient without making every Core package global.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):prelude-surface]
+        [$insert("title"):Prelude surface]
+        [$insert("advanced"):[prelude_advanced]]
+
+        [prelude_basic]
     ]
+]
 
-    Most Core packages still require imports:
-
-    [codeblock, $code("moth"):
-        import @core/math {sin}
-        import @core/time {mark_now}
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../]
+        [$insert("previous_title"):Core packages]
+        [$insert("next_path"):../io/]
+        [$insert("next_title"):Core IO]
     ]
 ]

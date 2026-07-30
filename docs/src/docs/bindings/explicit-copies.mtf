@@ -49,8 +49,9 @@ Expressions that construct a new result from existing inputs are not implicit
 copies of one input.
 
 [codeblock, $code("moth"):
-    total = left + right
+    total = unit_price + shipping
     label = [: [first_name] [last_name]]
 ]
 
-Those expressions create new result values through their own language rules.
+Those expressions create new result values through their own language rules. The
+first computes a numeric sum. The second builds a string through a template.

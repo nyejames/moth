@@ -1,0 +1,70 @@
+Entry config covers `@project` and entry-local `config:` blocks. Both feed builder metadata and compile-time values into normal module roots.
+
+### `@project`
+
+The folded `project` record produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` import root.
+
+`@project` exposes direct project fields as namespace members. It doesn't expose another value named `project`.
+
+Normal project modules and project-owned support packages may explicitly import `@project`. It is never implicitly injected.
+
+The following may not claim the `@project` root:
+
+- child modules
+- scoped support packages
+- dependency aliases
+- Core packages
+- Builder packages
+- binding-backed packages
+
+`@project` cannot be directly re-exported.
+
+Internal project modules may expose declarations derived from project values. The compiler retains project-context provenance on every affected public semantic fact. The external project package facade rejects prohibited project-context exposure.
+
+[codeblock, $code("moth"):
+    import @project { version, entry_root }
+
+    page_title #= [: [project_name] v[version]]
+]
+
+### Entry-local `config:` blocks
+
+An entry `config:` block is root-local builder metadata. It isn't an embedded `config.moth` source file.
+
+Placement rules:
+
+- valid only at the top level of a normal module root
+- at most one block per normal root
+- invalid in normal non-root files
+- invalid in support roots
+- invalid in the project package facade
+- invalid inside `export:`
+- invalid inside executable bodies
+- invalid in `config.moth`
+
+The block contains section records only. Imports, aliases, helper constants, support types and source `#Import` declarations live outside the block in the normal root file.
+
+The block uses the root file's ordinary compile-time visibility. It may reference:
+
+- imported constants
+- `@project`
+- same-file constants declared before the block
+- resolved source `#Import` constants
+- foldable local const-record types
+- selected-builder compile-time values available through normal module imports
+
+Same-file forward references remain invalid.
+
+The block creates no ordinary module symbol, HIR or project-global value. It cannot contain `project` or change project-level builder behaviour. It may contain active artefact-builder and tooling-overlay sections.
+
+Active entry sections are schema-validated. Inactive sections are parsed and folded but not schema-validated.
+
+Every normal module selected into the current command's semantic graph has its block validated whether or not an entry activates it. Imported modules never apply their entry metadata to an importer.
+
+Only active artefact-builder settings contribute entry activity.
+
+### Related concepts
+
+- For build inputs see @#build-inputs (Build inputs).
+- For module root rules see @#module-roots (Module roots).
+- For the full entry config contract see @../../../../build-system-design.md (Build system design).

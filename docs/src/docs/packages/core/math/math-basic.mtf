@@ -1,0 +1,47 @@
+`@core/math` gives you `Float` constants and helper functions for common math operations. Import it explicitly when you need trigonometry, rounding or clamping.
+
+### Importing
+
+Bring in the symbols you need with a grouped import.
+
+[codeblock, $code("moth"):
+    import @core/math {PI, sin, clamp}
+
+    wave = sin(PI / 2.0)
+    bounded = clamp(wave, 0.0, 1.0)
+
+    io.line([:bounded=[bounded]])
+]
+
+You can also import the whole namespace and access members through field access.
+
+[codeblock, $code("moth"):
+    import @core/math
+
+    angle = math.PI / 2.0
+    result = math.sin(angle)
+]
+
+### Constants
+
+`PI`, `TAU` and `E` form compile-time `Float` values. Use them directly in expressions.
+
+### Common functions
+
+- `sin`, `cos`, `tan` for trigonometry
+- `atan2(y, x)` for arc tangent of two values
+- `sqrt`, `pow`, `log` for powers and logarithms
+- `abs`, `floor`, `ceil`, `round`, `trunc` for rounding
+- `min(a, b)`, `max(a, b)`, `clamp(x, min, max)` for comparisons
+
+All functions take `Float` values and return `Float`.
+
+### Remember
+
+- `@core/math` needs an explicit import. It is not in the prelude.
+- All parameters use `Float`. All return values use `Float`.
+- Arguments are positional. Named arguments are not supported.
+
+### Read next
+
+For the full function list, backend behaviour and deferred surfaces, see @./math (Core math advanced).

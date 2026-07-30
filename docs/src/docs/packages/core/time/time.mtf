@@ -1,0 +1,113 @@
+`@core/time` separates elapsed time from wall-clock time. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
+
+`@core/time` carries Core origin with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+
+### Import roots
+
+Import individual symbols or the whole namespace:
+
+[codeblock, $code("moth"):
+    import @core/time {
+        Duration,
+        TimeMark,
+        mark_now,
+        duration_between,
+        as_seconds,
+    }
+
+    import @core/time
+
+    previous = time.mark_now()
+]
+
+### Opaque types
+
+The package exposes three opaque types. Do not construct them with struct syntax or inspect their fields. Pass them to the package functions.
+
+| Type | Purpose |
+|---|---|
+| `Duration` | Signed elapsed amount |
+| `TimeMark` | Monotonic clock mark for deltas and frame timing |
+| `Timestamp` | UTC wall-clock instant for logs, storage and system boundaries |
+
+All three use the handle ABI. They carry no source-visible fields.
+
+### Monotonic clock functions
+
+| Function | Parameters | Returns | Error |
+|---|---|---|---|
+| `mark_now()` | none | `TimeMark` | no |
+| `elapsed_since(start)` | `TimeMark` | `Duration` | no |
+| `duration_between(start, end)` | `TimeMark, TimeMark` | `Duration` | no |
+
+`mark_now()` returns the current monotonic mark. `elapsed_since(start)` returns the duration from `start` to now. `duration_between(start, end)` returns the duration from `start` to `end`.
+
+### Wall-clock timestamp functions
+
+| Function | Parameters | Returns | Error |
+|---|---|---|---|
+| `timestamp_now()` | none | `Timestamp` | no |
+| `timestamp_from_unix_seconds(seconds)` | `Float` | `Timestamp` | no |
+| `timestamp_from_unix_milliseconds(milliseconds)` | `Float` | `Timestamp` | no |
+| `timestamp_from_iso_string(text)` | `String` | `Timestamp, Error!` | yes |
+
+`timestamp_from_iso_string` is the only fallible function. Invalid ISO strings return through `Error!`.
+
+[codeblock, $code("moth"):
+    import @core/time {
+        Timestamp,
+        timestamp_from_iso_string,
+        timestamp_from_unix_milliseconds,
+    }
+
+    created = timestamp_from_iso_string("not-a-date") catch:
+        then timestamp_from_unix_milliseconds(0.0)
+    ;
+]
+
+### Duration construction and helpers
+
+| Function | Parameters | Returns | Error |
+|---|---|---|---|
+| `duration_from_seconds(seconds)` | `Float` | `Duration` | no |
+| `duration_from_milliseconds(milliseconds)` | `Float` | `Duration` | no |
+| `as_seconds(duration)` | `Duration` | `Float` | no |
+| `as_milliseconds(duration)` | `Duration` | `Float` | no |
+| `is_negative(duration)` | `Duration` | `Bool` | no |
+| `abs(duration)` | `Duration` | `Duration` | no |
+| `clamp(duration, min, max)` | `Duration, Duration, Duration` | `Duration` | no |
+
+### Timestamp helpers
+
+| Function | Parameters | Returns | Error |
+|---|---|---|---|
+| `unix_seconds(timestamp)` | `Timestamp` | `Float` | no |
+| `unix_milliseconds(timestamp)` | `Timestamp` | `Float` | no |
+| `to_iso_string(timestamp)` | `Timestamp` | `String` | no |
+
+### Access and return contracts
+
+All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on invalid input. Every other function stays infallible.
+
+### Backend behaviour
+
+HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `to_iso_string` lowers to `(new Date(#0)).toISOString()`. Duration and timestamp construction helpers lower to inline JavaScript expressions.
+
+HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+
+### Unsupported source forms
+
+- Direct symbol-path imports such as `import @core/time/mark_now` face rejection. Use grouped or namespace imports.
+- Named arguments are not supported. Binding-backed calls are positional-only.
+- Do not construct `Duration`, `TimeMark` or `Timestamp` with struct syntax.
+- Do not inspect opaque type fields directly.
+- The package does not expose receiver methods.
+
+### Deferred surfaces
+
+Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings remain deferred. Browser animation-frame integration belongs in a future web-specific package rather than `@core/time`. See @../../../../progress (progress matrix) for current status.
+
+### Related concepts
+
+- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For import path rules see @../../#import-paths (Import paths).

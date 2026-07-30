@@ -1,33 +1,44 @@
 import @html {center}
-import @styles/docs {navbar, title, section, theme_head}
+import @styles/docs {navbar, section, language_theme_head, doc_pager}
 
-page_title #= "Core Packages"
+page_title #= "Core packages"
 page_description #= "Overview of Moth Core packages and their current HTML/JS support."
-page_head #= theme_head
+page_head #= language_theme_head
 
 #[navbar]
-#[title, center: CORE PACKAGES]
 
 #[section, $md:
-    Core packages are small, typed packages owned by the compiler and selected for availability by a builder.
-    They are not ordinary source files in your project, but they are imported with the same `import` syntax.
+    @../../ (Documentation) / @../ (Packages and imports) / Core packages
 
-    Most Core packages require explicit imports.
-    The prelude keeps only the smallest always-available surface bare, such as `io`.
+    # Core packages
 
-    Builder support can vary.
-    The @../../progress (progress matrix) is the source of truth for current package and backend support.
-    The HTML builder currently supports optional core packages on the JavaScript path.
-]
+    Core packages form small, typed packages owned by the compiler and selected
+    for availability by a builder. They do not act as ordinary source files in
+    your project, but they import with the same `import` syntax.
 
-#[section, $md:
-    ## Current pages
+    Most Core packages require explicit imports. The prelude keeps only the
+    smallest always-available surface bare, such as `io`.
+
+    Builder support can vary. The @../../progress (progress matrix) owns the
+    source of truth for current package and backend support. The HTML builder
+    currently supports optional core packages on the JavaScript path.
+
+    ## Package pages
 
     - @./prelude (Prelude policy)
     - @./io (Core IO)
-    - @./collections (Collections)
-    - @./math (Math)
-    - @./text (Text)
-    - @./random (Random)
-    - @./time (Time)
+    - @./collections (Core collections)
+    - @./math (Core math)
+    - @./text (Core text)
+    - @./random (Core random)
+    - @./time (Core time)
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../]
+        [$insert("previous_title"):Packages and imports]
+        [$insert("next_path"):../../memory/]
+        [$insert("next_title"):Memory and lifetimes]
+    ]
 ]

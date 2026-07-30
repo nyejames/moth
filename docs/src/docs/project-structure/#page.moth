@@ -46,6 +46,30 @@ import @./html-routing-and-artifacts-basic {
     content as html_routing_and_artifacts_basic,
 }
 
+import @./build-inputs {
+    content as build_inputs,
+}
+
+import @./build-inputs-basic {
+    content as build_inputs_basic,
+}
+
+import @./entry-config {
+    content as entry_config,
+}
+
+import @./entry-config-basic {
+    content as entry_config_basic,
+}
+
+import @./project-package-facade {
+    content as project_package_facade,
+}
+
+import @./project-package-facade-basic {
+    content as project_package_facade_basic,
+}
+
 import @styles/docs {
     navbar,
     section,
@@ -130,6 +154,36 @@ page_head #= language_theme_head
         [$insert("advanced"):[html_routing_and_artifacts]]
 
         [html_routing_and_artifacts_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):build-inputs]
+        [$insert("title"):Build inputs]
+        [$insert("advanced"):[build_inputs]]
+
+        [build_inputs_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):entry-config]
+        [$insert("title"):Entry config]
+        [$insert("advanced"):[entry_config]]
+
+        [entry_config_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):project-package-facade]
+        [$insert("title"):Project package facade]
+        [$insert("advanced"):[project_package_facade]]
+
+        [project_package_facade_basic]
     ]
 ]
 

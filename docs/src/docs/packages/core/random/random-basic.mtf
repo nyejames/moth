@@ -1,0 +1,31 @@
+`@core/random` gives you random number helpers. Import it when you need random `Float` or `Int` values.
+
+### Importing
+
+Bring in the functions you need with a grouped import.
+
+[codeblock, $code("moth"):
+    import @core/random {random_float, random_int}
+
+    value = random_float()
+    die_roll = random_int(1, 6)
+
+    io.line([:roll=[die_roll] value=[value]])
+]
+
+### Available functions
+
+- `random_float()` returns a `Float` between `0.0` and `1.0`
+- `random_int(min, max)` returns an `Int` from `min` to `max` inclusive
+
+If `min` exceeds `max` in `random_int`, the bounds swap.
+
+### Remember
+
+- `@core/random` needs an explicit import. It is not in the prelude.
+- Both functions stay infallible. They do not need `!` or `catch`.
+- Arguments are positional. Named arguments are not supported.
+
+### Read next
+
+For the full function contract, backend behaviour and deferred surfaces, see @./random (Core random advanced).

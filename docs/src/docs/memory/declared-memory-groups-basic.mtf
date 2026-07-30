@@ -4,8 +4,7 @@ groups. This page explains what they are so you know the concept exists.
 ### What groups do
 
 A `group` lets you control where values are allocated and how long they live.
-When you put a value into a group, the compiler guarantees it lives at least as
-long as that group.
+When you put a value into a group, that value cannot outlive the group.
 
 ### Current status
 

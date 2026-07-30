@@ -43,7 +43,7 @@ Teaching vocabulary:
 - **places** for locations you can read or write
 - **regions** for structured nesting where the IR needs them
 
-Expression side effects linearise into statement preludes. The final value then feeds the next operation or terminator. Plain binary operations may remain for booleans, comparisons and string concatenation. Runtime scalar arithmetic lowers through explicit checked numeric statements.
+Expression side effects linearise into statement preludes. The final value then feeds the next operation or terminator. Plain binary operations may remain for booleans and comparisons. Runtime template string construction lowers through explicit string append operations. Runtime scalar arithmetic lowers through explicit checked numeric statements.
 
 **Diagram placeholder:** Blocks connect through branch and exit edges
 

@@ -45,7 +45,6 @@ arguments.
 - functions
 - fallible result carriers
 - external opaque types
-- template values as a distinct equality surface
 
 If any variant contains an unsupported payload field, equality for the whole
 choice type is rejected.

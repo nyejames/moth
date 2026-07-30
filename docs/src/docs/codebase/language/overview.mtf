@@ -191,15 +191,28 @@ review have been approved.
 `docs/src/docs/**` contains website pages, teaching references, examples and
 topic navigation.
 
-## Design boundaries
+## Design scope
 
-`docs/src/docs/codebase/design-scope/overview.mtf` summarises accepted
-mechanisms, constraints and intentionally excluded complexity.
+`docs/src/docs/codebase/design-scope/overview.mtf` owns the exact
+deferred-versus-outside-scope distinction, every excluded language family, the
+rationale for each family and the constrained mechanisms used instead.
 
-## Memory access
+## Memory and lifetimes
 
-`docs/src/docs/codebase/memory-management/access-and-aliasing/overview.mtf`
-covers shared reads, explicit copies and `~` access.
+The public Memory route covers source-facing memory behaviour:
+
+- `docs/src/docs/memory/reference-semantics.mtf`
+- `docs/src/docs/memory/reference-semantics-basic.mtf`
+- `docs/src/docs/memory/copy-and-exclusive-access.mtf`
+- `docs/src/docs/memory/copy-and-exclusive-access-basic.mtf`
+- `docs/src/docs/memory/lifetimes-and-result-shapes.mtf`
+- `docs/src/docs/memory/lifetimes-and-result-shapes-basic.mtf`
+- `docs/src/docs/memory/declared-memory-groups.mtf`
+- `docs/src/docs/memory/declared-memory-groups-basic.mtf`
+
+The formal memory model, borrow validation, lifetime-region analysis and
+backend lowering live under
+`docs/src/docs/codebase/memory-management/**`.
 
 ## Compiler ownership
 

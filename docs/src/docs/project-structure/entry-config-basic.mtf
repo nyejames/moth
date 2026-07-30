@@ -1,0 +1,35 @@
+Entry config lets each normal module root carry its own builder settings and
+access project-level values through `@project`.
+
+### Using `@project`
+
+Import `@project` to read project fields like `version` or `entry_root` inside a
+module:
+
+[codeblock, $code("moth"):
+    import @project { version }
+
+    footer #= [: v[version]]
+]
+
+`@project` is never implicitly injected. Import it explicitly when you need it.
+
+### Entry-local `config:` blocks
+
+A normal module root may contain one optional `config:` block with builder
+metadata for that entry:
+
+[codeblock, $code("moth"):
+    config:
+        html |
+            title = "About",
+        |
+    ;
+]
+
+The block lives at the top level of the root file, outside `export:` and outside
+executable bodies. It creates no module symbols or runtime values.
+
+### Related concepts
+
+- For build inputs see @#build-inputs (Build inputs).

@@ -1,0 +1,57 @@
+`@core/text` provides helper functions for `String` values. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
+
+`@core/text` carries Core origin with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+
+### Import roots
+
+Import individual symbols or the whole namespace:
+
+[codeblock, $code("moth"):
+    import @core/text {length, contains}
+
+    import @core/text
+
+    name = "Priya"
+    count = text.length(name)
+]
+
+### Functions
+
+All functions take `String` parameters with shared access. Parameters stay positional-only. Named arguments lack support because binding-backed packages do not expose source-function features.
+
+| Function | Parameters | Returns |
+|---|---|---|
+| `length(text)` | `String` | `Int` |
+| `is_empty(text)` | `String` | `Bool` |
+| `contains(text, substring)` | `String, String` | `Bool` |
+| `starts_with(text, prefix)` | `String, String` | `Bool` |
+| `ends_with(text, suffix)` | `String, String` | `Bool` |
+
+All functions stay infallible at the Moth level. They do not return through `Error!`.
+
+### Access and return contracts
+
+All parameters use shared access. No function requires mutable access. `length` returns a fresh `Int`. The predicate functions return fresh `Bool` values.
+
+### Backend behaviour
+
+HTML-JS lowers each function to a JavaScript runtime helper. Text length follows JavaScript string length behaviour on the current HTML JavaScript path.
+
+HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+
+### Unsupported source forms
+
+- Direct symbol-path imports such as `import @core/text/length` face rejection. Use grouped or namespace imports.
+- Named arguments lack support. Binding-backed calls stay positional-only.
+- The package does not expose receiver methods, opaque types or `Error!` channels.
+- Receiver-method forms on `String` values remain deferred. Use the free functions.
+
+### Deferred surfaces
+
+Deferred text surfaces include receiver-method forms, string splitting and joining, case conversion, trimming, replacement, regular expressions, character iteration, Unicode normalisation and non-JS lowerings. See @../../../../progress (progress matrix) for current status.
+
+### Related concepts
+
+- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For import path rules see @../../#import-paths (Import paths).
+- For `String` language semantics see @../../../../strings-and-characters (Strings and characters).

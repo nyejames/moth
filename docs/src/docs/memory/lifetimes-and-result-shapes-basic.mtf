@@ -10,7 +10,9 @@ When you create a value from scratch, it is a fresh result:
     items = {1, 2, 3}
 ]
 
-These values are independent from any other data.
+A fresh result has a new root allocation. It may still hold references to older
+values it read while building. Use `copy` when you need a value with no shared
+references to pre-existing data.
 
 ### Aliases to existing values
 

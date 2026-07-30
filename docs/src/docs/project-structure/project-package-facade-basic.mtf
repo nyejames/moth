@@ -1,0 +1,27 @@
+A project can expose a public package API to other projects through an optional
+facade file at the project root.
+
+### What a facade does
+
+A `+*.moth` file beside `config.moth` becomes the project package facade. It
+exports declarations that external consumers can import. Without it, the
+project has no externally consumable package surface.
+
+The facade rejects top-level runtime work and page fragments. It only exports
+API declarations.
+
+### How it reaches descendant modules
+
+The facade can reference public interfaces of modules below `entry_root` even
+though ordinary module visibility wouldn't allow it. Stage 0 gives the facade
+a special assembly namespace for this purpose.
+
+### What the facade cannot do
+
+- It cannot import `@project`.
+- It cannot expose declarations that depend on project-private context.
+- It isn't visible to internal project modules.
+
+### Related concepts
+
+- For module root rules see @#module-roots (Module roots).

@@ -1,32 +1,49 @@
-import @html {center}
-import @styles/docs {navbar, title, section, codeblock, theme_head}
+import @./text {
+    content as text_advanced,
+}
 
-page_title #= "Core Text"
+import @./text-basic {
+    content as text_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Core text"
 page_description #= "Text helper functions for String values."
-page_head #= theme_head
+page_head #= language_theme_head
 
 #[navbar]
-#[title, center: CORE TEXT]
 
 #[section, $md:
-    `@core/text` provides helper functions for `String` values.
+    @../../../ (Documentation) / @../ (Core packages) / Core text
 
-    Current helpers:
-    - `length`
-    - `is_empty`
-    - `contains`
-    - `starts_with`
-    - `ends_with`
+    # Core text
 
-    [codeblock, $code("moth"):
-        import @core/text {length, contains}
+    `@core/text` provides helper functions for `String` values. Import it
+    when you need to check length, emptiness or substrings.
+]
 
-        name = "Moth"
-        count = length(name)
-        has_stalk = contains(name, "stalk")
+#[section:
+    [doc_level:
+        [$insert("key"):text-helpers]
+        [$insert("title"):Text helpers]
+        [$insert("advanced"):[text_advanced]]
 
-        io.line([:count=[count] has_stalk=[has_stalk]])
+        [text_basic]
     ]
+]
 
-    On the current HTML JavaScript path, text length follows JavaScript string length behavior.
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../math/]
+        [$insert("previous_title"):Core math]
+        [$insert("next_path"):../random/]
+        [$insert("next_title"):Core random]
+    ]
 ]

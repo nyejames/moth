@@ -1,0 +1,66 @@
+`@core/collections` forms the binding-backed Core package that provides runtime functions for compiler-owned collection methods. Authors do not import `@core/collections` directly. The compiler lowers collection receiver methods to calls against this package.
+
+`@core/collections` belongs to the Core origin package family with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+
+### Binding-backed behaviour
+
+The package registers five host functions that implement the compiler-owned collection member operations:
+
+| Host function | Compiler-owned member | Receiver access |
+|---|---|---|
+| `__moth_collection_get` | `get(index)` | shared |
+| `__moth_collection_set` | `set(index, value)` | mutable |
+| `__moth_collection_push` | `push(value)` | mutable |
+| `__moth_collection_remove` | `remove(index)` | mutable |
+| `__moth_collection_length` | `length()` | shared |
+
+These host functions use inferred ABI types for the collection element and value parameters. The index parameter is `I32`. The length return is `I32`. Fallible operations return through the builtin `Error!` channel.
+
+### Source-visible surface
+
+Authors interact with collections through language-level syntax and receiver methods, not through direct imports of `@core/collections`. The compiler-owned methods include:
+
+- `get(index)` returns the element at `index` or fails with `Error!`
+- `set(index, value)` replaces the element at `index` or fails with `Error!`
+- `push(value)` appends `value` after the last element or fails with `Error!`
+- `remove(index)` removes and returns the element at `index` or fails with `Error!`
+- `length()` returns the logical length as `Int`
+
+`get`, `set`, `push` and `remove` take the fallible path. `length` stays infallible. `set`, `push` and `remove` require mutable receiver access through `~`.
+
+[codeblock, $code("moth"):
+    values ~= {1, 2, 3}
+
+    ~values.push(4) catch:
+    ;
+
+    first = values.get(0) catch:
+        then 0
+    ;
+
+    ~values.set(1, 99) catch:
+    ;
+
+    count = values.length()
+]
+
+### No direct import
+
+`@core/collections` carries no source-visible import surface. Do not write `import @core/collections`. The package exists to back the compiler-owned methods that receiver syntax invokes.
+
+### Unsupported source forms
+
+- Direct imports of `@core/collections` are not part of the author surface.
+- Square-bracket indexing is not supported. Use `get` and `set`.
+- Assignment through `get` was removed.
+- Builtin member arguments are positional-only. Named arguments are not supported.
+
+### Backend behaviour
+
+HTML-JS lowers the host functions to JavaScript runtime helpers. HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+
+### Related concepts
+
+- For collection literal syntax and typing see @../../../../collections (Collections).
+- For the full collection method contract see @../../../../collections/#collection-operations (Collection operations).
+- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).

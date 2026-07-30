@@ -1,0 +1,46 @@
+Collections hold ordered groups of values. You create them with literals and work with them through built-in methods.
+
+### Creating collections
+
+Growable collections use `{T}`. Fixed collections use `{N T}` with a compile-time maximum length.
+
+[codeblock, $code("moth"):
+    values ~= {1, 2, 3}
+    empty_values ~{Int} = {}
+    fixed_values ~{2 Int} = {}
+]
+
+Non-empty literals infer their element type from their items. Empty literals need an explicit collection type.
+
+### Common methods
+
+Collection methods use receiver syntax. `push`, `get`, `set` and `remove` take the fallible path, so they need `!` or `catch`. `length` stays infallible.
+
+[codeblock, $code("moth"):
+    values ~= {1, 2, 3}
+
+    ~values.push(4) catch:
+    ;
+
+    first = values.get(0) catch:
+        then 0
+    ;
+
+    ~values.set(1, 99) catch:
+    ;
+
+    count = values.length()
+]
+
+`push` appends after the last element. `get` reads at an index. `set` replaces an element. `remove` takes an element out and shifts later elements down. `length` returns the logical length, not the fixed capacity.
+
+### Remember
+
+- Use `{T}` for growable collections and `{N T}` for fixed collections.
+- `push`, `get`, `set` and `remove` take the fallible path. Handle them with `!` or `catch`.
+- `length` stays infallible.
+- `set`, `push` and `remove` need `~` on the receiver.
+
+### Read next
+
+For the full language rules around collection literals, mutability and fixed capacity, see @../../../../collections (Collections). For the binding-backed contract behind these methods, see @./collections (Core collections advanced).

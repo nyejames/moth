@@ -1,89 +1,49 @@
-import @html {center}
-import @styles/docs {navbar, title, section, codeblock, theme_head}
+import @./io {
+    content as io_advanced,
+}
+
+import @./io-basic {
+    content as io_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
 
 page_title #= "Core IO"
 page_description #= "Console output and input polling helpers in Moth."
-page_head #= theme_head
+page_head #= language_theme_head
 
 #[navbar]
-#[title, center: CORE IO]
 
 #[section, $md:
-    `io` is the prelude namespace alias for `@core/io`.
-    Console helpers write string content to the backend output surface.
+    @../../../ (Documentation) / @../ (Core packages) / Core IO
 
-    [codeblock, $code("moth"):
-        io.print("loading...")
-        io.line("Hello")
-        io.debug("debug details")
-        io.warn("warning")
-        io.error("error")
+    # Core IO
 
-        name = "Moth"
-        io.line([: Hello, [name]])
+    `io` gives a Moth program console output and input polling. The prelude
+    makes the bare `io` namespace available without an import.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):console-and-input]
+        [$insert("title"):Console and input]
+        [$insert("advanced"):[io_advanced]]
+
+        [io_basic]
     ]
+]
 
-    Strings and templates are accepted at the output boundary. Other values are rejected directly;
-    use template interpolation when you want a debug-style message.
-
-    [codeblock, $code("moth"):
-        count = 3
-        io.line([: count = [count]])
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../prelude/]
+        [$insert("previous_title"):Prelude policy]
+        [$insert("next_path"):../collections/]
+        [$insert("next_title"):Core collections]
     ]
-
-    Importing `@core/io` explicitly binds the same `io` namespace. Aliasing creates a file-local
-    namespace name:
-
-    [codeblock, $code("moth"):
-        import @core/io as output
-
-        output.line("Hello from an alias")
-    ]
-
-    Input polling lives under `io.input.*`. The handle type `io.input.Input` is opaque: pass it to
-    the input functions, but do not construct it with struct syntax or inspect fields.
-
-    [codeblock, $code("moth"):
-        input ~= io.input.new()!
-
-        io.input.update(~input)
-
-        if io.input.key_pressed(input, "d"):
-            io.line("pressed d")
-        ;
-
-        if io.input.pointer_down(input, "left"):
-            x = io.input.pointer_x(input)
-            y = io.input.pointer_y(input)
-
-            io.line([: pointer [x], [y]])
-        ;
-
-        last_key = io.input.last_key_pressed(input)
-
-        if last_key is |key|:
-            io.line([: last key: [key]])
-        ;
-
-        io.input.close(~input)
-    ]
-
-    `io.input.new()` is fallible because backend input support can be unavailable. `update` and
-    `close` require mutable access. Polling reads use shared access.
-
-    Keyboard helpers track held, pressed, released, and last-edge states. Single alphabetic key
-    strings normalize to lowercase, space is `"Space"`, and special keys use logical names such as
-    `"ArrowLeft"`, `"Enter"`, `"Escape"`, `"Backspace"`, and `"Shift"`. Pointer helpers use
-    `"left"`, `"middle"`, and `"right"` buttons, plus `Float` pointer coordinates.
-
-    HTML-JS maps console helpers to the browser console and input helpers to window/document-level
-    keyboard and pointer polling. HTML-Wasm rejects reachable Core IO calls before lowering until
-    it has equivalent support. Browser input events are delivered by the host event loop, so a
-    synchronous infinite Moth loop can block new input from being observed.
-
-    Deferred IO surfaces include filesystem/path IO, fetch/network IO, timers, sleep, intervals,
-    frame/tick APIs, targeted DOM/canvas input sources, physical key-code APIs, typed key/button
-    choices, text entry and IME/composition, touch gestures, gamepads, drag/drop, clipboard, wheel
-    scrolling, file picker APIs, full ordered event queues, pressed/released collections, relative
-    or DPI-scaled pointer coordinates, configurable default suppression, and non-JS lowerings.
 ]

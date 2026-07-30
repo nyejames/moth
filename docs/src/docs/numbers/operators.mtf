@@ -21,26 +21,17 @@ Moth keeps equality and logical operators readable.
 
 `//` is integer division and is valid only for two `Int` operands.
 
-### Plain string concatenation
-
-Two plain string slices can use `+`.
-
-[codeblock, $code("moth"):
-    prefix = "Hello, "
-    name = "Priya"
-    greeting = prefix + name
-]
-
-This is the narrow plain-string operator surface. Templates remain the general
-tool for interpolation and structured string construction.
-
 ### Comparisons
 
 - `Int` and `Float` support equality and ordering, including mixed numeric comparisons.
 - `Char` supports equality and ordering.
 - `Bool` supports equality only.
-- Plain string slices support `is` and `is not`.
+- `String` supports `is` and `is not`. It does not support ordering operators.
 - Choices and options have additional equality rules in their own references.
+
+`+` is a numeric operator only. Source string concatenation uses templates. See
+@../language-overview/strings-and-characters (Strings and characters) for the
+canonical concatenation form.
 
 ### Precedence and associativity
 

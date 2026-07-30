@@ -1,0 +1,85 @@
+`@core/math` provides `Float` constants and helper functions. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
+
+`@core/math` carries Core origin with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+
+### Import roots
+
+Import individual symbols or the whole namespace:
+
+[codeblock, $code("moth"):
+    import @core/math {PI, sin, clamp}
+
+    import @core/math
+
+    angle = math.PI / 2.0
+    result = math.sin(angle)
+]
+
+A namespace alias creates a file-local name:
+
+[codeblock, $code("moth"):
+    import @core/math as math
+]
+
+### Constants
+
+| Constant | Type | Value |
+|---|---|---|
+| `PI` | `Float` | pi |
+| `TAU` | `Float` | 2 * pi |
+| `E` | `Float` | Euler's number |
+
+Constants form compile-time `Float` values. They fold into expressions at compile time and do not produce runtime lookups.
+
+### Functions
+
+All functions take `Float` parameters and return `Float`. Parameters stay positional-only. Named arguments lack support because binding-backed packages do not expose source-function features.
+
+| Function | Parameters | Returns |
+|---|---|---|
+| `sin(x)` | `Float` | `Float` |
+| `cos(x)` | `Float` | `Float` |
+| `tan(x)` | `Float` | `Float` |
+| `atan2(y, x)` | `Float, Float` | `Float` |
+| `log(x)` | `Float` | `Float` |
+| `log2(x)` | `Float` | `Float` |
+| `log10(x)` | `Float` | `Float` |
+| `exp(x)` | `Float` | `Float` |
+| `pow(base, exponent)` | `Float, Float` | `Float` |
+| `sqrt(x)` | `Float` | `Float` |
+| `abs(x)` | `Float` | `Float` |
+| `floor(x)` | `Float` | `Float` |
+| `ceil(x)` | `Float` | `Float` |
+| `round(x)` | `Float` | `Float` |
+| `trunc(x)` | `Float` | `Float` |
+| `min(a, b)` | `Float, Float` | `Float` |
+| `max(a, b)` | `Float, Float` | `Float` |
+| `clamp(x, min, max)` | `Float, Float, Float` | `Float` |
+
+All functions stay infallible at the Moth level. They do not return through `Error!`. Non-finite `Float` results from operations such as `sqrt(-1.0)` follow the ordinary `Float` domain rules of the backend.
+
+### Access and return contracts
+
+All parameters use shared access. No function requires mutable access. Every function returns a fresh `Float` value.
+
+### Backend behaviour
+
+HTML-JS lowers each function to a JavaScript `Math` expression. `clamp` lowers to `Math.min(Math.max(x, min), max)`. Constants fold into the expression at compile time.
+
+HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+
+### Unsupported source forms
+
+- Direct symbol-path imports such as `import @core/math/sin` face rejection. Use grouped or namespace imports.
+- Named arguments lack support. Binding-backed calls stay positional-only.
+- The package does not expose receiver methods, opaque types or `Error!` channels.
+
+### Deferred surfaces
+
+Deferred math surfaces include integer math helpers, checked overflow modes, broader numeric tower support and non-JS lowerings. See @../../../../progress (progress matrix) for current status.
+
+### Related concepts
+
+- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For import path rules see @../../#import-paths (Import paths).
+- For `Float` language semantics see @../../../../numbers (Numbers).

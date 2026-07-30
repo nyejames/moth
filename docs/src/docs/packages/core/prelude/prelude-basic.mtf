@@ -1,0 +1,30 @@
+The prelude gives you a few names without an import. It keeps common output convenient without making every Core package global.
+
+### What you get without importing
+
+The `io` namespace comes available in normal source files. It exposes Core IO helpers such as `io.line(...)`.
+
+[codeblock, $code("moth"):
+    io.line("Hello from the prelude")
+]
+
+The compiler-owned `Error` type also stays available for `Error!` flows.
+
+### What still needs an import
+
+Most Core packages require explicit imports:
+
+[codeblock, $code("moth"):
+    import @core/math {sin}
+    import @core/time {mark_now}
+]
+
+### Remember
+
+- The prelude forms visibility policy, not a package. No `@core/prelude` exists to import.
+- `io` stands as the only namespace alias the prelude registers.
+- `Error` works as a compiler-owned builtin, not a prelude symbol.
+
+### Read next
+
+For the full prelude contract, collision rules and builder ownership, see @./prelude (Prelude policy advanced).

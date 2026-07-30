@@ -1,27 +1,50 @@
-import @html {center}
-import @styles/docs {navbar, title, section, codeblock, theme_head}
+import @./math {
+    content as math_advanced,
+}
 
-page_title #= "Core Math"
+import @./math-basic {
+    content as math_basic,
+}
+
+import @styles/docs {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "Core math"
 page_description #= "Math constants and Float helper functions."
-page_head #= theme_head
+page_head #= language_theme_head
 
 #[navbar]
-#[title, center: CORE MATH]
 
 #[section, $md:
-    `@core/math` provides common `Float` constants and helper functions.
+    @../../../ (Documentation) / @../ (Core packages) / Core math
 
-    Constants include `PI`, `TAU`, and `E`.
-    Functions include `sin`, `cos`, `tan`, `atan2`, `log`, `pow`, `sqrt`, `abs`, `min`, `max`, and `clamp`.
+    # Core math
 
-    [codeblock, $code("moth"):
-        import @core/math {PI, sin, clamp}
+    `@core/math` provides `Float` constants and helper functions for common
+    math operations. Import it explicitly when you need trigonometry, rounding
+    or clamping.
+]
 
-        wave = sin(PI / 2.0)
-        bounded = clamp(wave, 0.0, 1.0)
+#[section:
+    [doc_level:
+        [$insert("key"):math-helpers]
+        [$insert("title"):Math helpers]
+        [$insert("advanced"):[math_advanced]]
 
-        io.line([:bounded=[bounded]])
+        [math_basic]
     ]
+]
 
-    On the HTML JavaScript path these helpers lower to JavaScript `Math` expressions.
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../collections/]
+        [$insert("previous_title"):Core collections]
+        [$insert("next_path"):../text/]
+        [$insert("next_title"):Core text]
+    ]
 ]

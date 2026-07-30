@@ -1,0 +1,35 @@
+`@core/text` gives you helper functions for `String` values. Import it when you need to check length, emptiness or substrings.
+
+### Importing
+
+Bring in the functions you need with a grouped import.
+
+[codeblock, $code("moth"):
+    import @core/text {length, contains}
+
+    name = "Priya"
+    count = length(name)
+    has_stalk = contains(name, "stalk")
+
+    io.line([:count=[count] has_stalk=[has_stalk]])
+]
+
+### Available functions
+
+- `length(text)` returns the number of characters as `Int`
+- `is_empty(text)` returns `Bool`
+- `contains(text, substring)` returns `Bool`
+- `starts_with(text, prefix)` returns `Bool`
+- `ends_with(text, suffix)` returns `Bool`
+
+All functions take `String` values and return `Int` or `Bool`.
+
+### Remember
+
+- `@core/text` needs an explicit import. It is not in the prelude.
+- All functions work as free functions, not receiver methods. Call them as `length(name)`, not `name.length()`.
+- Arguments are positional. Named arguments are not supported.
+
+### Read next
+
+For the full function contract, backend behaviour and deferred surfaces, see @./text (Core text advanced).

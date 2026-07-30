@@ -4,20 +4,151 @@ The following is accepted end-state syntax. Implementation is deferred and must 
 
 ### Declared memory groups
 
-`group name:` creates a declared hard lifetime region. A declaration can target a group with the `into` keyword.
+`group name:` creates a declared hard lifetime region. Values placed into a group belong to that group for their full lifetime. No group-owned value, projection or alias may outlive the group.
 
-[codeblock, $code("text"):
-    group name:
-        name [access/type] into group_name = expression
+A declaration can target a group with the `into` keyword:
+
+[codeblock, $code("moth"):
+    group request:
+        parsed ParsedPost into request = parse_post(post)
+        html String into request = render_post(parsed)
     ;
 ]
 
-Rules:
+[codeblock, $code("moth"):
+    name [access/type] into group_name = expression
+]
 
-- destination-group lexical ownership and visibility follow the declaration point through the remainder of the destination group
-- a declaration targeting an ancestor group is legal only from a straight-line nested `block:` or nested `group:` that executes at most once
-- targeting is invalid directly inside `if` branches, match arms, `catch` branches, loops or any construct that may execute zero or multiple times
-- group identity is not part of types or signatures
+### Placement rules
+
+- `group name:` is valid only in runtime executable bodies
+- `into group_name` appears only on declaration receiving boundaries in V1
+- Placement may target the current group or a lexically enclosing ancestor group
+- Placement may not target a sibling, child, unrelated group or builder lifecycle root by spelling its name
+- Groups cannot be passed, returned, stored, imported, exported, compared or used as values
+- Group identity is not a type, field, parameter, generic argument, trait, allocator object or lifetime annotation
+- Group identity must not enter `TypeId` or a source signature
+- Group closure occurs on every exit: fallthrough, `return`, `return!`, `break`, recovery exit and checked-operation failure path
+
+The group name is local to the current executable body scope. It cannot collide with a visible value, type, import, constant, reactive source or active group.
+
+### `into` declaration position
+
+`into group_name` appears after access or type syntax and before `=`. V1 has no expression-site placement. Declarations are the only placement surface.
+
+[codeblock, $code("moth"):
+    parsed into scratch = parse_post(post)
+    parsed ParsedPost into scratch = parse_post(post)
+    rows ~{Row} into scratch = {}
+    maybe_name String? into scratch = find_name(id)?
+]
+
+### Destination scope and visibility
+
+A declaration targeting an ancestor group is a narrow V1 escape mechanism, not a general definite-assignment system.
+
+- A declaration targeting an ancestor group is legal only from a straight-line nested `block:` or nested `group:` that executes at most once
+- It is invalid directly inside `if` branches, match arms, `catch` branches, loops, repeated template or runtime control flow, or any construct that may execute zero or multiple times
+- Conditional production must use one declaration in the destination scope whose initializer is a value-producing `if`, match or `catch`
+- Loop production must mutate a collection or aggregate already owned by the destination group through ordinary exclusive access
+- Name collisions and definite initialization are checked in the destination scope
+- Visibility begins at the declaration point and continues through the remainder of the destination group
+
+Ordinary declarations without `into` retain normal lexical visibility.
+
+### Placement eligibility
+
+A declaration may be placed into a group when its result root is fresh and every retained edge is legal for the destination group, or when it is an independent result graph such as an explicit `copy`.
+
+An alias result cannot become new group-owned storage through `into`.
+
+A fresh result root may retain parameters or other pre-existing values only when every retained edge satisfies the destination lifetime's outlives constraints. An independent result graph can enter an unrelated destination lifetime without retained-edge constraints to its source graph.
+
+### Nested groups and retained edges
+
+Nested groups are valid.
+
+[codeblock, $code("moth"):
+    group request:
+        config Config into request = load_config()
+
+        group scratch:
+            parsed ParsedPost into scratch = parse_post(post)
+            html String into request = render_post(parsed, config)
+        ;
+
+        use(html)
+    ;
+]
+
+For a child group nested in a parent group:
+
+- a child value may retain a parent value: valid
+- a child value may retain a same-child value: valid
+- a parent value may retain a child value: invalid
+- a sibling may retain a sibling-group value: invalid
+- a child may retain an unrelated shorter-lived value: invalid
+
+A group has one lexical entry and explicit exits. Values placed into the group cannot escape it. The compiler must not silently widen a declared group. A child group ends before its parent.
+
+### No group-to-group transfer in V1
+
+V1 has no extraction, adoption or unrestricted group-to-group transfer. A value crosses from a shorter-lived group into a longer-lived group only by producing independent storage in the destination lifetime or by invoking a fresh producer that allocates directly into the destination.
+
+Use one of:
+
+- allocate the result directly into the destination group
+- `copy` into the destination group
+- place the whole graph in the correct common group from the start
+
+### Escapes
+
+Lifetime-region validation rejects every path where a group-owned value or alias can outlive the group.
+
+Invalid escapes include:
+
+- returning a group-owned value
+- returning a projection or alias rooted in group-owned storage
+- storing a group-owned value in a longer-lived local or aggregate
+- storing a child-group value in a parent or sibling group
+- assigning a group-owned value into longer-lived reactive storage
+- passing a group-owned value to an external call that may retain it
+- keeping a map lookup, collection element or field alias live after group exit
+- creating a longer-lived retained edge into the group
+
+Backend GC representation does not legalise these cases.
+
+### Reassignment inside a group
+
+V1 has no `into group` syntax on reassignment. A mutable binding already owned by a group may be reassigned only with:
+
+- a fresh result root valid for that same group
+- an independent copy allocated into that group
+- a same-group value transferred at a proven final use
+
+Reassignment doesn't let a group-owned binding switch into a borrowed alias of ancestor, sibling or external storage. Use a separate ordinary alias binding for that purpose.
+
+### Reactive storage restrictions
+
+V1 rejects:
+
+- reactive declarations placed directly into an ordinary lexical memory group
+- assigning group-owned values into reactive storage that outlives the group
+- subscriptions or mounted state retaining group-owned aliases past group exit
+
+### Calls and hidden result destinations
+
+Functions whose result root is fresh may allocate that root directly into a caller-selected destination. The function summary classifies the result root as fresh and records retained-edge constraints separately.
+
+A hidden destination:
+
+- is not part of the source signature
+- is not a region parameter visible to generics or callers
+- is not a source lifetime parameter
+- may be ignored by a GC backend
+- lets an optimising backend allocate a fresh result root directly into the caller's region when every retained edge is legal
+
+Hidden result destinations don't become source signature parameters.
 
 ### V1 restrictions
 
@@ -25,7 +156,6 @@ Rules:
 - no `into group` syntax on reassignment
 - no extraction
 - no unrestricted group-to-group adoption
-- a mutable binding already owned by a group may be reassigned only with a fresh result root valid for that group, an independent copy allocated into that group, or a same-group value transferred at a proven final use
 
 ### Why groups exist
 

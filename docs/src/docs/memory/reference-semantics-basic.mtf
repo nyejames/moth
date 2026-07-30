@@ -1,13 +1,13 @@
 Existing values are shared by default. Here is what that means in practice.
 
-When you assign one variable to another, both point at the same data:
+When you assign one variable to another, both read the same data:
 
 [codeblock, $code("moth"):
     original = "hello"
-    copy_of = original
+    view = original
 ]
 
-No copy happens here. `copy_of` reads the same value as `original`.
+No copy happens here. `view` reads the same value as `original`.
 
 ### When shared access blocks mutation
 

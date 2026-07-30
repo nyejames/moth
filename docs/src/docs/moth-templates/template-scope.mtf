@@ -47,6 +47,15 @@ Authors resolve collisions by renaming the module-root export.
 
 This follows the same no-shadowing model as ordinary source visibility.
 
+### Implementation gap
+
+The accepted collision model rejects same-name imports from both surfaces with
+a visible-name diagnostic. The current compiler resolves some collisions through
+local-over-HTML precedence rather than diagnosing them. Stage B of the language
+documentation plan removes the overwrite path and registers both surfaces
+through one visible-name registry. See @../../codebase/progress (Progress) for
+the recorded drift.
+
 ### Nested templates
 
 Nested templates inside a `.mtf` body are valid. A nested template with no explicit directive defaults to `$md`. Any explicit directive (such as `$raw`, `$fresh`, `$html`, `$code`, `$css` or `$escape_html`) overrides the moth template Markdown default for that nested template.

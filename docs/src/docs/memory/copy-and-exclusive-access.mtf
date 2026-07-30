@@ -10,7 +10,17 @@
     -- original is unchanged
 ]
 
-`copy` performs a semantic deep copy of the complete copyable runtime value graph reachable from the place. Internal alias topology is preserved, same-region cycles are preserved and the copied graph shares no mutable allocation with the source.
+`copy` performs a semantic deep copy of the complete copyable runtime value graph reachable from the place:
+
+- every copyable allocation in the graph is duplicated into the destination lifetime region
+- internal alias topology is preserved: repeated source references to one allocation become repeated references to one copied allocation
+- same-region cycles are preserved in the copied graph
+- the copied graph shares no mutable allocation with the source graph
+- a reactive source is copied as its current value, not as the same reactive source identity
+- an external opaque handle or resource that doesn't define a genuine independent-copy operation produces a source diagnostic
+- a non-copyable graph member produces a source diagnostic, and the compiler won't silently retain an alias instead
+
+A copy result may be allocated directly into an inferred or declared destination region.
 
 `copy` accepts a visible binding, field projection or parenthesised place. Literals, templates, calls and computed expressions aren't copy places and are rejected.
 
@@ -42,7 +52,7 @@ A mutable declaration initialized from a fresh value creates an independent muta
 
 ### Mutable receivers
 
-Mutable receiver calls require explicit mutable/exclusive receiver syntax:
+Mutable receiver calls require explicit mutable or exclusive receiver syntax:
 
 [codeblock, $code("moth"):
     items ~= {1, 2, 3}
@@ -51,12 +61,24 @@ Mutable receiver calls require explicit mutable/exclusive receiver syntax:
     -- items.push(4)   -- invalid: missing ~
 ]
 
-Fresh rvalues can satisfy mutable parameters without `~`. Existing places still require explicit `~`.
+Fresh rvalues can satisfy mutable parameters without `~`. Existing places still require explicit `~`. Temporaries and rvalues cannot be mutable receivers.
+
+A fresh rvalue passed to an ordinary mutable parameter is materialised into a compiler-introduced hidden local before borrow analysis. That hidden local isn't source-visible lifetime syntax, and it doesn't make temporaries valid mutable receivers.
+
+### Call access summary
+
+- a shared parameter from an existing place needs no `~`
+- a mutable parameter from an existing place requires `~place`
+- a mutable parameter from a fresh value uses the plain value
+- a mutable receiver uses `~value.method(...)`
+- an immutable receiver uses `value.method(...)`
+- mutable receivers require an existing mutable place
 
 ### Read next
 
 - @#reference-semantics (Reference semantics)
 - @#lifetimes-and-result-shapes (Lifetimes and result shapes)
+- @#declared-memory-groups (Declared memory groups)
 
 For the formal access rules, see
 @../../codebase/memory-management/access-and-aliasing (Access and aliasing).

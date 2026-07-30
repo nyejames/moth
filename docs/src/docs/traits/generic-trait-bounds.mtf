@@ -44,7 +44,7 @@ Generic bounds use traits to promise that a generic parameter provides certain b
 
 [codeblock, $code("moth"):
     render_pair type A is DISPLAY_TEXT, B is DISPLAY_TEXT |left A, right B| -> String:
-        return left.display() + right.display()
+        return [left.display(), right.display()]
     ;
 ]
 
