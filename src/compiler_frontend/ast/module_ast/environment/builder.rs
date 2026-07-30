@@ -91,7 +91,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-mod import_projection;
+pub(in crate::compiler_frontend::ast) mod import_projection;
 
 #[cfg(test)]
 pub(crate) use import_projection::imported_nominal_path;
@@ -523,6 +523,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         resolved_public_surface_outputs: ResolvedPublicSurfaceOutputs,
         string_table: &StringTable,
     ) -> Result<AstModuleEnvironment, CompilerMessages> {
+        let source_nominal_paths = self
+            .struct_source_by_path
+            .keys()
+            .chain(self.choice_source_by_path.keys())
+            .cloned()
+            .collect();
         let declaration_semantics = DeclarationSemanticTable::from_environment(
             self.declaration_table.as_ref(),
             &self.resolved_function_signatures_by_path,
@@ -561,6 +567,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 trait_evidence_environment: Rc::new(trait_evidence_environment),
                 generic_declarations_by_path: Rc::new(generic_declarations_by_path),
                 nominal_type_ids_by_path: Rc::new(self.nominal_type_ids_by_path),
+                source_nominal_paths: Rc::new(source_nominal_paths),
 
                 external_package_registry: Arc::clone(&self.context.external_package_registry),
                 style_directives: self.context.style_directives.clone(),

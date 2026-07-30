@@ -78,6 +78,7 @@ fn collect_canonical_type_origins(
     match identity {
         CanonicalTypeIdentity::Builtin(_)
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
+        | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
         | CanonicalTypeIdentity::ExternalOpaque(_)
         | CanonicalTypeIdentity::GenericParameter(_) => {}
         CanonicalTypeIdentity::SourceNominal(origin) => {

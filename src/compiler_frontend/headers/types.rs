@@ -329,6 +329,7 @@ impl FileImport {
     // Called when merging per-file frontend outputs into the module-wide compilation.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.provider.remap_string_ids(remap);
+        self.authored_provider.remap_string_ids(remap);
 
         if let Some(alias) = &mut self.alias {
             *alias = remap.get(*alias);
@@ -503,6 +504,12 @@ pub struct FileImport {
     /// classes; embedding the shared `StructuralProviderReference` keeps one authority for the
     /// provider path and its location across Stage 0 scanning and retained import shells.
     pub provider: StructuralProviderReference,
+    /// The exact authored structural path before module-root normalization.
+    ///
+    /// Stage 0 resolves topology and provider classes from this spelling so obsolete relative
+    /// source imports and provider prefixes retain their authored diagnostics. Semantic binding
+    /// continues to consume `provider`, whose path is normalized for module-local lookup.
+    pub authored_provider: StructuralProviderReference,
     pub alias: Option<StringId>,
     /// Location of the `import` clause that introduced this record.
     pub location: SourceLocation,

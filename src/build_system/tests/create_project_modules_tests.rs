@@ -1,5 +1,5 @@
 use super::prepared_source::PreparedSourceInput;
-use super::prepared_source_store::{MothScanOrigin, PreparedSourceStore};
+use super::prepared_source_store::PreparedSourceStore;
 use super::*;
 use crate::build_system::build::BackendBuilder;
 use crate::build_system::create_project_modules::module_namespace::{
@@ -36,15 +36,15 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::temp_dir;
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Serializes tests that reset and read the process-global `SOURCE_READ_COUNT_FOR_TEST` counter.
+/// Serializes tests that reset and read the process-global source-read path counters.
 ///
 /// WHY: source-read counting uses one global atomic and one global tracked-prefix slot. Parallel
 /// test execution would otherwise let one test's reset/prefix overwrite another's mid-snapshot, so
-/// every test that asserts on `source_read_count_for_test` holds this lock for its whole window.
+/// every test that asserts on per-path read counts holds this lock for its whole window.
 #[cfg(test)]
 static SOURCE_READ_COUNTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -138,7 +138,7 @@ fn discover_modules_for_test(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
@@ -174,7 +174,7 @@ fn discover_modules_for_test(
         source_package_boundary_indexes,
         &external_packages,
     );
-    let mut external_imports = super::reachable_file_discovery::ExternalImportDiscoveryState {
+    let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut external_packages,
         providers: &external_import_providers,
         cache: &mut external_import_cache,
@@ -196,7 +196,7 @@ fn discover_modules_for_test_with_providers(
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_import_providers: &ExternalImportProviderRegistry,
-) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
@@ -230,7 +230,7 @@ fn discover_modules_for_test_with_providers(
         source_package_boundary_indexes,
         &external_packages,
     );
-    let mut external_imports = super::reachable_file_discovery::ExternalImportDiscoveryState {
+    let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut external_packages,
         providers: external_import_providers,
         cache: &mut external_import_cache,
@@ -494,7 +494,7 @@ fn discover_modules_and_graph_for_test(
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
 ) -> (
-    ModuleEntryCompileWaves,
+    ModuleCompilationSchedule,
     super::project_module_graph::ProjectModuleGraph,
     super::source_tree_index::SourceTreeIndex,
     StringTable,
@@ -536,7 +536,7 @@ fn discover_modules_and_graph_for_test(
         source_package_boundary_indexes,
         &external_packages,
     );
-    let mut external_imports = super::reachable_file_discovery::ExternalImportDiscoveryState {
+    let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut external_packages,
         providers: &external_import_providers,
         cache: &mut external_import_cache,
@@ -602,7 +602,7 @@ fn discover_modules_for_test_messages(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     discover_modules_for_test(config, resolver, style_directives)
 }
 
@@ -916,47 +916,6 @@ fn source_tree_index_rejects_duplicate_hash_root_files() {
         string_table.intern(&fs::canonicalize(&entry_root).unwrap().display().to_string())
     );
     assert_eq!(candidates.len(), 2);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn project_path_resolver_consumes_source_tree_module_roots() {
-    let root = temp_dir("source_tree_index_resolver_consumption");
-    let entry_root = root.join("src");
-    let nested = entry_root.join("nested");
-    fs::create_dir_all(&nested).expect("should create nested module directory");
-    fs::write(entry_root.join("#home.moth"), "").expect("should write entry root");
-    fs::write(nested.join("#nested.moth"), "").expect("should write nested root");
-
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
-    let mut string_table = StringTable::new();
-    let setup = super::project_roots::build_project_path_resolver_with_index(
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-        &crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
-        &mut string_table,
-    )
-    .expect("resolver setup should build from prepared roots");
-    let resolver = setup.resolver;
-
-    let mut import_path = crate::compiler_frontend::symbols::interned_path::InternedPath::new();
-    import_path.push_str("nested", &mut string_table);
-    import_path.push_str("identity", &mut string_table);
-    let resolved = resolver
-        .resolve_import_to_source_file_with_public_surface_fallback(
-            &import_path,
-            &entry_root.join("#home.moth"),
-            &mut string_table,
-        )
-        .expect("prepared nested module root should resolve its public surface");
-    assert_eq!(
-        resolved.path,
-        fs::canonicalize(nested.join("#nested.moth")).unwrap()
-    );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -1424,7 +1383,53 @@ fn rejects_project_local_config_import_even_when_module_root_exists() {
         matches!(
             &diagnostic.payload,
             DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigImportRootViolation,
+                reason: InvalidConfigReason::ConfigImportUnsupported,
+                ..
+            }
+        ),
+        "unexpected diagnostic payload: {:?}",
+        diagnostic.payload
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn rejects_builder_config_import_without_discovering_the_package_root() {
+    let root = temp_dir("config_builder_import_rejected_before_discovery");
+    let package_root = root.join("builder/defaults");
+    fs::create_dir_all(&package_root).expect("should create Builder package folder");
+    fs::write(package_root.join("#first.moth"), "value #= 1\n")
+        .expect("should write first invalid package root");
+    fs::write(package_root.join("#second.moth"), "value #= 2\n")
+        .expect("should write second invalid package root");
+
+    let config_path = root.join(settings::CONFIG_FILE_NAME);
+    fs::write(&config_path, "import @defaults { value }\n").expect("should write config import");
+
+    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    frontend_surface.source_packages.register_filesystem_root(
+        "defaults",
+        package_root,
+        PackageOrigin::Builder,
+    );
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    let messages = parse_project_config_for_test_with_packages(
+        &mut config,
+        &config_path,
+        &style_directives,
+        &frontend_surface,
+    )
+    .expect_err("config import should fail before source-package discovery");
+
+    let diagnostic = first_error_diagnostic(&messages);
+    assert!(
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::ConfigImportUnsupported,
                 ..
             }
         ),
@@ -1461,211 +1466,6 @@ fn configured_package_folder_registers_project_local_source_metadata() {
         crate::builder_surface::PackageMetadata::source(
             crate::builder_surface::PackageOrigin::ProjectLocal,
         )
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn accepts_config_imported_builder_source_package_constant() {
-    let root = temp_dir("config_builder_package_constant");
-    let package_root = root.join("builder/defaults");
-    fs::create_dir_all(&package_root).expect("should create Builder package");
-    fs::write(
-        package_root.join("#mod.moth"),
-        "export:\n    default_entry_root #= \"src\"\n;\n",
-    )
-    .expect("should write builder root");
-    let config_path = root.join(settings::CONFIG_FILE_NAME);
-    fs::write(
-        &config_path,
-        "import @defaults { default_entry_root }\nentry_root #= default_entry_root\n",
-    )
-    .expect("should write config");
-
-    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "defaults",
-        package_root,
-        PackageOrigin::Builder,
-    );
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test_with_packages(
-        &mut config,
-        &config_path,
-        &style_directives,
-        &frontend_surface,
-    )
-    .expect("config should resolve builder source-backed package constant");
-
-    assert_eq!(config.entry_root, PathBuf::from("src"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn accepts_config_imported_constant_that_depends_on_imported_constant() {
-    let root = temp_dir("config_builder_package_constant_chain");
-    let package_root = root.join("builder/defaults");
-    fs::create_dir_all(&package_root).expect("should create Builder package");
-    fs::write(
-        package_root.join("#mod.moth"),
-        "root_folder #= \"src\"\nexport:\n    default_entry_root #= root_folder\n;\n",
-    )
-    .expect("should write builder root");
-    let config_path = root.join(settings::CONFIG_FILE_NAME);
-    fs::write(
-        &config_path,
-        "import @defaults { default_entry_root }\nentry_root #= default_entry_root\n",
-    )
-    .expect("should write config");
-
-    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "defaults",
-        package_root,
-        PackageOrigin::Builder,
-    );
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test_with_packages(
-        &mut config,
-        &config_path,
-        &style_directives,
-        &frontend_surface,
-    )
-    .expect("config should resolve imported constant dependency");
-
-    assert_eq!(config.entry_root, PathBuf::from("src"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn accepts_config_imported_constant_reexported_from_builder_source_package_file() {
-    let root = temp_dir("config_builder_package_reexport");
-    let package_root = root.join("builder/defaults");
-    fs::create_dir_all(&package_root).expect("should create Builder package");
-    fs::write(
-        package_root.join("#mod.moth"),
-        "import @./values { root_folder as internal_root }\n\nexport:\n    default_entry_root #= internal_root\n;\n",
-    )
-    .expect("should write builder root");
-    fs::write(package_root.join("values.moth"), "root_folder #= \"src\"\n")
-        .expect("should write builder support file");
-    let config_path = root.join(settings::CONFIG_FILE_NAME);
-    fs::write(
-        &config_path,
-        "import @defaults { default_entry_root }\nentry_root #= default_entry_root\n",
-    )
-    .expect("should write config");
-
-    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "defaults",
-        package_root,
-        PackageOrigin::Builder,
-    );
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test_with_packages(
-        &mut config,
-        &config_path,
-        &style_directives,
-        &frontend_surface,
-    )
-    .expect("config should resolve re-exported builder source-backed package constant");
-
-    assert_eq!(config.entry_root, PathBuf::from("src"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn accepts_config_imported_type_declarations_as_support_surface() {
-    let root = temp_dir("config_builder_package_type_alias");
-    let package_root = root.join("builder/defaults");
-    fs::create_dir_all(&package_root).expect("should create Builder package");
-    fs::write(
-        package_root.join("#mod.moth"),
-        "export:\n    EntryRoot as String\n    Config = |\n        value String,\n    |\n    Mode ::\n        Ready,\n    ;\n    default_entry_root #= \"src\"\n;\n",
-    )
-    .expect("should write builder root");
-    let config_path = root.join(settings::CONFIG_FILE_NAME);
-    fs::write(
-        &config_path,
-        "import @defaults { EntryRoot, Config, Mode, default_entry_root }\nentry_root #EntryRoot = default_entry_root\n",
-    )
-    .expect("should write config");
-
-    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "defaults",
-        package_root,
-        PackageOrigin::Builder,
-    );
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test_with_packages(
-        &mut config,
-        &config_path,
-        &style_directives,
-        &frontend_surface,
-    )
-    .expect("config should allow imported type declarations as support surface");
-
-    assert_eq!(config.entry_root, PathBuf::from("src"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn imported_config_support_duplicate_keeps_normal_duplicate_diagnostic() {
-    let root = temp_dir("config_builder_package_duplicate");
-    let package_root = root.join("builder/defaults");
-    fs::create_dir_all(&package_root).expect("should create Builder package");
-    fs::write(
-        package_root.join("#mod.moth"),
-        "default_entry_root #= \"src\"\ndefault_entry_root #= \"app\"\n",
-    )
-    .expect("should write duplicate builder root");
-    let config_path = root.join(settings::CONFIG_FILE_NAME);
-    fs::write(
-        &config_path,
-        "import @defaults { default_entry_root }\nentry_root #= default_entry_root\n",
-    )
-    .expect("should write config");
-
-    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "defaults",
-        package_root,
-        PackageOrigin::Builder,
-    );
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test_with_packages(
-        &mut config,
-        &config_path,
-        &style_directives,
-        &frontend_surface,
-    )
-    .expect_err("duplicate imported support declarations should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::DuplicateDeclaration { .. }
-        ),
-        "expected normal duplicate declaration diagnostic, got: {:?}",
-        diagnostic.payload
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -1942,9 +1742,7 @@ fn malformed_import_syntax_keeps_precise_location_during_module_discovery() {
             .primary_location
             .scope
             .to_path_buf(&messages.string_table),
-        src.join("#page.moth")
-            .canonicalize()
-            .expect("entry file path should canonicalize")
+        PathBuf::from("#page.moth")
     );
     assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
     assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
@@ -2083,14 +1881,11 @@ fn discover_modules_resolves_relative_child_imports() {
     .expect("should write page");
     fs::write(
         src.join("components/widget.moth"),
-        "import @components/common\nio.line([: [\"widget\"]])\n",
+        "import @components/common\nwidget #= common\n",
     )
     .expect("should write widget file");
-    fs::write(
-        src.join("components/common.moth"),
-        "io.line([: [\"common\"]])\n",
-    )
-    .expect("should write common");
+    fs::write(src.join("components/common.moth"), "common #= \"common\"\n")
+        .expect("should write common");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -2127,7 +1922,7 @@ fn discover_modules_resolves_relative_child_imports() {
 }
 
 #[test]
-fn entry_root_fallback_wins_for_unmatched_non_relative_imports() {
+fn module_root_relative_import_resolves_from_the_entry_root() {
     let root = temp_dir("entry_root_fallback");
     let src = root.join("src");
     let lib = root.join("lib");
@@ -2146,12 +1941,12 @@ fn entry_root_fallback_wins_for_unmatched_non_relative_imports() {
     .expect("should write page");
     fs::write(
         src.join("helpers/theme.moth"),
-        "io.line([: [\"source\"]])\n",
+        "source_theme #= \"source\"\n",
     )
     .expect("should write source");
     fs::write(
         lib.join("helpers/theme.moth"),
-        "io.line([: [\"package\"]])\n",
+        "package_theme #= \"package\"\n",
     )
     .expect("should write root-folder helper");
 
@@ -2181,11 +1976,11 @@ fn entry_root_fallback_wins_for_unmatched_non_relative_imports() {
 
     assert!(
         discovered_paths.contains(&source_theme),
-        "unmatched non-relative imports should fall back to the entry root"
+        "module-root-relative imports should resolve from the entry root"
     );
     assert!(
         !discovered_paths.contains(&package_theme),
-        "entry-root fallback must not also pull in the same-stem package file"
+        "module-root-relative resolution must not pull in an unrelated same-stem package file"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -3005,29 +2800,13 @@ fn source_package_accepts_cosmetic_hash_root_name() {
     .expect("config should parse");
 
     let mut string_table = StringTable::new();
-    let resolver = super::project_roots::build_project_path_resolver(
+    super::project_roots::build_project_path_resolver(
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         &mut string_table,
     )
     .expect("cosmetic source-backed package root should pass Stage 0 preflight");
-
-    let mut path = crate::compiler_frontend::symbols::interned_path::InternedPath::new();
-    path.push_str("helper", &mut string_table);
-    let importer = root.join("src/#page.moth");
-    let resolved = resolver
-        .resolve_import_to_source_file_with_public_surface_fallback(
-            &path,
-            &importer,
-            &mut string_table,
-        )
-        .expect("source-backed package folder import should resolve through the root pipeline");
-
-    assert_eq!(
-        resolved.path,
-        fs::canonicalize(root.join("lib/helper/#package.moth")).unwrap()
-    );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -3825,7 +3604,7 @@ fn extensionless_moth_import_and_virtual_package_import_still_work() {
 }
 
 #[test]
-fn reachable_file_discovery_markdown_files_are_reachable_without_import_scanning() {
+fn indexed_module_inventory_includes_imported_markdown_without_scanning_its_body() {
     let root = temp_dir("markdown_no_import_scanning");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
@@ -3879,7 +3658,7 @@ fn reachable_file_discovery_markdown_files_are_reachable_without_import_scanning
 }
 
 #[test]
-fn reachable_file_discovery_markdown_does_not_queue_unrelated_module_root_file() {
+fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner() {
     let root = temp_dir("markdown_no_unrelated_module_root");
     let src = root.join("src");
     fs::create_dir_all(src.join("other")).expect("should create other module dir");
@@ -3936,7 +3715,7 @@ fn reachable_file_discovery_markdown_does_not_queue_unrelated_module_root_file()
 }
 
 #[test]
-fn reachable_file_discovery_unimported_markdown_file_is_ignored() {
+fn indexed_module_inventory_ignores_unimported_markdown_file() {
     let root = temp_dir("unimported_markdown_ignored");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
@@ -3982,7 +3761,7 @@ fn reachable_file_discovery_unimported_markdown_file_is_ignored() {
 }
 
 #[test]
-fn reachable_file_discovery_direct_markdown_extension_import_reports_moth_import_0024() {
+fn indexed_module_inventory_rejects_direct_markdown_extension_import() {
     let root = temp_dir("direct_markdown_extension");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
@@ -4043,7 +3822,7 @@ fn reachable_file_discovery_direct_markdown_extension_import_reports_moth_import
 }
 
 #[test]
-fn reachable_file_discovery_unsupported_markdown_import_reports_moth_import_0025() {
+fn indexed_module_inventory_rejects_unsupported_markdown_import() {
     let root = temp_dir("unsupported_markdown_import");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
@@ -4134,11 +3913,14 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(modules.len(), 1);
-    assert_eq!(
-        super::source_loading::source_read_count_for_test(),
-        2,
-        "entry and helper .moth files should each be read once during import scanning"
-    );
+    for source in [src.join("#page.moth"), src.join("helper.moth")] {
+        let canonical = fs::canonicalize(source).expect("source should canonicalize");
+        assert_eq!(
+            super::source_loading::source_read_count_for_path_for_test(&canonical),
+            1,
+            "each selected Moth source should be read exactly once"
+        );
+    }
     assert_eq!(modules[0].input_files.len(), 2);
     assert!(
         modules[0]
@@ -4196,25 +3978,28 @@ fn project_prepared_source_store_transitions_one_dense_source_slot_once() {
         .expect("entry should have a dense source ID");
     let mut store = PreparedSourceStore::new(source_tree_index.source_count());
 
-    let Ok((_, first_origin)) = store.prepare_or_get_project_moth_imports(
+    let first = match store.prepare_or_get_project_input(
         source_id,
-        &entry_path,
+        &source_tree_index,
         &style_directives,
         &mut string_table,
-    ) else {
-        panic!("first preparation should succeed");
+    ) {
+        Ok(input) => input,
+        Err(_) => panic!("first preparation should succeed"),
     };
-    let Ok((_, second_origin)) = store.prepare_or_get_project_moth_imports(
+    let second = match store.prepare_or_get_project_input(
         source_id,
-        &entry_path,
+        &source_tree_index,
         &style_directives,
         &mut string_table,
-    ) else {
-        panic!("second preparation should reuse the same slot");
+    ) {
+        Ok(input) => input,
+        Err(_) => panic!("second preparation should reuse the same slot"),
     };
 
-    assert!(matches!(first_origin, MothScanOrigin::FreshRead { .. }));
-    assert_eq!(second_origin, MothScanOrigin::ReusedFromStore);
+    assert_eq!(first.source_code(), second.source_code());
+    assert!(matches!(first, PreparedSourceInput::Moth { .. }));
+    assert!(matches!(second, PreparedSourceInput::Moth { .. }));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -4288,7 +4073,7 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
     let root = temp_dir("stage0_parallel_missing_source_order");
     fs::create_dir_all(&root).expect("should create root dir");
 
-    let source_paths = (0..super::reachable_file_discovery::STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES)
+    let source_paths = (0..super::source_discovery::STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES)
         .map(|index| {
             let path = root.join(format!("asset_{index}.md"));
             fs::write(&path, format!("# Asset {index}\n")).expect("should write markdown asset");
@@ -4297,7 +4082,7 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
         .collect::<Vec<_>>();
     let mut string_table = StringTable::new();
 
-    let input_files = super::reachable_file_discovery::load_missing_source_paths_for_test(
+    let input_files = super::source_discovery::load_missing_source_paths_for_test(
         source_paths,
         crate::builder_surface::SourceFileKind::PlainMarkdown,
         &mut string_table,
@@ -4315,8 +4100,7 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
                 .to_owned()
         })
         .collect::<Vec<_>>();
-    let expected_names = (0
-        ..super::reachable_file_discovery::STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES)
+    let expected_names = (0..super::source_discovery::STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES)
         .map(|index| format!("asset_{index}.md"))
         .collect::<Vec<_>>();
 
@@ -4339,7 +4123,7 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
     let missing_source = root.join("missing.md");
     let mut string_table = StringTable::new();
 
-    let messages = super::reachable_file_discovery::load_missing_source_path_for_test(
+    let messages = super::source_discovery::load_missing_source_path_for_test(
         missing_source.clone(),
         crate::builder_surface::SourceFileKind::PlainMarkdown,
         &mut string_table,
@@ -4411,8 +4195,8 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
 }
 
 #[test]
-fn provider_free_multi_entry_discovery_is_deterministic_and_uses_parallel_path() {
-    let root = temp_dir("provider_free_multi_entry_deterministic");
+fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once() {
+    let root = temp_dir("canonical_multi_entry_deterministic");
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -4456,14 +4240,24 @@ fn provider_free_multi_entry_discovery_is_deterministic_and_uses_parallel_path()
     super::source_loading::reset_source_read_count_for_test(&canonical_root);
 
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("provider-free multi-entry discovery should pass");
+        .expect("canonical multi-entry discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    assert_eq!(
-        super::source_loading::source_read_count_for_test(),
-        6,
-        "provider-free classification should read each unique Moth source once and share the source cache with module discovery"
-    );
+    for source in [
+        src.join("page_a/#pageA.moth"),
+        src.join("page_a/helper.moth"),
+        src.join("page_a/a_only.moth"),
+        src.join("page_b/#pageB.moth"),
+        src.join("page_b/helper.moth"),
+        src.join("page_b/b_only.moth"),
+    ] {
+        let canonical = fs::canonicalize(source).expect("source should canonicalize");
+        assert_eq!(
+            super::source_loading::source_read_count_for_path_for_test(&canonical),
+            1,
+            "each selected Moth source should be read exactly once"
+        );
+    }
     assert_eq!(modules.len(), 2, "expected two discovered modules");
 
     // Module order must follow deterministic entry-point order.
@@ -4506,8 +4300,7 @@ fn provider_free_multi_entry_discovery_is_deterministic_and_uses_parallel_path()
         })
         .collect::<Vec<_>>();
 
-    // Reachable files are collected into a `BTreeSet`, so per-module order is deterministic by
-    // canonical path (file name within this test).
+    // Canonical source order is deterministic by logical path (file name within this test).
     assert_eq!(
         module_a_inputs,
         vec!["#pageA.moth", "a_only.moth", "helper.moth"]
@@ -4521,8 +4314,8 @@ fn provider_free_multi_entry_discovery_is_deterministic_and_uses_parallel_path()
 }
 
 #[test]
-fn provider_backed_import_in_multi_entry_falls_back_to_serial_and_calls_provider() {
-    let root = temp_dir("provider_backed_multi_entry_fallback");
+fn canonical_multi_entry_discovery_calls_provider_once() {
+    let root = temp_dir("canonical_provider_multi_entry");
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -4561,7 +4354,7 @@ fn provider_backed_import_in_multi_entry_falls_back_to_serial_and_calls_provider
 
     let modules =
         discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers)
-            .expect("provider-backed multi-entry discovery should fall back and succeed");
+            .expect("provider-backed multi-entry discovery should succeed");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(
@@ -4583,8 +4376,8 @@ fn provider_backed_import_in_multi_entry_falls_back_to_serial_and_calls_provider
 }
 
 #[test]
-fn provider_required_replay_reuses_classification_cache_without_retokenizing() {
-    let root = temp_dir("provider_required_replay_cache");
+fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
+    let root = temp_dir("canonical_provider_prepare_once");
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -4636,29 +4429,33 @@ fn provider_required_replay_reuses_classification_cache_without_retokenizing() {
 
     let modules =
         discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers)
-            .expect("provider-required replay should succeed");
+            .expect("canonical provider discovery should succeed");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    // Three unique Moth sources: #pageA.moth, shared/helper.moth, and #pageB.moth.
-    // Classification reads each once while completing the full local traversal. The serial
-    // provider-capable replay must reuse that retained cache, so each .moth is read exactly once
-    // and never re-tokenized.
-    assert_eq!(
-        super::source_loading::source_read_count_for_test(),
-        3,
-        "provider-required replay should reuse the classification cache without re-reading .moth files"
-    );
+    // Three unique Moth sources: #pageA.moth, page_a/helper.moth, and #pageB.moth.
+    // The canonical prepared-source store reads each once before header preparation.
+    for source in [
+        src.join("page_a/#pageA.moth"),
+        src.join("page_a/helper.moth"),
+        src.join("page_b/#pageB.moth"),
+    ] {
+        let canonical = fs::canonicalize(source).expect("source should canonicalize");
+        assert_eq!(
+            super::source_loading::source_read_count_for_path_for_test(&canonical),
+            1,
+            "each selected Moth source should be read exactly once"
+        );
+    }
 
-    // The provider-backed import is handled exactly once during serial replay.
+    // The provider-backed import is handled exactly once by header-owned discovery.
     assert_eq!(
         calls.load(Ordering::Relaxed),
         1,
-        "provider should be called once during replay"
+        "provider should be called once"
     );
     assert_eq!(modules.len(), 2);
 
-    // Every Moth input carries its retained Stage 0 token stream by type, proving the
-    // replayed inputs consumed retained tokens rather than a second scan path.
+    // Every Moth input carries its retained Stage 0 token stream by type.
     for module in &modules {
         for input in &module.input_files {
             match input {
@@ -4669,11 +4466,11 @@ fn provider_required_replay_reuses_classification_cache_without_retokenizing() {
                 } => {
                     assert!(
                         !tokens.tokens.is_empty(),
-                        "replayed Moth file {:?} should carry retained tokens",
+                        "prepared Moth file {:?} should carry retained tokens",
                         source_path.file_name(),
                     );
                 }
-                _ => panic!("provider-required replay should only produce Moth files"),
+                _ => panic!("this fixture should only produce Moth files"),
             }
         }
     }
@@ -4940,8 +4737,8 @@ fn directory_provider_import_missing_target_reports_structured_diagnostic_withou
 }
 
 #[test]
-fn provider_free_parallel_preserves_cross_module_root_queuing() {
-    let root = temp_dir("provider_free_cross_module_root");
+fn canonical_discovery_preserves_cross_module_root_queuing() {
+    let root = temp_dir("canonical_cross_module_root");
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = module_a.join("module_b");
@@ -5347,8 +5144,8 @@ fn stage0_retains_moth_tokens_and_leaves_non_tokenized_sources_without_tokens() 
 }
 
 #[test]
-fn provider_free_parallel_retains_moth_tokens_for_every_reachable_file() {
-    let root = temp_dir("provider_free_retained_tokens");
+fn canonical_discovery_retains_moth_tokens_for_every_reachable_file() {
+    let root = temp_dir("canonical_retained_tokens");
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = src.join("module_b");
@@ -5361,7 +5158,7 @@ fn provider_free_parallel_retains_moth_tokens_for_every_reachable_file() {
     )
     .expect("should write config");
 
-    // Two entry points exercise the provider-free parallel path. Each module imports a helper.
+    // Two entry points share the canonical prepared-source owner. Each module imports a helper.
     fs::write(module_a.join("#pageA.moth"), "import @helperA\n#[:pageA]\n")
         .expect("should write pageA");
     fs::write(module_a.join("helperA.moth"), "a #= 1\n").expect("should write helperA");
@@ -5380,13 +5177,12 @@ fn provider_free_parallel_retains_moth_tokens_for_every_reachable_file() {
     let resolver = configured_resolver(&config);
 
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("provider-free parallel discovery should pass");
+        .expect("canonical discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(modules.len(), 2);
 
-    // Every Moth input in both modules must carry retained Stage 0 tokens by type,
-    // proving the provider-free parallel path reuses classification tokens without re-tokenizing.
+    // Every Moth input in both modules must carry the tokens retained by canonical Stage 0.
     for module in &modules {
         for input in &module.input_files {
             match input {
@@ -6001,209 +5797,8 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
-// ---------------------------------------------------------------------------
-// R4D1: project semantic-source-set focused tests
-// ---------------------------------------------------------------------------
-
-struct DiscoveredSemanticSet {
-    set: super::semantic_source_set::SemanticSourceSet,
-    source_tree_index: super::source_tree_index::SourceTreeIndex,
-}
-
-/// Build the project context (source tree index, graph, namespace set) and return the semantic
-/// source set plus its owning index for one entry without consuming it through input assembly.
-fn discover_semantic_set_for_entry(
-    config: &Config,
-    style_directives: &StyleDirectiveRegistry,
-    entry_path: &Path,
-) -> Option<DiscoveredSemanticSet> {
-    discover_semantic_set_for_entry_with_inputs(
-        config,
-        style_directives,
-        entry_path,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &ExternalImportProviderRegistry::default(),
-    )
-}
-
-fn discover_semantic_set_for_entry_with_inputs(
-    config: &Config,
-    style_directives: &StyleDirectiveRegistry,
-    entry_path: &Path,
-    source_packages: &crate::builder_surface::SourcePackageRegistry,
-    external_import_providers: &ExternalImportProviderRegistry,
-) -> Option<DiscoveredSemanticSet> {
-    discover_semantic_set_result_for_entry_with_inputs(
-        config,
-        style_directives,
-        entry_path,
-        source_packages,
-        external_import_providers,
-    )
-    .expect("semantic source set discovery should pass")
-}
-
-fn discover_semantic_set_result_for_entry_with_inputs(
-    config: &Config,
-    style_directives: &StyleDirectiveRegistry,
-    entry_path: &Path,
-    source_packages: &crate::builder_surface::SourcePackageRegistry,
-    external_import_providers: &ExternalImportProviderRegistry,
-) -> Result<Option<DiscoveredSemanticSet>, CompilerMessages> {
-    let mut string_table = StringTable::new();
-    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
-    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::default();
-    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
-        entry_root.clone(),
-        &project_root,
-        config,
-        source_packages,
-        &source_file_kinds,
-        external_import_providers,
-        &mut string_table,
-    )?;
-    let project_module_graph =
-        super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
-    let mut external_packages = ExternalPackageRegistry::new();
-    let mut external_import_cache =
-        crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new(
-        );
-    let mut external_import_resolution_table =
-        crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
-    let source_package_boundary_indexes = build_source_package_boundary_indexes(
-        source_packages,
-        &source_file_kinds,
-        external_import_providers,
-        &mut string_table,
-    )?;
-    let prepared_source_package_roots =
-        source_package_boundary_indexes.prepared_source_package_roots();
-    let resolver = ProjectPathResolver::new_with_module_roots(
-        project_root,
-        entry_root,
-        prepared_source_package_roots,
-        &source_file_kinds,
-        source_tree_index.module_roots().clone(),
-    )
-    .expect("resolver should build");
-    let module_namespace_set = ModuleNamespaceSet::build(
-        &source_tree_index,
-        &project_module_graph,
-        source_package_boundary_indexes,
-        &external_packages,
-    );
-    let mut external_imports = super::reachable_file_discovery::ExternalImportDiscoveryState {
-        external_packages: &mut external_packages,
-        providers: external_import_providers,
-        cache: &mut external_import_cache,
-        resolution_table: &mut external_import_resolution_table,
-    };
-
-    // Source packages now compile as separate indexed graphs. Validate their semantic imports
-    // through the same package-boundary namespace before discovering the project consumer set.
-    // The project traversal sees only each package facade and cannot inspect private package
-    // sources by design.
-    for (import_prefix, package_index) in module_namespace_set.source_package_boundaries() {
-        let mut package_graph =
-            super::project_module_graph::ProjectModuleGraph::from_source_tree_index(package_index);
-        let package_resolver = resolver.for_source_package_boundary(
-            package_index.entry_root().to_path_buf(),
-            package_index
-                .module_identities()
-                .derive_compilation_root_table(),
-        );
-        super::module_inventory::discover_all_modules_in_package(
-            config,
-            &package_resolver,
-            &mut package_graph,
-            style_directives,
-            &mut external_imports,
-            DirectoryImportResolution::package(&module_namespace_set, import_prefix, package_index),
-            &mut string_table,
-        )?;
-    }
-
-    super::reachable_file_discovery::discover_semantic_source_set_for_test(
-        entry_path,
-        &resolver,
-        style_directives,
-        &mut external_imports,
-        DirectoryImportResolution::project(&module_namespace_set, &source_tree_index),
-        &mut string_table,
-    )
-    .map(|set| {
-        set.map(|set| DiscoveredSemanticSet {
-            set,
-            source_tree_index,
-        })
-    })
-}
-
 #[test]
-fn semantic_source_set_contains_only_same_owner_sources_in_source_id_order() {
-    let root = temp_dir("semantic_set_same_owner_order");
-    let src = root.join("src");
-    fs::create_dir_all(src.join("helpers")).expect("should create helpers dir");
-
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "entry_root #= \"src\"\n",
-    )
-    .expect("should write config");
-    // The entry imports two same-module sources in reverse SourceId order so the test proves the
-    // set sorts by SourceId, not by import declaration or traversal order.
-    fs::write(
-        src.join("#page.moth"),
-        "import @helpers/util\nimport @top\n#[:entry]\n",
-    )
-    .expect("should write entry");
-    fs::write(src.join("top.moth"), "top #= 1\n").expect("should write top");
-    fs::write(src.join("helpers/util.moth"), "util #= 1\n").expect("should write util");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-    let entry_path = fs::canonicalize(src.join("#page.moth")).expect("entry should canonicalize");
-    let discovered = discover_semantic_set_for_entry(&config, &style_directives, &entry_path)
-        .expect("semantic set should be built for a directory entry");
-
-    let source_ids = discovered.set.source_ids();
-    let entry_module_id = discovered.set.entry_module_id();
-
-    // The entry module root file is always the first member (seeded).
-    assert_eq!(
-        source_ids.len(),
-        3,
-        "entry root plus two same-owner sources"
-    );
-
-    // SourceIds are in ascending (portable logical identity) order.
-    let mut sorted = source_ids.clone();
-    sorted.sort();
-    assert_eq!(source_ids, sorted, "SourceIds must be in ascending order");
-
-    // Every member is owned by the entry module.
-    for source_id in &source_ids {
-        let record = discovered.source_tree_index.source(*source_id);
-        let ownership = record.ownership();
-        assert!(
-            matches!(ownership, super::source_tree_index::SourceOwnership::Owned(owner) if owner == entry_module_id),
-            "every semantic member must be owned by the entry module"
-        );
-    }
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn semantic_input_assembly_excludes_cross_module_donor_sources() {
+fn canonical_module_job_excludes_cross_module_donor_sources() {
     let root = temp_dir("semantic_set_drives_input_assembly");
     let src = root.join("src");
     let provider = src.join("a_provider");
@@ -6257,273 +5852,18 @@ fn semantic_input_assembly_excludes_cross_module_donor_sources() {
     assert_eq!(
         input_names,
         vec!["#page.moth", "z_local.moth"],
-        "the consumer job must contain only its SourceId-ordered semantic members; the provider reaches binding through its completed interface"
+        "the consumer job must contain only its canonical prepared sources; the provider reaches binding through its completed interface"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn semantic_source_sets_for_distinct_modules_are_disjoint() {
-    let root = temp_dir("semantic_sets_disjoint");
-    let src = root.join("src");
-    let module_a = src.join("a");
-    let module_b = src.join("b");
-    fs::create_dir_all(&module_a).expect("should create module A");
-    fs::create_dir_all(&module_b).expect("should create module B");
-
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "entry_root #= \"src\"\n",
-    )
-    .expect("should write config");
-    for (module, root_name, value) in [(&module_a, "#a.moth", "a"), (&module_b, "#b.moth", "b")] {
-        fs::write(module.join(root_name), "import @helper\n").expect("should write module root");
-        fs::write(module.join("helper.moth"), format!("{value} #= 1\n"))
-            .expect("should write module helper");
-    }
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let entry_a = fs::canonicalize(module_a.join("#a.moth")).expect("entry A should canonicalize");
-    let entry_b = fs::canonicalize(module_b.join("#b.moth")).expect("entry B should canonicalize");
-    let set_a = discover_semantic_set_for_entry(&config, &style_directives, &entry_a)
-        .expect("module A set should be built")
-        .set
-        .source_ids()
-        .into_iter()
-        .collect::<HashSet<_>>();
-    let set_b = discover_semantic_set_for_entry(&config, &style_directives, &entry_b)
-        .expect("module B set should be built")
-        .set
-        .source_ids()
-        .into_iter()
-        .collect::<HashSet<_>>();
-
-    assert!(
-        set_a.is_disjoint(&set_b),
-        "one project SourceId must not belong to two module semantic sets"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn semantic_source_set_excludes_cross_module_implementation_sources() {
-    let root = temp_dir("semantic_set_no_cross_module_leakage");
-    let (config, _resolver, style_directives, _module_a_root, _module_b_root) =
-        write_cross_module_project(&root);
-
-    let src = root.join("src");
-    let entry_path =
-        fs::canonicalize(src.join("module_a/#pageA.moth")).expect("entry should canonicalize");
-    let discovered = discover_semantic_set_for_entry(&config, &style_directives, &entry_path)
-        .expect("semantic set should be built");
-
-    let source_ids = discovered.set.source_ids();
-
-    // The entry module A owns only #pageA.moth. Module B's root (#api.moth) is a cross-module
-    // provider root queued as an interface input; its impl file (impl.moth) is never imported.
-    // Neither B source enters A's semantic set.
-    assert_eq!(
-        source_ids.len(),
-        1,
-        "module A's semantic set must contain only its own root, not module B's sources"
-    );
-
-    // Verify the set member is the entry root file, not module B's root or impl.
-    let member_record = discovered.source_tree_index.source(source_ids[0]);
-    assert_eq!(
-        member_record.canonical_path(),
-        entry_path,
-        "the sole semantic member must be the entry root file"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn semantic_source_set_excludes_provider_owned_sources() {
-    let root = temp_dir("semantic_set_no_provider");
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create src dir");
-
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "entry_root #= \"src\"\n",
-    )
-    .expect("should write config");
-    fs::write(src.join("#page.moth"), "import @./drawing.js\n#[:entry]\n")
-        .expect("should write entry");
-    fs::write(src.join("drawing.js"), "export function draw() {}\n").expect("should write js");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let calls = Arc::new(AtomicUsize::new(0));
-    let mut providers = ExternalImportProviderRegistry::empty();
-    providers.register(Arc::new(CountingExternalImportProvider::new(Arc::clone(
-        &calls,
-    ))));
-
-    let entry_path = fs::canonicalize(src.join("#page.moth")).expect("entry should canonicalize");
-    let discovered = discover_semantic_set_for_entry_with_inputs(
-        &config,
-        &style_directives,
-        &entry_path,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &providers,
-    )
-    .expect("semantic set should be built");
-
-    let source_ids = discovered.set.source_ids();
-
-    // The provider-owned .js file is never a compiler-semantic source and never enters the
-    // project semantic set. Only the entry root .moth file is a member.
-    assert_eq!(
-        source_ids.len(),
-        1,
-        "provider-owned files must not enter the project semantic set"
-    );
-    assert_eq!(
-        calls.load(Ordering::Relaxed),
-        1,
-        "provider resolution must remain an explicit external edge"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn project_semantic_source_set_excludes_source_package_sources() {
-    let root = temp_dir("semantic_set_no_source_package");
-    let src = root.join("src");
-    let package_root = root.join("packages/shared");
-    fs::create_dir_all(&src).expect("should create src dir");
-    fs::create_dir_all(&package_root).expect("should create package dir");
-
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "entry_root #= \"src\"\n",
-    )
-    .expect("should write config");
-    fs::write(
-        src.join("#page.moth"),
-        "import @shared { value }\n#[:entry]\n",
-    )
-    .expect("should write entry");
-    fs::write(
-        package_root.join("#api.moth"),
-        "export:\n    value #= 1\n;\n",
-    )
-    .expect("should write package root");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
-    source_packages.register_filesystem_root(
-        "shared",
-        fs::canonicalize(&package_root).expect("package root should canonicalize"),
-        PackageOrigin::Builder,
-    );
-
-    let entry_path = fs::canonicalize(src.join("#page.moth")).expect("entry should canonicalize");
-    let discovered = discover_semantic_set_for_entry_with_inputs(
-        &config,
-        &style_directives,
-        &entry_path,
-        &source_packages,
-        &ExternalImportProviderRegistry::default(),
-    )
-    .expect("semantic set should be built");
-
-    assert_eq!(
-        discovered.set.source_ids().len(),
-        1,
-        "source-package facade and implementation sources must not enter the project set"
-    );
-    assert_eq!(
-        discovered
-            .source_tree_index
-            .source(discovered.set.source_ids()[0])
-            .canonical_path(),
-        entry_path,
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn semantic_source_set_preserves_unchanged_source_read_count() {
-    let root = temp_dir("semantic_set_read_count");
-    let src = root.join("src");
-    fs::create_dir_all(src.join("helpers")).expect("should create helpers dir");
-
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "entry_root #= \"src\"\n",
-    )
-    .expect("should write config");
-    fs::write(src.join("#page.moth"), "import @helpers/util\n#[:entry]\n")
-        .expect("should write entry");
-    fs::write(src.join("helpers/util.moth"), "util #= 1\n").expect("should write util");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-    let resolver = configured_resolver(&config);
-
-    let _counter_guard = SOURCE_READ_COUNTER_TEST_LOCK
-        .lock()
-        .expect("source read counter test lock poisoned");
-    let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
-    super::source_loading::reset_source_read_count_for_test(&canonical_root);
-
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should pass");
-    let modules: Vec<_> = modules.waves().iter().flatten().collect();
-
-    // The semantic set does not add reads or tokenizations: the entry and helper .moth files are
-    // each read once during import scanning, matching the pre-set behavior.
-    assert_eq!(
-        super::source_loading::source_read_count_for_test(),
-        2,
-        "semantic set assembly must not change source read counts"
-    );
-    assert_eq!(modules.len(), 1);
-    assert_eq!(modules[0].input_files.len(), 2);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn indexed_namespace_rejects_direct_entry_root_import() {
-    for import_path in ["#page", "#page.moth"] {
+    for (import_path, expected_code) in [
+        ("#page", "MOTH-IMPORT-0008"),
+        ("#page.moth", "MOTH-IMPORT-0020"),
+    ] {
         let root = temp_dir("indexed_namespace_direct_entry_root_rejected");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create source root");
@@ -6555,10 +5895,7 @@ fn indexed_namespace_rejects_direct_entry_root_import() {
             ),
             Err(messages) => messages,
         };
-        assert_eq!(
-            first_error_diagnostic(&messages).kind.code(),
-            "MOTH-IMPORT-0008"
-        );
+        assert_eq!(first_error_diagnostic(&messages).kind.code(), expected_code);
 
         fs::remove_dir_all(&root).expect("should remove temp root");
     }
@@ -6598,69 +5935,6 @@ fn indexed_namespace_rejects_direct_nested_child_root_import() {
         Ok(_) => panic!(
             "direct nested-child root imports must be rejected as direct special file imports"
         ),
-        Err(messages) => messages,
-    };
-    assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
-        "MOTH-IMPORT-0008"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn indexed_namespace_rejects_source_package_internal_direct_root_import() {
-    let root = temp_dir("indexed_namespace_source_package_direct_mod_rejected");
-    let src = root.join("src");
-    let package_root = root.join("packages/helper");
-    fs::create_dir_all(&src).expect("should create source root");
-    fs::create_dir_all(&package_root).expect("should create source package root");
-
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "entry_root #= \"src\"\n",
-    )
-    .expect("should write config");
-    fs::write(
-        src.join("#page.moth"),
-        "import @helper { use_public }\n\nio.line([: [use_public]])\n",
-    )
-    .expect("should write entry root");
-    fs::write(
-        package_root.join("#mod.moth"),
-        "public_symbol #= \"public\"\nimport @sibling { use_public as internal_use_public }\nexport:\n    use_public #= internal_use_public\n;\n",
-    )
-    .expect("should write package module root");
-    fs::write(
-        package_root.join("sibling.moth"),
-        "import @#mod { public_symbol }\n\nuse_public #= public_symbol\n",
-    )
-    .expect("should write package-internal source importing its own root");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
-    source_packages.register_filesystem_root(
-        "helper",
-        fs::canonicalize(&package_root).expect("package root should canonicalize"),
-        PackageOrigin::Builder,
-    );
-    let entry_path = fs::canonicalize(src.join("#page.moth")).expect("entry should canonicalize");
-
-    let messages = match discover_semantic_set_result_for_entry_with_inputs(
-        &config,
-        &style_directives,
-        &entry_path,
-        &source_packages,
-        &ExternalImportProviderRegistry::default(),
-    ) {
-        Ok(_) => panic!("source-package-internal direct root imports must be rejected"),
         Err(messages) => messages,
     };
     assert_eq!(

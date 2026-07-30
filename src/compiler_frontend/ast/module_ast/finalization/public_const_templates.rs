@@ -21,16 +21,28 @@ use crate::compiler_frontend::folded_value::{
     PublicConstTemplateSlot, PublicTemplateSlotKey,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+/// Stable const-template projections consumed by public-interface construction and generated
+/// materialisation.
+///
+/// The name index matches public export lookup, while the path index lets an in-flight generated
+/// compilation rebuild the exact declaring-module constant in its fresh TIR store.
+pub(super) struct ProjectedConstTemplates {
+    pub(super) by_name: FxHashMap<String, PublicConstTemplate>,
+    pub(super) by_path: FxHashMap<InternedPath, PublicConstTemplate>,
+}
+
 impl AstFinalizer<'_, '_> {
-    pub(super) fn project_public_const_templates(
+    pub(super) fn project_const_templates(
         &self,
         project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
-    ) -> Result<FxHashMap<String, PublicConstTemplate>, TemplateNormalizationError> {
-        let mut templates = FxHashMap::default();
+    ) -> Result<ProjectedConstTemplates, TemplateNormalizationError> {
+        let mut by_name = FxHashMap::default();
+        let mut by_path = FxHashMap::default();
         let store = self.context.template_ir_store.borrow();
 
         for declaration in &self.environment.lookups.module_constants {
@@ -79,10 +91,11 @@ impl AstFinalizer<'_, '_> {
                     "Public const-template declaration path has no defining name.",
                 )
             })?;
-            templates.insert(defining_name.to_owned(), projected);
+            by_name.insert(defining_name.to_owned(), projected.clone());
+            by_path.insert(declaration.id.clone(), projected);
         }
 
-        Ok(templates)
+        Ok(ProjectedConstTemplates { by_name, by_path })
     }
 }
 

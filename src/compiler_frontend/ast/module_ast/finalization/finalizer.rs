@@ -12,7 +12,9 @@ use super::super::emission::AstEmission;
 use super::super::environment::AstModuleEnvironment;
 use super::const_fact_collection::ConstFactCollector;
 use super::normalize_ast::TemplateNormalizationError;
-use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
+use crate::compiler_frontend::ast::generic_functions::{
+    ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
+};
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     collect_and_strip_comment_templates, collect_const_top_level_fragments,
 };
@@ -172,8 +174,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Normalize module constants
         // ----------------------------
         let module_constant_normalization_start = Instant::now();
-        let public_const_templates = self
-            .project_public_const_templates(project_path_resolver, string_table)
+        let projected_const_templates = self
+            .project_const_templates(project_path_resolver, string_table)
             .map_err(|error| {
                 self.template_normalization_error_messages(error, &emitted.warnings, string_table)
             })?;
@@ -295,14 +297,19 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             }
         };
 
-        let materialisation_context = ModuleMaterialisationContext::from_environment(
-            &owned_lookups,
-            &type_environment,
-            &resolved_public_trait_roots,
-            self.context.entry_dir.clone(),
-            string_table,
-            self.context.template_const_loop_iteration_limit,
-            self.context.capacity_estimate,
+        let materialisation_context = ModuleMaterialisationPreparationBuilder::from_environment(
+            ModuleMaterialisationEnvironmentInput {
+                lookups: &owned_lookups,
+                type_environment: &type_environment,
+                public_trait_roots: &resolved_public_trait_roots,
+                const_templates_by_path: projected_const_templates.by_path,
+                entry_dir: self.context.entry_dir.clone(),
+                string_table,
+                template_const_loop_iteration_limit: self
+                    .context
+                    .template_const_loop_iteration_limit,
+                capacity_estimate: self.context.capacity_estimate,
+            },
         );
         let rendered_path_usages =
             std::mem::take(&mut *owned_lookups.rendered_path_usages.borrow_mut());
@@ -311,7 +318,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             trait_roots: resolved_public_trait_roots,
             trait_environment: Some(owned_lookups.trait_environment),
             trait_evidence_environment: Some(owned_lookups.trait_evidence_environment),
-            const_templates_by_name: public_const_templates,
+            const_templates_by_name: projected_const_templates.by_name,
         };
         Ok(AstBuildResult {
             ast: Ast {

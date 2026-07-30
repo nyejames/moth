@@ -10,7 +10,6 @@ use crate::build_system::build::{
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -21,8 +20,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
-use rustc_hash::FxHashMap;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_hash_root_file;
@@ -47,8 +45,8 @@ use super::project_module_graph::ProjectModuleGraph;
 use super::project_roots;
 use super::project_structure_diagnostics::non_utf8_filesystem_name_error;
 use super::provider_store::{ModuleProviderStore, ProviderSlot};
-use super::reachable_file_discovery;
-use super::reachable_file_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageImport};
+use super::source_discovery;
+use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageImport};
 use super::source_package_discovery::build_source_package_boundary_indexes;
 use super::source_tree_index::SourceTreeIndex;
 
@@ -228,7 +226,7 @@ pub(crate) fn compile_single_file_frontend(
     log_stage_timing("stage0.single_file.path_resolver", path_resolver_start);
 
     // 4. Discover all transitively reachable files.
-    let mut external_imports = reachable_file_discovery::ExternalImportDiscoveryState {
+    let mut external_imports = source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut builder_surface.binding_packages,
         providers: &builder_surface.external_import_providers,
         cache: &mut builder_surface.external_import_cache,
@@ -236,13 +234,11 @@ pub(crate) fn compile_single_file_frontend(
     };
 
     let reachable_files_start = crate::timing::start_pipeline_timing();
-    let input_files = match reachable_file_discovery::collect_reachable_input_files(
+    let input_files = match source_discovery::collect_reachable_input_files(
         &entry_path,
         &project_path_resolver,
         style_directives,
         &mut external_imports,
-        None,
-        None,
         string_table,
     ) {
         Ok(collected) => collected.input_files,
@@ -314,7 +310,7 @@ pub(crate) fn compile_single_file_frontend(
     };
 
     let prepared = match preparation_context.prepare_module(
-        super::frontend_orchestration::ModuleOriginInput::Synthetic(stable_origin),
+        stable_origin,
         &input_files,
         &entry_path,
         local_table,
@@ -440,15 +436,25 @@ struct FailedModuleCompilation {
     messages: CompilerMessages,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum BlockedProvider {
+    Module(ModuleId),
+    SourcePackage(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BlockedModule {
+    module_id: ModuleId,
+    required_provider: BlockedProvider,
+}
+
 struct DirectoryModuleCompileContext<'a> {
-    string_table_fork_source: &'a StringTableForkSource,
     config: &'a Config,
     build_profile: FrontendBuildProfile,
     project_path_resolver: &'a ProjectPathResolver,
     style_directives: &'a StyleDirectiveRegistry,
     external_packages: &'a Arc<ExternalPackageRegistry>,
     builder_surface: &'a BuilderSurface,
-    source_origin_lookup: &'a FxHashMap<std::path::PathBuf, StableModuleOriginIdentity>,
     provider_store: &'a ModuleProviderStore,
     provider_bindings: &'a [ResolvedDependencyEdge],
     source_package_imports: &'a [ResolvedSourcePackageImport],
@@ -460,8 +466,7 @@ struct SourcePackageModuleInventory {
     root_module_id: ModuleId,
     path_resolver: ProjectPathResolver,
     graph: ProjectModuleGraph,
-    source_origin_lookup: FxHashMap<PathBuf, StableModuleOriginIdentity>,
-    module_waves: Vec<Vec<module_inventory::DiscoveredModule>>,
+    module_waves: Vec<Vec<module_inventory::ModuleCompilationJob>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_imports: Vec<ResolvedSourcePackageImport>,
 }
@@ -469,13 +474,19 @@ struct SourcePackageModuleInventory {
 struct CompletedSourcePackage {
     import_prefix: String,
     root_module_id: ModuleId,
-    provider_store: ModuleProviderStore,
-    generated_store: BoundaryGeneratedFunctionStore,
+    outcome: GraphCompilationOutcome,
 }
 
-struct CompiledModuleBoundary {
+/// Complete result of one project or source-package graph compilation.
+///
+/// Successful independent artefacts remain available after another module is diagnosed. Blocked
+/// modules record the direct provider that prevented semantic compilation but produce no cascade
+/// diagnostic of their own.
+struct GraphCompilationOutcome {
     provider_store: ModuleProviderStore,
     generated_store: BoundaryGeneratedFunctionStore,
+    diagnosed: Vec<FailedModuleCompilation>,
+    blocked: Vec<BlockedModule>,
 }
 
 impl CompletedSourcePackage {
@@ -483,7 +494,8 @@ impl CompletedSourcePackage {
         &self,
     ) -> Result<&crate::compiler_frontend::public_interface::PublicSemanticInterface, CompilerError>
     {
-        self.provider_store
+        self.outcome
+            .provider_store
             .interface(self.root_module_id)?
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
@@ -491,6 +503,10 @@ impl CompletedSourcePackage {
                     self.import_prefix
                 ))
             })
+    }
+
+    fn root_slot(&self) -> Result<ProviderSlot, CompilerError> {
+        self.outcome.provider_store.slot(self.root_module_id)
     }
 }
 
@@ -591,7 +607,7 @@ fn provider_binding_matches_import(
     import: &crate::compiler_frontend::headers::parse_file_headers::FileImport,
     string_table: &StringTable,
 ) -> bool {
-    if binding.from_grouped != import.provider.from_grouped {
+    if binding.from_grouped != import.from_grouped {
         return false;
     }
 
@@ -612,62 +628,28 @@ fn provider_binding_matches_import(
 impl DirectoryModuleCompileContext<'_> {
     fn compile(
         &self,
-        discovered: module_inventory::DiscoveredModule,
+        job: module_inventory::ModuleCompilationJob,
         generated_worklist: super::generated_worklist::GeneratedFunctionWorklist,
     ) -> DirectoryModuleTaskResult {
-        let string_table_fork = self.string_table_fork_source.fork_for_module();
-        let (local_table, base_len) = string_table_fork.into_parts();
-        let module_inventory::DiscoveredModule {
+        let module_inventory::ModuleCompilationJob {
             module_id,
-            stable_origin,
             entry_point,
-            input_files,
-        } = discovered;
-        let input_files = &input_files;
+            string_table_base_len: base_len,
+            prepared,
+            ..
+        } = job;
 
         // Record module-input counters and the per-module timing label before preparation so
         // the frontend module total can be attributed even when preparation fails.
-        let source_byte_count = record_module_input_counters(input_files);
-        let module_label_text =
-            module_timing_label(&entry_point, input_files.len(), source_byte_count);
+        let module_label_text = module_timing_label(
+            &entry_point,
+            prepared.source_file_count,
+            prepared.source_byte_count,
+        );
         let module_label: Option<&str> = Some(&module_label_text);
 
         // Record the total frontend time for this module (success or error).
         let module_total_start = crate::timing::start_pipeline_timing();
-
-        // Preparation is provider-independent: it owns no external package registry, import
-        // resolution table or builder runtime packages. Construct it before the semantic context
-        // so Phase 5 can schedule provider binding between the two calls.
-        let preparation_context = ModulePreparationContext {
-            style_directives: self.style_directives,
-            project_path_resolver: Some(self.project_path_resolver.clone()),
-        };
-
-        let prepared = match preparation_context.prepare_module(
-            super::frontend_orchestration::ModuleOriginInput::Graph {
-                stable_origin,
-                origin_by_canonical_path: self.source_origin_lookup,
-            },
-            input_files,
-            &entry_point,
-            local_table,
-            source_byte_count,
-            module_label,
-        ) {
-            Ok(prepared) => prepared,
-            Err(messages) => {
-                crate::timing::record_started_pipeline_timing_with_label(
-                    "frontend.module.total",
-                    module_total_start,
-                    module_label,
-                );
-                return DirectoryModuleTaskResult {
-                    module_id,
-                    string_table_base_len: base_len,
-                    outcome: classify_directory_failure(messages),
-                };
-            }
-        };
 
         // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
         // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and
@@ -702,11 +684,9 @@ impl DirectoryModuleCompileContext<'_> {
             source_provider_materialisations: &SourceProviderMaterialisationSet::new(
                 self.provider_store
                     .materialisation_contexts()
-                    .chain(
-                        self.completed_source_packages
-                            .iter()
-                            .flat_map(|package| package.provider_store.materialisation_contexts()),
-                    )
+                    .chain(self.completed_source_packages.iter().flat_map(|package| {
+                        package.outcome.provider_store.materialisation_contexts()
+                    }))
                     .collect(),
             ),
             builder_runtime_packages: &self.builder_surface.builder_runtime_packages,
@@ -751,13 +731,6 @@ impl DirectoryModuleCompileContext<'_> {
     }
 }
 
-fn classify_directory_failure(messages: CompilerMessages) -> DirectoryModuleTaskOutcome {
-    match ModuleDiagnostics::from_messages(messages) {
-        Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics.into_messages()),
-        Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn compile_module_waves(
     config: &Config,
@@ -766,32 +739,31 @@ fn compile_module_waves(
     style_directives: &StyleDirectiveRegistry,
     external_packages: &Arc<ExternalPackageRegistry>,
     builder_surface: &BuilderSurface,
-    source_origin_lookup: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
     graph: &ProjectModuleGraph,
-    module_waves: Vec<Vec<module_inventory::DiscoveredModule>>,
+    module_waves: Vec<Vec<module_inventory::ModuleCompilationJob>>,
     provider_bindings: &[ResolvedDependencyEdge],
     source_package_imports: &[ResolvedSourcePackageImport],
     completed_source_packages: &[CompletedSourcePackage],
-    string_table_fork_source: &StringTableForkSource,
     string_table: &mut StringTable,
-) -> Result<CompiledModuleBoundary, CompilerMessages> {
+) -> Result<GraphCompilationOutcome, CompilerMessages> {
     let mut provider_store = ModuleProviderStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
     for package in completed_source_packages {
         generated_store
-            .import_completed_summaries(&package.generated_store)
+            .import_completed_summaries(&package.outcome.generated_store)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     }
 
-    let mut failures = Vec::new();
+    let mut diagnosed = Vec::new();
+    let mut blocked = Vec::new();
 
     for wave in module_waves {
         add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, wave.len());
         let mut ready = Vec::new();
-        for discovered in wave {
-            let mut blocked = false;
+        for job in wave {
+            let mut blocked_provider = None;
             for provider_id in graph
-                .dependency_providers(discovered.module_id)
+                .dependency_providers(job.module_id)
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
             {
                 match provider_store
@@ -799,11 +771,14 @@ fn compile_module_waves(
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
                 {
                     ProviderSlot::Successful(_) => {}
-                    ProviderSlot::Diagnosed | ProviderSlot::Blocked => blocked = true,
+                    ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
+                        blocked_provider = Some(BlockedProvider::Module(*provider_id));
+                        break;
+                    }
                     ProviderSlot::Unavailable => {
                         let error = CompilerError::compiler_error(format!(
                             "ModuleId {} became ready before provider ModuleId {} completed",
-                            discovered.module_id.index(),
+                            job.module_id.index(),
                             provider_id.index()
                         ));
                         return Err(CompilerMessages::from_error_ref(error, string_table));
@@ -811,37 +786,81 @@ fn compile_module_waves(
                 }
             }
 
-            if blocked {
+            if blocked_provider.is_none() {
+                for package_import in source_package_imports
+                    .iter()
+                    .filter(|source_import| source_import.consumer_module_id == job.module_id)
+                {
+                    let package = completed_source_packages
+                        .iter()
+                        .find(|package| package.import_prefix == package_import.import_prefix)
+                        .ok_or_else(|| {
+                            CompilerMessages::from_error_ref(
+                                CompilerError::compiler_error(format!(
+                                    "ModuleId {} became ready before source package @{} completed",
+                                    job.module_id.index(),
+                                    package_import.import_prefix
+                                )),
+                                string_table,
+                            )
+                        })?;
+
+                    match package
+                        .root_slot()
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
+                    {
+                        ProviderSlot::Successful(_) => {}
+                        ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
+                            blocked_provider = Some(BlockedProvider::SourcePackage(
+                                package.import_prefix.clone(),
+                            ));
+                            break;
+                        }
+                        ProviderSlot::Unavailable => {
+                            let error = CompilerError::compiler_error(format!(
+                                "ModuleId {} became ready before source package @{} completed its facade",
+                                job.module_id.index(),
+                                package.import_prefix
+                            ));
+                            return Err(CompilerMessages::from_error_ref(error, string_table));
+                        }
+                    }
+                }
+            }
+
+            if let Some(required_provider) = blocked_provider {
                 provider_store
-                    .mark_blocked(discovered.module_id)
+                    .mark_blocked(job.module_id)
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                blocked.push(BlockedModule {
+                    module_id: job.module_id,
+                    required_provider,
+                });
             } else {
-                ready.push(discovered);
+                ready.push(job);
             }
         }
 
-        ready.sort_by_key(|discovered| discovered.module_id.index());
-        for discovered in ready {
+        ready.sort_by_key(|job| job.module_id.index());
+        for job in ready {
             // The boundary worklist publishes each successful module transaction before the
             // next ModuleId so duplicate requests in one ready wave materialise exactly once.
             // File preparation remains parallel inside each module. Module-wave parallelism can
             // return once worklist sessions can commit deterministic deltas concurrently.
             let outcome = {
                 let compile_context = DirectoryModuleCompileContext {
-                    string_table_fork_source,
                     config,
                     build_profile,
                     project_path_resolver,
                     style_directives,
                     external_packages,
                     builder_surface,
-                    source_origin_lookup,
                     provider_store: &provider_store,
                     provider_bindings,
                     source_package_imports,
                     completed_source_packages,
                 };
-                compile_context.compile(discovered, generated_store.session())
+                compile_context.compile(job, generated_store.session())
             };
             match outcome.outcome {
                 DirectoryModuleTaskOutcome::Success(compiled) => {
@@ -873,7 +892,7 @@ fn compile_module_waves(
                     provider_store
                         .mark_diagnosed(outcome.module_id)
                         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                    failures.push(FailedModuleCompilation {
+                    diagnosed.push(FailedModuleCompilation {
                         string_table_base_len: outcome.string_table_base_len,
                         messages,
                     });
@@ -885,29 +904,22 @@ fn compile_module_waves(
         }
     }
 
-    if !failures.is_empty() {
-        return Err(aggregate_directory_failures(
-            failures,
-            string_table_fork_source,
-        ));
-    }
-
-    Ok(CompiledModuleBoundary {
+    Ok(GraphCompilationOutcome {
         provider_store,
         generated_store,
+        diagnosed,
+        blocked,
     })
 }
 
 fn aggregate_directory_failures(
     failures: Vec<FailedModuleCompilation>,
-    string_table_fork_source: &StringTableForkSource,
+    string_table: &mut StringTable,
 ) -> CompilerMessages {
-    let aggregation_fork = string_table_fork_source.fork_for_module();
-    let (mut aggregated_table, _) = aggregation_fork.into_parts();
-    let mut aggregated_messages = CompilerMessages::empty(aggregated_table.clone());
+    let mut aggregated_messages = CompilerMessages::empty(string_table.clone());
 
     for mut failure in failures {
-        let remap = aggregated_table.merge_delta_from(
+        let remap = string_table.merge_delta_from(
             &failure.messages.string_table,
             failure.string_table_base_len,
         );
@@ -919,7 +931,7 @@ fn aggregate_directory_failures(
         aggregated_messages.append_messages_preserving_context(failure.messages);
     }
 
-    aggregated_messages.string_table = aggregated_table;
+    aggregated_messages.string_table = string_table.clone();
     aggregated_messages
 }
 
@@ -1024,7 +1036,7 @@ pub(crate) fn compile_directory_frontend(
     // 2. Build every source-package inventory and the project inventory before semantic
     // compilation. Provider-backed discovery may extend the binding registry, so all boundaries
     // finish that serial mutation phase before the registry becomes the immutable frontend view.
-    let mut external_imports = reachable_file_discovery::ExternalImportDiscoveryState {
+    let mut external_imports = source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut builder_surface.binding_packages,
         providers: &builder_surface.external_import_providers,
         cache: &mut builder_surface.external_import_cache,
@@ -1065,9 +1077,6 @@ pub(crate) fn compile_directory_frontend(
                 return Err(messages);
             }
         };
-        let source_origin_lookup = package_graph
-            .build_source_origin_lookup(package_index)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         let root_module_id = package_index
             .module_identities()
             .module_id_for_directory(package_index.entry_root())
@@ -1086,7 +1095,6 @@ pub(crate) fn compile_directory_frontend(
             root_module_id,
             path_resolver: package_path_resolver,
             graph: package_graph,
-            source_origin_lookup,
             module_waves,
             provider_bindings,
             source_package_imports,
@@ -1115,22 +1123,6 @@ pub(crate) fn compile_directory_frontend(
     };
     log_stage_timing("stage0.directory.module_inventory", module_inventory_start);
 
-    // Build the immutable source-origin lookup by projecting the retained central source index
-    // through the graph's owned source IDs so each directory module's preparation can resolve
-    // every prepared source file to its owning stable module origin. The lookup is shared across
-    // all module compilations and is a direct projection of the index ownership authority, not a
-    // filesystem scan or longest-prefix guess.
-    let source_origin_lookup = match project_setup
-        .project_module_graph
-        .build_source_origin_lookup(&project_setup.source_tree_index)
-    {
-        Ok(lookup) => lookup,
-        Err(error) => {
-            log_stage_timing("stage0.directory.total", total_start);
-            return Err(CompilerMessages::from_error_ref(error, string_table));
-        }
-    };
-
     let source_package_inventories =
         order_source_package_inventories(source_package_inventories, string_table)?;
 
@@ -1149,59 +1141,45 @@ pub(crate) fn compile_directory_frontend(
             root_module_id,
             path_resolver,
             graph,
-            source_origin_lookup,
             module_waves,
             provider_bindings,
             source_package_imports,
         } = inventory;
-        let boundary_string_table_fork_source = string_table.fork_source();
-        let CompiledModuleBoundary {
-            provider_store,
-            generated_store,
-        } = compile_module_waves(
+        let outcome = compile_module_waves(
             config,
             build_profile,
             &path_resolver,
             style_directives,
             &external_packages,
             builder_surface,
-            &source_origin_lookup,
             &graph,
             module_waves,
             &provider_bindings,
             &source_package_imports,
             &completed_source_packages,
-            &boundary_string_table_fork_source,
             string_table,
         )?;
         completed_source_packages.push(CompletedSourcePackage {
             import_prefix,
             root_module_id,
-            provider_store,
-            generated_store,
+            outcome,
         });
     }
 
     let (project_module_waves, project_provider_bindings, project_source_package_imports) =
         module_waves.into_parts();
-    let project_string_table_fork_source = string_table.fork_source();
-    let CompiledModuleBoundary {
-        provider_store: project_provider_store,
-        generated_store: project_generated_store,
-    } = compile_module_waves(
+    let mut project_outcome = compile_module_waves(
         config,
         build_profile,
         &project_path_resolver,
         style_directives,
         &external_packages,
         builder_surface,
-        &source_origin_lookup,
         &project_setup.project_module_graph,
         project_module_waves,
         &project_provider_bindings,
         &project_source_package_imports,
         &completed_source_packages,
-        &project_string_table_fork_source,
         string_table,
     )?;
     log_stage_timing(
@@ -1212,13 +1190,38 @@ pub(crate) fn compile_directory_frontend(
     // Project modules remain first so existing entry assembly indexes stay project-local.
     // Source-package executable artefacts follow for stable cross-module call resolution, but
     // their facade interfaces crossed the semantic boundary before this flattening handoff.
+    let mut diagnosed = Vec::new();
+    let mut blocked_count = project_outcome.blocked.len();
+    for package in &mut completed_source_packages {
+        diagnosed.append(&mut package.outcome.diagnosed);
+        blocked_count += package.outcome.blocked.len();
+    }
+    diagnosed.append(&mut project_outcome.diagnosed);
+
+    if !diagnosed.is_empty() {
+        return Err(aggregate_directory_failures(diagnosed, string_table));
+    }
+    if blocked_count != 0 {
+        let error = CompilerError::compiler_error(format!(
+            "Directory graph retained {blocked_count} blocked modules without a diagnosed provider"
+        ));
+        return Err(CompilerMessages::from_error_ref(error, string_table));
+    }
+
+    let GraphCompilationOutcome {
+        provider_store: project_provider_store,
+        generated_store: project_generated_store,
+        diagnosed: _,
+        blocked: _,
+    } = project_outcome;
+
     let mut compiled_modules = Vec::new();
     for artifact in project_provider_store.into_artifacts() {
         compiled_modules.push(artifact.module);
     }
     let mut generated_modules = project_generated_store.into_sidecars();
     for package in completed_source_packages {
-        for artifact in package.provider_store.into_artifacts() {
+        for artifact in package.outcome.provider_store.into_artifacts() {
             let mut module = artifact.module;
 
             // Source-package roots participate in semantic compilation and may provide
@@ -1228,7 +1231,7 @@ pub(crate) fn compile_directory_frontend(
             module.metadata.root_activity = Default::default();
             compiled_modules.push(module);
         }
-        generated_modules.extend(package.generated_store.into_sidecars());
+        generated_modules.extend(package.outcome.generated_store.into_sidecars());
     }
 
     log_stage_timing("stage0.directory.total", total_start);

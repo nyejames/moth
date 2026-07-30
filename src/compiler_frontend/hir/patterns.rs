@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::ids::ChoiceId;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 #[derive(Debug, Clone)]
 pub struct HirMatchArm {
@@ -53,4 +54,24 @@ pub enum HirPattern {
     /// WHAT: marks an arm that binds the entire scrutinee value.
     /// The local assignment is emitted separately inside the arm block.
     Capture,
+}
+
+impl HirMatchArm {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        match &mut self.pattern {
+            HirPattern::Literal(value)
+            | HirPattern::OptionValue { value }
+            | HirPattern::OptionRelational { value, .. }
+            | HirPattern::Relational { value, .. } => value.remap_string_ids(remap),
+            HirPattern::OptionNone
+            | HirPattern::OptionPresent
+            | HirPattern::Wildcard
+            | HirPattern::ChoiceVariant { .. }
+            | HirPattern::Capture => {}
+        }
+
+        if let Some(guard) = &mut self.guard {
+            guard.remap_string_ids(remap);
+        }
+    }
 }

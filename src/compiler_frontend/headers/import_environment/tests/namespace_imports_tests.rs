@@ -52,12 +52,14 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
 }
 
 fn test_import(header_path: InternedPath, string_table: &mut StringTable) -> FileImport {
+    let provider = StructuralProviderReference {
+        path: header_path,
+        path_location: location_for(&["src", "#page.moth"], string_table),
+        from_grouped: false,
+    };
     FileImport {
-        provider: StructuralProviderReference {
-            path: header_path,
-            path_location: location_for(&["src", "#page.moth"], string_table),
-            from_grouped: false,
-        },
+        authored_provider: provider.clone(),
+        provider,
         alias: None,
         location: location_for(&["src", "#page.moth"], string_table),
         alias_location: None,
@@ -466,12 +468,14 @@ fn explicit_external_symbol_import_retains_authored_location() {
     let mut string_table = StringTable::new();
     let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
     let import_location = location_for(&["src", "#page.moth"], &mut string_table);
+    let provider = StructuralProviderReference {
+        path: intern_path(&["test", "explicit_symbols", "run"], &mut string_table),
+        path_location: import_location.clone(),
+        from_grouped: true,
+    };
     let import = FileImport {
-        provider: StructuralProviderReference {
-            path: intern_path(&["test", "explicit_symbols", "run"], &mut string_table),
-            path_location: import_location.clone(),
-            from_grouped: true,
-        },
+        authored_provider: provider.clone(),
+        provider,
         alias: None,
         location: import_location.clone(),
         alias_location: None,
@@ -623,12 +627,14 @@ fn prelude_namespace_alias_coexists_with_explicit_import_of_same_target() {
     let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
     let import_path = intern_path(&["test", "prelude_ns"], &mut string_table);
 
+    let provider = StructuralProviderReference {
+        path: import_path,
+        path_location: location_for(&["src", "#page.moth"], &mut string_table),
+        from_grouped: false,
+    };
     let import = FileImport {
-        provider: StructuralProviderReference {
-            path: import_path,
-            path_location: location_for(&["src", "#page.moth"], &mut string_table),
-            from_grouped: false,
-        },
+        authored_provider: provider.clone(),
+        provider,
         alias: None,
         location: location_for(&["src", "#page.moth"], &mut string_table),
         alias_location: None,

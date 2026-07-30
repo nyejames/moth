@@ -5,20 +5,25 @@ use crate::build_system::build::{
     ModuleRootActivity, ProjectCompilation,
 };
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
-use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::borrow_checker::{
+    BorrowCheckReport, ReactiveInvalidationFact, ReactiveInvalidationKind,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expressions::{
+    HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
+};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
+use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -75,11 +80,48 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
     let start_name_path = InternedPath::from_single_str("start_entry", &mut local_string_table);
 
     let source_scope = InternedPath::from_single_str("source.moth", &mut local_string_table);
+    let reactive_scope =
+        InternedPath::from_single_str("reactive_source.moth", &mut local_string_table);
+    let option_value_name = local_string_table.intern("value");
     let mut hir_module = minimal_hir_module(start_name_path);
     hir_module.blocks[0].statements.push(HirStatement {
         id: HirNodeId(1),
         kind: HirStatementKind::Expr(HirExpression {
             id: HirValueId(1),
+            kind: HirExpressionKind::VariantConstruct {
+                carrier: HirVariantCarrier::Option,
+                variant_index: 1,
+                fields: vec![HirVariantField {
+                    name: Some(option_value_name),
+                    value: HirExpression {
+                        id: HirValueId(2),
+                        kind: HirExpressionKind::Int(7),
+                        ty: NONE,
+                        value_kind: ValueKind::Const,
+                        region: RegionId(0),
+                    },
+                }],
+            },
+            ty: NONE,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+        }),
+        location: SourceLocation::new(
+            source_scope.clone(),
+            CharPosition {
+                line_number: 3,
+                char_column: 2,
+            },
+            CharPosition {
+                line_number: 3,
+                char_column: 8,
+            },
+        ),
+    });
+    hir_module.blocks[0].statements.push(HirStatement {
+        id: HirNodeId(2),
+        kind: HirStatementKind::Expr(HirExpression {
+            id: HirValueId(3),
             kind: HirExpressionKind::MapLiteral(vec![]),
             ty: NONE,
             value_kind: ValueKind::RValue,
@@ -88,11 +130,11 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
         location: SourceLocation::new(
             source_scope,
             CharPosition {
-                line_number: 3,
+                line_number: 4,
                 char_column: 2,
             },
             CharPosition {
-                line_number: 3,
+                line_number: 4,
                 char_column: 8,
             },
         ),
@@ -125,11 +167,32 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
     };
 
     let entry_point = PathBuf::from("src/#page.moth");
+    let mut borrow_analysis = BorrowCheckReport::default();
+    borrow_analysis.analysis.reactive_invalidations.insert(
+        HirNodeId(1),
+        vec![ReactiveInvalidationFact {
+            statement_id: HirNodeId(1),
+            source: ReactiveSourceId(0),
+            kind: ReactiveInvalidationKind::Assignment,
+            location: SourceLocation::new(
+                reactive_scope,
+                CharPosition {
+                    line_number: 8,
+                    char_column: 4,
+                },
+                CharPosition {
+                    line_number: 8,
+                    char_column: 10,
+                },
+            ),
+        }],
+    );
+
     let mut module = Module {
         executable: ModuleExecutable {
             hir: hir_module,
             type_environment: TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(),
+            borrow_analysis,
         },
         link_facts,
         metadata: ModuleCompilerMetadata {
@@ -154,6 +217,37 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
         .expect("start function name should be bound")
         .name_str(&merged_string_table);
     assert_eq!(resolved_name, Some("start_entry"));
+
+    let statement = &module.executable.hir.blocks[0].statements[0];
+    assert_eq!(
+        statement.location.scope.name_str(&merged_string_table),
+        Some("source.moth"),
+        "executable statement locations should resolve through the merged string table"
+    );
+    let HirStatementKind::Expr(HirExpression {
+        kind: HirExpressionKind::VariantConstruct { fields, .. },
+        ..
+    }) = &statement.kind
+    else {
+        panic!("test statement should retain its option construction");
+    };
+    assert_eq!(
+        fields[0].name.map(|name| merged_string_table.resolve(name)),
+        Some("value"),
+        "variant payload names should resolve through the merged string table"
+    );
+
+    let reactive_location = &module
+        .executable
+        .borrow_analysis
+        .analysis
+        .reactive_invalidations[&HirNodeId(1)][0]
+        .location;
+    assert_eq!(
+        reactive_location.scope.name_str(&merged_string_table),
+        Some("reactive_source.moth"),
+        "borrow-fact locations should resolve through the merged string table"
+    );
 
     let reachability = collect_reachability_from_function_link_facts(
         &module.link_facts.functions,

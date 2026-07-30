@@ -5,20 +5,19 @@
 //!       store is shared across all entry traversals in one project boundary so each project
 //!       source is read, tokenized and prepared at most once.
 //! WHY: replaces per-entry path-keyed `ScannedImportSource` caches with one shared project owner.
-//!      The live reachable traversal prepares sources lazily and stores them here; semantic-input
-//!      assembly projects `PreparedSourceInput` values from the retained slots instead of
-//!      consuming a second per-entry project cache. Package-boundary sources remain outside this
-//!      store until their own indexed store and consumer land.
+//!      Canonical header discovery prepares sources lazily and projects `PreparedSourceInput`
+//!      values from retained slots instead of running a second per-entry lexical scan.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 
 use std::path::Path;
 
-use super::import_scanning::{ScannedImportSource, scan_imports_with_source};
 use super::prepared_source::PreparedSourceInput;
 use super::source_discovery_error::SourceDiscoveryError;
 use super::source_loading::extract_source_code;
@@ -30,10 +29,8 @@ use super::source_tree_index::{SourceClassification, SourceId, SourceTreeIndex};
 /// transitions at most once from `Unprepared` to `Prepared`; sources from another compilation
 /// boundary never enter this store.
 ///
-/// The store is populated serially during classification (or the single-entry serial path) and then
-/// shared read-only across Rayon workers. Workers call [`Self::get_project_moth_imports`], which only reads
-/// already-prepared slots; an unprepared slot during a worker traversal is an invariant violation
-/// because classification traverses every entry before workers start.
+/// The canonical Stage 0 traversal populates this store serially and reuses prepared slots across
+/// module jobs, so a source shared by multiple modules is not read or tokenized again.
 pub(super) struct PreparedSourceStore {
     project_slots: Vec<PreparedSourceSlot>,
 }
@@ -55,14 +52,6 @@ struct PreparedSourceEntry {
     source_code: String,
     source_kind: SourceFileKind,
     tokens: Option<Box<FileTokens>>,
-    imports: Vec<StructuralProviderReference>,
-}
-
-/// Whether a `.moth` source was freshly read or reused from the store.
-#[derive(Debug, PartialEq)]
-pub(super) enum MothScanOrigin {
-    FreshRead { source_byte_count: usize },
-    ReusedFromStore,
 }
 
 impl PreparedSourceStore {
@@ -73,66 +62,28 @@ impl PreparedSourceStore {
         }
     }
 
-    /// Prepare or reuse one `.moth` source during traversal, returning its structural provider
-    /// references.
+    /// Prepare or reuse one indexed compiler source.
     ///
-    /// If the slot is already `Prepared` the retained imports are returned without re-reading or
-    /// re-tokenizing. If the slot is `Unprepared` the source is read, tokenized and stored, and the
-    /// fresh imports are returned. Non-project sources (no `SourceId`) are stored by canonical path.
-    pub(super) fn prepare_or_get_project_moth_imports(
-        &mut self,
-        source_id: SourceId,
-        canonical_path: &Path,
-        style_directives: &StyleDirectiveRegistry,
-        string_table: &mut StringTable,
-    ) -> Result<(Vec<StructuralProviderReference>, MothScanOrigin), SourceDiscoveryError> {
-        let slot = &mut self.project_slots[source_id.index()];
-
-        if let PreparedSourceSlot::Prepared(entry) = slot {
-            return Ok((entry.imports.clone(), MothScanOrigin::ReusedFromStore));
-        }
-
-        let scanned = scan_imports_with_source(canonical_path, style_directives, string_table)?;
-        let imports = scanned.imports.clone();
-        let source_byte_count = scanned.source_code.len();
-        *slot =
-            PreparedSourceSlot::Prepared(scanned_source_to_entry(scanned, SourceFileKind::Moth));
-        Ok((imports, MothScanOrigin::FreshRead { source_byte_count }))
-    }
-
-    /// Get the structural provider references from an already-prepared `.moth` source.
-    ///
-    /// Used by provider-free workers after classification has prepared every reachable source.
-    /// An unprepared slot is an invariant violation because classification traverses all entries.
-    pub(super) fn get_project_moth_imports(
-        &self,
-        source_id: SourceId,
-    ) -> Result<Vec<StructuralProviderReference>, SourceDiscoveryError> {
-        match &self.project_slots[source_id.index()] {
-            PreparedSourceSlot::Prepared(entry) => Ok(entry.imports.clone()),
-            _ => Err(SourceDiscoveryError::from(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                    "Provider-free worker reached a Moth file absent from the prepared source store",
-                ),
-            )),
-        }
-    }
-
-    /// Project one `PreparedSourceInput` from the store for a project source, preparing the slot
-    /// lazily if it is still `Unprepared` (`.mtf`/`.md` loaded during assembly).
-    pub(super) fn project_project_prepared_input(
+    /// Moth sources are read and tokenized once here. Header syntax preparation consumes the
+    /// retained tokens and returns structural provider references, so this store never runs a
+    /// parallel lexical import scan.
+    pub(super) fn prepare_or_get_project_input(
         &mut self,
         source_id: SourceId,
         source_tree_index: &SourceTreeIndex,
+        style_directives: &StyleDirectiveRegistry,
         string_table: &mut StringTable,
     ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
-        let record = source_tree_index.source(source_id);
         let slot = &mut self.project_slots[source_id.index()];
 
         if let PreparedSourceSlot::Prepared(entry) = slot {
-            return Ok(prepared_input_from_entry(record.canonical_path(), entry));
+            return Ok(prepared_input_from_entry(
+                source_tree_index.source(source_id).canonical_path(),
+                entry,
+            ));
         }
 
+        let record = source_tree_index.source(source_id);
         let SourceClassification::CompilerSemantic(source_kind) = record.classification() else {
             return Err(SourceDiscoveryError::from(
                 crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
@@ -141,15 +92,42 @@ impl PreparedSourceStore {
                 )),
             ));
         };
-
         let source_code = extract_source_code(record.canonical_path(), string_table)?;
-        let entry = PreparedSourceEntry {
-            source_code: source_code.clone(),
-            source_kind: *source_kind,
-            tokens: None,
-            imports: Vec::new(),
+        let tokens = if *source_kind == SourceFileKind::Moth {
+            let interned_path = InternedPath::try_from_filesystem_path(
+                record.canonical_path(),
+                string_table,
+            )
+            .map_err(|NonUtf8PathComponent { path }| {
+                SourceDiscoveryError::from(
+                    crate::compiler_frontend::compiler_errors::CompilerError::file_error(
+                        &path,
+                        format!(
+                            "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+                        ),
+                        string_table,
+                    ),
+                )
+            })?;
+            Some(Box::new(
+                tokenize(
+                    &source_code,
+                    &interned_path,
+                    TokenizerEntryMode::SourceFile,
+                    style_directives,
+                    string_table,
+                    None,
+                )
+                .map_err(SourceDiscoveryError::Diagnostic)?,
+            ))
+        } else {
+            None
         };
-        *slot = PreparedSourceSlot::Prepared(entry);
+        *slot = PreparedSourceSlot::Prepared(PreparedSourceEntry {
+            source_code,
+            source_kind: *source_kind,
+            tokens,
+        });
         Ok(prepared_input_from_entry(
             record.canonical_path(),
             slot_entry(slot),
@@ -162,19 +140,6 @@ fn slot_entry(slot: &PreparedSourceSlot) -> &PreparedSourceEntry {
     match slot {
         PreparedSourceSlot::Prepared(entry) => entry,
         _ => unreachable!("slot was just set to Prepared"),
-    }
-}
-
-/// Convert a `ScannedImportSource` into a `PreparedSourceEntry`.
-fn scanned_source_to_entry(
-    scanned: ScannedImportSource,
-    source_kind: SourceFileKind,
-) -> PreparedSourceEntry {
-    PreparedSourceEntry {
-        source_code: scanned.source_code,
-        source_kind,
-        tokens: Some(Box::new(scanned.tokens)),
-        imports: scanned.imports,
     }
 }
 

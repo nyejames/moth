@@ -6,6 +6,7 @@
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::patterns::HirMatchArm;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 #[derive(Debug, Clone)]
 pub enum HirTerminator {
@@ -87,4 +88,28 @@ pub enum HirTerminator {
     AssertFailure {
         message: Option<String>,
     },
+}
+
+impl HirTerminator {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        match self {
+            Self::If { condition, .. } => condition.remap_string_ids(remap),
+            Self::FallibleBranch { result, .. }
+            | Self::Return(result)
+            | Self::ReturnSuccess(result)
+            | Self::ReturnError(result) => result.remap_string_ids(remap),
+            Self::Match { scrutinee, arms } => {
+                scrutinee.remap_string_ids(remap);
+                for arm in arms {
+                    arm.remap_string_ids(remap);
+                }
+            }
+            Self::Jump { .. }
+            | Self::Break { .. }
+            | Self::Continue { .. }
+            | Self::Uninitialized
+            | Self::RuntimeFailure { .. }
+            | Self::AssertFailure { .. } => {}
+        }
+    }
 }

@@ -9,7 +9,7 @@
 //!      Moth template and PlainMarkdown cannot accidentally carry Moth tokens.
 //!
 //! This type is the build-system-owned storage threaded through `ReachableSourceInventory`
-//! assembly, `DiscoveredModule`, single-file compilation and `FrontendModuleBuildContext`.
+//! assembly, `ModuleCompilationJob`, single-file compilation and `FrontendModuleBuildContext`.
 
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
@@ -17,13 +17,14 @@ use std::path::{Path, PathBuf};
 
 /// Owned prepared source input carrying the strict source-kind/token relationship.
 ///
-/// Construct this only from Stage 0 reachable-file discovery. Moth files must already have
+/// Construct this only from Stage 0 source preparation. Moth files must already have
 /// been tokenized once; the retained `FileTokens` are carried here so header preparation never
 /// lexes the same source again.
 ///
 /// The Moth `tokens` are boxed so the enum is not sized by `FileTokens` (which is large);
 /// the Moth template and PlainMarkdown variants stay small and moving a `PreparedSourceInput` only
 /// copies a pointer for the retained token stream.
+#[derive(Clone)]
 pub(crate) enum PreparedSourceInput {
     /// A Moth module source with the retained token stream from its single lexical pass.
     Moth {

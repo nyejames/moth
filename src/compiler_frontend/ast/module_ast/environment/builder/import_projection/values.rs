@@ -246,7 +246,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     }
 }
 
-fn materialize_public_const_template(
+/// Rebuilds one stable const-template value in the active module-local TIR store.
+///
+/// Imported constants and generated sidecars share this inverse projection so neither path
+/// carries a provider or declaring-module TIR identity into a fresh AST compilation.
+pub(in crate::compiler_frontend::ast) fn materialize_public_const_template(
     template: &PublicConstTemplate,
     store_handle: &Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
     string_table: &mut StringTable,

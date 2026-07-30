@@ -14,9 +14,8 @@
 //! - `prepared_source_store`    — project-boundary prepare-once store indexed by `SourceId`
 //! - `prepared_module`          — retained module-preparation payload handed to semantic compilation
 //! - `provider_store`           — completed immutable artefacts and per-module publication state
-//! - `reachable_file_discovery` — BFS traversal over import graphs
-//! - `semantic_source_set`      — project-boundary semantic source set per entry module
-//! - `import_scanning`          — per-file import path extraction
+//! - `source_discovery`         — single-file source traversal and structural provider resolution
+//! - `source_scanning`          — retained single-pass source tokenisation and import extraction
 //! - `project_structure_diagnostics` — typed Stage 0 project diagnostics
 //! - `source_discovery_error`   — Stage 0 boundary between diagnostics and file/tooling errors
 //! - `source_loading`           — raw file I/O
@@ -27,7 +26,6 @@
 mod compilation;
 mod frontend_orchestration;
 pub(crate) mod generated_worklist;
-pub(crate) mod import_scanning;
 mod module_identity;
 mod module_inventory;
 mod module_namespace;
@@ -38,15 +36,15 @@ mod project_module_graph;
 mod project_roots;
 mod project_structure_diagnostics;
 mod provider_store;
-mod reachable_file_discovery;
-mod semantic_source_set;
+mod source_discovery;
 pub(crate) mod source_discovery_error;
 pub(crate) mod source_loading;
 pub(crate) mod source_package_discovery;
+pub(crate) mod source_scanning;
 mod source_tree_index;
 
 #[cfg(test)]
-pub(super) use module_inventory::{ModuleEntryCompileWaves, discover_all_modules_in_project};
+pub(super) use module_inventory::{ModuleCompilationSchedule, discover_all_modules_in_project};
 
 pub(crate) use project_roots::resolve_project_entry_root;
 pub(crate) use source_loading::extract_source_code;

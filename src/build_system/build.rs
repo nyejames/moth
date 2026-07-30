@@ -109,8 +109,8 @@ impl ModuleRootActivity {
 /// WHAT: the sole owner of the typed HIR, its paired `TypeEnvironment` and the
 ///       `BorrowCheckReport` produced by borrow validation.
 /// WHY: keeping these together in one executable lane makes the HIR/type/borrow pairing obvious
-///      at every backend call site and lets string-ID remapping touch HIR and type identity
-///      exactly once. Borrow facts carry only HIR IDs and need no string remap.
+///      at every backend call site and lets string-ID remapping cover HIR, type identity and
+///      source locations retained by borrow facts exactly once.
 pub(crate) struct ModuleExecutable {
     pub(crate) hir: HirModule,
     pub(crate) type_environment: TypeEnvironment,
@@ -120,11 +120,11 @@ pub(crate) struct ModuleExecutable {
 impl ModuleExecutable {
     /// Remap interned string IDs after string-table merging.
     ///
-    /// WHY: HIR and type identity remap exactly once here. `BorrowCheckReport` carries only HIR
-    ///      IDs (no `StringId`s), so it is intentionally not remapped.
+    /// WHY: HIR, type identity and borrow-fact source locations remap exactly once here.
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.hir.remap_string_ids(remap);
         self.type_environment.remap_string_ids(remap);
+        self.borrow_analysis.remap_string_ids(remap);
     }
 }
 
@@ -179,7 +179,7 @@ impl ModuleCompilerMetadata {
         lowering_metadata: HirLoweringMetadata,
         const_top_level_fragments: Vec<ResolvedConstFragment>,
         root_activity: ModuleRootActivity,
-        materialisation_context: ModuleMaterialisationContext,
+        materialisation_context: Option<ModuleMaterialisationContext>,
     ) -> Self {
         Self {
             entry_point,
@@ -188,29 +188,18 @@ impl ModuleCompilerMetadata {
             rendered_path_usages: lowering_metadata.rendered_path_usages,
             const_top_level_fragments,
             root_activity,
-            materialisation_context: Some(materialisation_context),
+            materialisation_context,
         }
     }
 
-    /// Drop the unconsumed validated generic-template body-artefact store.
-    ///
-    /// WHY: the retained `GenericFunctionTemplate` values carry `FunctionSignature` donor-local
-    ///      `StringId`s whose remap owner is not in scope for this slice. The store must never
-    ///      remain reachable by a backend after the pre-provider project-compilation handoff, so each handoff
-    ///      path calls this before `remap_string_ids`. The discard is deliberate; R5D-R5G
-    ///      will replace this body-only checkpoint with the complete artefact store and worklist.
     /// Remap interned string IDs after string-table merging.
     ///
     /// WHY: warnings, documentation locations, and rendered-path interned fields must all remap
     ///      exactly once. Const fragment rendered text is already a resolved `String`, root
     ///      activity carries no interned fields, and the entry path is a `PathBuf`.
     ///
-    /// The `validated_generic_templates` store is intentionally not remapped here. Its retained
-    /// `GenericFunctionTemplate` values carry `FunctionSignature` donor-local `StringId`s whose
-    /// remap owner is not in scope for the current slice. The pre-provider project-compilation handoff drops
-    /// the store before calling this method so no stale local `StringId` reaches backends. R5D-R5G
-    /// will add a dedicated remap path when it replaces this checkpoint with the complete
-    /// artefact store and worklist.
+    /// Materialisation metadata owns self-contained strings and stable semantic identities, so
+    /// this remap covers only executable presentation fields that retain local `StringId` values.
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for warning in &mut self.warnings {
             warning.remap_string_ids(remap);

@@ -34,6 +34,8 @@ impl PublicSemanticInterface {
     /// Validate locally produced declaration, summary and evidence facts before provider closure.
     /// Cross-provider bindings are intentionally validated only after closure supplies them.
     pub(super) fn validate_closure_input(&self) -> Result<(), CompilerError> {
+        self.validate_no_private_type_identities()?;
+
         let mut declarations_by_origin = FxHashMap::default();
         for declaration in &self.declarations {
             if declarations_by_origin
@@ -53,6 +55,8 @@ impl PublicSemanticInterface {
 
     /// Validate the total closed semantic surface owned by one successful provider interface.
     pub(crate) fn validate_for_publication(&self) -> Result<(), CompilerError> {
+        self.validate_no_private_type_identities()?;
+
         let declarations_by_origin = self.validate_declarations_and_bindings()?;
         self.validate_concrete_call_summaries(&declarations_by_origin)?;
         self.validate_reusable_evidence(&declarations_by_origin)
@@ -80,13 +84,82 @@ impl PublicSemanticInterface {
         }
 
         for declaration in &self.declarations {
-            validate_declaration_external_types(declaration, external_registry)?;
+            let mut invalid_identity = None;
+            visit_declaration_type_identities(declaration, &mut |identity| {
+                if invalid_identity.is_none()
+                    && let CanonicalTypeIdentity::ExternalOpaque(external) = identity
+                    && external_registry
+                        .resolve_canonical_package_type_by_path(
+                            external.package(),
+                            external.symbol_path(),
+                        )
+                        .is_none()
+                {
+                    invalid_identity = Some(external.clone());
+                }
+            });
+            if let Some(identity) = invalid_identity {
+                return Err(publication_error(format!(
+                    "public semantic surface references unresolved canonical external type {:?}",
+                    identity
+                )));
+            }
         }
         for evidence in &self.reusable_evidence {
-            validate_external_type_identity(
-                evidence.identity.target_type_identity(),
-                external_registry,
-            )?;
+            let mut invalid_identity = None;
+            evidence
+                .identity
+                .target_type_identity()
+                .visit(&mut |identity| {
+                    if invalid_identity.is_none()
+                        && let CanonicalTypeIdentity::ExternalOpaque(external) = identity
+                        && external_registry
+                            .resolve_canonical_package_type_by_path(
+                                external.package(),
+                                external.symbol_path(),
+                            )
+                            .is_none()
+                    {
+                        invalid_identity = Some(external.clone());
+                    }
+                });
+            if let Some(identity) = invalid_identity {
+                return Err(publication_error(format!(
+                    "reusable evidence references unresolved canonical external type {:?}",
+                    identity
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_no_private_type_identities(&self) -> Result<(), CompilerError> {
+        let mut invalid_identity = None;
+        let mut inspect = |identity: &CanonicalTypeIdentity| {
+            if invalid_identity.is_none()
+                && matches!(
+                    identity,
+                    CanonicalTypeIdentity::ModulePrivateNominal(_)
+                        | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
+                )
+            {
+                invalid_identity = Some(identity.clone());
+            }
+        };
+
+        for declaration in &self.declarations {
+            visit_declaration_type_identities(declaration, &mut inspect);
+        }
+        for evidence in &self.reusable_evidence {
+            evidence.identity.target_type_identity().visit(&mut inspect);
+        }
+
+        if let Some(identity) = invalid_identity {
+            return Err(publication_error(format!(
+                "public semantic surface references artefact-private type identity {:?}",
+                identity
+            )));
         }
 
         Ok(())
@@ -708,148 +781,92 @@ fn receiver_methods(
     }
 }
 
-fn validate_declaration_external_types(
+fn visit_declaration_type_identities(
     declaration: &super::model::PublicDeclarationRecord,
-    external_registry: &ExternalPackageRegistry,
-) -> Result<(), CompilerError> {
+    visitor: &mut impl FnMut(&CanonicalTypeIdentity),
+) {
     match &declaration.semantics {
         PublicDeclarationSemantics::Function(function) => {
-            validate_callable_external_types(
+            visit_callable_type_identities(
                 &function.parameters,
                 &function.returns,
                 function.error_return.as_ref(),
-                external_registry,
-            )?;
+                visitor,
+            );
         }
         PublicDeclarationSemantics::Struct(structure) => {
             for field in &structure.fields {
-                validate_external_type_identity(&field.type_identity, external_registry)?;
+                field.type_identity.visit(visitor);
                 if let Some(default) = &field.folded_default {
-                    validate_folded_value_external_types(default, external_registry)?;
+                    default.visit_type_identities(visitor);
                 }
             }
             for method in &structure.receiver_methods {
-                validate_callable_external_types(
+                visit_callable_type_identities(
                     &method.parameters,
                     &method.returns,
                     method.error_return.as_ref(),
-                    external_registry,
-                )?;
+                    visitor,
+                );
             }
         }
         PublicDeclarationSemantics::Choice(choice) => {
             for variant in &choice.variants {
                 for field in &variant.payload_fields {
-                    validate_external_type_identity(&field.type_identity, external_registry)?;
+                    field.type_identity.visit(visitor);
                 }
             }
             for method in &choice.receiver_methods {
-                validate_callable_external_types(
+                visit_callable_type_identities(
                     &method.parameters,
                     &method.returns,
                     method.error_return.as_ref(),
-                    external_registry,
-                )?;
+                    visitor,
+                );
             }
         }
         PublicDeclarationSemantics::TransparentAlias(alias) => {
-            validate_external_type_identity(&alias.target_type_identity, external_registry)?;
+            alias.target_type_identity.visit(visitor);
         }
         PublicDeclarationSemantics::Constant(constant) => {
-            validate_external_type_identity(&constant.type_identity, external_registry)?;
-            validate_folded_value_external_types(&constant.folded_value, external_registry)?;
+            constant.type_identity.visit(visitor);
+            constant.folded_value.visit_type_identities(visitor);
         }
         PublicDeclarationSemantics::Trait(trait_semantics) => {
             for requirement in &trait_semantics.requirements {
                 for parameter in &requirement.parameters {
                     if let TraitSurfaceTypeIdentity::Concrete(identity) = &parameter.type_identity {
-                        validate_external_type_identity(identity, external_registry)?;
+                        identity.visit(visitor);
                     }
                 }
                 for returned in &requirement.returns {
                     if let TraitSurfaceTypeIdentity::Concrete(identity) = &returned.type_identity {
-                        validate_external_type_identity(identity, external_registry)?;
+                        identity.visit(visitor);
                     }
                 }
             }
         }
     }
-
-    Ok(())
 }
 
-fn validate_callable_external_types(
+fn visit_callable_type_identities(
     parameters: &[super::model::PublicParameterTypeSlot],
     returns: &[super::model::PublicReturnTypeSlot],
     error_return: Option<&CanonicalTypeIdentity>,
-    external_registry: &ExternalPackageRegistry,
-) -> Result<(), CompilerError> {
+    visitor: &mut impl FnMut(&CanonicalTypeIdentity),
+) {
     for parameter in parameters {
-        validate_external_type_identity(&parameter.type_identity, external_registry)?;
+        parameter.type_identity.visit(visitor);
         if let Some(default) = &parameter.folded_default {
-            validate_folded_value_external_types(default, external_registry)?;
+            default.visit_type_identities(visitor);
         }
     }
     for returned in returns {
-        validate_external_type_identity(&returned.type_identity, external_registry)?;
+        returned.type_identity.visit(visitor);
     }
     if let Some(error_return) = error_return {
-        validate_external_type_identity(error_return, external_registry)?;
+        error_return.visit(visitor);
     }
-
-    Ok(())
-}
-
-fn validate_folded_value_external_types(
-    value: &crate::compiler_frontend::folded_value::PublicFoldedValue,
-    external_registry: &ExternalPackageRegistry,
-) -> Result<(), CompilerError> {
-    let mut invalid_identity = None;
-    value.visit_type_identities(&mut |identity| {
-        if invalid_identity.is_none()
-            && let CanonicalTypeIdentity::ExternalOpaque(external) = identity
-            && external_registry
-                .resolve_canonical_package_type_by_path(external.package(), external.symbol_path())
-                .is_none()
-        {
-            invalid_identity = Some(external.clone());
-        }
-    });
-
-    if let Some(identity) = invalid_identity {
-        return Err(publication_error(format!(
-            "folded public value references unresolved canonical external type {:?}",
-            identity
-        )));
-    }
-
-    Ok(())
-}
-
-fn validate_external_type_identity(
-    identity: &CanonicalTypeIdentity,
-    external_registry: &ExternalPackageRegistry,
-) -> Result<(), CompilerError> {
-    let mut invalid_identity = None;
-    identity.visit(&mut |nested| {
-        if invalid_identity.is_none()
-            && let CanonicalTypeIdentity::ExternalOpaque(external) = nested
-            && external_registry
-                .resolve_canonical_package_type_by_path(external.package(), external.symbol_path())
-                .is_none()
-        {
-            invalid_identity = Some(external.clone());
-        }
-    });
-
-    if let Some(identity) = invalid_identity {
-        return Err(publication_error(format!(
-            "public semantic surface references unresolved canonical external type {:?}",
-            identity
-        )));
-    }
-
-    Ok(())
 }
 
 fn publication_error(message: String) -> CompilerError {

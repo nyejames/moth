@@ -13,12 +13,13 @@ use std::path::Path;
 use std::path::PathBuf;
 
 #[cfg(test)]
-static SOURCE_READ_COUNT_FOR_TEST: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
-#[cfg(test)]
 static SOURCE_READ_TRACK_PREFIX_FOR_TEST: std::sync::Mutex<Option<PathBuf>> =
     std::sync::Mutex::new(None);
+
+#[cfg(test)]
+static SOURCE_READ_COUNTS_BY_PATH_FOR_TEST: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<PathBuf, usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 // -------------------------
 //  Source Extraction
@@ -32,7 +33,11 @@ static SOURCE_READ_TRACK_PREFIX_FOR_TEST: std::sync::Mutex<Option<PathBuf>> =
 pub(crate) fn read_source_code(file_path: &Path) -> Result<String, std::io::Error> {
     #[cfg(test)]
     if should_count_source_read_for_test(file_path) {
-        SOURCE_READ_COUNT_FOR_TEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        *SOURCE_READ_COUNTS_BY_PATH_FOR_TEST
+            .lock()
+            .expect("source read path-count test hook lock poisoned")
+            .entry(file_path.to_path_buf())
+            .or_insert(0) += 1;
     }
 
     fs::read_to_string(file_path)
@@ -51,17 +56,24 @@ fn should_count_source_read_for_test(file_path: &Path) -> bool {
 
 #[cfg(test)]
 pub(crate) fn reset_source_read_count_for_test(tracked_prefix: &Path) {
-    SOURCE_READ_COUNT_FOR_TEST.store(0, std::sync::atomic::Ordering::Relaxed);
-
     let mut prefix = SOURCE_READ_TRACK_PREFIX_FOR_TEST
         .lock()
         .expect("source read test hook lock poisoned");
     *prefix = Some(tracked_prefix.to_path_buf());
+    SOURCE_READ_COUNTS_BY_PATH_FOR_TEST
+        .lock()
+        .expect("source read path-count test hook lock poisoned")
+        .clear();
 }
 
 #[cfg(test)]
-pub(crate) fn source_read_count_for_test() -> usize {
-    SOURCE_READ_COUNT_FOR_TEST.load(std::sync::atomic::Ordering::Relaxed)
+pub(crate) fn source_read_count_for_path_for_test(path: &Path) -> usize {
+    SOURCE_READ_COUNTS_BY_PATH_FOR_TEST
+        .lock()
+        .expect("source read path-count test hook lock poisoned")
+        .get(path)
+        .copied()
+        .unwrap_or(0)
 }
 
 /// Reads the contents of a source file from disk.

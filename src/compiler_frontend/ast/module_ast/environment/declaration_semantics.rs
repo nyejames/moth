@@ -78,6 +78,14 @@ impl DeclarationSemanticTable {
     pub(crate) fn kind_for_path(&self, path: &InternedPath) -> Option<DeclarationSemanticKind> {
         self.by_path.get(path).copied()
     }
+
+    /// Register a function reconstructed from a closed generated-materialisation artefact.
+    ///
+    /// Generated environments do not rerun declaration-shell preparation, so their stable
+    /// callable blueprints join the ordinary semantic table directly after inverse projection.
+    pub(crate) fn register_materialised_function(&mut self, path: InternedPath) {
+        self.by_path.insert(path, DeclarationSemanticKind::Function);
+    }
 }
 
 fn classify_declaration(

@@ -151,7 +151,7 @@ use crate::compiler_frontend::instrumentation::{log_ast_counters, reset_ast_coun
 
 use crate::benchmark_timer_log;
 use crate::compiler_frontend::ast::generic_functions::{
-    GenericFunctionInstantiationRequest, ModuleMaterialisationContext,
+    GenericFunctionInstantiationRequest, ModuleMaterialisationPreparationBuilder,
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -270,8 +270,8 @@ pub struct AstBuildResult {
     /// Direct public-interface projection input consumed by the public-interface draft builder.
     pub public_interface_projection_input: AstPublicInterfaceProjectionInput,
 
-    /// Immutable declaring-module context consumed by generated-function materialisation.
-    pub(crate) materialisation_context: ModuleMaterialisationContext,
+    /// Construction-only declaring-module context frozen before successful publication.
+    pub(crate) materialisation_context: ModuleMaterialisationPreparationBuilder,
 
     /// Imported generic requests inferred against provider contracts. The requester carries only
     /// stable declaration/type evidence into the build-owned sidecar worklist.

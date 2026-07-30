@@ -1,3 +1,5 @@
+entry = "."
+
 [backends.html]
 mode = "success"
 warnings = "forbid"
@@ -8,6 +10,6 @@ kind = "html"
 must_contain = ["trait_relation_facade_private_private_success result=ok"]
 
 [backends.html_wasm]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-success_contract = "acceptance_only"
+diagnostic_codes = ["MOTH-RULE-0064"]

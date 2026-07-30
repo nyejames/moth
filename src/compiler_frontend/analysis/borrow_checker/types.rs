@@ -9,6 +9,7 @@ use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, Default)]
@@ -20,6 +21,11 @@ pub(crate) struct BorrowCheckReport {
 impl BorrowCheckReport {
     pub(crate) fn borrow_facts(&self) -> &BorrowAnalysis {
         &self.analysis
+    }
+
+    /// Remap source identities retained by immutable borrow-analysis facts.
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        self.analysis.remap_string_ids(remap);
     }
 }
 
@@ -52,6 +58,15 @@ pub(crate) struct BorrowAnalysis {
 }
 
 impl BorrowAnalysis {
+    /// Remap every source location retained beside HIR-keyed facts.
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for invalidations in self.reactive_invalidations.values_mut() {
+            for invalidation in invalidations {
+                invalidation.location.remap_string_ids(remap);
+            }
+        }
+    }
+
     #[cfg(any(test, feature = "show_borrow_checker"))]
     pub(crate) fn total_state_snapshots(&self) -> usize {
         self.block_entry_states.len()

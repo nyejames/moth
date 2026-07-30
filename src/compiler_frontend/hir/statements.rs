@@ -20,6 +20,7 @@ use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[derive(Debug, Clone)]
@@ -180,4 +181,43 @@ pub enum HirStatementKind {
         /// Local that receives the validated float or fallible carrier.
         result: LocalId,
     },
+}
+
+impl HirStatement {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        self.location.remap_string_ids(remap);
+
+        match &mut self.kind {
+            HirStatementKind::Assign { target, value } => {
+                target.remap_string_ids(remap);
+                value.remap_string_ids(remap);
+            }
+            HirStatementKind::Call { args, .. } => {
+                for argument in args {
+                    argument.remap_string_ids(remap);
+                }
+            }
+            HirStatementKind::Expr(expression) => expression.remap_string_ids(remap),
+            HirStatementKind::PushRuntimeFragment { value, .. }
+            | HirStatementKind::CastOp { source: value, .. }
+            | HirStatementKind::FormatFloat { source: value, .. }
+            | HirStatementKind::ValidateFloat { source: value, .. } => {
+                value.remap_string_ids(remap);
+            }
+            HirStatementKind::MapOp { receiver, args, .. } => {
+                receiver.remap_string_ids(remap);
+                for argument in args {
+                    argument.remap_string_ids(remap);
+                }
+            }
+            HirStatementKind::NumericOp { operands, .. } => match operands {
+                HirNumericOperands::Unary { operand } => operand.remap_string_ids(remap),
+                HirNumericOperands::Binary { left, right } => {
+                    left.remap_string_ids(remap);
+                    right.remap_string_ids(remap);
+                }
+            },
+            HirStatementKind::Drop(_) => {}
+        }
+    }
 }

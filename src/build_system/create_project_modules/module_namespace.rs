@@ -130,8 +130,8 @@ pub(crate) enum ResolvedImport {
     /// `consumer_module_id` is the importing file's owning module inside the active boundary.
     SameModuleSource {
         source_id: SourceId,
+        #[cfg(test)]
         canonical_path: PathBuf,
-        source_kind: SourceFileKind,
         consumer_module_id: ModuleId,
     },
     /// A cross-module target in the active project or package boundary.
@@ -141,12 +141,14 @@ pub(crate) enum ResolvedImport {
     CrossModule {
         provider_module_id: ModuleId,
         consumer_module_id: ModuleId,
+        #[cfg(test)]
         root_file: PathBuf,
     },
     /// A source-backed package facade selected by its registered import prefix.
     SourcePackageSurface {
         consumer_module_id: ModuleId,
         import_prefix: String,
+        #[cfg(test)]
         root_file: PathBuf,
     },
     /// A registered binding-backed package handled by frontend import binding.
@@ -176,7 +178,7 @@ pub(crate) struct ModuleNamespaceSet {
     package_boundary_indexes: SourcePackageBoundaryIndexes,
 }
 
-/// Borrowed directory-project namespace context threaded through reachable discovery.
+/// Borrowed directory-project namespace context used by canonical header-owned discovery.
 ///
 /// The namespace set and project index form one lookup authority: the set resolves boundary-local
 /// identities and the index supplies the project importer's ownership plus canonical IO handles.
@@ -241,28 +243,7 @@ impl<'a> DirectoryImportResolution<'a> {
             .is_some()
     }
 
-    /// Look up the boundary-local `SourceId` and owning `ModuleId` for one canonical path in the
-    /// project boundary.
-    ///
-    /// Used by the reachable traversal to seed the project `SemanticSourceSet` from the entry
-    /// root file. Returns `None` for unrooted sources or paths outside the project index.
-    pub(crate) fn source_id_and_module_for_path(
-        self,
-        canonical_path: &Path,
-    ) -> Option<(SourceId, ModuleId)> {
-        let source_id = self
-            .source_tree_index
-            .source_id_for_canonical_path(canonical_path)?;
-        match self.source_tree_index.source(source_id).ownership() {
-            SourceOwnership::Owned(module_id) => Some((source_id, module_id)),
-            SourceOwnership::Unrooted => None,
-        }
-    }
-
-    /// The project `SourceTreeIndex` carried by this resolution context.
-    ///
-    /// Used by the reachable traversal to build and verify the project `SemanticSourceSet`
-    /// ownership against the central source record table.
+    /// The boundary `SourceTreeIndex` used by canonical module preparation.
     pub(crate) fn source_tree_index(&self) -> &SourceTreeIndex {
         self.source_tree_index
     }
@@ -333,8 +314,8 @@ impl ModuleNamespaceSet {
     /// extensions, resolves source-backed package surfaces, and looks up the import path in
     /// the owning module's namespace. Returns a tagged `ResolvedImport` carrying the canonical
     /// path as the IO handle and the boundary-local `ModuleId` for project graph edges.
-    /// WHY: replaces `resolve_import_to_source_file_with_public_surface_fallback` and the
-    /// filesystem candidate probing it depends on, using only indexed facts.
+    /// WHY: replaces the legacy filesystem source-surface fallback and candidate probing with
+    /// indexed facts.
     pub(crate) fn resolve_import(
         &self,
         provider: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
@@ -410,7 +391,7 @@ impl ModuleNamespaceSet {
             return Ok(ResolvedImport::BindingPackage);
         }
 
-        if let Some((import_prefix, root_file)) = source_package_surface {
+        if let Some((import_prefix, _root_file)) = source_package_surface {
             if namespace_conflicts_with_package_prefix(namespace, &key) {
                 return Err(CompilerDiagnostic::ambiguous_import_target(
                     import_path.clone(),
@@ -421,7 +402,8 @@ impl ModuleNamespaceSet {
             return Ok(ResolvedImport::SourcePackageSurface {
                 consumer_module_id,
                 import_prefix: import_prefix.to_owned(),
-                root_file: root_file.to_path_buf(),
+                #[cfg(test)]
+                root_file: _root_file.to_path_buf(),
             });
         }
 
@@ -917,12 +899,13 @@ fn resolve_entry(
             }
             Ok(ResolvedImport::SameModuleSource {
                 source_id: *source_id,
+                #[cfg(test)]
                 canonical_path: record.canonical_path().to_path_buf(),
-                source_kind: *source_kind,
                 consumer_module_id,
             })
         }
         NamespaceEntry::CrossModule { target_module_id } => {
+            #[cfg(test)]
             let root_file = index
                 .module_identities()
                 .record(*target_module_id)
@@ -931,6 +914,7 @@ fn resolve_entry(
             Ok(ResolvedImport::CrossModule {
                 provider_module_id: *target_module_id,
                 consumer_module_id,
+                #[cfg(test)]
                 root_file,
             })
         }

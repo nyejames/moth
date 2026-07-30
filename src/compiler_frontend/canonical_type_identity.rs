@@ -68,6 +68,9 @@ pub(crate) enum CanonicalTypeIdentity {
     Option(Box<CanonicalTypeIdentity>),
     FallibleCarrier(FallibleCarrierTypeIdentity),
     GenericInstance(GenericInstanceTypeIdentity),
+    /// Artefact-scoped concrete instance of a private nominal, used only by generated requests
+    /// and sidecars. Public-interface validation rejects this variant.
+    ModulePrivateGenericInstance(ModulePrivateGenericInstanceTypeIdentity),
     GenericParameter(ExportedGenericParameterIdentity),
 }
 
@@ -92,6 +95,11 @@ impl CanonicalTypeIdentity {
                 carrier.error().visit(visitor);
             }
             Self::GenericInstance(instance) => {
+                for argument in instance.arguments() {
+                    argument.visit(visitor);
+                }
+            }
+            Self::ModulePrivateGenericInstance(instance) => {
                 for argument in instance.arguments() {
                     argument.visit(visitor);
                 }
@@ -128,6 +136,10 @@ impl ModulePrivateNominalIdentity {
 
     pub(crate) fn category(&self) -> OriginTypeCategory {
         self.category
+    }
+
+    pub(crate) fn module_origin(&self) -> &StableModuleOriginIdentity {
+        &self.module_origin
     }
 
     pub(crate) fn defining_path(&self) -> &str {
@@ -278,6 +290,30 @@ impl FallibleCarrierTypeIdentity {
 pub(crate) struct GenericInstanceTypeIdentity {
     base: OriginTypeId,
     arguments: Box<[CanonicalTypeIdentity]>,
+}
+
+/// Stable artefact-scoped identity for a concrete instance of one private nominal.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct ModulePrivateGenericInstanceTypeIdentity {
+    base: ModulePrivateNominalIdentity,
+    arguments: Box<[CanonicalTypeIdentity]>,
+}
+
+impl ModulePrivateGenericInstanceTypeIdentity {
+    pub(crate) fn new(
+        base: ModulePrivateNominalIdentity,
+        arguments: Box<[CanonicalTypeIdentity]>,
+    ) -> Self {
+        Self { base, arguments }
+    }
+
+    pub(crate) fn base(&self) -> &ModulePrivateNominalIdentity {
+        &self.base
+    }
+
+    pub(crate) fn arguments(&self) -> &[CanonicalTypeIdentity] {
+        &self.arguments
+    }
 }
 
 impl GenericInstanceTypeIdentity {
@@ -833,19 +869,30 @@ fn project_generic_instance(
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
 ) -> Result<CanonicalTypeIdentity, CompilerError> {
-    let base_origin = context
-        .nominal_origins
-        .resolve_nominal_origin(instance.base)
-        .map_err(|error| {
+    let expected_arity = validate_generic_instance_base_arity(instance.base, type_environment)?;
+    let base_type_id = type_environment
+        .type_id_for_nominal_id(instance.base)
+        .ok_or_else(|| {
             CompilerError::compiler_error(format!(
-                "canonical type projection could not resolve a source-nominal origin for \
-                 generic-instance base NominalTypeId({}): {error_msg}",
+                "canonical type projection could not resolve a TypeId for generic-instance base NominalTypeId({})",
                 instance.base.0,
-                error_msg = error.msg
             ))
         })?;
+    let private_base = match type_environment.canonical_identity_for_type_id(base_type_id) {
+        Some(CanonicalTypeIdentity::SourceNominal(origin)) => Some(Ok(origin.clone())),
+        Some(CanonicalTypeIdentity::ModulePrivateNominal(_)) => None,
+        Some(identity) => {
+            return Err(CompilerError::compiler_error(format!(
+                "canonical generic-instance base has non-nominal identity {identity:?}",
+            )));
+        }
+        None => Some(
+            context
+                .nominal_origins
+                .resolve_nominal_origin(instance.base),
+        ),
+    };
 
-    let expected_arity = validate_generic_instance_base_arity(instance.base, type_environment)?;
     if instance.arguments.len() != expected_arity {
         return Err(CompilerError::compiler_error(format!(
             "canonical type projection found a malformed generic-instance arity: \
@@ -863,8 +910,30 @@ fn project_generic_instance(
         projected_arguments.push(projected);
     }
 
-    Ok(CanonicalTypeIdentity::GenericInstance(
-        GenericInstanceTypeIdentity::new(base_origin, projected_arguments.into_boxed_slice()),
+    let arguments = projected_arguments.into_boxed_slice();
+    if let Some(base_origin) = private_base {
+        return Ok(CanonicalTypeIdentity::GenericInstance(
+            GenericInstanceTypeIdentity::new(
+                base_origin.map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "canonical type projection could not resolve a source-nominal origin for generic-instance base NominalTypeId({}): {error_msg}",
+                        instance.base.0,
+                        error_msg = error.msg,
+                    ))
+                })?,
+                arguments,
+            ),
+        ));
+    }
+    let Some(CanonicalTypeIdentity::ModulePrivateNominal(base)) =
+        type_environment.canonical_identity_for_type_id(base_type_id)
+    else {
+        return Err(CompilerError::compiler_error(
+            "canonical private generic-instance base lost its private nominal identity",
+        ));
+    };
+    Ok(CanonicalTypeIdentity::ModulePrivateGenericInstance(
+        ModulePrivateGenericInstanceTypeIdentity::new(base.clone(), arguments),
     ))
 }
 

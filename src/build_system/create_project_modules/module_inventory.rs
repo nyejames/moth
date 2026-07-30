@@ -1,6 +1,6 @@
 //! Directory-project module inventory assembly.
 //!
-//! WHAT: turns every canonical project module graph node into a `DiscoveredModule`
+//! WHAT: turns every canonical project module graph node into a `ModuleCompilationJob`
 //! records carrying their graph-assigned stable module origin and all transitively reachable
 //! input files.
 //! WHY: module inventory is the Stage 0 bridge between the structural graph and parallel frontend
@@ -19,29 +19,23 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 
-use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
+use std::collections::{BTreeSet, VecDeque};
 use std::path::PathBuf;
 
+use super::frontend_orchestration::ModulePreparationContext;
 use super::module_identity::ModuleId;
-use super::module_namespace::DirectoryImportResolution;
-use super::prepared_source::PreparedSourceInput;
+use super::module_namespace::{DirectoryImportResolution, ResolvedImport};
+use super::prepared_module::PreparedModule;
 use super::prepared_source_store::PreparedSourceStore;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
-use super::reachable_file_discovery::{
-    CollectedReachableInputs, ExternalImportDiscoveryState, ProviderFreeDiscoveryFailed,
-    ProviderFreeProjectInventory, ResolvedDependencyEdge, ResolvedSourcePackageImport,
-    assemble_input_files_from_inventory, classify_provider_free_project,
-    collect_reachable_input_files, discover_reachable_source_files_provider_free,
+use super::source_discovery::{
+    ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageImport,
+    StructuralProviderAction, resolve_structural_provider_reference,
 };
-
-/// Minimum number of entry modules before the provider-free path uses Rayon.
-///
-/// WHY: a single module pays the fork/merge overhead without any cross-module work to overlap,
-///      so it stays serial. Multi-entry directory builds are the case the parallel path targets.
-const PROVIDER_FREE_PARALLEL_MIN_MODULES: usize = 2;
+use super::source_tree_index::SourceClassification;
 
 /// One normal entry module seed carrying its graph-assigned `ModuleId` and canonical root file.
 ///
@@ -60,32 +54,47 @@ struct ModuleEntrySeed {
 /// discovery so the compile-wave reorder can match by identity.
 ///
 /// The graph-owned `StableModuleOriginIdentity` is attached once, after reorder, when each draft
-/// is lifted to the consumer-facing [`DiscoveredModule`].
-struct DiscoveredModuleDraft {
+/// is lifted to the consumer-facing [`ModuleCompilationJob`].
+struct ModuleCompilationJobDraft {
     module_id: ModuleId,
     entry_point: PathBuf,
-    input_files: Vec<PreparedSourceInput>,
+    string_table_base_len: usize,
+    prepared: PreparedModule,
+    #[cfg(test)]
+    input_files: Vec<super::prepared_source::PreparedSourceInput>,
 }
 
-/// Entry point, graph-owned stable origin and all collected source files for one discovered
-/// module.
+/// One graph-owned module job with its stable origin and prepared semantic inputs.
 ///
 /// Carries both graph identities through the build-owned scheduling boundary. `ModuleId` remains
 /// the dense project-local job and merge-order key; `StableModuleOriginIdentity` is the portable
 /// semantic identity consumed by the frontend and public interface.
-pub(crate) struct DiscoveredModule {
+pub(crate) struct ModuleCompilationJob {
     /// Dense project-local identity used only by build-system scheduling and result storage.
     pub(crate) module_id: ModuleId,
     /// The graph-assigned cross-build origin identity for this canonical module.
+    #[cfg(test)]
     pub(crate) stable_origin: StableModuleOriginIdentity,
     pub(crate) entry_point: PathBuf,
-    pub(crate) input_files: Vec<PreparedSourceInput>,
+    pub(crate) string_table_base_len: usize,
+    pub(crate) prepared: PreparedModule,
+    #[cfg(test)]
+    pub(crate) input_files: Vec<super::prepared_source::PreparedSourceInput>,
 }
 
-struct DiscoveredModuleBatch {
-    drafts: Vec<DiscoveredModuleDraft>,
+struct ModuleCompilationJobBatch {
+    drafts: Vec<ModuleCompilationJobDraft>,
     resolved_edges: Vec<ResolvedDependencyEdge>,
     source_package_imports: Vec<ResolvedSourcePackageImport>,
+}
+
+/// Immutable Stage 0 owners shared while the serial discovery pass prepares graph modules.
+struct ModuleDiscoveryContext<'a> {
+    project_path_resolver: &'a ProjectPathResolver,
+    style_directives: &'a StyleDirectiveRegistry,
+    directory_import_resolution: DirectoryImportResolution<'a>,
+    project_module_graph: &'a ProjectModuleGraph,
+    source_origin_lookup: &'a FxHashMap<PathBuf, StableModuleOriginIdentity>,
 }
 
 /// Normal entry modules grouped by the populated graph's compile waves.
@@ -93,31 +102,31 @@ struct DiscoveredModuleBatch {
 /// WHAT: owns the wave-preserving data contract between module inventory and directory
 ///       semantic compilation. Each wave holds every canonical module job in one retained graph
 ///       dependency wave, preserving the populated graph's dependency ordering and deterministic
-///       `ModuleId` order. This temporary discovered-job inventory feeds the provider-store
+///       `ModuleId` order. This schedule feeds the provider-store
 ///       scheduler; completed waves publish immutable interfaces before later consumers bind.
 /// WHY: preserving wave boundaries lets the directory compiler execute semantic compilation one
 ///      dependency wave at a time, with Rayon parallelism only within a ready wave. The graph
 ///      owns compile-wave order; this contract is the single owner of that order at the inventory
 ///      boundary so the compiler does not recompute waves or flatten them back into one batch.
-pub(crate) struct ModuleEntryCompileWaves {
-    waves: Vec<Vec<DiscoveredModule>>,
+pub(crate) struct ModuleCompilationSchedule {
+    waves: Vec<Vec<ModuleCompilationJob>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_imports: Vec<ResolvedSourcePackageImport>,
 }
 
-impl ModuleEntryCompileWaves {
+impl ModuleCompilationSchedule {
     /// Read-only access to the compile waves in deterministic graph order.
     ///
     /// Each wave is non-empty and contains every canonical module assigned to that graph wave.
     #[cfg(test)]
-    pub(crate) fn waves(&self) -> &[Vec<DiscoveredModule>] {
+    pub(crate) fn waves(&self) -> &[Vec<ModuleCompilationJob>] {
         &self.waves
     }
 
     pub(crate) fn into_parts(
         self,
     ) -> (
-        Vec<Vec<DiscoveredModule>>,
+        Vec<Vec<ModuleCompilationJob>>,
         Vec<ResolvedDependencyEdge>,
         Vec<ResolvedSourcePackageImport>,
     ) {
@@ -149,7 +158,7 @@ pub(crate) fn discover_all_modules_in_project(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
-) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
@@ -170,7 +179,7 @@ pub(crate) fn discover_all_modules_in_package(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
-) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
@@ -193,8 +202,11 @@ fn discover_all_modules_in_boundary(
     directory_import_resolution: DirectoryImportResolution<'_>,
     require_normal_entry: bool,
     string_table: &mut StringTable,
-) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
+    let source_origin_lookup = project_module_graph
+        .build_source_origin_lookup(directory_import_resolution.source_tree_index())
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     if require_normal_entry && project_module_graph.entry_modules().is_empty() {
         return Err(config_diagnostic_messages(
@@ -207,86 +219,35 @@ fn discover_all_modules_in_boundary(
         ));
     }
 
-    // The shared project-boundary prepared-source store. Every reachable `.moth` source is
-    // read, tokenized and stored at most once across all entry traversals. The store replaces
-    // the per-entry path-keyed `ScannedImportSource` caches.
+    // The shared project-boundary prepared-source store. Every selected `.moth` source is read,
+    // tokenized and prepared at most once across the canonical module inventory.
     let mut prepared_source_store = PreparedSourceStore::new(
         directory_import_resolution
             .source_tree_index()
             .source_count(),
     );
 
-    // Conservative gate: only take the provider-free parallel path when the entire reachable
-    // import graph contains no provider-backed imports and no unsupported non-Moth
-    // extensions. This keeps provider cache/resolution table mutations on the serial path.
-    // WHY: classification populates the shared `PreparedSourceStore`. It records
-    //      `provider_capable_required` and skips the external edge when a provider-backed or
-    //      unsupported package import needs the serial owner, but it never aborts and discards
-    //      the store. The serial fallback reuses the already-prepared store so the lexer never
-    //      runs twice for the same source. Skip classification for the common single-entry case
-    //      because that path stays serial provider-capable anyway.
-    let provider_free_inventory = if seeds.len() >= PROVIDER_FREE_PARALLEL_MIN_MODULES {
-        let entry_paths: Vec<PathBuf> = seeds.iter().map(|seed| seed.entry_path.clone()).collect();
-        classify_provider_free_project(
-            &entry_paths,
-            project_path_resolver,
-            style_directives,
-            &*external_imports.external_packages,
-            &mut prepared_source_store,
-            Some(directory_import_resolution),
-            string_table,
-        )
-        .map_err(|error| error.into_messages(string_table))?
-    } else {
-        ProviderFreeProjectInventory::provider_capable_required()
-    };
-
-    let DiscoveredModuleBatch {
+    let ModuleCompilationJobBatch {
         drafts,
         resolved_edges,
         source_package_imports,
-    } = if !provider_free_inventory.provider_capable_required {
-        match discover_modules_provider_free_parallel(
-            &seeds,
+    } = discover_modules_serial_provider_capable(
+        &seeds,
+        ModuleDiscoveryContext {
             project_path_resolver,
             style_directives,
-            &*external_imports.external_packages,
-            &mut prepared_source_store,
             directory_import_resolution,
-            string_table,
-        ) {
-            Ok(outcome) => outcome,
-            Err(ProviderFreeDiscoveryFailed) => {
-                // Worker-local diagnostics cannot be rendered on the parent string table. Retry on
-                // the serial provider-capable path so the existing Stage 0 diagnostic owner reports
-                // the real filesystem/import failure with stable path identity. The store retains
-                // every already-scanned `.moth` so the lexer never runs twice for the same source.
-                discover_modules_serial_provider_capable(
-                    &seeds,
-                    project_path_resolver,
-                    style_directives,
-                    external_imports,
-                    &mut prepared_source_store,
-                    directory_import_resolution,
-                    string_table,
-                )?
-            }
-        }
-    } else {
-        discover_modules_serial_provider_capable(
-            &seeds,
-            project_path_resolver,
-            style_directives,
-            external_imports,
-            &mut prepared_source_store,
-            directory_import_resolution,
-            string_table,
-        )?
-    };
+            project_module_graph,
+            source_origin_lookup: &source_origin_lookup,
+        },
+        external_imports,
+        &mut prepared_source_store,
+        string_table,
+    )?;
 
     // Insert the resolved dependency edges directly by ModuleId before the graph completes.
-    // Edges are idempotent, so duplicate observations across entry closures collapse without
-    // changing the graph.
+    // Edges are idempotent, so duplicate retained import shells collapse without changing the
+    // graph.
     insert_resolved_dependency_edges(project_module_graph, &resolved_edges, string_table)?;
 
     // Freeze the graph's adjacency into sorted `Vec<ModuleId>` storage before compile waves are
@@ -365,7 +326,7 @@ fn insert_resolved_dependency_edges(
             .add_resolved_dependency_edge(
                 edge.provider_module_id,
                 edge.consumer_module_id,
-                edge.provider.path_location,
+                edge.graph_location,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     }
@@ -385,13 +346,12 @@ fn graph_inventory_mismatch_error(
     CompilerMessages::from_error_ref(CompilerError::compiler_error(reason), string_table)
 }
 
-/// Group discovered module drafts by the populated graph's compile waves and lift each draft to
-/// a `DiscoveredModule` carrying its graph-owned stable origin.
+/// Group module-job drafts by the populated graph's compile waves and attach each stable origin.
 ///
 /// WHAT: iterates the graph's compile waves and groups every discovered job so providers precede
 ///       consumers. Drafts are keyed by their
 ///       graph-assigned `ModuleId`, so the grouping matches by identity rather than re-deriving
-///       identity from a root path. Each lifted `DiscoveredModule` carries the exact
+///       identity from a root path. Each lifted `ModuleCompilationJob` carries the exact
 ///       `StableModuleOriginIdentity` the graph assigned to that module.
 /// WHY: discovery seeds entries in `ModuleId` order and resolves direct dependency edges. The
 ///      dependency-ordered wave order is known after those edges enter the graph. The graph and
@@ -402,11 +362,11 @@ fn graph_inventory_mismatch_error(
 ///      kind of internal failure reported by `compile_waves`.
 fn order_discovered_modules_by_compile_waves(
     project_module_graph: &ProjectModuleGraph,
-    drafts: Vec<DiscoveredModuleDraft>,
+    drafts: Vec<ModuleCompilationJobDraft>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_imports: Vec<ResolvedSourcePackageImport>,
     string_table: &mut StringTable,
-) -> Result<ModuleEntryCompileWaves, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let waves = project_module_graph
         .compile_waves()
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
@@ -414,7 +374,8 @@ fn order_discovered_modules_by_compile_waves(
     // Index discovered drafts by their graph-assigned `ModuleId`. A duplicate `ModuleId` means
     // two inventories claim the same graph node, which breaks the one-to-one correspondence the
     // wave order depends on; report it as an internal failure instead of silently dropping one.
-    let mut draft_by_module_id: FxHashMap<ModuleId, DiscoveredModuleDraft> = FxHashMap::default();
+    let mut draft_by_module_id: FxHashMap<ModuleId, ModuleCompilationJobDraft> =
+        FxHashMap::default();
     for draft in drafts {
         let module_id = draft.module_id;
         if draft_by_module_id.insert(module_id, draft).is_some() {
@@ -446,14 +407,19 @@ fn order_discovered_modules_by_compile_waves(
                     ));
                 }
             };
+            #[cfg(test)]
             let stable_origin = project_module_graph
                 .node(*module_id)
                 .stable_origin()
                 .clone();
-            wave_modules.push(DiscoveredModule {
+            wave_modules.push(ModuleCompilationJob {
                 module_id: *module_id,
+                #[cfg(test)]
                 stable_origin,
                 entry_point: draft.entry_point,
+                string_table_base_len: draft.string_table_base_len,
+                prepared: draft.prepared,
+                #[cfg(test)]
                 input_files: draft.input_files,
             });
         }
@@ -473,145 +439,207 @@ fn order_discovered_modules_by_compile_waves(
         ));
     }
 
-    Ok(ModuleEntryCompileWaves {
+    Ok(ModuleCompilationSchedule {
         waves: grouped_waves,
         provider_bindings,
         source_package_imports,
     })
 }
 
-/// Serial provider-capable fallback.
+/// Prepare every graph module through the canonical header-owned Stage 0 path.
 ///
-/// WHAT: the original Stage 0 module loop. It mutates `ExternalImportDiscoveryState` and the
-///       shared `StringTable`, so it is kept serial and is used whenever the project is not
-///       proven provider-free. It also retains direct dependency edges observed during each
-///       entry's traversal so the graph can record provider-before-consumer order.
+/// Each source is read and tokenized through the boundary store, then its retained header import
+/// shells drive indexed reachability and provider resolution. The loop stays serial because
+/// provider discovery mutates build-scoped registries; semantic compilation remains wave-parallel.
 fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
-    project_path_resolver: &ProjectPathResolver,
-    style_directives: &StyleDirectiveRegistry,
+    context: ModuleDiscoveryContext<'_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     prepared_source_store: &mut PreparedSourceStore,
-    directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
-) -> Result<DiscoveredModuleBatch, CompilerMessages> {
+) -> Result<ModuleCompilationJobBatch, CompilerMessages> {
+    let ModuleDiscoveryContext {
+        project_path_resolver,
+        style_directives,
+        directory_import_resolution,
+        project_module_graph,
+        source_origin_lookup,
+    } = context;
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
     let mut source_package_imports = Vec::new();
 
     for seed in seeds {
-        let CollectedReachableInputs {
-            input_files,
-            resolved_edges: entry_edges,
-            source_package_imports: entry_package_imports,
-        } = collect_reachable_input_files(
-            &seed.entry_path,
-            project_path_resolver,
+        let module_edge_start = resolved_edges.len();
+        let source_tree_index = directory_import_resolution.source_tree_index();
+        let candidate_source_ids = source_tree_index
+            .owned_source_ids(seed.module_id)
+            .iter()
+            .copied()
+            .filter(|source_id| {
+                matches!(
+                    source_tree_index.source(*source_id).classification(),
+                    SourceClassification::CompilerSemantic(_)
+                )
+            })
+            .collect::<Vec<_>>();
+        let source_order = candidate_source_ids
+            .iter()
+            .enumerate()
+            .map(|(order, source_id)| (*source_id, order))
+            .collect::<FxHashMap<_, _>>();
+        let entry_source_id = source_tree_index
+            .source_id_for_canonical_path(&seed.entry_path)
+            .ok_or_else(|| {
+                graph_inventory_mismatch_error(
+                    format!(
+                        "ModuleId {} root is absent from the source index",
+                        seed.module_id.index()
+                    ),
+                    string_table,
+                )
+            })?;
+
+        let fork = string_table.fork_for_module();
+        let (local_string_table, string_table_base_len) = fork.into_parts();
+        let preparation_context = ModulePreparationContext {
             style_directives,
-            external_imports,
-            Some(prepared_source_store),
-            Some(directory_import_resolution),
-            string_table,
+            project_path_resolver: Some(project_path_resolver.clone()),
+        };
+        let stable_origin = project_module_graph
+            .node(seed.module_id)
+            .stable_origin()
+            .clone();
+        let mut syntax = preparation_context.begin_syntax_discovery(
+            stable_origin,
+            source_origin_lookup,
+            candidate_source_ids
+                .iter()
+                .map(|source_id| source_tree_index.source(*source_id).canonical_path()),
+            &seed.entry_path,
+            local_string_table,
         )?;
 
-        drafts.push(DiscoveredModuleDraft {
-            module_id: seed.module_id,
-            entry_point: seed.entry_path.clone(),
-            input_files,
-        });
-        resolved_edges.extend(entry_edges);
-        source_package_imports.extend(entry_package_imports);
-    }
-
-    Ok(DiscoveredModuleBatch {
-        drafts,
-        resolved_edges,
-        source_package_imports,
-    })
-}
-
-/// Parallel provider-free module discovery.
-///
-/// WHAT: discovers each module's reachable files in a separate Rayon worker using a worker-local
-///       `StringTable`; the shared `StringTable` is only used again when assembling
-///       `PreparedSourceInput` values on the main thread. Workers also return direct dependency
-///       edges whose boundary-local IDs and parent-valid source locations need no remapping.
-/// WHY: provider-free BFS is embarrassingly parallel across entry points and does not need the
-///      mutable provider state that makes provider-capable discovery serial.
-fn discover_modules_provider_free_parallel(
-    seeds: &[ModuleEntrySeed],
-    project_path_resolver: &ProjectPathResolver,
-    style_directives: &StyleDirectiveRegistry,
-    external_packages: &crate::compiler_frontend::external_packages::ExternalPackageRegistry,
-    prepared_source_store: &mut PreparedSourceStore,
-    directory_import_resolution: DirectoryImportResolution<'_>,
-    string_table: &mut StringTable,
-) -> Result<DiscoveredModuleBatch, ProviderFreeDiscoveryFailed> {
-    // Phase 1: Run provider-free BFS for each entry seed in parallel. Each worker forks a local
-    // `StringTable` from the parent so classification's retained tokens (parent-valid StringIds)
-    // stay interpretable without re-tokenizing. Workers read from the shared `PreparedSourceStore`
-    // (populated by classification) without mutating it.
-    let store_ref: &PreparedSourceStore = &*prepared_source_store;
-    let fork_source = string_table.fork_source();
-    let mut indexed_outcomes: Vec<(
-        usize,
-        super::reachable_file_discovery::ReachableSourceInventory,
-        Vec<ResolvedDependencyEdge>,
-        Vec<ResolvedSourcePackageImport>,
-    )> = seeds
-        .par_iter()
-        .enumerate()
-        .map(|(index, seed)| {
-            let mut local_string_table = fork_source.fork_for_module().into_parts().0;
-            let discovery = discover_reachable_source_files_provider_free(
-                &seed.entry_path,
-                project_path_resolver,
+        let mut queued = BTreeSet::new();
+        let mut queue = VecDeque::from([entry_source_id]);
+        #[cfg(test)]
+        let mut input_files = Vec::new();
+        queued.insert(entry_source_id);
+        while let Some(source_id) = queue.pop_front() {
+            let input = match prepared_source_store.prepare_or_get_project_input(
+                source_id,
+                source_tree_index,
                 style_directives,
-                external_packages,
-                store_ref,
-                directory_import_resolution,
-                &mut local_string_table,
-            )
-            .map_err(|_| ProviderFreeDiscoveryFailed)?;
+                syntax.string_table_mut(),
+            ) {
+                Ok(input) => input,
+                Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
+            };
+            let order = source_order.get(&source_id).copied().ok_or_else(|| {
+                graph_inventory_mismatch_error(
+                    format!(
+                        "ModuleId {} reached source ID {} outside its owned source set",
+                        seed.module_id.index(),
+                        source_id.index()
+                    ),
+                    syntax.string_table_mut(),
+                )
+            })?;
+            let providers = syntax.prepare_source(order, &input)?;
+            #[cfg(test)]
+            input_files.push(input.clone());
+            for provider in providers {
+                let action = match resolve_structural_provider_reference(
+                    &provider,
+                    input.source_path(),
+                    project_path_resolver,
+                    external_imports,
+                    directory_import_resolution,
+                    syntax.string_table_mut(),
+                ) {
+                    Ok(action) => action,
+                    Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
+                };
+                if matches!(action, StructuralProviderAction::Handled) {
+                    continue;
+                }
 
-            Ok((
-                index,
-                discovery.inventory,
-                discovery.resolved_edges,
-                discovery.source_package_imports,
-            ))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+                let resolved = directory_import_resolution
+                    .resolve_import(&provider, input.source_path(), syntax.string_table_mut())
+                    .map_err(|diagnostic| {
+                        CompilerMessages::from_diagnostics(
+                            vec![diagnostic],
+                            syntax.string_table_mut().clone(),
+                        )
+                    })?;
+                match resolved {
+                    ResolvedImport::SameModuleSource {
+                        source_id: target_source_id,
+                        consumer_module_id,
+                        ..
+                    } => {
+                        if consumer_module_id != seed.module_id {
+                            return Err(graph_inventory_mismatch_error(
+                                "Same-module import resolved to another module".to_owned(),
+                                syntax.string_table_mut(),
+                            ));
+                        }
+                        if queued.insert(target_source_id) {
+                            queue.push_back(target_source_id);
+                        }
+                    }
+                    ResolvedImport::CrossModule {
+                        provider_module_id,
+                        consumer_module_id,
+                        ..
+                    } => resolved_edges.push(ResolvedDependencyEdge {
+                        provider_module_id,
+                        consumer_module_id,
+                        graph_location: provider.path_location.clone(),
+                        provider: provider.clone(),
+                    }),
+                    ResolvedImport::SourcePackageSurface {
+                        consumer_module_id,
+                        import_prefix,
+                        ..
+                    } => source_package_imports.push(ResolvedSourcePackageImport {
+                        consumer_module_id,
+                        import_prefix,
+                        provider: provider.clone(),
+                    }),
+                    ResolvedImport::BindingPackage => {}
+                }
+            }
+        }
+        let prepared = syntax.finish()?;
+        let graph_location_remap =
+            string_table.merge_delta_from(&prepared.string_table, string_table_base_len);
+        for edge in &mut resolved_edges[module_edge_start..] {
+            edge.graph_location.remap_string_ids(&graph_location_remap);
+        }
+        #[cfg(test)]
+        input_files.sort_by_key(|input| {
+            source_order
+                .get(
+                    &source_tree_index
+                        .source_id_for_canonical_path(input.source_path())
+                        .expect("a prepared test input must retain its indexed canonical path"),
+                )
+                .copied()
+                .expect("a prepared test input must belong to the module source order")
+        });
 
-    // Deterministic ordering: seeds are created in graph-assigned ModuleId order, so restoring
-    // their original indexes restores ModuleId order regardless of worker completion order.
-    indexed_outcomes.sort_by_key(|(index, _, _, _)| *index);
-
-    // Phase 2: Assemble `PreparedSourceInput` values serially on the main thread from the shared
-    // store. The immutable worker borrows have ended, so the store can be mutably reborrowed for
-    // lazy `.mtf`/`.md` preparation during assembly.
-    let mut drafts = Vec::with_capacity(seeds.len());
-    let mut resolved_edges = Vec::new();
-    let mut source_package_imports = Vec::new();
-    for (index, inventory, entry_edges, entry_package_imports) in indexed_outcomes {
-        let input_files = assemble_input_files_from_inventory(
-            inventory,
-            Some(prepared_source_store),
-            Some(directory_import_resolution),
-            string_table,
-        )
-        .map_err(|_| ProviderFreeDiscoveryFailed)?;
-        let seed = &seeds[index];
-        drafts.push(DiscoveredModuleDraft {
+        drafts.push(ModuleCompilationJobDraft {
             module_id: seed.module_id,
             entry_point: seed.entry_path.clone(),
+            string_table_base_len,
+            prepared,
+            #[cfg(test)]
             input_files,
         });
-        resolved_edges.extend(entry_edges);
-        source_package_imports.extend(entry_package_imports);
     }
 
-    Ok(DiscoveredModuleBatch {
+    Ok(ModuleCompilationJobBatch {
         drafts,
         resolved_edges,
         source_package_imports,

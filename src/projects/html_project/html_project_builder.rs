@@ -29,7 +29,9 @@ use crate::projects::html_project::external_js::js_import_provider::JsExternalIm
 use crate::projects::html_project::external_js::runtime_assets::emit_external_js_runtime_assets;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
 use crate::projects::html_project::external_js::runtime_glue::emit_build_runtime_modules;
-use crate::projects::html_project::js_path::{compile_html_module_js, html_output_path};
+use crate::projects::html_project::js_path::{
+    HtmlJsCompileInput, compile_html_module_js, html_output_path,
+};
 use crate::projects::html_project::path_policy::HtmlEntryPathPlan;
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use crate::projects::html_project::tracked_assets::{
@@ -469,15 +471,17 @@ impl HtmlProjectBuilder {
             Ok(CompiledHtmlModuleArtifacts::from_wasm(compiled_wasm))
         } else {
             let compiled_js = compile_html_module_js(
-                module,
-                external_imports,
-                linked_modules,
-                source_function_names,
-                module_private_function_names,
-                generated_function_names,
-                &compile_input,
+                HtmlJsCompileInput {
+                    module,
+                    external_imports,
+                    linked_modules,
+                    source_function_names,
+                    module_private_function_names,
+                    generated_function_names,
+                    compile_input: &compile_input,
+                    output_path: logical_html_output_path.to_path_buf(),
+                },
                 string_table,
-                logical_html_output_path.to_path_buf(),
             )?;
             Ok(CompiledHtmlModuleArtifacts {
                 output_files: compiled_js.output_files,

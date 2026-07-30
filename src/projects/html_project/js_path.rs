@@ -62,36 +62,51 @@ pub(crate) struct CompiledHtmlJsModule {
     pub html_output_path: PathBuf,
 }
 
-/// Compiles one module through the JS-only HTML builder path.
-///
-/// WHAT: lowers HIR to JS and embeds the JS with runtime slot hydration into HTML.
-/// WHY: this preserves existing builder behavior when `--html-wasm` is not enabled.
-pub(crate) fn compile_html_module_js(
-    module: &Module,
-    external_imports: &[ModuleExternalImport],
-    linked_modules: &[ProjectLinkedModule<'_>],
-    source_function_names: Arc<
+/// Complete JS-only compilation input for one entry and its linked module selection.
+pub(crate) struct HtmlJsCompileInput<'a> {
+    pub(crate) module: &'a Module,
+    pub(crate) external_imports: &'a [ModuleExternalImport],
+    pub(crate) linked_modules: &'a [ProjectLinkedModule<'a>],
+    pub(crate) source_function_names: Arc<
         std::collections::HashMap<
             crate::compiler_frontend::semantic_identity::OriginFunctionId,
             String,
         >,
     >,
-    module_private_function_names: Arc<
+    pub(crate) module_private_function_names: Arc<
         std::collections::HashMap<
             crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
             String,
         >,
     >,
-    generated_function_names: Arc<
+    pub(crate) generated_function_names: Arc<
         std::collections::HashMap<
             crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
             String,
         >,
     >,
-    input: &HtmlModuleCompileInput<'_>,
+    pub(crate) compile_input: &'a HtmlModuleCompileInput<'a>,
+    pub(crate) output_path: PathBuf,
+}
+
+/// Compiles one module through the JS-only HTML builder path.
+///
+/// WHAT: lowers HIR to JS and embeds the JS with runtime slot hydration into HTML.
+/// WHY: this preserves existing builder behavior when `--html-wasm` is not enabled.
+pub(crate) fn compile_html_module_js(
+    input: HtmlJsCompileInput<'_>,
     string_table: &mut StringTable,
-    output_path: PathBuf,
 ) -> Result<CompiledHtmlJsModule, CompilerMessages> {
+    let HtmlJsCompileInput {
+        module,
+        external_imports,
+        linked_modules,
+        source_function_names,
+        module_private_function_names,
+        generated_function_names,
+        compile_input: input,
+        output_path,
+    } = input;
     let js_lowering_config = JsLoweringConfig::html_page_bundle(
         input.release_build,
         Arc::clone(&input.external_package_registry),

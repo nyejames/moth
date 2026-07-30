@@ -156,6 +156,19 @@ impl HirModule {
     }
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for block in &mut self.blocks {
+            block.remap_string_ids(remap);
+        }
+
+        for choice in &mut self.choices {
+            for variant in &mut choice.variants {
+                variant.name = remap.get(variant.name);
+                for field in &mut variant.fields {
+                    field.name = remap.get(field.name);
+                }
+            }
+        }
+
         self.side_table.remap_string_ids(remap);
         self.const_facts.remap_string_ids(remap);
     }

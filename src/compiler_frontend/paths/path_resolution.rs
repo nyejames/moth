@@ -1,4 +1,4 @@
-//! Project-aware path resolution and public-surface fallback.
+//! Project-aware compile-time path and single-file import resolution.
 //!
 //! `ProjectPathResolver` keeps the public resolution surface for Stage 0, headers, AST folding,
 //! and builder-facing path tracking. The data contracts, module-root scanning, and path
@@ -9,8 +9,7 @@ use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, ImportDiagnosticKind, InvalidCompileTimePathReason,
-    InvalidConfigReason, InvalidImportPathReason,
+    CompilerDiagnostic, InvalidCompileTimePathReason, InvalidImportPathReason,
 };
 use crate::compiler_frontend::paths::compile_time_paths::{
     CompileTimePath, CompileTimePathBase, CompileTimePathKind, CompileTimePathResolutionError,
@@ -31,19 +30,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Controls which import roots are acceptable for a given compilation context.
-///
-/// WHAT: determines whether relative, entry-root fallback, and project-local imports are allowed.
-/// WHY: config files may only import from Core or Builder packages,
-///      while normal modules can use all import roots.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ImportRootPolicy {
-    /// All import roots are allowed (normal project mode).
-    Normal,
-    /// Only Core or Builder source-backed and binding-backed packages are allowed (config mode).
-    SourceAndBindingPackagesOnly,
-}
-
 /// Concrete source-file import selected by path resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedImportFile {
@@ -61,8 +47,6 @@ pub(crate) struct ProjectPathResolver {
     source_package_roots: PreparedSourcePackageRoots,
     /// Module roots prepared by Stage 0. Resolver construction never discovers them.
     module_roots: ModuleRootTable,
-    /// Import root policy enforced during import resolution.
-    import_root_policy: ImportRootPolicy,
     /// Builder-supported source file kinds available for this project.
     source_file_kinds: SourceFileKindRegistry,
 }
@@ -100,17 +84,8 @@ impl ProjectPathResolver {
             entry_root,
             source_package_roots,
             module_roots,
-            import_root_policy: ImportRootPolicy::Normal,
             source_file_kinds: source_file_kinds.clone(),
         })
-    }
-
-    /// Set the import root policy for this resolver.
-    ///
-    /// WHY: config files restrict imports to Core or Builder packages only.
-    pub(crate) fn with_import_root_policy(mut self, policy: ImportRootPolicy) -> Self {
-        self.import_root_policy = policy;
-        self
     }
 
     /// Derive a resolver scoped to one independently compiled source-package boundary.
@@ -279,107 +254,6 @@ impl ProjectPathResolver {
         })
     }
 
-    /// WHAT: resolves an import path with public-surface fallback while preserving source kind.
-    /// WHY: Stage 0 needs source kind for implementation files and Moth kind for root files.
-    pub(crate) fn resolve_import_to_source_file_with_public_surface_fallback(
-        &self,
-        import_path: &InternedPath,
-        importer_file: &Path,
-        string_table: &mut StringTable,
-    ) -> Result<ResolvedImportFile, ImportPathResolutionError> {
-        match self.resolve_import_to_source_file(import_path, importer_file, string_table) {
-            Ok(resolved) => Ok(resolved),
-            Err(original_error) => {
-                if !is_missing_import_target_error(&original_error) {
-                    return Err(original_error);
-                }
-
-                if let Some(root_file) =
-                    self.resolve_source_package_public_surface(import_path, string_table)
-                {
-                    Ok(ResolvedImportFile {
-                        path: root_file,
-                        kind: SourceFileKind::Moth,
-                    })
-                } else {
-                    if self.import_root_policy == ImportRootPolicy::SourceAndBindingPackagesOnly {
-                        return Err(original_error);
-                    }
-
-                    match self.resolve_module_root_public_surface_fallback(
-                        import_path,
-                        importer_file,
-                        string_table,
-                    ) {
-                        Ok(Some(root_file)) => Ok(ResolvedImportFile {
-                            path: root_file,
-                            kind: SourceFileKind::Moth,
-                        }),
-                        Ok(None) => Err(original_error),
-                        Err(diagnostic_error) => Err(diagnostic_error),
-                    }
-                }
-            }
-        }
-    }
-
-    /// WHAT: checks whether an import path targets a source-backed package and returns its root file.
-    fn resolve_source_package_public_surface(
-        &self,
-        import_path: &InternedPath,
-        string_table: &StringTable,
-    ) -> Option<PathBuf> {
-        let first_component = import_path.as_components().first()?;
-        let prefix = string_table.resolve(*first_component);
-        self.source_package_roots.root_files().get(prefix).cloned()
-    }
-
-    /// WHAT: checks whether an import path targets a regular module root and returns its prepared
-    /// root file.
-    /// WHY: regular module roots (under the entry root) use their prepared root file as the
-    ///      outward-facing surface. Plain folder imports resolve to it after normal file lookup.
-    fn resolve_module_root_public_surface_fallback(
-        &self,
-        import_path: &InternedPath,
-        importer_file: &Path,
-        string_table: &mut StringTable,
-    ) -> Result<Option<PathBuf>, ImportPathResolutionError> {
-        let (_, filesystem_base) = self
-            .resolve_path_base(import_path, importer_file, string_table)
-            .map_err(ImportPathResolutionError::from)?;
-
-        let normalized = join_and_normalize_path(&filesystem_base, import_path, string_table);
-
-        // Walk up from the normalized path itself to find the nearest module root.
-        // WHY: a plain folder import like `@helper` normalizes to `.../helper`; we must check
-        //      `helper/` itself as a module root before walking to its parents.
-        let mut current = normalized.clone();
-        loop {
-            // Canonicalize before lookup because Stage 0 stores canonical module-root paths.
-            // On macOS, temp directories are under /var which symlinks to /private/var,
-            // so non-canonical paths won't match canonicalized module roots.
-            let lookup_current = fs::canonicalize(&current).unwrap_or_else(|_| current.clone());
-
-            if let Some(root_path) = self.module_root_file_for_directory(&lookup_current) {
-                let canonical_importer =
-                    fs::canonicalize(importer_file).unwrap_or_else(|_| importer_file.to_path_buf());
-                let importer_root = self.module_root_for_file(&canonical_importer);
-
-                // Same-module imports do not need public-surface fallback.
-                if importer_root.as_ref() == Some(&lookup_current) {
-                    return Ok(None);
-                }
-
-                return Ok(Some(root_path));
-            }
-            if !current.pop() {
-                break;
-            }
-        }
-
-        Ok(None)
-    }
-
     /// WHAT: resolves one import path to both a typed compile-time path and a canonical file path.
     /// WHY: imports use the same resolution model as general path literals, but additionally
     ///      apply `.moth` extension fallback logic. Returns both representations so callers
@@ -419,25 +293,6 @@ impl ProjectPathResolver {
 
         let (base_kind, filesystem_base) =
             self.resolve_path_base(import_path, importer_file, string_table)?;
-
-        // Enforce import root policy for config-mode restrictions.
-        if self.import_root_policy == ImportRootPolicy::SourceAndBindingPackagesOnly {
-            match base_kind {
-                CompileTimePathBase::RelativeToFile
-                    if self.importer_is_inside_source_package(importer_file) => {}
-                CompileTimePathBase::RelativeToFile | CompileTimePathBase::EntryRoot => {
-                    let location = SourceLocation::from_path(importer_file, string_table);
-                    return Err(ImportPathResolutionError::Diagnostic(Box::new(
-                        CompilerDiagnostic::invalid_config_reason(
-                            None,
-                            InvalidConfigReason::ConfigImportRootViolation,
-                            location,
-                        ),
-                    )));
-                }
-                CompileTimePathBase::SourcePackageRoot => {}
-            }
-        }
 
         // Source-backed package roots already include the prefix directory, so skip the first
         // component when joining to avoid double-prefixing (e.g. `lib/helper/helper/...`).
@@ -536,19 +391,6 @@ impl ProjectPathResolver {
         let first_component = import_path.as_components().first()?;
         let segment = string_table.resolve(*first_component);
         self.source_package_roots.roots().get(segment).cloned()
-    }
-
-    /// WHAT: checks whether a file already admitted to config parsing belongs to a source-backed package.
-    /// WHY: `config.moth` cannot use relative imports, but builder/core source-backed package roots often
-    /// re-export support declarations through relative imports inside the package root.
-    fn importer_is_inside_source_package(&self, importer_file: &Path) -> bool {
-        let canonical_importer =
-            fs::canonicalize(importer_file).unwrap_or_else(|_| importer_file.to_path_buf());
-
-        self.source_package_roots
-            .roots()
-            .values()
-            .any(|package_root| canonical_importer.starts_with(package_root))
     }
 
     // -----------------------------------------------------------------------
@@ -714,17 +556,6 @@ fn explicit_source_extension(
     }
 
     None
-}
-
-fn is_missing_import_target_error(error: &ImportPathResolutionError) -> bool {
-    matches!(
-        error,
-        ImportPathResolutionError::Diagnostic(diagnostic)
-            if matches!(
-                diagnostic.kind,
-                DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget)
-            )
-    )
 }
 
 fn existing_import_candidates(candidates: &[ImportCandidate]) -> Vec<&ImportCandidate> {

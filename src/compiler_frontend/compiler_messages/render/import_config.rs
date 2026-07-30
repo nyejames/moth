@@ -23,11 +23,11 @@ pub(crate) fn invalid_config_message(
                 "Duplicate config key found. Each config key must be unique.".to_owned()
             }
         }
-        InvalidConfigReason::ConfigImportRootViolation => {
-            "Config files may only import from Core or Builder packages.".to_owned()
+        InvalidConfigReason::ConfigImportUnsupported => {
+            "`config.moth` is self-contained and does not support imports.".to_owned()
         }
         InvalidConfigReason::FunctionUnsupported => {
-            "`config.moth` does not support user-defined functions. Use known setting declarations plus import/type support declarations only.".to_owned()
+            "`config.moth` does not support user-defined functions. Use earlier private helper constants for reusable folded values.".to_owned()
         }
         InvalidConfigReason::TraitDeclarationUnsupported => {
             "`config.moth` does not support trait declarations. Use ordinary source files for trait contracts.".to_owned()

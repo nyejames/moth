@@ -8,34 +8,51 @@
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::emission::AstEmitter;
+use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_const_template;
 use crate::compiler_frontend::ast::module_ast::environment::{
-    AstModuleEnvironment, AstModuleLookups, DeclarationSemanticTable, TopLevelDeclarationTable,
+    AstEnvironmentInput, AstModuleEnvironment, AstModuleEnvironmentBuilder, AstModuleLookups,
+    DeclarationSemanticTable, ResolvedPublicTraitRoot, TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::ast::module_ast::finalization::AstFinalizer;
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
+use crate::compiler_frontend::ast::statements::functions::{
+    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAnnotation,
 };
 use crate::compiler_frontend::ast::{AstBuildContext, AstBuildResult, AstImportedFunctionContract};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTraitIdentity, CanonicalTypeIdentity,
+    ExportedGenericParameterIdentity, ExternalOpaqueTypeIdentity, GenericDeclarationOrigin,
     ModulePrivateNominalIdentity, ModulePrivateTraitIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
-    ChoiceTypeDefinition, StructTypeDefinition, TypeDefinition,
+    ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
+    StructTypeDefinition, TypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::generic_parameters::{
+    GenericParameter, GenericParameterList, TypeParameterId,
+};
+use crate::compiler_frontend::datatypes::ids::{
+    BuiltinTypeConstructor, BuiltinTypeKey, FunctionTypeKey, GenericParameterId, NominalTypeId,
+    TypeConstructor, TypeId,
+};
+use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::{
+    CanonicalBindingSymbolIdentity, ExternalPackageRegistry,
+};
+use crate::compiler_frontend::folded_value::PublicConstTemplate;
 use crate::compiler_frontend::headers::import_environment::{
-    HeaderImportEnvironment, SourceFunctionTarget,
+    FileVisibility, HeaderImportEnvironment, ImportedFunctionContract, SourceDeclarationTarget,
+    SourceFunctionTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
@@ -47,13 +64,21 @@ use crate::compiler_frontend::public_call_summary::{
     PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
     PublicCallTransferEffect, PublicCallTransferEligibility,
 };
+use crate::compiler_frontend::public_interface::{
+    PublicDeclarationRecord, PublicDeclarationSemantics, PublicEvidenceRecord,
+    PublicSemanticInterface,
+};
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    ModuleRootRole, OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId,
+    ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeCategory,
+    OriginTypeId,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, PathTokenItem, SourceLocation, Token, TokenKind,
+};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::environment::{
     TraitEvidenceKind, TraitRequirementEvidence,
@@ -62,7 +87,8 @@ use crate::compiler_frontend::traits::evidence::{
     TraitEvidenceDefinition, TraitEvidenceEnvironment,
 };
 use crate::compiler_frontend::traits::ids::TraitEvidenceId;
-use rustc_hash::FxHashMap;
+use crate::compiler_frontend::value_mode::ValueMode;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -78,9 +104,1449 @@ pub(crate) struct MaterialisedGenericAst {
     pub(crate) instance_path: InternedPath,
 }
 
-/// Self-contained immutable semantic context owned by one successful declaring module.
+/// Active build services and requester facts for one published generic materialisation.
+///
+/// The published context owns only stable declaration artefacts. Build-lifetime registries,
+/// source-path folding policy and the requester-local evidence environment enter through this
+/// transient input and are never retained by successful module metadata.
+pub(crate) struct ModuleMaterialisationInput<'a> {
+    pub(crate) identity: &'a GeneratedFunctionIdentity,
+    pub(crate) requester_context: &'a ModuleMaterialisationPreparation,
+    pub(crate) requester_call_location: &'a SourceLocation,
+    pub(crate) external_package_registry: &'a ExternalPackageRegistry,
+    pub(crate) style_directives: &'a StyleDirectiveRegistry,
+    pub(crate) build_profile: FrontendBuildProfile,
+    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
+    pub(crate) template_const_loop_iteration_limit: usize,
+}
+
+/// Owned token stream retained by one generic declaration artefact.
+///
+/// WHAT: preserves the already-tokenized body with owned strings and portable path components.
+/// WHY: successful metadata must not retain `StringId`, `InternedPath`, `FileId`, filesystem
+/// paths, or another handle into the declaring module's token arena. Materialisation interns this
+/// syntax into its fresh generated-local string table without running tokenization again.
+#[derive(Clone)]
+struct StableBodySyntax {
+    source_path: Box<[String]>,
+    tokens: Box<[StableToken]>,
+}
+
+#[derive(Clone)]
+struct StableToken {
+    kind: StableTokenKind,
+    location: StableSourceLocation,
+}
+
+#[derive(Clone)]
+struct StableSourceLocation {
+    scope: Box<[String]>,
+    start: crate::compiler_frontend::tokenizer::tokens::CharPosition,
+    end: crate::compiler_frontend::tokenizer::tokens::CharPosition,
+}
+
+#[derive(Clone)]
+struct StablePathTokenItem {
+    path: Box<[String]>,
+    alias: Option<String>,
+    path_location: StableSourceLocation,
+    alias_location: Option<StableSourceLocation>,
+    from_grouped: bool,
+}
+
+#[derive(Clone)]
+enum StableTokenKind {
+    Plain(StablePlainTokenKind),
+    Symbol(String),
+    StyleDirective(String),
+    StringSliceLiteral(String),
+    Path(Box<[StablePathTokenItem]>),
+    NumericLiteral(StableNumericLiteral),
+    CharLiteral(char),
+    RawStringLiteral(String),
+    BoolLiteral(bool),
+}
+
+#[derive(Clone)]
+struct StableNumericLiteral {
+    sign: crate::compiler_frontend::numeric_text::token::NumericLiteralSign,
+    source_text: String,
+    normalized_text: String,
+    kind: crate::compiler_frontend::numeric_text::token::NumericLiteralKind,
+    digit_count: u32,
+    fractional_digit_count: u32,
+    exponent_digit_count: u32,
+    exponent_sign: crate::compiler_frontend::numeric_text::token::NumericExponentSign,
+}
+
+#[derive(Clone, Copy)]
+enum StablePlainTokenKind {
+    ModuleStart,
+    Eof,
+    Import,
+    Export,
+    Hash,
+    Reactive,
+    Arrow,
+    OpenCurly,
+    CloseCurly,
+    TypeParameterBracket,
+    Newline,
+    End,
+    StartTemplateBody,
+    Comma,
+    Dot,
+    Colon,
+    DoubleColon,
+    Assign,
+    This,
+    Must,
+    TraitThis,
+    OpenParenthesis,
+    CloseParenthesis,
+    As,
+    Type,
+    Of,
+    Variadic,
+    Mutable,
+    DatatypeNone,
+    NoneLiteral,
+    DatatypeInt,
+    DatatypeFloat,
+    DatatypeBool,
+    DatatypeTrue,
+    DatatypeFalse,
+    DatatypeString,
+    DatatypeChar,
+    Bang,
+    QuestionMark,
+    Negative,
+    Exponent,
+    Multiply,
+    Divide,
+    Modulus,
+    IntDivide,
+    ExponentAssign,
+    MultiplyAssign,
+    DivideAssign,
+    ModulusAssign,
+    IntDivideAssign,
+    Add,
+    Subtract,
+    AddAssign,
+    SubtractAssign,
+    Not,
+    Is,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+    And,
+    Or,
+    If,
+    Else,
+    Return,
+    ReturnBang,
+    Catch,
+    Then,
+    Block,
+    Checked,
+    Async,
+    Cast,
+    CastBang,
+    Assert,
+    Loop,
+    By,
+    Break,
+    Continue,
+    ExclusiveRange,
+    Ampersand,
+    FatArrow,
+    Wildcard,
+    Copy,
+    TemplateClose,
+    TemplateHead,
+    ChannelSend,
+    ChannelReceive,
+    Yield,
+}
+
+impl StableBodySyntax {
+    fn capture(tokens: &FileTokens, string_table: &StringTable) -> Self {
+        Self {
+            source_path: stable_path(&tokens.src_path, string_table),
+            tokens: tokens
+                .tokens
+                .iter()
+                .map(|token| StableToken {
+                    kind: StableTokenKind::capture(&token.kind, string_table),
+                    location: StableSourceLocation::capture(&token.location, string_table),
+                })
+                .collect(),
+        }
+    }
+
+    fn materialise(&self, string_table: &mut StringTable) -> FileTokens {
+        let source_path = materialise_path(&self.source_path, string_table);
+        let tokens = self
+            .tokens
+            .iter()
+            .map(|token| {
+                Token::new(
+                    token.kind.materialise(string_table),
+                    token.location.materialise(string_table),
+                )
+            })
+            .collect();
+        FileTokens::new(source_path, tokens)
+    }
+}
+
+impl StableSourceLocation {
+    fn capture(location: &SourceLocation, string_table: &StringTable) -> Self {
+        Self {
+            scope: stable_path(&location.scope, string_table),
+            start: location.start_pos,
+            end: location.end_pos,
+        }
+    }
+
+    fn materialise(&self, string_table: &mut StringTable) -> SourceLocation {
+        SourceLocation::new(
+            materialise_path(&self.scope, string_table),
+            self.start,
+            self.end,
+        )
+    }
+}
+
+impl StableTokenKind {
+    fn capture(kind: &TokenKind, string_table: &StringTable) -> Self {
+        match kind {
+            TokenKind::Symbol(value) => Self::Symbol(string_table.resolve(*value).to_owned()),
+            TokenKind::StyleDirective(value) => {
+                Self::StyleDirective(string_table.resolve(*value).to_owned())
+            }
+            TokenKind::StringSliceLiteral(value) => {
+                Self::StringSliceLiteral(string_table.resolve(*value).to_owned())
+            }
+            TokenKind::RawStringLiteral(value) => {
+                Self::RawStringLiteral(string_table.resolve(*value).to_owned())
+            }
+            TokenKind::CharLiteral(value) => Self::CharLiteral(*value),
+            TokenKind::BoolLiteral(value) => Self::BoolLiteral(*value),
+            TokenKind::NumericLiteral(value) => Self::NumericLiteral(StableNumericLiteral {
+                sign: value.sign,
+                source_text: string_table.resolve(value.source_text).to_owned(),
+                normalized_text: string_table.resolve(value.normalized_text).to_owned(),
+                kind: value.kind,
+                digit_count: value.digit_count,
+                fractional_digit_count: value.fractional_digit_count,
+                exponent_digit_count: value.exponent_digit_count,
+                exponent_sign: value.exponent_sign,
+            }),
+            TokenKind::Path(items) => Self::Path(
+                items
+                    .iter()
+                    .map(|item| StablePathTokenItem {
+                        path: stable_path(&item.path, string_table),
+                        alias: item
+                            .alias
+                            .map(|alias| string_table.resolve(alias).to_owned()),
+                        path_location: StableSourceLocation::capture(
+                            &item.path_location,
+                            string_table,
+                        ),
+                        alias_location: item
+                            .alias_location
+                            .as_ref()
+                            .map(|location| StableSourceLocation::capture(location, string_table)),
+                        from_grouped: item.from_grouped,
+                    })
+                    .collect(),
+            ),
+            plain => Self::Plain(StablePlainTokenKind::capture(plain)),
+        }
+    }
+
+    fn materialise(&self, string_table: &mut StringTable) -> TokenKind {
+        match self {
+            Self::Symbol(value) => TokenKind::Symbol(string_table.intern(value)),
+            Self::StyleDirective(value) => TokenKind::StyleDirective(string_table.intern(value)),
+            Self::StringSliceLiteral(value) => {
+                TokenKind::StringSliceLiteral(string_table.intern(value))
+            }
+            Self::RawStringLiteral(value) => {
+                TokenKind::RawStringLiteral(string_table.intern(value))
+            }
+            Self::CharLiteral(value) => TokenKind::CharLiteral(*value),
+            Self::BoolLiteral(value) => TokenKind::BoolLiteral(*value),
+            Self::NumericLiteral(value) => TokenKind::NumericLiteral(
+                crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
+                    value.sign,
+                    string_table.intern(&value.source_text),
+                    string_table.intern(&value.normalized_text),
+                    value.kind,
+                    value.digit_count,
+                    value.fractional_digit_count,
+                    value.exponent_digit_count,
+                    value.exponent_sign,
+                ),
+            ),
+            Self::Path(items) => TokenKind::Path(
+                items
+                    .iter()
+                    .map(|item| PathTokenItem {
+                        path: materialise_path(&item.path, string_table),
+                        alias: item
+                            .alias
+                            .as_deref()
+                            .map(|alias| string_table.intern(alias)),
+                        path_location: item.path_location.materialise(string_table),
+                        alias_location: item
+                            .alias_location
+                            .as_ref()
+                            .map(|location| location.materialise(string_table)),
+                        from_grouped: item.from_grouped,
+                    })
+                    .collect(),
+            ),
+            Self::Plain(kind) => kind.materialise(),
+        }
+    }
+}
+
+impl StablePlainTokenKind {
+    fn capture(kind: &TokenKind) -> Self {
+        match kind {
+            TokenKind::ModuleStart => Self::ModuleStart,
+            TokenKind::Eof => Self::Eof,
+            TokenKind::Import => Self::Import,
+            TokenKind::Export => Self::Export,
+            TokenKind::Hash => Self::Hash,
+            TokenKind::Reactive => Self::Reactive,
+            TokenKind::Arrow => Self::Arrow,
+            TokenKind::OpenCurly => Self::OpenCurly,
+            TokenKind::CloseCurly => Self::CloseCurly,
+            TokenKind::TypeParameterBracket => Self::TypeParameterBracket,
+            TokenKind::Newline => Self::Newline,
+            TokenKind::End => Self::End,
+            TokenKind::StartTemplateBody => Self::StartTemplateBody,
+            TokenKind::Comma => Self::Comma,
+            TokenKind::Dot => Self::Dot,
+            TokenKind::Colon => Self::Colon,
+            TokenKind::DoubleColon => Self::DoubleColon,
+            TokenKind::Assign => Self::Assign,
+            TokenKind::This => Self::This,
+            TokenKind::Must => Self::Must,
+            TokenKind::TraitThis => Self::TraitThis,
+            TokenKind::OpenParenthesis => Self::OpenParenthesis,
+            TokenKind::CloseParenthesis => Self::CloseParenthesis,
+            TokenKind::As => Self::As,
+            TokenKind::Type => Self::Type,
+            TokenKind::Of => Self::Of,
+            TokenKind::Variadic => Self::Variadic,
+            TokenKind::Mutable => Self::Mutable,
+            TokenKind::DatatypeNone => Self::DatatypeNone,
+            TokenKind::NoneLiteral => Self::NoneLiteral,
+            TokenKind::DatatypeInt => Self::DatatypeInt,
+            TokenKind::DatatypeFloat => Self::DatatypeFloat,
+            TokenKind::DatatypeBool => Self::DatatypeBool,
+            TokenKind::DatatypeTrue => Self::DatatypeTrue,
+            TokenKind::DatatypeFalse => Self::DatatypeFalse,
+            TokenKind::DatatypeString => Self::DatatypeString,
+            TokenKind::DatatypeChar => Self::DatatypeChar,
+            TokenKind::Bang => Self::Bang,
+            TokenKind::QuestionMark => Self::QuestionMark,
+            TokenKind::Negative => Self::Negative,
+            TokenKind::Exponent => Self::Exponent,
+            TokenKind::Multiply => Self::Multiply,
+            TokenKind::Divide => Self::Divide,
+            TokenKind::Modulus => Self::Modulus,
+            TokenKind::IntDivide => Self::IntDivide,
+            TokenKind::ExponentAssign => Self::ExponentAssign,
+            TokenKind::MultiplyAssign => Self::MultiplyAssign,
+            TokenKind::DivideAssign => Self::DivideAssign,
+            TokenKind::ModulusAssign => Self::ModulusAssign,
+            TokenKind::IntDivideAssign => Self::IntDivideAssign,
+            TokenKind::Add => Self::Add,
+            TokenKind::Subtract => Self::Subtract,
+            TokenKind::AddAssign => Self::AddAssign,
+            TokenKind::SubtractAssign => Self::SubtractAssign,
+            TokenKind::Not => Self::Not,
+            TokenKind::Is => Self::Is,
+            TokenKind::LessThan => Self::LessThan,
+            TokenKind::LessThanOrEqual => Self::LessThanOrEqual,
+            TokenKind::GreaterThan => Self::GreaterThan,
+            TokenKind::GreaterThanOrEqual => Self::GreaterThanOrEqual,
+            TokenKind::And => Self::And,
+            TokenKind::Or => Self::Or,
+            TokenKind::If => Self::If,
+            TokenKind::Else => Self::Else,
+            TokenKind::Return => Self::Return,
+            TokenKind::ReturnBang => Self::ReturnBang,
+            TokenKind::Catch => Self::Catch,
+            TokenKind::Then => Self::Then,
+            TokenKind::Block => Self::Block,
+            TokenKind::Checked => Self::Checked,
+            TokenKind::Async => Self::Async,
+            TokenKind::Cast => Self::Cast,
+            TokenKind::CastBang => Self::CastBang,
+            TokenKind::Assert => Self::Assert,
+            TokenKind::Loop => Self::Loop,
+            TokenKind::By => Self::By,
+            TokenKind::Break => Self::Break,
+            TokenKind::Continue => Self::Continue,
+            TokenKind::ExclusiveRange => Self::ExclusiveRange,
+            TokenKind::Ampersand => Self::Ampersand,
+            TokenKind::FatArrow => Self::FatArrow,
+            TokenKind::Wildcard => Self::Wildcard,
+            TokenKind::Copy => Self::Copy,
+            TokenKind::TemplateClose => Self::TemplateClose,
+            TokenKind::TemplateHead => Self::TemplateHead,
+            TokenKind::ChannelSend => Self::ChannelSend,
+            TokenKind::ChannelReceive => Self::ChannelReceive,
+            TokenKind::Yield => Self::Yield,
+            TokenKind::Symbol(_)
+            | TokenKind::StyleDirective(_)
+            | TokenKind::StringSliceLiteral(_)
+            | TokenKind::Path(_)
+            | TokenKind::NumericLiteral(_)
+            | TokenKind::CharLiteral(_)
+            | TokenKind::RawStringLiteral(_)
+            | TokenKind::BoolLiteral(_) => {
+                unreachable!("payload token handled before plain capture")
+            }
+        }
+    }
+
+    fn materialise(self) -> TokenKind {
+        match self {
+            Self::ModuleStart => TokenKind::ModuleStart,
+            Self::Eof => TokenKind::Eof,
+            Self::Import => TokenKind::Import,
+            Self::Export => TokenKind::Export,
+            Self::Hash => TokenKind::Hash,
+            Self::Reactive => TokenKind::Reactive,
+            Self::Arrow => TokenKind::Arrow,
+            Self::OpenCurly => TokenKind::OpenCurly,
+            Self::CloseCurly => TokenKind::CloseCurly,
+            Self::TypeParameterBracket => TokenKind::TypeParameterBracket,
+            Self::Newline => TokenKind::Newline,
+            Self::End => TokenKind::End,
+            Self::StartTemplateBody => TokenKind::StartTemplateBody,
+            Self::Comma => TokenKind::Comma,
+            Self::Dot => TokenKind::Dot,
+            Self::Colon => TokenKind::Colon,
+            Self::DoubleColon => TokenKind::DoubleColon,
+            Self::Assign => TokenKind::Assign,
+            Self::This => TokenKind::This,
+            Self::Must => TokenKind::Must,
+            Self::TraitThis => TokenKind::TraitThis,
+            Self::OpenParenthesis => TokenKind::OpenParenthesis,
+            Self::CloseParenthesis => TokenKind::CloseParenthesis,
+            Self::As => TokenKind::As,
+            Self::Type => TokenKind::Type,
+            Self::Of => TokenKind::Of,
+            Self::Variadic => TokenKind::Variadic,
+            Self::Mutable => TokenKind::Mutable,
+            Self::DatatypeNone => TokenKind::DatatypeNone,
+            Self::NoneLiteral => TokenKind::NoneLiteral,
+            Self::DatatypeInt => TokenKind::DatatypeInt,
+            Self::DatatypeFloat => TokenKind::DatatypeFloat,
+            Self::DatatypeBool => TokenKind::DatatypeBool,
+            Self::DatatypeTrue => TokenKind::DatatypeTrue,
+            Self::DatatypeFalse => TokenKind::DatatypeFalse,
+            Self::DatatypeString => TokenKind::DatatypeString,
+            Self::DatatypeChar => TokenKind::DatatypeChar,
+            Self::Bang => TokenKind::Bang,
+            Self::QuestionMark => TokenKind::QuestionMark,
+            Self::Negative => TokenKind::Negative,
+            Self::Exponent => TokenKind::Exponent,
+            Self::Multiply => TokenKind::Multiply,
+            Self::Divide => TokenKind::Divide,
+            Self::Modulus => TokenKind::Modulus,
+            Self::IntDivide => TokenKind::IntDivide,
+            Self::ExponentAssign => TokenKind::ExponentAssign,
+            Self::MultiplyAssign => TokenKind::MultiplyAssign,
+            Self::DivideAssign => TokenKind::DivideAssign,
+            Self::ModulusAssign => TokenKind::ModulusAssign,
+            Self::IntDivideAssign => TokenKind::IntDivideAssign,
+            Self::Add => TokenKind::Add,
+            Self::Subtract => TokenKind::Subtract,
+            Self::AddAssign => TokenKind::AddAssign,
+            Self::SubtractAssign => TokenKind::SubtractAssign,
+            Self::Not => TokenKind::Not,
+            Self::Is => TokenKind::Is,
+            Self::LessThan => TokenKind::LessThan,
+            Self::LessThanOrEqual => TokenKind::LessThanOrEqual,
+            Self::GreaterThan => TokenKind::GreaterThan,
+            Self::GreaterThanOrEqual => TokenKind::GreaterThanOrEqual,
+            Self::And => TokenKind::And,
+            Self::Or => TokenKind::Or,
+            Self::If => TokenKind::If,
+            Self::Else => TokenKind::Else,
+            Self::Return => TokenKind::Return,
+            Self::ReturnBang => TokenKind::ReturnBang,
+            Self::Catch => TokenKind::Catch,
+            Self::Then => TokenKind::Then,
+            Self::Block => TokenKind::Block,
+            Self::Checked => TokenKind::Checked,
+            Self::Async => TokenKind::Async,
+            Self::Cast => TokenKind::Cast,
+            Self::CastBang => TokenKind::CastBang,
+            Self::Assert => TokenKind::Assert,
+            Self::Loop => TokenKind::Loop,
+            Self::By => TokenKind::By,
+            Self::Break => TokenKind::Break,
+            Self::Continue => TokenKind::Continue,
+            Self::ExclusiveRange => TokenKind::ExclusiveRange,
+            Self::Ampersand => TokenKind::Ampersand,
+            Self::FatArrow => TokenKind::FatArrow,
+            Self::Wildcard => TokenKind::Wildcard,
+            Self::Copy => TokenKind::Copy,
+            Self::TemplateClose => TokenKind::TemplateClose,
+            Self::TemplateHead => TokenKind::TemplateHead,
+            Self::ChannelSend => TokenKind::ChannelSend,
+            Self::ChannelReceive => TokenKind::ChannelReceive,
+            Self::Yield => TokenKind::Yield,
+        }
+    }
+}
+
+fn stable_path(path: &InternedPath, string_table: &StringTable) -> Box<[String]> {
+    path.as_components()
+        .iter()
+        .map(|component| string_table.resolve(*component).to_owned())
+        .collect()
+}
+
+fn materialise_path(path: &[String], string_table: &mut StringTable) -> InternedPath {
+    InternedPath::from_components(
+        path.iter()
+            .map(|component| string_table.intern(component))
+            .collect(),
+    )
+}
+
+/// Immutable requester-owned definition used to project one nominal into a generated-local
+/// type environment.
+///
+/// The blueprint carries owned names, stable type identities and declaration-local generic
+/// parameter slots only. It contains no requester `TypeId`, `NominalTypeId`, `GenericParameterId`,
+/// `InternedPath` or `StringId`. Registering every shell before populating members makes mutually
+/// referential definitions safe without reopening the requester environment during materialisation.
+#[derive(Clone, PartialEq, Eq)]
+struct NominalMaterialisationBlueprint {
+    generic_parameters: Box<[NominalGenericParameterBlueprint]>,
+    definition: NominalMaterialisationDefinition,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct NominalGenericParameterBlueprint {
+    name: String,
+    exported_identity: Option<ExportedGenericParameterIdentity>,
+    bounds: Box<[CanonicalTraitIdentity]>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum NominalMaterialisationDefinition {
+    Struct {
+        fields: Box<[NominalFieldBlueprint]>,
+        const_record: bool,
+    },
+    Choice {
+        variants: Box<[NominalChoiceVariantBlueprint]>,
+    },
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct NominalFieldBlueprint {
+    name: String,
+    field_type: MaterialisationTypeBlueprint,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct NominalChoiceVariantBlueprint {
+    name: String,
+    tag: usize,
+    payload_fields: Box<[NominalFieldBlueprint]>,
+}
+
+/// Closed type shape used inside a nominal blueprint.
+///
+/// Canonical identities cover stable closed leaves. Declaration-local parameters and shapes that
+/// contain them remain explicit so private generic nominals never acquire exported parameter
+/// identities merely to support generated-local layout.
+#[derive(Clone, PartialEq, Eq)]
+enum MaterialisationTypeBlueprint {
+    Canonical(CanonicalTypeIdentity),
+    GenericParameter(usize),
+    Collection {
+        element: Box<MaterialisationTypeBlueprint>,
+        fixed_capacity: Option<usize>,
+    },
+    OrderedMap {
+        key: Box<MaterialisationTypeBlueprint>,
+        value: Box<MaterialisationTypeBlueprint>,
+    },
+    Option(Box<MaterialisationTypeBlueprint>),
+    FallibleCarrier {
+        success: Box<MaterialisationTypeBlueprint>,
+        error: Box<MaterialisationTypeBlueprint>,
+    },
+    Tuple(Box<[MaterialisationTypeBlueprint]>),
+    GenericInstance {
+        base: CanonicalTypeIdentity,
+        arguments: Box<[MaterialisationTypeBlueprint]>,
+    },
+}
+
+/// Published generated-function metadata for one successful declaring module.
+///
+/// The context is deliberately a compact list rather than a donor-module snapshot. Every entry
+/// owns one retained body and the stable semantic closure needed to materialise that body in a
+/// fresh environment. Modules without retained bodies publish no context.
 #[derive(Clone)]
 pub(crate) struct ModuleMaterialisationContext {
+    artefacts: Box<[GenericTemplateArtefact]>,
+}
+
+#[derive(Clone)]
+struct GenericTemplateArtefact {
+    declaration_identity: GeneratedDeclarationIdentity,
+    function_path: Box<[String]>,
+    source_file: Box<[String]>,
+    declaration_location: StableSourceLocation,
+    body: StableBodySyntax,
+    signature: StableFunctionSignature,
+    generic_parameters: Box<[StableGenericParameter]>,
+    visibility: StableFileVisibility,
+    declarations: Box<[StableDeclarationBinding]>,
+    declaration_closure: Box<[PublicDeclarationRecord]>,
+    evidence: Box<[PublicEvidenceRecord]>,
+    callables: Box<[StableCallableBinding]>,
+    nominals: Box<[StableNominalBinding]>,
+    nominal_blueprints: FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
+}
+
+#[derive(Clone)]
+struct StableGenericParameter {
+    name: String,
+    exported_identity: Option<ExportedGenericParameterIdentity>,
+    bounds: Box<[CanonicalTraitIdentity]>,
+}
+
+#[derive(Clone)]
+struct StableFunctionSignature {
+    parameters: Box<[StableFunctionParameter]>,
+    returns: Box<[StableFunctionReturn]>,
+}
+
+#[derive(Clone)]
+struct StableFunctionParameter {
+    name: String,
+    value_mode: ValueMode,
+    parameter_type: MaterialisationTypeBlueprint,
+    location: StableSourceLocation,
+}
+
+#[derive(Clone)]
+struct StableFunctionReturn {
+    return_type: MaterialisationTypeBlueprint,
+    alias_candidates: Option<Box<[usize]>>,
+    channel: ReturnChannel,
+}
+
+#[derive(Clone)]
+struct StableDeclarationBinding {
+    local_path: Box<[String]>,
+    record: PublicDeclarationRecord,
+}
+
+#[derive(Clone)]
+struct StableCallableBinding {
+    local_path: Box<[String]>,
+    target: StableFunctionTarget,
+    signature: StableFunctionSignature,
+    summary: PublicCallSummary,
+}
+
+#[derive(Clone)]
+struct StableNominalBinding {
+    local_path: Box<[String]>,
+    identity: CanonicalTypeIdentity,
+}
+
+#[derive(Clone)]
+enum StableFunctionTarget {
+    Imported(OriginFunctionId),
+    Generated(GeneratedFunctionIdentity),
+    ModulePrivate(ModulePrivateExecutableIdentity),
+}
+
+#[derive(Clone, Default)]
+struct StableFileVisibility {
+    source_names: Box<[StableVisibleDeclaration]>,
+    type_alias_names: Box<[StableVisibleDeclaration]>,
+    trait_names: Box<[StableVisibleDeclaration]>,
+    external_symbols: Box<[StableExternalSymbol]>,
+    receiver_methods: Box<[StableReceiverMethod]>,
+}
+
+#[derive(Clone)]
+struct StableVisibleDeclaration {
+    visible_name: String,
+    local_path: Box<[String]>,
+    origin: Option<OriginDeclarationId>,
+}
+
+#[derive(Clone)]
+struct StableExternalSymbol {
+    visible_name: String,
+    identity: CanonicalBindingSymbolIdentity,
+}
+
+#[derive(Clone)]
+struct StableReceiverMethod {
+    visible_name: String,
+    local_path: Box<[String]>,
+    target: StableFunctionTarget,
+    location: StableSourceLocation,
+}
+
+trait MaterialisationNominalSource {
+    fn nominal_blueprint(
+        &self,
+        identity: &CanonicalTypeIdentity,
+    ) -> Option<&NominalMaterialisationBlueprint>;
+}
+
+impl MaterialisationNominalSource for ModuleMaterialisationPreparation {
+    fn nominal_blueprint(
+        &self,
+        identity: &CanonicalTypeIdentity,
+    ) -> Option<&NominalMaterialisationBlueprint> {
+        self.nominal_blueprints.get(identity)
+    }
+}
+
+impl MaterialisationNominalSource for GenericTemplateArtefact {
+    fn nominal_blueprint(
+        &self,
+        identity: &CanonicalTypeIdentity,
+    ) -> Option<&NominalMaterialisationBlueprint> {
+        self.nominal_blueprints.get(identity)
+    }
+}
+
+impl StableFunctionTarget {
+    fn capture(target: &SourceFunctionTarget) -> Option<Self> {
+        match target {
+            SourceFunctionTarget::Imported { origin, .. } => Some(Self::Imported(origin.clone())),
+            SourceFunctionTarget::Generated { identity, .. } => {
+                Some(Self::Generated(identity.clone()))
+            }
+            SourceFunctionTarget::ModulePrivate { identity, .. } => {
+                Some(Self::ModulePrivate(identity.clone()))
+            }
+            SourceFunctionTarget::Local(_) => None,
+        }
+    }
+
+    fn materialise(&self, local_path: InternedPath) -> SourceFunctionTarget {
+        match self {
+            Self::Imported(origin) => SourceFunctionTarget::Imported {
+                origin: origin.clone(),
+                local_path,
+            },
+            Self::Generated(identity) => SourceFunctionTarget::Generated {
+                identity: identity.clone(),
+                local_path,
+            },
+            Self::ModulePrivate(identity) => SourceFunctionTarget::ModulePrivate {
+                identity: identity.clone(),
+                local_path,
+            },
+        }
+    }
+}
+
+impl StableFunctionSignature {
+    fn collect_nominal_identities(&self, identities: &mut FxHashSet<CanonicalTypeIdentity>) {
+        for parameter in &self.parameters {
+            parameter
+                .parameter_type
+                .collect_nominal_identities(identities);
+        }
+        for returned in &self.returns {
+            returned.return_type.collect_nominal_identities(identities);
+        }
+    }
+}
+
+impl MaterialisationTypeBlueprint {
+    fn collect_nominal_identities(&self, identities: &mut FxHashSet<CanonicalTypeIdentity>) {
+        match self {
+            Self::Canonical(identity) => {
+                if matches!(
+                    identity,
+                    CanonicalTypeIdentity::SourceNominal(_)
+                        | CanonicalTypeIdentity::ModulePrivateNominal(_)
+                ) {
+                    identities.insert(identity.clone());
+                }
+            }
+            Self::GenericParameter(_) => {}
+            Self::Collection { element, .. } | Self::Option(element) => {
+                element.collect_nominal_identities(identities);
+            }
+            Self::OrderedMap { key, value } => {
+                key.collect_nominal_identities(identities);
+                value.collect_nominal_identities(identities);
+            }
+            Self::FallibleCarrier { success, error } => {
+                success.collect_nominal_identities(identities);
+                error.collect_nominal_identities(identities);
+            }
+            Self::Tuple(elements) => {
+                for element in elements {
+                    element.collect_nominal_identities(identities);
+                }
+            }
+            Self::GenericInstance { base, arguments } => {
+                identities.insert(base.clone());
+                for argument in arguments {
+                    argument.collect_nominal_identities(identities);
+                }
+            }
+        }
+    }
+}
+
+fn stable_body_symbol_names(tokens: &FileTokens, string_table: &StringTable) -> FxHashSet<String> {
+    tokens
+        .tokens
+        .iter()
+        .filter_map(|token| match token.kind {
+            TokenKind::Symbol(symbol) => Some(string_table.resolve(symbol).to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+impl ModuleMaterialisationContext {
+    pub(crate) fn contains_template(&self, identity: &GeneratedDeclarationIdentity) -> bool {
+        self.artefacts
+            .iter()
+            .any(|artefact| &artefact.declaration_identity == identity)
+    }
+
+    pub(crate) fn materialise_ast(
+        &self,
+        input: ModuleMaterialisationInput<'_>,
+    ) -> Result<MaterialisedGenericAst, CompilerMessages> {
+        let artefact = self
+            .artefacts
+            .iter()
+            .find(|artefact| &artefact.declaration_identity == input.identity.declaration())
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "Generated request has no retained stable generic artefact",
+                    ),
+                    &input.requester_context.string_table,
+                )
+            })?;
+        artefact.materialise_ast(self, input)
+    }
+}
+
+impl GenericTemplateArtefact {
+    fn materialise_ast(
+        &self,
+        context: &ModuleMaterialisationContext,
+        input: ModuleMaterialisationInput<'_>,
+    ) -> Result<MaterialisedGenericAst, CompilerMessages> {
+        let ModuleMaterialisationInput {
+            identity,
+            requester_context,
+            requester_call_location,
+            external_package_registry,
+            style_directives,
+            build_profile,
+            project_path_resolver,
+            template_const_loop_iteration_limit,
+        } = input;
+        let project_path_resolver = project_path_resolver.ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(
+                    "Stable generated materialisation has no active project path resolver",
+                ),
+                &requester_context.string_table,
+            )
+        })?;
+        let mut string_table = StringTable::new();
+        let requester_string_remap = string_table.merge_from(&requester_context.string_table);
+        let mut call_location = requester_call_location.clone();
+        call_location.remap_string_ids(&requester_string_remap);
+
+        let source_file = materialise_path(&self.source_file, &mut string_table);
+        let function_path = materialise_path(&self.function_path, &mut string_table);
+        let entry_dir = source_file.parent().unwrap_or_default();
+        let build_context = AstBuildContext {
+            external_package_registry: Arc::new(external_package_registry.clone()),
+            style_directives,
+            string_table: &mut string_table,
+            entry_dir,
+            root_role: ModuleRootRole::Support,
+            build_profile,
+            project_path_resolver: Some(project_path_resolver),
+            path_format_config: PathStringFormatConfig::default(),
+            template_const_loop_iteration_limit,
+            capacity_estimate: FrontendArenaCapacityEstimate::default(),
+        };
+        let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
+        let import_environment = self
+            .materialise_import_environment(
+                &source_file,
+                external_package_registry,
+                string_table_ref,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+        let builtin_manifest =
+            crate::compiler_frontend::builtins::error_type::register_builtin_error_types(
+                string_table_ref,
+            );
+        let mut module_symbols = ModuleSymbols::empty();
+        module_symbols
+            .builtin_visible_symbol_paths
+            .extend(builtin_manifest.visible_symbol_paths.iter().cloned());
+        module_symbols.declarations = builtin_manifest.declarations;
+        module_symbols
+            .resolved_struct_fields_by_path
+            .extend(builtin_manifest.resolved_struct_fields_by_path);
+        module_symbols
+            .struct_source_by_path
+            .extend(builtin_manifest.struct_source_by_path);
+        module_symbols
+            .builtin_struct_ast_nodes
+            .extend(builtin_manifest.ast_struct_nodes);
+        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context).build(
+            &[],
+            AstEnvironmentInput {
+                module_symbols,
+                import_environment,
+            },
+            string_table_ref,
+        )?;
+        self.install_closed_environment(
+            context,
+            &mut environment,
+            external_package_registry,
+            string_table_ref,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+
+        let mut type_arguments = Vec::with_capacity(identity.type_arguments().len());
+        for canonical_identity in identity.type_arguments() {
+            type_arguments.push(
+                intern_generated_canonical_type(
+                    canonical_identity,
+                    &mut environment.type_environment,
+                    external_package_registry,
+                    requester_context,
+                    string_table_ref,
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?,
+            );
+        }
+        install_generated_request_evidence(
+            identity,
+            requester_context,
+            &requester_string_remap,
+            &mut environment,
+            string_table_ref,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+
+        let instance_path = function_path.join_str("__generated_instance", string_table_ref);
+        let request = GenericFunctionInstantiationRequest {
+            declaration_identity: Some(identity.declaration().clone()),
+            evidence: Box::new([]),
+            key: GenericFunctionInstanceKey {
+                function_path,
+                type_arguments: type_arguments.into_boxed_slice(),
+            },
+            instance_path: instance_path.clone(),
+            call_location,
+        };
+        let emitted = AstEmitter::new(&phase_context, &mut environment, 1)
+            .emit_generated_request(request, string_table_ref)?;
+        let mut build_result = AstFinalizer::new(&phase_context, environment).finalize(
+            emitted,
+            &[],
+            string_table_ref,
+        )?;
+        build_result
+            .materialisation_context
+            .inherit_nominal_blueprints(requester_context)
+            .and_then(|()| {
+                build_result
+                    .materialisation_context
+                    .inherit_artefact_nominal_blueprints(self)
+            })
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+        Ok(MaterialisedGenericAst {
+            build_result,
+            string_table,
+            instance_path,
+        })
+    }
+
+    fn materialise_import_environment(
+        &self,
+        source_file: &InternedPath,
+        external_package_registry: &ExternalPackageRegistry,
+        string_table: &mut StringTable,
+    ) -> Result<HeaderImportEnvironment, CompilerError> {
+        let mut environment = HeaderImportEnvironment::default();
+        environment.file_visibility_by_source.insert(
+            source_file.clone(),
+            self.visibility
+                .materialise(external_package_registry, string_table)?,
+        );
+        for binding in &self.declarations {
+            let local_path = materialise_path(&binding.local_path, string_table);
+            environment
+                .imported_declarations_by_local_path
+                .insert(local_path, binding.record.clone());
+        }
+        for record in &self.declaration_closure {
+            environment
+                .imported_declarations_by_origin
+                .insert(record.origin.clone(), record.clone());
+        }
+        environment
+            .imported_reusable_evidence
+            .extend(self.evidence.iter().cloned());
+        for callable in &self.callables {
+            let local_path = materialise_path(&callable.local_path, string_table);
+            environment.imported_functions_by_local_path.insert(
+                local_path.clone(),
+                ImportedFunctionContract {
+                    target: callable.target.materialise(local_path),
+                    summary: callable.summary.clone(),
+                },
+            );
+        }
+        Ok(environment)
+    }
+
+    fn install_closed_environment(
+        &self,
+        context: &ModuleMaterialisationContext,
+        environment: &mut AstModuleEnvironment,
+        external_package_registry: &ExternalPackageRegistry,
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerError> {
+        for nominal in &self.nominals {
+            let type_id = intern_generated_canonical_type(
+                &nominal.identity,
+                &mut environment.type_environment,
+                external_package_registry,
+                self,
+                string_table,
+            )?;
+            let local_path = materialise_path(&nominal.local_path, string_table);
+            environment
+                .type_environment
+                .register_nominal_path_alias(local_path.clone(), type_id)?;
+            let lookups = Rc::make_mut(&mut environment.lookups);
+            Rc::make_mut(&mut lookups.nominal_type_ids_by_path).insert(local_path.clone(), type_id);
+            Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path);
+        }
+
+        for callable in &self.callables {
+            if self
+                .declarations
+                .iter()
+                .any(|declaration| declaration.local_path == callable.local_path)
+            {
+                continue;
+            }
+            let local_path = materialise_path(&callable.local_path, string_table);
+            let (signature, function_type_id, fallible_carrier_type_id) =
+                callable.signature.materialise(
+                    &local_path,
+                    &[],
+                    self,
+                    &mut environment.type_environment,
+                    external_package_registry,
+                    string_table,
+                )?;
+            let declaration = Declaration {
+                id: local_path.clone(),
+                value: Expression::new(
+                    ExpressionKind::NoValue,
+                    Default::default(),
+                    function_type_id,
+                    DataType::Function(Box::new(None), signature.clone()),
+                    ValueMode::ImmutableReference,
+                ),
+            };
+            let lookups = Rc::make_mut(&mut environment.lookups);
+            let mut declarations = lookups
+                .declaration_table
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            declarations.push(declaration);
+            lookups.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
+            Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
+                local_path.clone(),
+                ResolvedFunctionSignature {
+                    receiver: None,
+                    signature,
+                },
+            );
+            Rc::make_mut(&mut lookups.declaration_semantics)
+                .register_materialised_function(local_path.clone());
+            lookups.imported_functions_by_local_path.insert(
+                local_path.clone(),
+                AstImportedFunctionContract {
+                    target: callable.target.materialise(local_path),
+                    summary: callable.summary.clone(),
+                    fallible_carrier_type_id,
+                },
+            );
+        }
+
+        let selected_paths = self.visibility.materialised_selected_paths(string_table);
+        for nested in &context.artefacts {
+            let nested_path = materialise_path(&nested.function_path, string_table);
+            if nested.declaration_identity != self.declaration_identity
+                && !selected_paths.contains(&nested_path)
+            {
+                continue;
+            }
+            let parsed_parameters = GenericParameterList {
+                parameters: nested
+                    .generic_parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, parameter)| GenericParameter {
+                        id: TypeParameterId(slot as u32),
+                        name: string_table.intern(&parameter.name),
+                        location: Default::default(),
+                        trait_bounds: Vec::new(),
+                    })
+                    .collect(),
+            };
+            let registration = environment
+                .type_environment
+                .register_generic_parameter_list(&parsed_parameters, &FxHashMap::default());
+            let generic_parameter_type_ids = (0..nested.generic_parameters.len())
+                .map(|slot| {
+                    let parameter_id = registration
+                        .canonical_by_local
+                        .get(&TypeParameterId(slot as u32))
+                        .copied()
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Materialised generic template omitted a parameter slot",
+                            )
+                        })?;
+                    environment
+                        .type_environment
+                        .type_id_for_generic_parameter(parameter_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Materialised generic template parameter has no type handle",
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, CompilerError>>()?;
+            let mut resolved_bounds_by_local = FxHashMap::default();
+            for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
+                let local_id = TypeParameterId(slot as u32);
+                let parameter_id = registration
+                    .canonical_by_local
+                    .get(&local_id)
+                    .copied()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Materialised generic template omitted a stable parameter slot",
+                        )
+                    })?;
+                let parameter_type_id = environment
+                    .type_environment
+                    .type_id_for_generic_parameter(parameter_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Materialised generic template parameter has no type identity",
+                        )
+                    })?;
+                if let Some(exported_identity) = &parameter.exported_identity {
+                    environment.type_environment.register_canonical_identity(
+                        CanonicalTypeIdentity::GenericParameter(exported_identity.clone()),
+                        parameter_type_id,
+                    )?;
+                }
+                let bounds = parameter
+                    .bounds
+                    .iter()
+                    .map(|identity| {
+                        environment
+                            .lookups
+                            .trait_environment
+                            .id_for_canonical_identity(identity)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialised generic bound is absent from its trait closure",
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                resolved_bounds_by_local.insert(local_id, bounds);
+            }
+            environment
+                .type_environment
+                .update_generic_parameter_bounds(
+                    registration.list_id,
+                    &resolved_bounds_by_local,
+                    &registration.canonical_by_local,
+                );
+            let (signature, function_type_id, _) = nested.signature.materialise(
+                &nested_path,
+                &generic_parameter_type_ids,
+                nested,
+                &mut environment.type_environment,
+                external_package_registry,
+                string_table,
+            )?;
+            let template = GenericFunctionTemplate {
+                function_path: nested_path.clone(),
+                source_file: materialise_path(&nested.source_file, string_table),
+                declaration_identity: Some(nested.declaration_identity.clone()),
+                generic_parameter_list_id: registration.list_id,
+                signature: signature.clone(),
+                body_tokens: Some(nested.body.materialise(string_table)),
+                declaration_location: nested.declaration_location.materialise(string_table),
+            };
+            let lookups = Rc::make_mut(&mut environment.lookups);
+            lookups
+                .generic_function_templates_by_path
+                .insert(nested_path.clone(), template);
+            Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
+                nested_path.clone(),
+                ResolvedFunctionSignature {
+                    receiver: None,
+                    signature: signature.clone(),
+                },
+            );
+            if lookups
+                .declaration_table
+                .get_by_path(&nested_path)
+                .is_none()
+            {
+                let mut declarations = lookups
+                    .declaration_table
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                declarations.push(Declaration {
+                    id: nested_path.clone(),
+                    value: Expression::new(
+                        ExpressionKind::NoValue,
+                        Default::default(),
+                        function_type_id,
+                        DataType::Function(Box::new(None), signature),
+                        ValueMode::ImmutableReference,
+                    ),
+                });
+                lookups.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
+            }
+            Rc::make_mut(&mut lookups.declaration_semantics)
+                .register_materialised_function(nested_path);
+        }
+        Ok(())
+    }
+}
+
+impl StableFileVisibility {
+    fn materialise(
+        &self,
+        external_package_registry: &ExternalPackageRegistry,
+        string_table: &mut StringTable,
+    ) -> Result<FileVisibility, CompilerError> {
+        let mut visibility = FileVisibility::default();
+        let mut materialise_bindings =
+            |bindings: &[StableVisibleDeclaration],
+             target: &mut FxHashMap<StringId, SourceDeclarationTarget>| {
+                for binding in bindings {
+                    let name = string_table.intern(&binding.visible_name);
+                    let local_path = materialise_path(&binding.local_path, string_table);
+                    visibility
+                        .visible_declaration_paths
+                        .insert(local_path.clone());
+                    let declaration_target = match &binding.origin {
+                        Some(origin) => SourceDeclarationTarget::Imported {
+                            origin: origin.clone(),
+                            local_path,
+                        },
+                        None => SourceDeclarationTarget::Local(local_path),
+                    };
+                    target.insert(name, declaration_target);
+                }
+            };
+        materialise_bindings(&self.source_names, &mut visibility.visible_source_names);
+        materialise_bindings(
+            &self.type_alias_names,
+            &mut visibility.visible_type_alias_names,
+        );
+        materialise_bindings(&self.trait_names, &mut visibility.visible_trait_names);
+        let error_path =
+            crate::compiler_frontend::builtins::error_type::builtin_error_type_path(string_table);
+        let error_name =
+            string_table.intern(crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME);
+        visibility
+            .visible_declaration_paths
+            .insert(error_path.clone());
+        visibility
+            .visible_source_names
+            .insert(error_name, SourceDeclarationTarget::Local(error_path));
+        for binding in &self.external_symbols {
+            let symbol_id = external_package_registry
+                .resolve_canonical_symbol(&binding.identity)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialisation external binding is absent from the active registry",
+                    )
+                })?;
+            visibility
+                .visible_external_symbols
+                .insert(string_table.intern(&binding.visible_name), symbol_id);
+        }
+        for method in &self.receiver_methods {
+            let local_path = materialise_path(&method.local_path, string_table);
+            visibility
+                .visible_receiver_methods
+                .entry(string_table.intern(&method.visible_name))
+                .or_default()
+                .push(crate::compiler_frontend::headers::import_environment::ReceiverMethodVisibility {
+                    target: method.target.materialise(local_path),
+                    location: method.location.materialise(string_table),
+                });
+        }
+        Ok(visibility)
+    }
+
+    fn materialised_selected_paths(
+        &self,
+        string_table: &mut StringTable,
+    ) -> FxHashSet<InternedPath> {
+        self.source_names
+            .iter()
+            .chain(self.type_alias_names.iter())
+            .chain(self.trait_names.iter())
+            .map(|binding| materialise_path(&binding.local_path, string_table))
+            .collect()
+    }
+}
+
+impl StableFunctionSignature {
+    fn materialise(
+        &self,
+        function_path: &InternedPath,
+        generic_parameter_type_ids: &[TypeId],
+        nominal_source: &impl MaterialisationNominalSource,
+        type_environment: &mut TypeEnvironment,
+        external_package_registry: &ExternalPackageRegistry,
+        string_table: &mut StringTable,
+    ) -> Result<(FunctionSignature, TypeId, Option<TypeId>), CompilerError> {
+        let mut parameters = Vec::with_capacity(self.parameters.len());
+        let mut parameter_type_ids = Vec::with_capacity(self.parameters.len());
+        for parameter in &self.parameters {
+            let type_id = intern_materialisation_type_blueprint(
+                &parameter.parameter_type,
+                generic_parameter_type_ids,
+                nominal_source,
+                type_environment,
+                external_package_registry,
+                string_table,
+            )?;
+            let name = string_table.intern(&parameter.name);
+            parameters.push(Declaration {
+                id: function_path.append(name),
+                value: Expression::new(
+                    ExpressionKind::NoValue,
+                    parameter.location.materialise(string_table),
+                    type_id,
+                    diagnostic_type_spelling(type_id, type_environment),
+                    parameter.value_mode.clone(),
+                ),
+            });
+            parameter_type_ids.push(type_id);
+        }
+        let mut returns = Vec::with_capacity(self.returns.len());
+        let mut success_type_ids = Vec::new();
+        let mut error_return = None;
+        for returned in &self.returns {
+            let type_id = intern_materialisation_type_blueprint(
+                &returned.return_type,
+                generic_parameter_type_ids,
+                nominal_source,
+                type_environment,
+                external_package_registry,
+                string_table,
+            )?;
+            let diagnostic_type = diagnostic_type_spelling(type_id, type_environment);
+            let value = match &returned.alias_candidates {
+                Some(indices) => FunctionReturn::AliasCandidates {
+                    parameter_indices: indices.to_vec(),
+                    data_type: diagnostic_type,
+                },
+                None => FunctionReturn::Value(diagnostic_type),
+            };
+            returns.push(ReturnSlot {
+                value,
+                type_id: Some(type_id),
+                reactive_template: None,
+                channel: returned.channel,
+            });
+            match returned.channel {
+                ReturnChannel::Success => success_type_ids.push(type_id),
+                ReturnChannel::Error => error_return = Some(type_id),
+            }
+        }
+        let fallible_carrier_type_id = error_return.map(|error_type_id| {
+            let success_type_id = match success_type_ids.as_slice() {
+                [] => builtin_type_ids::NONE,
+                [single] => *single,
+                many => type_environment.intern_tuple(many.to_vec()),
+            };
+            type_environment.intern_fallible_carrier(success_type_id, error_type_id)
+        });
+        let function_type_id = type_environment.intern_function(FunctionTypeKey {
+            parameters: parameter_type_ids.into_boxed_slice(),
+            returns: success_type_ids.into_boxed_slice(),
+            error_return,
+        });
+        Ok((
+            FunctionSignature {
+                parameters,
+                returns,
+            },
+            function_type_id,
+            fallible_carrier_type_id,
+        ))
+    }
+}
+
+/// Self-contained immutable semantic context owned by one successful declaring module.
+#[derive(Clone)]
+pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) string_table: StringTable,
     pub(crate) entry_dir: InternedPath,
     pub(crate) type_environment: TypeEnvironment,
@@ -92,6 +1558,7 @@ pub(crate) struct ModuleMaterialisationContext {
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
     pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,
     pub(crate) module_constants: Vec<Declaration>,
+    const_templates_by_path: FxHashMap<InternedPath, PublicConstTemplate>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
     pub(crate) resolved_struct_fields_by_path: FxHashMap<InternedPath, Vec<Declaration>>,
     pub(crate) resolved_function_signatures_by_path:
@@ -102,9 +1569,9 @@ pub(crate) struct ModuleMaterialisationContext {
     pub(crate) declaration_semantics: DeclarationSemanticTable,
     pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationMetadata>,
     pub(crate) nominal_type_ids_by_path: FxHashMap<InternedPath, TypeId>,
+    source_nominal_paths: FxHashSet<InternedPath>,
     public_trait_paths: Vec<InternedPath>,
-    source_nominals_by_origin: FxHashMap<OriginTypeId, (InternedPath, TypeId)>,
-    private_nominals_by_identity: FxHashMap<ModulePrivateNominalIdentity, (InternedPath, TypeId)>,
+    nominal_blueprints: FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
     pub(crate) receiver_methods: ReceiverMethodCatalog,
     pub(crate) trait_environment: TraitEnvironment,
     pub(crate) trait_evidence_environment: TraitEvidenceEnvironment,
@@ -117,18 +1584,627 @@ pub(crate) struct ModuleMaterialisationContext {
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 }
 
-impl ModuleMaterialisationContext {
+/// Construction-only owner for the declaring-module context.
+///
+/// WHAT: accumulates stable executable identities, validated template identities and exact local
+/// call summaries while the declaring module is still compiling, then freezes the completed
+/// context before publication.
+/// WHY: phase-local mutation must not leak into provider metadata. The builder can either hand
+/// its broad state to another in-flight generated compilation or freeze the successful module's
+/// retained bodies into [`ModuleMaterialisationContext`].
+pub(crate) struct ModuleMaterialisationPreparationBuilder {
+    context: ModuleMaterialisationPreparation,
+}
+
+/// Declaring-module facts captured together before AST finalisation releases its local owners.
+pub(crate) struct ModuleMaterialisationEnvironmentInput<'a> {
+    pub(crate) lookups: &'a AstModuleLookups,
+    pub(crate) type_environment: &'a TypeEnvironment,
+    pub(crate) public_trait_roots: &'a [ResolvedPublicTraitRoot],
+    pub(crate) const_templates_by_path: FxHashMap<InternedPath, PublicConstTemplate>,
+    pub(crate) entry_dir: InternedPath,
+    pub(crate) string_table: &'a StringTable,
+    pub(crate) template_const_loop_iteration_limit: usize,
+    pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
+}
+
+impl ModuleMaterialisationPreparationBuilder {
+    pub(crate) fn from_environment(input: ModuleMaterialisationEnvironmentInput<'_>) -> Self {
+        Self {
+            context: ModuleMaterialisationPreparation::from_environment(input),
+        }
+    }
+
+    pub(crate) fn context(&self) -> &ModuleMaterialisationPreparation {
+        &self.context
+    }
+
+    pub(crate) fn finish_preparation(self) -> ModuleMaterialisationPreparation {
+        self.context
+    }
+
+    pub(crate) fn freeze(
+        self,
+        public_interface: &PublicSemanticInterface,
+    ) -> Result<Option<ModuleMaterialisationContext>, CompilerError> {
+        self.context.freeze(public_interface)
+    }
+
+    pub(crate) fn install_concrete_executable_contracts(
+        &mut self,
+        module_origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
+        public_origins_by_path: &FxHashMap<InternedPath, OriginFunctionId>,
+        public_nominal_origins_by_path: &FxHashMap<InternedPath, OriginTypeId>,
+    ) -> Result<Vec<(InternedPath, ModulePrivateExecutableIdentity)>, CompilerError> {
+        self.context.install_concrete_executable_contracts(
+            module_origin,
+            public_origins_by_path,
+            public_nominal_origins_by_path,
+        )
+    }
+
+    pub(crate) fn generic_function_templates_mut(
+        &mut self,
+    ) -> &mut FxHashMap<InternedPath, GenericFunctionTemplate> {
+        &mut self.context.generic_function_templates_by_path
+    }
+
+    pub(crate) fn imported_functions_mut(
+        &mut self,
+    ) -> &mut FxHashMap<InternedPath, AstImportedFunctionContract> {
+        &mut self.context.imported_functions_by_local_path
+    }
+
+    fn inherit_nominal_blueprints(
+        &mut self,
+        source: &ModuleMaterialisationPreparation,
+    ) -> Result<(), CompilerError> {
+        for (identity, blueprint) in &source.nominal_blueprints {
+            if let Some(existing) = self.context.nominal_blueprints.get(identity)
+                && existing != blueprint
+            {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated materialisation contexts disagree on nominal blueprint {identity:?}",
+                )));
+            }
+            self.context
+                .nominal_blueprints
+                .insert(identity.clone(), blueprint.clone());
+        }
+        Ok(())
+    }
+
+    fn inherit_artefact_nominal_blueprints(
+        &mut self,
+        source: &GenericTemplateArtefact,
+    ) -> Result<(), CompilerError> {
+        for (identity, blueprint) in &source.nominal_blueprints {
+            if let Some(existing) = self.context.nominal_blueprints.get(identity)
+                && existing != blueprint
+            {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated materialisation artefact disagrees on nominal blueprint {identity:?}",
+                )));
+            }
+            self.context
+                .nominal_blueprints
+                .insert(identity.clone(), blueprint.clone());
+        }
+        Ok(())
+    }
+}
+
+impl ModuleMaterialisationPreparation {
+    fn freeze(
+        self,
+        public_interface: &PublicSemanticInterface,
+    ) -> Result<Option<ModuleMaterialisationContext>, CompilerError> {
+        let mut templates = self
+            .generic_function_templates_by_path
+            .values()
+            .filter(|template| template.body_tokens.is_some())
+            .collect::<Vec<_>>();
+        templates.sort_by_key(|template| format!("{:?}", template.declaration_identity));
+        if templates.is_empty() {
+            return Ok(None);
+        }
+
+        let artefacts = templates
+            .into_iter()
+            .map(|template| self.freeze_template(template, public_interface))
+            .collect::<Result<Box<[_]>, CompilerError>>()?;
+        Ok(Some(ModuleMaterialisationContext { artefacts }))
+    }
+
+    fn freeze_template(
+        &self,
+        template: &GenericFunctionTemplate,
+        public_interface: &PublicSemanticInterface,
+    ) -> Result<GenericTemplateArtefact, CompilerError> {
+        let declaration_identity = template.declaration_identity.clone().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Retained generic template has no stable declaration identity",
+            )
+        })?;
+        let body_tokens = template.body_tokens.as_ref().ok_or_else(|| {
+            CompilerError::compiler_error("Retained generic template has no body syntax")
+        })?;
+        let generic_parameters = self.stable_generic_parameters(template)?;
+        let parameter_slots = self.generic_parameter_slots(template)?;
+        let signature = self.stable_function_signature(&template.signature, &parameter_slots)?;
+        let mut referenced_names = stable_body_symbol_names(body_tokens, &self.string_table);
+        self.retain_generic_bound_trait_names(
+            &template.source_file,
+            &generic_parameters,
+            &mut referenced_names,
+        )?;
+        let selected_paths =
+            self.selected_visible_paths(&template.source_file, &referenced_names)?;
+        let visibility = self.stable_file_visibility(&template.source_file, &referenced_names)?;
+        let declarations = self.stable_declaration_bindings(&selected_paths, public_interface)?;
+        let callables = self.stable_callable_bindings(&selected_paths)?;
+        let nominals = self.stable_nominal_bindings(&selected_paths);
+        let nominal_blueprints = self.stable_nominal_blueprints(&selected_paths, &signature)?;
+
+        let mut declaration_closure = self
+            .import_environment
+            .imported_declarations_by_origin
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        declaration_closure.extend(public_interface.declarations.iter().cloned());
+        declaration_closure.sort_by_key(|record| format!("{:?}", record.origin));
+        declaration_closure.dedup_by(|left, right| left.origin == right.origin);
+
+        let mut evidence = self.import_environment.imported_reusable_evidence.clone();
+        evidence.extend(public_interface.reusable_evidence.iter().cloned());
+        evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
+        evidence.dedup_by(|left, right| left.identity == right.identity);
+
+        Ok(GenericTemplateArtefact {
+            declaration_identity,
+            function_path: stable_path(&template.function_path, &self.string_table),
+            source_file: stable_path(&template.source_file, &self.string_table),
+            declaration_location: StableSourceLocation::capture(
+                &template.declaration_location,
+                &self.string_table,
+            ),
+            body: StableBodySyntax::capture(body_tokens, &self.string_table),
+            signature,
+            generic_parameters,
+            visibility,
+            declarations,
+            declaration_closure: declaration_closure.into_boxed_slice(),
+            evidence: evidence.into_boxed_slice(),
+            callables,
+            nominals,
+            nominal_blueprints,
+        })
+    }
+
+    fn stable_generic_parameters(
+        &self,
+        template: &GenericFunctionTemplate,
+    ) -> Result<Box<[StableGenericParameter]>, CompilerError> {
+        let parameters = self
+            .type_environment
+            .generic_parameters(template.generic_parameter_list_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Retained generic template references a missing parameter list",
+                )
+            })?;
+        parameters
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(slot, parameter)| {
+                let name = self.string_table.resolve(parameter.name).to_owned();
+                let exported_identity = match template.declaration_identity.as_ref() {
+                    Some(GeneratedDeclarationIdentity::Public(origin)) => {
+                        Some(ExportedGenericParameterIdentity::new(
+                            GenericDeclarationOrigin::free_function(origin.clone())?,
+                            slot as u32,
+                            name.clone(),
+                        ))
+                    }
+                    Some(GeneratedDeclarationIdentity::ModulePrivate(_)) => None,
+                    None => {
+                        return Err(CompilerError::compiler_error(
+                            "Retained generic template has no declaration identity",
+                        ));
+                    }
+                };
+                let bounds = parameter
+                    .trait_bounds
+                    .iter()
+                    .map(|trait_id| {
+                        self.trait_environment
+                            .canonical_identity_for_id(*trait_id)
+                            .cloned()
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Retained generic parameter bound has no stable trait identity",
+                                )
+                            })
+                    })
+                    .collect::<Result<Box<[_]>, CompilerError>>()?;
+                Ok(StableGenericParameter {
+                    name,
+                    exported_identity,
+                    bounds,
+                })
+            })
+            .collect()
+    }
+
+    /// Retains the declaration-file spellings that make non-core generic bounds visible.
+    ///
+    /// Bound-provided receiver dispatch checks ordinary file visibility even after the bound has
+    /// been resolved to a canonical trait identity. Bound names live in the declaration header,
+    /// outside the retained body token slice, so body-name filtering alone would silently hide
+    /// them in the fresh generated environment.
+    fn retain_generic_bound_trait_names(
+        &self,
+        source_file: &InternedPath,
+        parameters: &[StableGenericParameter],
+        referenced_names: &mut FxHashSet<String>,
+    ) -> Result<(), CompilerError> {
+        let visibility = self.import_environment.visibility_for(source_file)?;
+
+        for parameter in parameters {
+            for bound in &parameter.bounds {
+                if matches!(bound, CanonicalTraitIdentity::Core(_)) {
+                    continue;
+                }
+
+                let trait_id = self
+                    .trait_environment
+                    .id_for_canonical_identity(bound)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Retained generic bound has no declaring-module trait definition",
+                        )
+                    })?;
+                let mut retained_visible_name = false;
+
+                for (visible_name, target) in &visibility.visible_trait_names {
+                    if self
+                        .trait_environment
+                        .has_path(trait_id, target.local_path())
+                    {
+                        referenced_names
+                            .insert(self.string_table.resolve(*visible_name).to_owned());
+                        retained_visible_name = true;
+                    }
+                }
+
+                if !retained_visible_name {
+                    return Err(CompilerError::compiler_error(
+                        "Retained generic bound is not visible in its declaration file",
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn generic_parameter_slots(
+        &self,
+        template: &GenericFunctionTemplate,
+    ) -> Result<FxHashMap<GenericParameterId, usize>, CompilerError> {
+        let parameters = self
+            .type_environment
+            .generic_parameters(template.generic_parameter_list_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Retained generic template references a missing parameter list",
+                )
+            })?;
+        Ok(parameters
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(slot, parameter)| (parameter.id, slot))
+            .collect())
+    }
+
+    fn stable_function_signature(
+        &self,
+        signature: &FunctionSignature,
+        parameter_slots: &FxHashMap<GenericParameterId, usize>,
+    ) -> Result<StableFunctionSignature, CompilerError> {
+        let parameters = signature
+            .parameters
+            .iter()
+            .map(|parameter| {
+                let name = parameter.id.name().ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialisation function parameter has no defining name",
+                    )
+                })?;
+                Ok(StableFunctionParameter {
+                    name: self.string_table.resolve(name).to_owned(),
+                    value_mode: parameter.value.value_mode.clone(),
+                    parameter_type: self
+                        .materialisation_type_blueprint(parameter.value.type_id, parameter_slots)?,
+                    location: StableSourceLocation::capture(
+                        &parameter.value.location,
+                        &self.string_table,
+                    ),
+                })
+            })
+            .collect::<Result<Box<[_]>, CompilerError>>()?;
+        let returns = signature
+            .returns
+            .iter()
+            .map(|returned| {
+                let type_id = returned.type_id.ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialisation function return has no resolved type",
+                    )
+                })?;
+                Ok(StableFunctionReturn {
+                    return_type: self.materialisation_type_blueprint(type_id, parameter_slots)?,
+                    alias_candidates: returned
+                        .value
+                        .alias_candidates()
+                        .map(|indices| indices.to_vec().into_boxed_slice()),
+                    channel: returned.channel,
+                })
+            })
+            .collect::<Result<Box<[_]>, CompilerError>>()?;
+        Ok(StableFunctionSignature {
+            parameters,
+            returns,
+        })
+    }
+
+    fn stable_file_visibility(
+        &self,
+        source_file: &InternedPath,
+        referenced_names: &FxHashSet<String>,
+    ) -> Result<StableFileVisibility, CompilerError> {
+        let visibility = self.import_environment.visibility_for(source_file)?;
+        let capture_declarations = |bindings: &FxHashMap<StringId, SourceDeclarationTarget>| {
+            bindings
+                .iter()
+                .filter_map(|(name, target)| {
+                    let visible_name = self.string_table.resolve(*name);
+                    referenced_names
+                        .contains(visible_name)
+                        .then(|| StableVisibleDeclaration {
+                            visible_name: visible_name.to_owned(),
+                            local_path: stable_path(target.local_path(), &self.string_table),
+                            origin: match target {
+                                SourceDeclarationTarget::Local(_) => None,
+                                SourceDeclarationTarget::Imported { origin, .. } => {
+                                    Some(origin.clone())
+                                }
+                            },
+                        })
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice()
+        };
+        let mut external_symbols = Vec::new();
+        for (name, symbol_id) in &visibility.visible_external_symbols {
+            let visible_name = self.string_table.resolve(*name);
+            if !referenced_names.contains(visible_name) {
+                continue;
+            }
+            let identity = self
+                .external_package_registry
+                .canonical_symbol_identity(*symbol_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialisation external binding has no canonical identity",
+                    )
+                })?;
+            external_symbols.push(StableExternalSymbol {
+                visible_name: visible_name.to_owned(),
+                identity,
+            });
+        }
+        let receiver_methods = visibility
+            .visible_receiver_methods
+            .iter()
+            .filter(|(name, _)| referenced_names.contains(self.string_table.resolve(**name)))
+            .flat_map(|(name, methods)| {
+                methods.iter().filter_map(|method| {
+                    StableFunctionTarget::capture(&method.target).map(|target| {
+                        StableReceiverMethod {
+                            visible_name: self.string_table.resolve(*name).to_owned(),
+                            local_path: stable_path(method.target.local_path(), &self.string_table),
+                            target,
+                            location: StableSourceLocation::capture(
+                                &method.location,
+                                &self.string_table,
+                            ),
+                        }
+                    })
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Ok(StableFileVisibility {
+            source_names: capture_declarations(&visibility.visible_source_names),
+            type_alias_names: capture_declarations(&visibility.visible_type_alias_names),
+            trait_names: capture_declarations(&visibility.visible_trait_names),
+            external_symbols: external_symbols.into_boxed_slice(),
+            receiver_methods,
+        })
+    }
+
+    fn selected_visible_paths(
+        &self,
+        source_file: &InternedPath,
+        referenced_names: &FxHashSet<String>,
+    ) -> Result<FxHashSet<InternedPath>, CompilerError> {
+        let visibility = self.import_environment.visibility_for(source_file)?;
+        Ok(visibility
+            .visible_source_names
+            .iter()
+            .chain(visibility.visible_type_alias_names.iter())
+            .chain(visibility.visible_trait_names.iter())
+            .filter(|(name, _)| referenced_names.contains(self.string_table.resolve(**name)))
+            .map(|(_, target)| target.local_path().clone())
+            .collect())
+    }
+
+    fn stable_declaration_bindings(
+        &self,
+        selected_paths: &FxHashSet<InternedPath>,
+        public_interface: &PublicSemanticInterface,
+    ) -> Result<Box<[StableDeclarationBinding]>, CompilerError> {
+        let mut bindings = Vec::new();
+        for path in selected_paths {
+            if let Some(record) = self
+                .import_environment
+                .imported_declarations_by_local_path
+                .get(path)
+            {
+                bindings.push(StableDeclarationBinding {
+                    local_path: stable_path(path, &self.string_table),
+                    record: record.clone(),
+                });
+                continue;
+            }
+            let origin = self.public_origin_for_path(path);
+            if let Some(origin) = origin
+                && let Some(record) = public_interface.declaration(&origin)
+            {
+                bindings.push(StableDeclarationBinding {
+                    local_path: stable_path(path, &self.string_table),
+                    record: record.clone(),
+                });
+            }
+        }
+        bindings.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+        Ok(bindings.into_boxed_slice())
+    }
+
+    fn public_origin_for_path(&self, path: &InternedPath) -> Option<OriginDeclarationId> {
+        if let Some(template) = self.generic_function_templates_by_path.get(path)
+            && let Some(GeneratedDeclarationIdentity::Public(origin)) =
+                template.declaration_identity.as_ref()
+        {
+            return Some(OriginDeclarationId::Function(origin.clone()));
+        }
+        if let Some(contract) = self.imported_functions_by_local_path.get(path)
+            && let SourceFunctionTarget::Imported { origin, .. } = &contract.target
+        {
+            return Some(OriginDeclarationId::Function(origin.clone()));
+        }
+        if let Some(type_id) = self.nominal_type_ids_by_path.get(path)
+            && let Some(CanonicalTypeIdentity::SourceNominal(origin)) = self
+                .type_environment
+                .canonical_identity_for_type_id(*type_id)
+        {
+            return Some(OriginDeclarationId::Type(origin.clone()));
+        }
+        if let Some(trait_id) = self.trait_environment.id_for_path(path)
+            && let Some(CanonicalTraitIdentity::Source(origin)) =
+                self.trait_environment.canonical_identity_for_id(trait_id)
+        {
+            return Some(OriginDeclarationId::Trait(origin.clone()));
+        }
+        None
+    }
+
+    fn stable_callable_bindings(
+        &self,
+        selected_paths: &FxHashSet<InternedPath>,
+    ) -> Result<Box<[StableCallableBinding]>, CompilerError> {
+        let mut callables = Vec::new();
+        for path in selected_paths {
+            let Some(contract) = self.imported_functions_by_local_path.get(path) else {
+                continue;
+            };
+            let Some(target) = StableFunctionTarget::capture(&contract.target) else {
+                continue;
+            };
+            let Some(resolved) = self.resolved_function_signatures_by_path.get(path) else {
+                continue;
+            };
+            if resolved.receiver.is_some() {
+                continue;
+            }
+            callables.push(StableCallableBinding {
+                local_path: stable_path(path, &self.string_table),
+                target,
+                signature: self
+                    .stable_function_signature(&resolved.signature, &FxHashMap::default())?,
+                summary: contract.summary.clone(),
+            });
+        }
+        callables.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+        Ok(callables.into_boxed_slice())
+    }
+
+    fn stable_nominal_blueprints(
+        &self,
+        selected_paths: &FxHashSet<InternedPath>,
+        signature: &StableFunctionSignature,
+    ) -> Result<FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>, CompilerError>
+    {
+        let mut identities = FxHashSet::default();
+        signature.collect_nominal_identities(&mut identities);
+        for path in selected_paths {
+            if let Some(type_id) = self.nominal_type_ids_by_path.get(path)
+                && let Some(identity) = self
+                    .type_environment
+                    .canonical_identity_for_type_id(*type_id)
+            {
+                identities.insert(identity.clone());
+            }
+        }
+        let mut blueprints = FxHashMap::default();
+        for identity in identities {
+            if let Some(blueprint) = self.nominal_blueprints.get(&identity) {
+                blueprints.insert(identity, blueprint.clone());
+            }
+        }
+        Ok(blueprints)
+    }
+
+    fn stable_nominal_bindings(
+        &self,
+        selected_paths: &FxHashSet<InternedPath>,
+    ) -> Box<[StableNominalBinding]> {
+        let mut bindings = selected_paths
+            .iter()
+            .filter_map(|path| {
+                let type_id = self.nominal_type_ids_by_path.get(path)?;
+                let identity = self
+                    .type_environment
+                    .canonical_identity_for_type_id(*type_id)?;
+                self.nominal_blueprints
+                    .contains_key(identity)
+                    .then(|| StableNominalBinding {
+                        local_path: stable_path(path, &self.string_table),
+                        identity: identity.clone(),
+                    })
+            })
+            .collect::<Vec<_>>();
+        bindings.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+        bindings.into_boxed_slice()
+    }
+
     /// Freeze stable targets for every concrete executable visible to generated bodies.
     ///
     /// Public functions retain their interface identity. Concrete local helpers receive a
     /// distinct artefact-scoped identity and are projected as imported contracts when a generic
     /// body is materialised in an independent sidecar.
-    pub(crate) fn install_concrete_executable_contracts(
+    fn install_concrete_executable_contracts(
         &mut self,
         module_origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
         public_origins_by_path: &FxHashMap<InternedPath, OriginFunctionId>,
+        public_nominal_origins_by_path: &FxHashMap<InternedPath, OriginTypeId>,
     ) -> Result<Vec<(InternedPath, ModulePrivateExecutableIdentity)>, CompilerError> {
-        self.install_private_semantic_identities(module_origin)?;
+        self.install_private_semantic_identities(module_origin, public_nominal_origins_by_path)?;
+        self.install_nominal_blueprints()?;
 
         let generic_paths = self
             .generic_function_templates_by_path
@@ -232,6 +2308,7 @@ impl ModuleMaterialisationContext {
     fn install_private_semantic_identities(
         &mut self,
         module_origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
+        public_nominal_origins_by_path: &FxHashMap<InternedPath, OriginTypeId>,
     ) -> Result<(), CompilerError> {
         let nominal_types = self
             .nominal_type_ids_by_path
@@ -244,6 +2321,16 @@ impl ModuleMaterialisationContext {
                 .canonical_identity_for_type_id(type_id)
                 .is_some()
             {
+                continue;
+            }
+            if let Some(origin) = public_nominal_origins_by_path.get(&path) {
+                self.type_environment.register_canonical_identity(
+                    CanonicalTypeIdentity::SourceNominal(origin.clone()),
+                    type_id,
+                )?;
+                continue;
+            }
+            if !self.source_nominal_paths.contains(&path) {
                 continue;
             }
             let category = match self.type_environment.get(type_id) {
@@ -260,8 +2347,6 @@ impl ModuleMaterialisationContext {
                 CanonicalTypeIdentity::ModulePrivateNominal(identity.clone()),
                 type_id,
             )?;
-            self.private_nominals_by_identity
-                .insert(identity, (path, type_id));
         }
 
         let private_traits = self
@@ -328,6 +2413,396 @@ impl ModuleMaterialisationContext {
         Ok(())
     }
 
+    /// Freeze every requester-visible nominal definition into owned, stable semantic data.
+    ///
+    /// Imported and local aliases can add several lookup paths for the same nominal. The
+    /// canonical identity is the sole blueprint key, so each definition is captured once in
+    /// deterministic identity order.
+    fn install_nominal_blueprints(&mut self) -> Result<(), CompilerError> {
+        let mut nominal_type_ids = FxHashMap::default();
+        for (identity, type_id) in self.type_environment.canonical_type_identities() {
+            if matches!(
+                identity,
+                CanonicalTypeIdentity::SourceNominal(_)
+                    | CanonicalTypeIdentity::ModulePrivateNominal(_)
+            ) {
+                nominal_type_ids.entry(identity.clone()).or_insert(type_id);
+            }
+        }
+
+        let mut nominal_type_ids = nominal_type_ids.into_iter().collect::<Vec<_>>();
+        nominal_type_ids.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let mut blueprints = FxHashMap::default();
+        for (identity, type_id) in nominal_type_ids {
+            let blueprint = self.nominal_blueprint(&identity, type_id)?;
+            blueprints.insert(identity, blueprint);
+        }
+        self.nominal_blueprints = blueprints;
+        Ok(())
+    }
+
+    fn nominal_blueprint(
+        &self,
+        identity: &CanonicalTypeIdentity,
+        type_id: TypeId,
+    ) -> Result<NominalMaterialisationBlueprint, CompilerError> {
+        let generic_parameter_list_id = match self.type_environment.get(type_id) {
+            Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
+            Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
+            _ => {
+                return Err(CompilerError::compiler_error(
+                    "Materialisation nominal blueprint target is not a struct or choice",
+                ));
+            }
+        };
+
+        let (generic_parameters, parameter_slots) = if let Some(generic_parameter_list_id) =
+            generic_parameter_list_id
+        {
+            let generic_parameter_list = self
+                .type_environment
+                .generic_parameters(generic_parameter_list_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialisation nominal references a missing generic parameter list",
+                    )
+                })?;
+            let parameter_slots = generic_parameter_list
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(index, parameter)| (parameter.id, index))
+                .collect::<FxHashMap<_, _>>();
+            let public_parameters = self.public_nominal_generic_parameters(identity)?;
+            if let Some(public_parameters) = public_parameters
+                && public_parameters.len() != generic_parameter_list.parameters.len()
+            {
+                return Err(CompilerError::compiler_error(
+                    "Materialisation nominal public generic surface has inconsistent arity",
+                ));
+            }
+
+            let generic_parameters = generic_parameter_list
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(index, parameter)| {
+                let name = self.string_table.resolve(parameter.name).to_owned();
+                if let Some(public_parameters) = public_parameters {
+                    let public_parameter = &public_parameters[index];
+                    if public_parameter.identity.authored_name() != name {
+                        return Err(CompilerError::compiler_error(
+                            "Materialisation nominal public generic parameter name disagrees with its local definition",
+                        ));
+                    }
+                    return Ok(NominalGenericParameterBlueprint {
+                        name,
+                        exported_identity: Some(public_parameter.identity.clone()),
+                        bounds: public_parameter.bounds.clone().into_boxed_slice(),
+                    });
+                }
+
+                let exported_identity = match identity {
+                    CanonicalTypeIdentity::SourceNominal(origin) => Some(
+                        ExportedGenericParameterIdentity::new(
+                            GenericDeclarationOrigin::nominal_type(origin.clone())?,
+                            index as u32,
+                            name.clone(),
+                        ),
+                    ),
+                    CanonicalTypeIdentity::ModulePrivateNominal(_) => None,
+                    _ => {
+                        return Err(CompilerError::compiler_error(
+                            "Materialisation generic parameter owner is not nominal",
+                        ));
+                    }
+                };
+                let bounds = parameter
+                    .trait_bounds
+                    .iter()
+                    .map(|trait_id| {
+                        self.trait_environment
+                            .canonical_identity_for_id(*trait_id)
+                            .cloned()
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialisation nominal generic bound has no canonical trait identity",
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_boxed_slice();
+                Ok(NominalGenericParameterBlueprint {
+                    name,
+                    exported_identity,
+                    bounds,
+                })
+                    })
+                    .collect::<Result<Box<[_]>, CompilerError>>()?;
+            (generic_parameters, parameter_slots)
+        } else {
+            (
+                Vec::<NominalGenericParameterBlueprint>::new().into_boxed_slice(),
+                FxHashMap::default(),
+            )
+        };
+
+        let definition = match self.type_environment.get(type_id) {
+            Some(TypeDefinition::Struct(definition)) => NominalMaterialisationDefinition::Struct {
+                fields: self.nominal_field_blueprints(&definition.fields, &parameter_slots)?,
+                const_record: definition.const_record,
+            },
+            Some(TypeDefinition::Choice(definition)) => NominalMaterialisationDefinition::Choice {
+                variants: self.nominal_choice_blueprints(&definition.variants, &parameter_slots)?,
+            },
+            _ => unreachable!("nominal kind was validated before generic blueprint extraction"),
+        };
+
+        Ok(NominalMaterialisationBlueprint {
+            generic_parameters,
+            definition,
+        })
+    }
+
+    fn public_nominal_generic_parameters(
+        &self,
+        identity: &CanonicalTypeIdentity,
+    ) -> Result<
+        Option<&[crate::compiler_frontend::public_interface::PublicGenericParameterSurface]>,
+        CompilerError,
+    > {
+        let CanonicalTypeIdentity::SourceNominal(origin) = identity else {
+            return Ok(None);
+        };
+        let Some(record) = self
+            .import_environment
+            .imported_declarations_by_origin
+            .get(&OriginDeclarationId::Type(origin.clone()))
+        else {
+            return Ok(None);
+        };
+        match &record.semantics {
+            PublicDeclarationSemantics::Struct(semantics) => {
+                Ok(Some(&semantics.generic_parameters))
+            }
+            PublicDeclarationSemantics::Choice(semantics) => {
+                Ok(Some(&semantics.generic_parameters))
+            }
+            _ => Err(CompilerError::compiler_error(
+                "Materialisation nominal origin resolved to a non-nominal public declaration",
+            )),
+        }
+    }
+
+    fn nominal_field_blueprints(
+        &self,
+        fields: &[FieldDefinition],
+        parameter_slots: &FxHashMap<GenericParameterId, usize>,
+    ) -> Result<Box<[NominalFieldBlueprint]>, CompilerError> {
+        fields
+            .iter()
+            .map(|field| {
+                let name = field.name.name().ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialisation nominal field path has no defining name",
+                    )
+                })?;
+                Ok(NominalFieldBlueprint {
+                    name: self.string_table.resolve(name).to_owned(),
+                    field_type: self
+                        .materialisation_type_blueprint(field.type_id, parameter_slots)?,
+                })
+            })
+            .collect::<Result<Box<[_]>, CompilerError>>()
+    }
+
+    fn nominal_choice_blueprints(
+        &self,
+        variants: &[ChoiceVariantDefinition],
+        parameter_slots: &FxHashMap<GenericParameterId, usize>,
+    ) -> Result<Box<[NominalChoiceVariantBlueprint]>, CompilerError> {
+        variants
+            .iter()
+            .map(|variant| {
+                let payload_fields = match &variant.payload {
+                    ChoiceVariantPayloadDefinition::Unit => Box::new([]),
+                    ChoiceVariantPayloadDefinition::Record { fields } => {
+                        self.nominal_field_blueprints(fields, parameter_slots)?
+                    }
+                };
+                Ok(NominalChoiceVariantBlueprint {
+                    name: self.string_table.resolve(variant.name).to_owned(),
+                    tag: variant.tag,
+                    payload_fields,
+                })
+            })
+            .collect::<Result<Box<[_]>, CompilerError>>()
+    }
+
+    fn materialisation_type_blueprint(
+        &self,
+        type_id: TypeId,
+        parameter_slots: &FxHashMap<GenericParameterId, usize>,
+    ) -> Result<MaterialisationTypeBlueprint, CompilerError> {
+        let definition = self.type_environment.get(type_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Materialisation nominal member references an unknown local type",
+            )
+        })?;
+        match definition {
+            TypeDefinition::GenericParameter(parameter) => parameter_slots
+                .get(&parameter.id)
+                .copied()
+                .map(MaterialisationTypeBlueprint::GenericParameter)
+                .or_else(|| {
+                    self.type_environment
+                        .canonical_identity_for_type_id(type_id)
+                        .cloned()
+                        .map(MaterialisationTypeBlueprint::Canonical)
+                })
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialisation nominal member references a foreign unresolved generic parameter",
+                    )
+                }),
+            TypeDefinition::Builtin(builtin) => Ok(MaterialisationTypeBlueprint::Canonical(
+                CanonicalTypeIdentity::Builtin(canonical_builtin_type(builtin.key)),
+            )),
+            TypeDefinition::Struct(_) | TypeDefinition::Choice(_) => {
+                self.type_environment
+                    .canonical_identity_for_type_id(type_id)
+                    .cloned()
+                    .map(MaterialisationTypeBlueprint::Canonical)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "Materialisation nominal member TypeId({}) has no canonical identity: {definition:?}",
+                            type_id.0,
+                        ))
+                    })
+            }
+            TypeDefinition::External(external) => {
+                let (package, symbol_path) = self
+                    .external_package_registry
+                    .resolve_type_package_and_symbol_path(external.type_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Materialisation nominal external member type is absent from the binding registry",
+                        )
+                    })?;
+                Ok(MaterialisationTypeBlueprint::Canonical(
+                    CanonicalTypeIdentity::ExternalOpaque(ExternalOpaqueTypeIdentity::new(
+                        package,
+                        symbol_path.clone(),
+                    )),
+                ))
+            }
+            TypeDefinition::Constructed(constructed) => {
+                self.constructed_materialisation_type_blueprint(constructed, parameter_slots)
+            }
+            TypeDefinition::GenericInstance(instance) => {
+                let base_type_id = self
+                    .type_environment
+                    .type_id_for_nominal_id(instance.base)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Materialisation generic instance has no nominal base type",
+                        )
+                    })?;
+                let base = self
+                    .type_environment
+                    .canonical_identity_for_type_id(base_type_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Materialisation generic instance base has no canonical identity",
+                        )
+                    })?;
+                let arguments = instance
+                    .arguments
+                    .iter()
+                    .map(|argument| {
+                        self.materialisation_type_blueprint(*argument, parameter_slots)
+                    })
+                    .collect::<Result<Box<[_]>, _>>()?;
+                Ok(MaterialisationTypeBlueprint::GenericInstance { base, arguments })
+            }
+            TypeDefinition::Function(_) => Err(CompilerError::compiler_error(
+                "Materialisation nominal member cannot contain a function type",
+            )),
+        }
+    }
+
+    fn constructed_materialisation_type_blueprint(
+        &self,
+        constructed: &crate::compiler_frontend::datatypes::definitions::ConstructedTypeDefinition,
+        parameter_slots: &FxHashMap<GenericParameterId, usize>,
+    ) -> Result<MaterialisationTypeBlueprint, CompilerError> {
+        let arguments = constructed.arguments.as_ref();
+        let project = |type_id| self.materialisation_type_blueprint(type_id, parameter_slots);
+        match constructed.constructor {
+            TypeConstructor::Builtin(BuiltinTypeConstructor::Collection { fixed_capacity }) => {
+                let [element] = arguments else {
+                    return Err(materialisation_type_arity_error(
+                        "collection",
+                        1,
+                        arguments.len(),
+                    ));
+                };
+                Ok(MaterialisationTypeBlueprint::Collection {
+                    element: Box::new(project(*element)?),
+                    fixed_capacity,
+                })
+            }
+            TypeConstructor::Builtin(BuiltinTypeConstructor::OrderedMap) => {
+                let [key, value] = arguments else {
+                    return Err(materialisation_type_arity_error(
+                        "ordered map",
+                        2,
+                        arguments.len(),
+                    ));
+                };
+                Ok(MaterialisationTypeBlueprint::OrderedMap {
+                    key: Box::new(project(*key)?),
+                    value: Box::new(project(*value)?),
+                })
+            }
+            TypeConstructor::Builtin(BuiltinTypeConstructor::Option) => {
+                let [inner] = arguments else {
+                    return Err(materialisation_type_arity_error(
+                        "option",
+                        1,
+                        arguments.len(),
+                    ));
+                };
+                Ok(MaterialisationTypeBlueprint::Option(Box::new(project(
+                    *inner,
+                )?)))
+            }
+            TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier) => {
+                let [success, error] = arguments else {
+                    return Err(materialisation_type_arity_error(
+                        "fallible carrier",
+                        2,
+                        arguments.len(),
+                    ));
+                };
+                Ok(MaterialisationTypeBlueprint::FallibleCarrier {
+                    success: Box::new(project(*success)?),
+                    error: Box::new(project(*error)?),
+                })
+            }
+            TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => {
+                Ok(MaterialisationTypeBlueprint::Tuple(
+                    arguments
+                        .iter()
+                        .map(|argument| project(*argument))
+                        .collect::<Result<Box<[_]>, _>>()?,
+                ))
+            }
+        }
+    }
+
     fn private_executable_identity(
         &self,
         module_origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
@@ -354,7 +2829,7 @@ impl ModuleMaterialisationContext {
             })?;
         let declaring_source = path
             .parent()
-            .unwrap_or_else(InternedPath::new)
+            .unwrap_or_default()
             .to_string(&self.string_table);
 
         Ok(ModulePrivateExecutableIdentity::new(
@@ -366,39 +2841,18 @@ impl ModuleMaterialisationContext {
         ))
     }
 
-    pub(crate) fn from_environment(
-        lookups: &AstModuleLookups,
-        type_environment: &TypeEnvironment,
-        public_trait_roots: &[crate::compiler_frontend::ast::module_ast::environment::ResolvedPublicTraitRoot],
-        entry_dir: InternedPath,
-        string_table: &StringTable,
-        template_const_loop_iteration_limit: usize,
-        capacity_estimate: FrontendArenaCapacityEstimate,
-    ) -> Self {
-        let source_nominals_by_origin = lookups
-            .nominal_type_ids_by_path
-            .iter()
-            .filter_map(|(path, type_id)| {
-                let CanonicalTypeIdentity::SourceNominal(origin) =
-                    type_environment.canonical_identity_for_type_id(*type_id)?
-                else {
-                    return None;
-                };
-                Some((origin.clone(), (path.clone(), *type_id)))
-            })
-            .collect();
-        let private_nominals_by_identity = lookups
-            .nominal_type_ids_by_path
-            .iter()
-            .filter_map(|(path, type_id)| {
-                let CanonicalTypeIdentity::ModulePrivateNominal(identity) =
-                    type_environment.canonical_identity_for_type_id(*type_id)?
-                else {
-                    return None;
-                };
-                Some((identity.clone(), (path.clone(), *type_id)))
-            })
-            .collect();
+    fn from_environment(input: ModuleMaterialisationEnvironmentInput<'_>) -> Self {
+        let ModuleMaterialisationEnvironmentInput {
+            lookups,
+            type_environment,
+            public_trait_roots,
+            const_templates_by_path,
+            entry_dir,
+            string_table,
+            template_const_loop_iteration_limit,
+            capacity_estimate,
+        } = input;
+
         Self {
             string_table: string_table.clone(),
             entry_dir,
@@ -409,6 +2863,7 @@ impl ModuleMaterialisationContext {
             imported_struct_definitions: lookups.imported_struct_definitions.clone(),
             imported_choice_definitions: lookups.imported_choice_definitions.clone(),
             module_constants: lookups.module_constants.clone(),
+            const_templates_by_path,
             builtin_struct_ast_nodes: lookups.builtin_struct_ast_nodes.clone(),
             resolved_struct_fields_by_path: (*lookups.resolved_struct_fields_by_path).clone(),
             resolved_function_signatures_by_path: (*lookups.resolved_function_signatures_by_path)
@@ -419,12 +2874,12 @@ impl ModuleMaterialisationContext {
             declaration_semantics: (*lookups.declaration_semantics).clone(),
             generic_declarations_by_path: (*lookups.generic_declarations_by_path).clone(),
             nominal_type_ids_by_path: (*lookups.nominal_type_ids_by_path).clone(),
+            source_nominal_paths: (*lookups.source_nominal_paths).clone(),
             public_trait_paths: public_trait_roots
                 .iter()
                 .map(|root| root.canonical_path.clone())
                 .collect(),
-            source_nominals_by_origin,
-            private_nominals_by_identity,
+            nominal_blueprints: FxHashMap::default(),
             receiver_methods: (*lookups.receiver_methods).clone(),
             trait_environment: (*lookups.trait_environment).clone(),
             trait_evidence_environment: (*lookups.trait_evidence_environment).clone(),
@@ -438,16 +2893,57 @@ impl ModuleMaterialisationContext {
         }
     }
 
-    pub(crate) fn build_environment(&self) -> AstModuleEnvironment {
+    pub(crate) fn build_environment(
+        &self,
+        phase_context: &AstPhaseContext<'_>,
+        string_table: &mut StringTable,
+    ) -> Result<AstModuleEnvironment, CompilerError> {
+        let mut module_constants = self.module_constants.clone();
+        for declaration in &mut module_constants {
+            let ExpressionKind::Template(_) = &declaration.value.kind else {
+                continue;
+            };
+            let projected = self
+                .const_templates_by_path
+                .get(&declaration.id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Generated materialisation constant has no stable const-template projection",
+                    )
+                })?;
+            let template = materialize_public_const_template(
+                projected,
+                &phase_context.template_ir_store,
+                string_table,
+                declaration.value.location.clone(),
+            )?;
+            declaration.value.kind = ExpressionKind::Template(Box::new(template));
+        }
+
+        let module_constants_by_path = module_constants
+            .iter()
+            .map(|declaration| (&declaration.id, declaration))
+            .collect::<FxHashMap<_, _>>();
+        let declarations = self
+            .declaration_table
+            .iter()
+            .map(|declaration| {
+                module_constants_by_path
+                    .get(&declaration.id)
+                    .map(|constant| (*constant).clone())
+                    .unwrap_or_else(|| declaration.clone())
+            })
+            .collect();
+
         let lookups = AstModuleLookups {
             module_symbols: ModuleSymbols::empty(),
             import_environment: self.import_environment.clone(),
             warnings: Vec::new(),
-            declaration_table: Rc::new(self.declaration_table.clone()),
+            declaration_table: Rc::new(TopLevelDeclarationTable::new(declarations)),
             imported_functions_by_local_path: self.imported_functions_by_local_path.clone(),
             imported_struct_definitions: self.imported_struct_definitions.clone(),
             imported_choice_definitions: self.imported_choice_definitions.clone(),
-            module_constants: self.module_constants.clone(),
+            module_constants,
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: self.builtin_struct_ast_nodes.clone(),
             resolved_struct_fields_by_path: Rc::new(self.resolved_struct_fields_by_path.clone()),
@@ -463,6 +2959,7 @@ impl ModuleMaterialisationContext {
             trait_evidence_environment: Rc::new(self.trait_evidence_environment.clone()),
             generic_declarations_by_path: Rc::new(self.generic_declarations_by_path.clone()),
             nominal_type_ids_by_path: Rc::new(self.nominal_type_ids_by_path.clone()),
+            source_nominal_paths: Rc::new(self.source_nominal_paths.clone()),
             external_package_registry: Arc::clone(&self.external_package_registry),
             style_directives: self.style_directives.clone(),
             build_profile: self.build_profile,
@@ -470,24 +2967,18 @@ impl ModuleMaterialisationContext {
             path_format_config: self.path_format_config.clone(),
         };
 
-        AstModuleEnvironment {
+        Ok(AstModuleEnvironment {
             lookups: Rc::new(lookups),
             type_environment: self.type_environment.clone(),
             resolved_public_type_roots: Default::default(),
             resolved_public_trait_roots: Vec::new(),
-        }
+        })
     }
 
     pub(crate) fn generic_function_templates(
         &self,
     ) -> &FxHashMap<InternedPath, GenericFunctionTemplate> {
         &self.generic_function_templates_by_path
-    }
-
-    pub(crate) fn generic_function_templates_mut(
-        &mut self,
-    ) -> &mut FxHashMap<InternedPath, GenericFunctionTemplate> {
-        &mut self.generic_function_templates_by_path
     }
 
     pub(crate) fn trait_environment(&self) -> &TraitEnvironment {
@@ -513,8 +3004,9 @@ impl ModuleMaterialisationContext {
     pub(crate) fn materialise_ast(
         &self,
         identity: &GeneratedFunctionIdentity,
-        requester_context: &ModuleMaterialisationContext,
+        requester_context: &ModuleMaterialisationPreparation,
         requester_call_location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+        project_path_resolver: Option<ProjectPathResolver>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
         let template = self
             .template_for_identity(identity.declaration())
@@ -530,7 +3022,22 @@ impl ModuleMaterialisationContext {
         let requester_string_remap = string_table.merge_from(&requester_context.string_table);
         let mut call_location = requester_call_location.clone();
         call_location.remap_string_ids(&requester_string_remap);
-        let mut environment = self.build_environment();
+        let build_context = AstBuildContext {
+            external_package_registry: Arc::clone(&self.external_package_registry),
+            style_directives: &self.style_directives,
+            string_table: &mut string_table,
+            entry_dir: self.entry_dir.clone(),
+            root_role: ModuleRootRole::Support,
+            build_profile: self.build_profile,
+            project_path_resolver: self.project_path_resolver.clone().or(project_path_resolver),
+            path_format_config: self.path_format_config.clone(),
+            template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
+            capacity_estimate: self.capacity_estimate,
+        };
+        let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
+        let mut environment = self
+            .build_environment(&phase_context, string_table_ref)
+            .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
         let mut type_arguments = Vec::with_capacity(identity.type_arguments().len());
         for canonical_identity in identity.type_arguments() {
             let type_id = intern_generated_canonical_type(
@@ -538,7 +3045,7 @@ impl ModuleMaterialisationContext {
                 &mut environment.type_environment,
                 self.external_package_registry.as_ref(),
                 requester_context,
-                &requester_string_remap,
+                string_table_ref,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
             type_arguments.push(type_id);
@@ -548,13 +3055,13 @@ impl ModuleMaterialisationContext {
             requester_context,
             &requester_string_remap,
             &mut environment,
-            &string_table,
+            string_table_ref,
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
 
         let instance_path = template
             .function_path
-            .join_str("__generated_instance", &mut string_table);
+            .join_str("__generated_instance", string_table_ref);
         let request = GenericFunctionInstantiationRequest {
             declaration_identity: Some(identity.declaration().clone()),
             evidence: Box::new([]),
@@ -565,27 +3072,23 @@ impl ModuleMaterialisationContext {
             instance_path: instance_path.clone(),
             call_location,
         };
-        let build_context = AstBuildContext {
-            external_package_registry: Arc::clone(&self.external_package_registry),
-            style_directives: &self.style_directives,
-            string_table: &mut string_table,
-            entry_dir: self.entry_dir.clone(),
-            root_role: ModuleRootRole::Support,
-            build_profile: self.build_profile,
-            project_path_resolver: self.project_path_resolver.clone(),
-            path_format_config: self.path_format_config.clone(),
-            template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
-            capacity_estimate: self.capacity_estimate,
-        };
-        let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
         let emitted = AstEmitter::new(&phase_context, &mut environment, 1)
             .emit_generated_request(request, string_table_ref)?;
 
-        let build_result = AstFinalizer::new(&phase_context, environment).finalize(
+        let mut build_result = AstFinalizer::new(&phase_context, environment).finalize(
             emitted,
             &[],
             string_table_ref,
         )?;
+        build_result
+            .materialisation_context
+            .inherit_nominal_blueprints(self)
+            .and_then(|()| {
+                build_result
+                    .materialisation_context
+                    .inherit_nominal_blueprints(requester_context)
+            })
+            .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
         Ok(MaterialisedGenericAst {
             build_result,
             string_table,
@@ -594,12 +3097,31 @@ impl ModuleMaterialisationContext {
     }
 }
 
+fn canonical_builtin_type(key: BuiltinTypeKey) -> CanonicalBuiltinType {
+    match key {
+        BuiltinTypeKey::Bool => CanonicalBuiltinType::Bool,
+        BuiltinTypeKey::Int => CanonicalBuiltinType::Int,
+        BuiltinTypeKey::Float => CanonicalBuiltinType::Float,
+        BuiltinTypeKey::Decimal => CanonicalBuiltinType::Decimal,
+        BuiltinTypeKey::String => CanonicalBuiltinType::String,
+        BuiltinTypeKey::Char => CanonicalBuiltinType::Char,
+        BuiltinTypeKey::Range => CanonicalBuiltinType::Range,
+        BuiltinTypeKey::None => CanonicalBuiltinType::None,
+    }
+}
+
+fn materialisation_type_arity_error(shape: &str, expected: usize, actual: usize) -> CompilerError {
+    CompilerError::compiler_error(format!(
+        "Materialisation {shape} type has malformed arity: expected {expected}, found {actual}",
+    ))
+}
+
 fn intern_generated_canonical_type(
     identity: &CanonicalTypeIdentity,
     type_environment: &mut TypeEnvironment,
     external_registry: &ExternalPackageRegistry,
-    requester_context: &ModuleMaterialisationContext,
-    requester_string_remap: &StringIdRemap,
+    nominal_source: &impl MaterialisationNominalSource,
+    string_table: &mut StringTable,
 ) -> Result<TypeId, CompilerError> {
     if let Some(type_id) = type_environment.type_id_for_canonical_identity(identity) {
         return Ok(type_id);
@@ -626,8 +3148,8 @@ fn intern_generated_canonical_type(
                 inner,
                 type_environment,
                 external_registry,
-                requester_context,
-                requester_string_remap,
+                nominal_source,
+                string_table,
             )?;
             type_environment.intern_option(inner)
         }
@@ -636,8 +3158,8 @@ fn intern_generated_canonical_type(
                 collection.element(),
                 type_environment,
                 external_registry,
-                requester_context,
-                requester_string_remap,
+                nominal_source,
+                string_table,
             )?;
             type_environment.intern_collection(element, collection.fixed_capacity())
         }
@@ -646,15 +3168,15 @@ fn intern_generated_canonical_type(
                 map.key(),
                 type_environment,
                 external_registry,
-                requester_context,
-                requester_string_remap,
+                nominal_source,
+                string_table,
             )?;
             let value = intern_generated_canonical_type(
                 map.value(),
                 type_environment,
                 external_registry,
-                requester_context,
-                requester_string_remap,
+                nominal_source,
+                string_table,
             )?;
             type_environment.intern_map(key, value)
         }
@@ -663,32 +3185,26 @@ fn intern_generated_canonical_type(
                 carrier.success(),
                 type_environment,
                 external_registry,
-                requester_context,
-                requester_string_remap,
+                nominal_source,
+                string_table,
             )?;
             let error = intern_generated_canonical_type(
                 carrier.error(),
                 type_environment,
                 external_registry,
-                requester_context,
-                requester_string_remap,
+                nominal_source,
+                string_table,
             )?;
             type_environment.intern_fallible_carrier(success, error)
         }
-        CanonicalTypeIdentity::SourceNominal(origin) => intern_requester_source_nominal(
-            origin,
-            requester_context,
-            requester_string_remap,
+        CanonicalTypeIdentity::SourceNominal(_)
+        | CanonicalTypeIdentity::ModulePrivateNominal(_) => intern_materialisation_nominal(
+            identity,
+            nominal_source,
             type_environment,
+            external_registry,
+            string_table,
         )?,
-        CanonicalTypeIdentity::ModulePrivateNominal(identity) => {
-            intern_requester_private_nominal(
-                identity,
-                requester_context,
-                requester_string_remap,
-                type_environment,
-            )?
-        }
         CanonicalTypeIdentity::ExternalOpaque(external) => {
             let (external_type_id, _) = external_registry
                 .resolve_canonical_package_type_by_path(external.package(), external.symbol_path())
@@ -703,8 +3219,8 @@ fn intern_generated_canonical_type(
                 &base_identity,
                 type_environment,
                 external_registry,
-                requester_context,
-                requester_string_remap,
+                nominal_source,
+                string_table,
             )?;
             let nominal_id = match type_environment.get(base_type_id) {
                 Some(TypeDefinition::Struct(definition)) => definition.id,
@@ -721,8 +3237,39 @@ fn intern_generated_canonical_type(
                     argument,
                     type_environment,
                     external_registry,
-                    requester_context,
-                    requester_string_remap,
+                    nominal_source,
+                    string_table,
+                )?);
+            }
+            type_environment.intern_generic_instance(nominal_id, arguments.into_boxed_slice())
+        }
+        CanonicalTypeIdentity::ModulePrivateGenericInstance(instance) => {
+            let base_identity =
+                CanonicalTypeIdentity::ModulePrivateNominal(instance.base().clone());
+            let base_type_id = intern_generated_canonical_type(
+                &base_identity,
+                type_environment,
+                external_registry,
+                nominal_source,
+                string_table,
+            )?;
+            let nominal_id = match type_environment.get(base_type_id) {
+                Some(TypeDefinition::Struct(definition)) => definition.id,
+                Some(TypeDefinition::Choice(definition)) => definition.id,
+                _ => {
+                    return Err(CompilerError::compiler_error(
+                        "Generated private generic base is not nominal",
+                    ));
+                }
+            };
+            let mut arguments = Vec::with_capacity(instance.arguments().len());
+            for argument in instance.arguments() {
+                arguments.push(intern_generated_canonical_type(
+                    argument,
+                    type_environment,
+                    external_registry,
+                    nominal_source,
+                    string_table,
                 )?);
             }
             type_environment.intern_generic_instance(nominal_id, arguments.into_boxed_slice())
@@ -737,113 +3284,413 @@ fn intern_generated_canonical_type(
     Ok(type_id)
 }
 
-fn intern_requester_private_nominal(
-    identity: &ModulePrivateNominalIdentity,
-    requester_context: &ModuleMaterialisationContext,
-    requester_string_remap: &StringIdRemap,
+fn intern_materialisation_type_blueprint(
+    blueprint: &MaterialisationTypeBlueprint,
+    generic_parameter_type_ids: &[TypeId],
+    nominal_source: &impl MaterialisationNominalSource,
     type_environment: &mut TypeEnvironment,
+    external_registry: &ExternalPackageRegistry,
+    string_table: &mut StringTable,
 ) -> Result<TypeId, CompilerError> {
-    let (requester_path, requester_type_id) = requester_context
-        .private_nominals_by_identity
-        .get(identity)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generated request private nominal '{}' is absent from its requester artefact",
-                identity.defining_path()
-            ))
-        })?;
-    let mut generated_path = requester_path.clone();
-    generated_path.remap_string_ids(requester_string_remap);
-
-    let type_id = match (
-        identity.category(),
-        requester_context.type_environment.get(*requester_type_id),
-    ) {
-        (OriginTypeCategory::Struct, Some(TypeDefinition::Struct(definition))) => {
-            let (_, type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
-                id: NominalTypeId(0),
-                path: generated_path,
-                fields: Box::new([]),
-                generic_parameters: None,
-                const_record: definition.const_record,
-            });
-            type_id
+    match blueprint {
+        MaterialisationTypeBlueprint::Canonical(identity) => intern_generated_canonical_type(
+            identity,
+            type_environment,
+            external_registry,
+            nominal_source,
+            string_table,
+        ),
+        MaterialisationTypeBlueprint::GenericParameter(slot) => generic_parameter_type_ids
+            .get(*slot)
+            .copied()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Materialisation nominal member references an invalid generic parameter slot",
+                )
+            }),
+        MaterialisationTypeBlueprint::Collection {
+            element,
+            fixed_capacity,
+        } => {
+            let element = intern_materialisation_type_blueprint(
+                element,
+                generic_parameter_type_ids,
+                nominal_source,
+                type_environment,
+                external_registry,
+                string_table,
+            )?;
+            Ok(type_environment.intern_collection(element, *fixed_capacity))
         }
-        (OriginTypeCategory::Choice, Some(TypeDefinition::Choice(_))) => {
-            let (_, type_id) = type_environment.register_nominal_choice(ChoiceTypeDefinition {
-                id: NominalTypeId(0),
-                path: generated_path,
-                variants: Box::new([]),
-                generic_parameters: None,
-            });
-            type_id
+        MaterialisationTypeBlueprint::OrderedMap { key, value } => {
+            let key = intern_materialisation_type_blueprint(
+                key,
+                generic_parameter_type_ids,
+                nominal_source,
+                type_environment,
+                external_registry,
+                string_table,
+            )?;
+            let value = intern_materialisation_type_blueprint(
+                value,
+                generic_parameter_type_ids,
+                nominal_source,
+                type_environment,
+                external_registry,
+                string_table,
+            )?;
+            Ok(type_environment.intern_map(key, value))
         }
-        _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "Generated request private nominal '{}' has a mismatched requester definition",
-                identity.defining_path()
-            )));
+        MaterialisationTypeBlueprint::Option(inner) => {
+            let inner = intern_materialisation_type_blueprint(
+                inner,
+                generic_parameter_type_ids,
+                nominal_source,
+                type_environment,
+                external_registry,
+                string_table,
+            )?;
+            Ok(type_environment.intern_option(inner))
         }
-    };
-
-    Ok(type_id)
+        MaterialisationTypeBlueprint::FallibleCarrier { success, error } => {
+            let success = intern_materialisation_type_blueprint(
+                success,
+                generic_parameter_type_ids,
+                nominal_source,
+                type_environment,
+                external_registry,
+                string_table,
+            )?;
+            let error = intern_materialisation_type_blueprint(
+                error,
+                generic_parameter_type_ids,
+                nominal_source,
+                type_environment,
+                external_registry,
+                string_table,
+            )?;
+            Ok(type_environment.intern_fallible_carrier(success, error))
+        }
+        MaterialisationTypeBlueprint::Tuple(elements) => {
+            let elements = elements
+                .iter()
+                .map(|element| {
+                    intern_materialisation_type_blueprint(
+                        element,
+                        generic_parameter_type_ids,
+                        nominal_source,
+                        type_environment,
+                        external_registry,
+                        string_table,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(type_environment.intern_tuple(elements))
+        }
+        MaterialisationTypeBlueprint::GenericInstance { base, arguments } => {
+            let base_type_id = intern_generated_canonical_type(
+                base,
+                type_environment,
+                external_registry,
+                nominal_source,
+                string_table,
+            )?;
+            let nominal_id = match type_environment.get(base_type_id) {
+                Some(TypeDefinition::Struct(definition)) => definition.id,
+                Some(TypeDefinition::Choice(definition)) => definition.id,
+                _ => {
+                    return Err(CompilerError::compiler_error(
+                        "Materialisation generic instance base is not nominal",
+                    ));
+                }
+            };
+            let expected_arity = type_environment
+                .generic_parameter_list_id_for_type(base_type_id)
+                .and_then(|list_id| type_environment.generic_parameters(list_id))
+                .map(|parameters| parameters.parameters.len())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialisation generic instance base has no generic parameter list",
+                    )
+                })?;
+            if arguments.len() != expected_arity {
+                return Err(materialisation_type_arity_error(
+                    "generic instance",
+                    expected_arity,
+                    arguments.len(),
+                ));
+            }
+            let arguments = arguments
+                .iter()
+                .map(|argument| {
+                    intern_materialisation_type_blueprint(
+                        argument,
+                        generic_parameter_type_ids,
+                        nominal_source,
+                        type_environment,
+                        external_registry,
+                        string_table,
+                    )
+                })
+                .collect::<Result<Box<[_]>, _>>()?;
+            Ok(type_environment.intern_generic_instance(nominal_id, arguments))
+        }
+    }
 }
 
-fn intern_requester_source_nominal(
-    origin: &OriginTypeId,
-    requester_context: &ModuleMaterialisationContext,
-    requester_string_remap: &StringIdRemap,
-    type_environment: &mut TypeEnvironment,
-) -> Result<TypeId, CompilerError> {
-    let (requester_path, requester_type_id) = requester_context
-        .source_nominals_by_origin
-        .get(origin)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generated request source nominal {:?} is absent from the requester context",
-                origin
-            ))
-        })?;
-    let mut generated_path = requester_path.clone();
-    generated_path.remap_string_ids(requester_string_remap);
-
-    let type_id = match (
-        origin.category(),
-        requester_context.type_environment.get(*requester_type_id),
-    ) {
-        (OriginTypeCategory::Struct, Some(TypeDefinition::Struct(definition))) => {
-            let (_, type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
-                id: NominalTypeId(0),
-                path: generated_path,
-                fields: Box::new([]),
-                generic_parameters: None,
-                const_record: definition.const_record,
-            });
-            type_id
+fn materialisation_nominal_path(
+    identity: &CanonicalTypeIdentity,
+    string_table: &mut StringTable,
+) -> Result<InternedPath, CompilerError> {
+    let mut path = InternedPath::from_single_str("<materialised>", string_table);
+    match identity {
+        CanonicalTypeIdentity::SourceNominal(origin) => {
+            path.push_str("source", string_table);
+            append_materialisation_module_origin(&mut path, origin.module_origin(), string_table);
+            path.push_str(origin.defining_name(), string_table);
+            path.push_str(origin_type_category_name(origin.category()), string_table);
         }
-        (OriginTypeCategory::Choice, Some(TypeDefinition::Choice(_))) => {
-            let (_, type_id) = type_environment.register_nominal_choice(ChoiceTypeDefinition {
-                id: NominalTypeId(0),
-                path: generated_path,
-                variants: Box::new([]),
-                generic_parameters: None,
-            });
-            type_id
+        CanonicalTypeIdentity::ModulePrivateNominal(identity) => {
+            path.push_str("private", string_table);
+            append_materialisation_module_origin(&mut path, identity.module_origin(), string_table);
+            path.push_str(identity.defining_path(), string_table);
+            path.push_str(origin_type_category_name(identity.category()), string_table);
         }
         _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "Generated request source nominal {:?} has a mismatched requester definition",
-                origin
-            )));
+            return Err(CompilerError::compiler_error(
+                "Materialisation nominal path requested for a non-nominal identity",
+            ));
+        }
+    }
+    Ok(path)
+}
+
+fn append_materialisation_module_origin(
+    path: &mut InternedPath,
+    origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
+    string_table: &mut StringTable,
+) {
+    let package_origin = match origin.package().origin() {
+        crate::builder_surface::PackageOrigin::Core => "core",
+        crate::builder_surface::PackageOrigin::Standard => "standard",
+        crate::builder_surface::PackageOrigin::Builder => "builder",
+        crate::builder_surface::PackageOrigin::ProjectLocal => "project",
+        crate::builder_surface::PackageOrigin::Dependency => "dependency",
+    };
+    let root_role = match origin.role() {
+        ModuleRootRole::Normal => "normal",
+        ModuleRootRole::Support => "support",
+        ModuleRootRole::ProjectPackageFacade => "facade",
+    };
+    path.push_str(package_origin, string_table);
+    path.push_str(origin.package().name(), string_table);
+    path.push_str(root_role, string_table);
+    for component in origin.logical_module_path().split('/') {
+        if !component.is_empty() {
+            path.push_str(component, string_table);
+        }
+    }
+}
+
+fn origin_type_category_name(category: OriginTypeCategory) -> &'static str {
+    match category {
+        OriginTypeCategory::Struct => "struct",
+        OriginTypeCategory::Choice => "choice",
+        OriginTypeCategory::TransparentAlias => "alias",
+    }
+}
+
+fn intern_materialisation_nominal(
+    identity: &CanonicalTypeIdentity,
+    nominal_source: &impl MaterialisationNominalSource,
+    type_environment: &mut TypeEnvironment,
+    external_registry: &ExternalPackageRegistry,
+    string_table: &mut StringTable,
+) -> Result<TypeId, CompilerError> {
+    if let Some(type_id) = type_environment.type_id_for_canonical_identity(identity) {
+        return Ok(type_id);
+    }
+    let blueprint = nominal_source
+        .nominal_blueprint(identity)
+        .cloned()
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Generated request nominal {identity:?} is absent from its requester artefact"
+            ))
+        })?;
+
+    let parsed_parameters = GenericParameterList {
+        parameters: blueprint
+            .generic_parameters
+            .iter()
+            .enumerate()
+            .map(|(index, parameter)| GenericParameter {
+                id: TypeParameterId(index as u32),
+                name: string_table.intern(&parameter.name),
+                location: Default::default(),
+                trait_bounds: Vec::new(),
+            })
+            .collect(),
+    };
+    // Bounds remain exact stable facts on the immutable blueprint. Reconstructing a concrete
+    // nominal for field/variant substitution does not re-run declaration-site evidence solving,
+    // and requester-only traits need not exist in the declaring generic function's trait table.
+    let _retained_bounds = blueprint
+        .generic_parameters
+        .iter()
+        .map(|parameter| parameter.bounds.as_ref())
+        .collect::<Vec<_>>();
+    let generic_parameter_registration = (!parsed_parameters.parameters.is_empty()).then(|| {
+        type_environment.register_generic_parameter_list(&parsed_parameters, &FxHashMap::default())
+    });
+    let generic_parameter_list_id = generic_parameter_registration
+        .as_ref()
+        .map(|registration| registration.list_id);
+    let generated_path = materialisation_nominal_path(identity, string_table)?;
+    let type_id = match &blueprint.definition {
+        NominalMaterialisationDefinition::Struct { const_record, .. } => {
+            type_environment
+                .register_nominal_struct(StructTypeDefinition {
+                    id: NominalTypeId(0),
+                    path: generated_path,
+                    fields: Box::new([]),
+                    generic_parameters: generic_parameter_list_id,
+                    const_record: *const_record,
+                })
+                .1
+        }
+        NominalMaterialisationDefinition::Choice { .. } => {
+            type_environment
+                .register_nominal_choice(ChoiceTypeDefinition {
+                    id: NominalTypeId(0),
+                    path: generated_path,
+                    variants: Box::new([]),
+                    generic_parameters: generic_parameter_list_id,
+                })
+                .1
         }
     };
+    type_environment.register_canonical_identity(identity.clone(), type_id)?;
+
+    let parameter_type_ids = if let Some(registration) = generic_parameter_registration {
+        blueprint
+            .generic_parameters
+            .iter()
+            .enumerate()
+            .map(|(index, parameter)| {
+                let parameter_id = registration
+                    .canonical_by_local
+                    .get(&TypeParameterId(index as u32))
+                    .copied()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated nominal parameter registration omitted a parameter slot",
+                        )
+                    })?;
+                let parameter_type_id = type_environment
+                    .type_id_for_generic_parameter(parameter_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated nominal parameter registration omitted its type handle",
+                        )
+                    })?;
+                if let Some(exported_identity) = &parameter.exported_identity {
+                    type_environment.register_canonical_identity(
+                        CanonicalTypeIdentity::GenericParameter(exported_identity.clone()),
+                        parameter_type_id,
+                    )?;
+                }
+                Ok(parameter_type_id)
+            })
+            .collect::<Result<Vec<_>, CompilerError>>()?
+    } else {
+        Vec::new()
+    };
+
+    match &blueprint.definition {
+        NominalMaterialisationDefinition::Struct { fields, .. } => {
+            let nominal_path =
+                type_environment
+                    .nominal_path(type_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated struct nominal shell has no local path",
+                        )
+                    })?;
+            let fields = fields
+                .iter()
+                .map(|field| {
+                    Ok(FieldDefinition {
+                        name: nominal_path.join_str(&field.name, string_table),
+                        type_id: intern_materialisation_type_blueprint(
+                            &field.field_type,
+                            &parameter_type_ids,
+                            nominal_source,
+                            type_environment,
+                            external_registry,
+                            string_table,
+                        )?,
+                        location: Default::default(),
+                    })
+                })
+                .collect::<Result<Box<[_]>, CompilerError>>()?;
+            type_environment.update_struct_fields(type_id, fields);
+        }
+        NominalMaterialisationDefinition::Choice { variants } => {
+            let nominal_path =
+                type_environment
+                    .nominal_path(type_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated choice nominal shell has no local path",
+                        )
+                    })?;
+            let variants = variants
+                .iter()
+                .map(|variant| {
+                    let payload = if variant.payload_fields.is_empty() {
+                        ChoiceVariantPayloadDefinition::Unit
+                    } else {
+                        let fields = variant
+                            .payload_fields
+                            .iter()
+                            .map(|field| {
+                                Ok(FieldDefinition {
+                                    name: nominal_path.join_str(&field.name, string_table),
+                                    type_id: intern_materialisation_type_blueprint(
+                                        &field.field_type,
+                                        &parameter_type_ids,
+                                        nominal_source,
+                                        type_environment,
+                                        external_registry,
+                                        string_table,
+                                    )?,
+                                    location: Default::default(),
+                                })
+                            })
+                            .collect::<Result<Box<[_]>, CompilerError>>()?;
+                        ChoiceVariantPayloadDefinition::Record { fields }
+                    };
+                    Ok(ChoiceVariantDefinition {
+                        name: string_table.intern(&variant.name),
+                        tag: variant.tag,
+                        payload,
+                        location: Default::default(),
+                    })
+                })
+                .collect::<Result<Box<[_]>, CompilerError>>()?;
+            type_environment.update_choice_variants(type_id, variants);
+        }
+    }
 
     Ok(type_id)
 }
 
 fn install_generated_request_evidence(
     identity: &GeneratedFunctionIdentity,
-    requester_context: &ModuleMaterialisationContext,
+    requester_context: &ModuleMaterialisationPreparation,
     requester_string_remap: &StringIdRemap,
     environment: &mut AstModuleEnvironment,
     string_table: &StringTable,
@@ -1088,7 +3935,7 @@ pub(crate) fn bootstrap_call_summary_from_signature(
 
 fn requester_type_id_for_canonical_identity(
     identity: &CanonicalTypeIdentity,
-    requester_context: &ModuleMaterialisationContext,
+    requester_context: &ModuleMaterialisationPreparation,
 ) -> Result<TypeId, CompilerError> {
     if let Some(type_id) = requester_context
         .type_environment
@@ -1096,51 +3943,33 @@ fn requester_type_id_for_canonical_identity(
     {
         return Ok(type_id);
     }
-    let CanonicalTypeIdentity::SourceNominal(origin) = identity else {
-        return match identity {
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool) => {
-                Ok(builtin_type_ids::BOOL)
-            }
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int) => Ok(builtin_type_ids::INT),
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Float) => {
-                Ok(builtin_type_ids::FLOAT)
-            }
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Decimal) => {
-                Ok(builtin_type_ids::DECIMAL)
-            }
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String) => {
-                Ok(builtin_type_ids::STRING)
-            }
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Char) => {
-                Ok(builtin_type_ids::CHAR)
-            }
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Range) => {
-                Ok(builtin_type_ids::RANGE)
-            }
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::None) => {
-                Ok(builtin_type_ids::NONE)
-            }
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)
-            | CanonicalTypeIdentity::ModulePrivateNominal(_)
-            | CanonicalTypeIdentity::ExternalOpaque(_)
-            | CanonicalTypeIdentity::Collection(_)
-            | CanonicalTypeIdentity::OrderedMap(_)
-            | CanonicalTypeIdentity::Option(_)
-            | CanonicalTypeIdentity::FallibleCarrier(_)
-            | CanonicalTypeIdentity::GenericInstance(_)
-            | CanonicalTypeIdentity::GenericParameter(_) => Err(CompilerError::compiler_error(
-                "Generated evidence target has no requester-local canonical type handle",
-            )),
-            CanonicalTypeIdentity::SourceNominal(_) => unreachable!(),
-        };
-    };
-    requester_context
-        .source_nominals_by_origin
-        .get(origin)
-        .map(|(_, type_id)| *type_id)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Generated source evidence target is absent from the requester context",
-            )
-        })
+    match identity {
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool) => Ok(builtin_type_ids::BOOL),
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int) => Ok(builtin_type_ids::INT),
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Float) => Ok(builtin_type_ids::FLOAT),
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Decimal) => {
+            Ok(builtin_type_ids::DECIMAL)
+        }
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String) => {
+            Ok(builtin_type_ids::STRING)
+        }
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Char) => Ok(builtin_type_ids::CHAR),
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Range) => Ok(builtin_type_ids::RANGE),
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::None) => Ok(builtin_type_ids::NONE),
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)
+        | CanonicalTypeIdentity::ModulePrivateNominal(_)
+        | CanonicalTypeIdentity::ExternalOpaque(_)
+        | CanonicalTypeIdentity::Collection(_)
+        | CanonicalTypeIdentity::OrderedMap(_)
+        | CanonicalTypeIdentity::Option(_)
+        | CanonicalTypeIdentity::FallibleCarrier(_)
+        | CanonicalTypeIdentity::GenericInstance(_)
+        | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
+        | CanonicalTypeIdentity::GenericParameter(_) => Err(CompilerError::compiler_error(
+            "Generated evidence target has no requester-local canonical type handle",
+        )),
+        CanonicalTypeIdentity::SourceNominal(_) => Err(CompilerError::compiler_error(
+            "Generated source evidence target has no requester-local canonical type handle",
+        )),
+    }
 }

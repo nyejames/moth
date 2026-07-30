@@ -2617,11 +2617,11 @@ contract = "language.config.private_const_references_accepted"
 role = "primary"
 
 [[case]]
-id = "config_builder_imported_constant_success"
-path = "config_builder_imported_constant_success"
+id = "config_builder_import_rejected"
+path = "config_builder_import_rejected"
 tags = ["integration", "config", "imports"]
-contract = "language.config.builder_imported_constant_accepted"
-role = "primary"
+contract = "language.config.import_rejected"
+role = "boundary"
 
 [[case]]
 id = "config_const_record_field_projection_success"

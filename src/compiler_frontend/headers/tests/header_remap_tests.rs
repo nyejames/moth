@@ -124,12 +124,14 @@ fn file_import_remaps_all_fields_without_alias() {
     let location = make_location("test.moth", &mut local);
     let path_location = make_location("test.moth", &mut local);
 
+    let provider = StructuralProviderReference {
+        path: header_path,
+        path_location,
+        from_grouped: false,
+    };
     let mut import = FileImport {
-        provider: StructuralProviderReference {
-            path: header_path,
-            path_location,
-            from_grouped: false,
-        },
+        authored_provider: provider.clone(),
+        provider,
         alias: None,
         location,
         alias_location: None,
@@ -162,12 +164,14 @@ fn file_import_remaps_all_fields_with_alias() {
     let path_location = make_location("test.moth", &mut local);
     let alias_location = Some(make_location("test.moth", &mut local));
 
+    let provider = StructuralProviderReference {
+        path: header_path,
+        path_location,
+        from_grouped: false,
+    };
     let mut import = FileImport {
-        provider: StructuralProviderReference {
-            path: header_path,
-            path_location,
-            from_grouped: false,
-        },
+        authored_provider: provider.clone(),
+        provider,
         alias: Some(alias_name),
         location,
         alias_location,
@@ -204,12 +208,14 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
     let path_location = make_location("file.moth", &mut local);
     let alias_location = Some(make_location("file.moth", &mut local));
 
+    let provider = StructuralProviderReference {
+        path: header_path,
+        path_location,
+        from_grouped: false,
+    };
     let mut import = FileImport {
-        provider: StructuralProviderReference {
-            path: header_path,
-            path_location,
-            from_grouped: false,
-        },
+        authored_provider: provider.clone(),
+        provider,
         alias: Some(alias_name),
         location,
         alias_location,
@@ -623,12 +629,14 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
 
     let warning = make_unknown_name_diagnostic("warn_name", &mut local);
 
+    let provider = StructuralProviderReference {
+        path: InternedPath::from_single_str("@html/head", &mut local),
+        path_location: make_location("test.moth", &mut local),
+        from_grouped: false,
+    };
     let import = FileImport {
-        provider: StructuralProviderReference {
-            path: InternedPath::from_single_str("@html/head", &mut local),
-            path_location: make_location("test.moth", &mut local),
-            from_grouped: false,
-        },
+        authored_provider: provider.clone(),
+        provider,
         alias: Some(local.intern("h")),
         location: make_location("test.moth", &mut local),
         alias_location: Some(make_location("test.moth", &mut local)),

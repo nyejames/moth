@@ -33,7 +33,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -87,6 +87,12 @@ pub(crate) struct AstModuleLookups {
     // Canonical TypeId for each nominal struct/choice registered in type_environment.
     // WHY: parsed type resolution and downstream consumers need fast path-to-TypeId lookup.
     pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
+    /// Canonical paths of source-authored nominal declarations.
+    ///
+    /// Synthetic namespace structs and compiler-owned builtin shells also appear in the broad
+    /// nominal lookup table. Generated materialisation uses this set to assign artefact-private
+    /// identity only to source declarations that can be concrete type arguments.
+    pub(crate) source_nominal_paths: Rc<FxHashSet<InternedPath>>,
 
     // Receiver method catalog built from visible declarations and imports.
     pub(crate) receiver_methods: Rc<ReceiverMethodCatalog>,

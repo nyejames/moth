@@ -1,11 +1,7 @@
-export:
-    Label = |
-        text String,
-    |
-;
+import @model { Label }
 
-display |this Label| -> String:
-    return this.text
+export:
+    import @model { Label }
 ;
 
 Label must DISPLAYABLE

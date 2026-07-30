@@ -7,6 +7,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId, RegionId};
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[derive(Debug, Clone)]
@@ -28,4 +29,20 @@ pub struct HirLocal {
     pub mutable: bool,
     pub region: RegionId,
     pub source_info: Option<SourceLocation>,
+}
+
+impl HirBlock {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for local in &mut self.locals {
+            if let Some(source_info) = &mut local.source_info {
+                source_info.remap_string_ids(remap);
+            }
+        }
+
+        for statement in &mut self.statements {
+            statement.remap_string_ids(remap);
+        }
+
+        self.terminator.remap_string_ids(remap);
+    }
 }

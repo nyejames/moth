@@ -403,6 +403,7 @@ impl ScopeContext {
             trait_evidence_environment: Rc::new(TraitEvidenceEnvironment::new()),
             generic_declarations_by_path: Rc::new(FxHashMap::default()),
             nominal_type_ids_by_path: Rc::new(FxHashMap::default()),
+            source_nominal_paths: Rc::new(Default::default()),
             external_package_registry,
             style_directives: StyleDirectiveRegistry::built_ins(),
             build_profile: FrontendBuildProfile::Dev,

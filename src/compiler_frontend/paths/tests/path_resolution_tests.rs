@@ -163,18 +163,6 @@ fn compile_time_path_diagnostic_payload(
     &diagnostic.payload
 }
 
-fn prepared_module_root_table(root_file: &std::path::Path) -> ModuleRootTable {
-    let canonical_root_file = fs::canonicalize(root_file).expect("root file should canonicalize");
-    let root_directory = canonical_root_file
-        .parent()
-        .expect("root file should have a parent")
-        .to_path_buf();
-    ModuleRootTable::from_records(vec![ModuleRootRecord::new(
-        root_directory,
-        canonical_root_file,
-    )])
-}
-
 // -----------------------------------------------------------------------
 // Relative file resolution
 // -----------------------------------------------------------------------
@@ -427,58 +415,6 @@ fn source_package_import_resolves_to_package_root() {
 }
 
 #[test]
-fn source_package_folder_import_uses_generic_hash_root_public_surface() {
-    let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let project_root = temp_dir.path().to_path_buf();
-    let entry_root = project_root.join("src");
-    let package_root = project_root.join("lib/helper");
-    let root_file = package_root.join("#mod.moth");
-
-    fs::create_dir_all(&entry_root).unwrap();
-    fs::create_dir_all(&package_root).unwrap();
-    fs::write(&root_file, b"").unwrap();
-    fs::write(entry_root.join("index.moth"), b"").unwrap();
-
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
-    source_packages.register_filesystem_root(
-        "helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
-
-    let resolver = ProjectPathResolver::new(
-        project_root.clone(),
-        entry_root.clone(),
-        prepared_source_package_roots(&source_packages),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("resolver creation should succeed");
-
-    let canonical_root_file = fs::canonicalize(&root_file).unwrap();
-    assert_eq!(
-        resolver
-            .source_package_public_surface_files()
-            .find(|(prefix, _)| prefix.as_str() == "helper")
-            .map(|(_, path)| path),
-        Some(&canonical_root_file)
-    );
-
-    let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-
-    let resolved = resolver
-        .resolve_import_to_source_file_with_public_surface_fallback(
-            &path,
-            &entry_root.join("index.moth"),
-            &mut string_table,
-        )
-        .expect("source-backed package folder import should use its generic root");
-
-    assert_eq!(resolved.path, canonical_root_file);
-}
-
-#[test]
 fn source_package_prefix_takes_priority_over_entry_root() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
@@ -654,7 +590,7 @@ fn moth_template_and_folder_same_stem_are_ambiguous() {
 }
 
 #[test]
-fn public_surface_fallback_preserves_moth_template_folder_ambiguity() {
+fn source_import_resolution_preserves_moth_template_folder_ambiguity() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -682,12 +618,8 @@ fn public_surface_fallback_preserves_moth_template_folder_ambiguity() {
 
     let importer = entry_root.join("index.moth");
     let error = resolver
-        .resolve_import_to_source_file_with_public_surface_fallback(
-            &path,
-            &importer,
-            &mut string_table,
-        )
-        .expect_err("public-surface fallback must not hide .mtf/folder ambiguity");
+        .resolve_import_to_source_file(&path, &importer, &mut string_table)
+        .expect_err("source resolution must not hide .mtf/folder ambiguity");
     let diagnostic = typed_import_diagnostic(&error);
 
     assert_eq!(
@@ -1105,130 +1037,6 @@ fn import_escape_package_root_rejected() {
 }
 
 #[test]
-fn module_root_public_surface_fallback_resolves_plain_folder_import() {
-    let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let project_root = temp_dir.path().to_path_buf();
-    let entry_root = project_root.join("src");
-
-    fs::create_dir_all(&entry_root).unwrap();
-    fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/#home.moth"), b"").unwrap();
-    fs::write(entry_root.join("index.moth"), b"").unwrap();
-
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new_with_module_roots(
-        project_root.clone(),
-        entry_root.clone(),
-        prepared_source_package_roots(&source_packages),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        prepared_module_root_table(&entry_root.join("helper/#home.moth")),
-    )
-    .expect("resolver creation should succeed");
-
-    let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-
-    let importer = entry_root.join("index.moth");
-    let result = resolver.resolve_import_to_source_file_with_public_surface_fallback(
-        &path,
-        &importer,
-        &mut string_table,
-    );
-
-    assert!(
-        result.is_ok(),
-        "plain folder import should resolve to module root public surface"
-    );
-    assert_eq!(
-        result.unwrap().path,
-        fs::canonicalize(entry_root.join("helper/#home.moth")).unwrap()
-    );
-}
-
-#[test]
-fn disabled_module_root_discovery_does_not_register_plain_folder_public_surfaces() {
-    let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let project_root = temp_dir.path().to_path_buf();
-    let entry_root = project_root.join("src");
-
-    fs::create_dir_all(&entry_root).unwrap();
-    fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/#home.moth"), b"").unwrap();
-    fs::write(entry_root.join("index.moth"), b"").unwrap();
-
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new(
-        project_root.clone(),
-        entry_root.clone(),
-        prepared_source_package_roots(&source_packages),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("resolver creation should succeed");
-
-    assert!(
-        resolver.module_roots().next().is_none(),
-        "disabled discovery should not traverse and register sibling module roots"
-    );
-
-    let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-
-    let importer = entry_root.join("index.moth");
-    let result = resolver.resolve_import_to_source_file_with_public_surface_fallback(
-        &path,
-        &importer,
-        &mut string_table,
-    );
-
-    assert!(
-        result.is_err(),
-        "single-file resolver policy should not use directory-project public-surface fallback"
-    );
-}
-
-#[test]
-fn plain_folder_import_to_module_root_uses_any_hash_root() {
-    let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let project_root = temp_dir.path().to_path_buf();
-    let entry_root = project_root.join("src");
-
-    fs::create_dir_all(&entry_root).unwrap();
-    fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/#home.moth"), b"").unwrap();
-    fs::write(entry_root.join("index.moth"), b"").unwrap();
-
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new_with_module_roots(
-        project_root.clone(),
-        entry_root.clone(),
-        prepared_source_package_roots(&source_packages),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        prepared_module_root_table(&entry_root.join("helper/#home.moth")),
-    )
-    .expect("resolver creation should succeed");
-
-    let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-
-    let importer = entry_root.join("index.moth");
-    let result = resolver
-        .resolve_import_to_source_file_with_public_surface_fallback(
-            &path,
-            &importer,
-            &mut string_table,
-        )
-        .expect("any hash root should be the module public surface");
-
-    assert_eq!(
-        result.path,
-        fs::canonicalize(entry_root.join("helper/#home.moth")).unwrap()
-    );
-}
-
-#[test]
 fn concrete_file_import_inside_module_root_is_accepted() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
@@ -1255,11 +1063,7 @@ fn concrete_file_import_inside_module_root_is_accepted() {
     path.push_str("thing", &mut string_table);
 
     let importer = entry_root.join("index.moth");
-    let result = resolver.resolve_import_to_source_file_with_public_surface_fallback(
-        &path,
-        &importer,
-        &mut string_table,
-    );
+    let result = resolver.resolve_import_to_source_file(&path, &importer, &mut string_table);
 
     assert!(
         result.is_ok(),

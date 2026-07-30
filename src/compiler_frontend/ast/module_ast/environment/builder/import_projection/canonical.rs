@@ -67,6 +67,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     "Public interface exposed module-private nominal identity {identity:?}"
                 )));
             }
+            CanonicalTypeIdentity::ModulePrivateGenericInstance(identity) => {
+                return Err(CompilerError::compiler_error(format!(
+                    "Public interface exposed module-private generic instance {identity:?}"
+                )));
+            }
             CanonicalTypeIdentity::ExternalOpaque(external) => {
                 let (external_type_id, _) = self
                     .context

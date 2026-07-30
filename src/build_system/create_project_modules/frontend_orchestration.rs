@@ -15,7 +15,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::generic_functions::{
-    GenericFunctionInstantiationRequest, GenericFunctionTemplate,
+    GenericFunctionInstantiationRequest, GenericFunctionTemplate, ModuleMaterialisationInput,
     bootstrap_call_summary_from_signature, concrete_argument_mapping,
     recursive_generic_function_instantiation, substitute_function_signature,
 };
@@ -44,6 +44,7 @@ use crate::compiler_frontend::hir::reachability::{
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
+use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{
@@ -191,26 +192,6 @@ impl FilePreparationStrategy {
     }
 }
 
-/// The origin input for module preparation, carrying the expected active origin and either the
-/// graph-owned source-origin lookup (directory mode) or nothing (single-file synthetic mode).
-///
-/// WHAT: bundles the two origin facts preparation needs so `prepare_module` stays under the
-///       Clippy argument limit without splitting related inputs across loose parameters.
-/// WHY: the expected active origin is validated against the per-file source-origin table during
-///      preparation and then discarded, so `PreparedModule` carries only the retained active
-///      root `FileId` rather than a loose origin argument. The optional graph lookup controls
-///      how the per-file `SourceModuleOriginTable` is built.
-pub(super) enum ModuleOriginInput<'a> {
-    /// Single-file compilation: every source file maps to the one synthetic origin.
-    Synthetic(StableModuleOriginIdentity),
-    /// Directory compilation: the graph-owned lookup resolves each source file to its owning
-    /// origin, and `stable_origin` is the expected active origin validated against the table.
-    Graph {
-        stable_origin: StableModuleOriginIdentity,
-        origin_by_canonical_path: &'a FxHashMap<PathBuf, StableModuleOriginIdentity>,
-    },
-}
-
 // -------------------------
 //  Preparation Context (provider-independent)
 // -------------------------
@@ -230,6 +211,24 @@ pub(super) enum ModuleOriginInput<'a> {
 pub(super) struct ModulePreparationContext<'a> {
     pub(super) style_directives: &'a StyleDirectiveRegistry,
     pub(super) project_path_resolver: Option<ProjectPathResolver>,
+}
+
+/// Incremental provider-independent syntax preparation for one indexed directory module.
+///
+/// Stage 0 prepares each selected source once, reads its retained import shells from the same
+/// header output and only then decides which same-module source to prepare next. This keeps
+/// semantic reachability and header ownership aligned without a second lexical import scanner.
+pub(super) struct ModuleSyntaxDiscovery<'a> {
+    context: &'a ModulePreparationContext<'a>,
+    entry_file_path: PathBuf,
+    active_root_role: ModuleRootRole,
+    expected_active_origin: StableModuleOriginIdentity,
+    source_module_origins: SourceModuleOriginTable,
+    source_files: SourceFileTable,
+    string_table: StringTable,
+    prepared_outputs: Vec<(usize, FileFrontendPrepareOutput)>,
+    warnings: Vec<CompilerDiagnostic>,
+    source_byte_count: usize,
 }
 
 // -------------------------
@@ -263,6 +262,13 @@ pub(super) struct SourceProviderMaterialisationSet<'a> {
         Vec<&'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext>,
 }
 
+enum DeclaringMaterialisation<'a> {
+    Published(&'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext),
+    Preparing(
+        &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
+    ),
+}
+
 impl<'a> SourceProviderMaterialisationSet<'a> {
     pub(super) fn new(
         contexts: Vec<
@@ -275,18 +281,18 @@ impl<'a> SourceProviderMaterialisationSet<'a> {
     fn context_for(
         &self,
         identity: &GeneratedDeclarationIdentity,
-        requester_context: &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
-    ) -> Option<&'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext>
-    {
+        requester_context: &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
+    ) -> Option<DeclaringMaterialisation<'a>> {
         self.contexts
             .iter()
             .copied()
-            .find(|context| context.template_for_identity(identity).is_some())
+            .find(|context| context.contains_template(identity))
+            .map(DeclaringMaterialisation::Published)
             .or_else(|| {
                 requester_context
                     .template_for_identity(identity)
                     .is_some()
-                    .then_some(requester_context)
+                    .then_some(DeclaringMaterialisation::Preparing(requester_context))
             })
     }
 }
@@ -315,6 +321,39 @@ pub(crate) enum ModuleCompilationOutcome {
 }
 
 impl ModulePreparationContext<'_> {
+    /// Begin header-owned reachability discovery for one indexed directory module.
+    pub(super) fn begin_syntax_discovery<'a>(
+        &'a self,
+        stable_origin: StableModuleOriginIdentity,
+        origin_by_canonical_path: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
+        candidate_source_paths: impl ExactSizeIterator<Item = &'a Path>,
+        entry_file_path: &Path,
+        mut string_table: StringTable,
+    ) -> Result<ModuleSyntaxDiscovery<'a>, CompilerMessages> {
+        let source_files = SourceFileTable::build(
+            candidate_source_paths,
+            entry_file_path,
+            self.project_path_resolver.as_ref(),
+            &mut string_table,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+        let source_module_origins =
+            SourceModuleOriginTable::from_graph_ownership(&source_files, origin_by_canonical_path);
+
+        Ok(ModuleSyntaxDiscovery {
+            context: self,
+            entry_file_path: entry_file_path.to_path_buf(),
+            active_root_role: stable_origin.role(),
+            expected_active_origin: stable_origin,
+            source_module_origins,
+            source_files,
+            string_table,
+            prepared_outputs: Vec::new(),
+            warnings: Vec::new(),
+            source_byte_count: 0,
+        })
+    }
+
     /// Prepare one discovered module's source files and aggregate provider-independent header
     /// syntax, retaining it with the module string-table context and the active root's file
     /// identity for semantic compilation.
@@ -336,7 +375,7 @@ impl ModulePreparationContext<'_> {
     ///      `FrontendModuleBuildContext::compile_module_semantic`.
     pub(super) fn prepare_module(
         &self,
-        origin_input: ModuleOriginInput<'_>,
+        stable_origin: StableModuleOriginIdentity,
         module: &[PreparedSourceInput],
         entry_file_path: &Path,
         mut string_table: StringTable,
@@ -347,10 +386,7 @@ impl ModulePreparationContext<'_> {
 
         // Entry identity and root semantics are separate. The stable module origin owns whether
         // the active file is a normal runtime-capable root or an API-only support/facade root.
-        let active_root_role = match &origin_input {
-            ModuleOriginInput::Synthetic(origin) => origin.role(),
-            ModuleOriginInput::Graph { stable_origin, .. } => stable_origin.role(),
-        };
+        let active_root_role = stable_origin.role();
 
         // 1. Build the module source identity table against the caller-owned string table. Source
         //    identities are deterministic and provider-free, so this needs no provider interface.
@@ -386,22 +422,8 @@ impl ModulePreparationContext<'_> {
         //    origin; for single-file compilation every file maps to the synthetic origin. The
         //    table is remap-free and provider-independent: it carries no StringIds and needs no
         //    provider interface.
-        let (expected_active_origin, source_module_origins) = match origin_input {
-            ModuleOriginInput::Synthetic(origin) => {
-                let table = SourceModuleOriginTable::from_synthetic_origin(&source_files, &origin);
-                (origin, table)
-            }
-            ModuleOriginInput::Graph {
-                stable_origin,
-                origin_by_canonical_path,
-            } => {
-                let table = SourceModuleOriginTable::from_graph_ownership(
-                    &source_files,
-                    origin_by_canonical_path,
-                );
-                (stable_origin, table)
-            }
-        };
+        let source_module_origins =
+            SourceModuleOriginTable::from_synthetic_origin(&source_files, &stable_origin);
 
         // 4. Resolve the entry file's FileId through the source file table once and validate that
         //    the per-file origin table maps it to the expected active origin. The active root must
@@ -414,7 +436,7 @@ impl ModulePreparationContext<'_> {
         let active_root_file_id = Self::resolve_and_validate_active_root(
             &source_files,
             &source_module_origins,
-            &expected_active_origin,
+            &stable_origin,
             entry_file_path,
             &string_table,
         )?;
@@ -852,6 +874,134 @@ impl ModulePreparationContext<'_> {
     }
 }
 
+impl ModuleSyntaxDiscovery<'_> {
+    pub(super) fn string_table_mut(&mut self) -> &mut StringTable {
+        &mut self.string_table
+    }
+
+    /// Prepare one selected source and return the structural provider references parsed from the
+    /// same retained header output.
+    pub(super) fn prepare_source(
+        &mut self,
+        source_order: usize,
+        source: &PreparedSourceInput,
+    ) -> Result<Vec<StructuralProviderReference>, CompilerMessages> {
+        let entry_file_id = self
+            .source_files
+            .get_by_canonical_path(&self.entry_file_path)
+            .map(|identity| identity.file_id);
+        let options = HeaderParseOptions {
+            entry_file_id,
+            project_path_resolver: self.context.project_path_resolver.clone(),
+            active_root_role: self.active_root_role,
+        };
+        let prepare_context = FrontendFilePrepareContext {
+            source_files: &self.source_files,
+            style_directives: self.context.style_directives,
+            entry_file_path: &self.entry_file_path,
+            options: &options,
+        };
+        let frontend_source = match source {
+            PreparedSourceInput::Moth {
+                source_path,
+                tokens,
+                ..
+            } => FrontendFilePrepareSource::Moth {
+                source_path,
+                tokens: tokens.as_ref(),
+            },
+            PreparedSourceInput::MothTemplate {
+                source_code,
+                source_path,
+            } => FrontendFilePrepareSource::MothTemplate {
+                source_code,
+                source_path,
+            },
+            PreparedSourceInput::PlainMarkdown {
+                source_code,
+                source_path,
+            } => FrontendFilePrepareSource::PlainMarkdown {
+                source_code,
+                source_path,
+            },
+        };
+        let input = FrontendFilePrepareInput {
+            source: frontend_source,
+            const_template_offset: 0,
+            runtime_fragment_offset: 0,
+        };
+
+        let output = match CompilerFrontend::prepare_file_frontend_local(
+            &prepare_context,
+            input,
+            &mut self.string_table,
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                let mut messages = CompilerMessages::from_diagnostics(
+                    vec![*error.diagnostic],
+                    self.string_table.clone(),
+                );
+                messages.prepend_diagnostics_preserving_context(error.warnings);
+                return Err(messages);
+            }
+        };
+
+        self.source_byte_count += source.source_code().len();
+        self.warnings.extend(output.warnings.iter().cloned());
+        let providers = output
+            .file_imports
+            .iter()
+            .map(|import| {
+                let mut provider = import.authored_provider.clone();
+                provider.from_grouped = import.from_grouped;
+                provider
+            })
+            .collect();
+        self.prepared_outputs.push((source_order, output));
+
+        Ok(providers)
+    }
+
+    /// Freeze the selected source outputs into the one retained module preparation payload.
+    pub(super) fn finish(mut self) -> Result<PreparedModule, CompilerMessages> {
+        self.prepared_outputs.sort_by_key(|(order, _)| *order);
+        let prepared_outputs = self
+            .prepared_outputs
+            .into_iter()
+            .map(|(_, output)| output)
+            .collect::<Vec<_>>();
+        let source_file_count = prepared_outputs.len();
+        let prepared_header_syntax =
+            prepare_header_syntax(prepared_outputs, &mut self.string_table).map_err(|bag| {
+                let mut messages = CompilerMessages::from_diagnostics(
+                    bag.into_diagnostics(),
+                    self.string_table.clone(),
+                );
+                messages.prepend_diagnostics_preserving_context(self.warnings.iter().cloned());
+                messages
+            })?;
+        let active_root_file_id = ModulePreparationContext::resolve_and_validate_active_root(
+            &self.source_files,
+            &self.source_module_origins,
+            &self.expected_active_origin,
+            &self.entry_file_path,
+            &self.string_table,
+        )?;
+
+        Ok(PreparedModule {
+            active_root_file_id,
+            source_module_origins: self.source_module_origins,
+            prepared_header_syntax,
+            string_table: self.string_table,
+            source_files: self.source_files,
+            warnings: self.warnings,
+            source_file_count,
+            source_byte_count: self.source_byte_count,
+        })
+    }
+}
+
 impl FrontendModuleBuildContext<'_> {
     /// Compile one retained module through the provider-dependent semantic pipeline.
     ///
@@ -1030,7 +1180,7 @@ impl FrontendModuleBuildContext<'_> {
             let AstBuildResult {
                 ast: mut module_ast,
                 public_interface_projection_input,
-                mut materialisation_context,
+                materialisation_context: mut materialisation_context_builder,
                 deferred_generic_requests,
             } = module_ast_build;
 
@@ -1062,7 +1212,8 @@ impl FrontendModuleBuildContext<'_> {
                     type_environment: &module_ast.type_environment,
                     external_registry: compiler.external_package_registry.as_ref(),
                     string_table: &compiler.string_table,
-                    generic_function_templates: materialisation_context
+                    generic_function_templates: materialisation_context_builder
+                        .context()
                         .generic_function_templates(),
                     module_constants: &module_ast.module_constants,
                 })
@@ -1075,10 +1226,11 @@ impl FrontendModuleBuildContext<'_> {
                 .iter()
                 .map(|seed| (seed.path.clone(), seed.origin.clone()))
                 .collect::<FxHashMap<_, _>>();
-            let private_function_origin_seeds = materialisation_context
+            let private_function_origin_seeds = materialisation_context_builder
                 .install_concrete_executable_contracts(
                     &active_module_origin,
                     &public_origins_by_path,
+                    &public_source_nominal_type_origins,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
                 .into_iter()
@@ -1087,8 +1239,10 @@ impl FrontendModuleBuildContext<'_> {
 
             let generated_requests = install_generated_request_contracts(
                 &deferred_generic_requests,
-                &materialisation_context,
-                materialisation_context.generic_function_templates(),
+                materialisation_context_builder.context(),
+                materialisation_context_builder
+                    .context()
+                    .generic_function_templates(),
                 compiler.external_package_registry.as_ref(),
                 &mut module_ast,
             )
@@ -1111,7 +1265,7 @@ impl FrontendModuleBuildContext<'_> {
             validate_materialisation_context_templates(
                 &public_interface_draft,
                 &public_interface_build.callable_seeds,
-                materialisation_context.generic_function_templates_mut(),
+                materialisation_context_builder.generic_function_templates_mut(),
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
@@ -1159,7 +1313,7 @@ impl FrontendModuleBuildContext<'_> {
                 || Self::check_borrows(&compiler, &hir_module, &warnings),
             )?;
             install_exact_concrete_call_summaries(
-                &mut materialisation_context,
+                &mut materialisation_context_builder,
                 &hir_module,
                 &bootstrap_borrow_analysis,
             )
@@ -1168,7 +1322,7 @@ impl FrontendModuleBuildContext<'_> {
                 &generated_requests,
                 &generated_request_ids,
                 &mut generated_worklist,
-                &materialisation_context,
+                materialisation_context_builder.context(),
                 &mut compiler,
                 entry_file_path,
             )?;
@@ -1195,14 +1349,14 @@ impl FrontendModuleBuildContext<'_> {
                     || Self::check_borrows(&compiler, &hir_module, &warnings),
                 )?;
                 let concrete_summaries_changed = install_exact_concrete_call_summaries(
-                    &mut materialisation_context,
+                    &mut materialisation_context_builder,
                     &hir_module,
                     &borrow_analysis,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
                 let generated_summaries_changed = self.recheck_generated_borrows(
                     &mut generated_worklist,
-                    &materialisation_context,
+                    materialisation_context_builder.context(),
                     &compiler,
                 )?;
                 hir_module.generated_call_summaries = generated_worklist
@@ -1249,6 +1403,9 @@ impl FrontendModuleBuildContext<'_> {
                 compiler.external_package_registry.as_ref(),
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            let materialisation_context = materialisation_context_builder
+                .freeze(&public_interface)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
             // Record every base function before entry selection. Build-owned assembly later
             // traverses these direct facts from the selected root and derives runtime unions.
@@ -1448,7 +1605,7 @@ impl FrontendModuleBuildContext<'_> {
         requests: &[CanonicalGeneratedRequest],
         request_ids: &[GeneratedRequestId],
         worklist: &mut GeneratedFunctionWorklist,
-        requester_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        requester_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
         compiler: &mut CompilerFrontend,
         entry_file_path: &Path,
     ) -> Result<(), CompilerMessages> {
@@ -1485,7 +1642,7 @@ impl FrontendModuleBuildContext<'_> {
         request_id: GeneratedRequestId,
         request: &CanonicalGeneratedRequest,
         worklist: &mut GeneratedFunctionWorklist,
-        requester_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        requester_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
         compiler: &mut CompilerFrontend,
         entry_file_path: &Path,
     ) -> Result<(), CompilerMessages> {
@@ -1522,11 +1679,33 @@ impl FrontendModuleBuildContext<'_> {
                     &compiler.string_table,
                 )
             })?;
-        let materialised = declaring_context.materialise_ast(
-            &identity,
-            requester_context,
-            &request.call_location,
-        )?;
+        let materialised = match declaring_context {
+            DeclaringMaterialisation::Published(context) => {
+                context.materialise_ast(ModuleMaterialisationInput {
+                    identity: &identity,
+                    requester_context,
+                    requester_call_location: &request.call_location,
+                    external_package_registry: self.external_packages.as_ref(),
+                    style_directives: self.style_directives,
+                    build_profile: self.build_profile,
+                    project_path_resolver: self
+                        .project_path_resolver
+                        .clone()
+                        .or_else(|| requester_context.project_path_resolver.clone()),
+                    template_const_loop_iteration_limit: self
+                        .config
+                        .template_const_loop_iteration_limit,
+                })
+            }
+            DeclaringMaterialisation::Preparing(context) => context.materialise_ast(
+                &identity,
+                requester_context,
+                &request.call_location,
+                self.project_path_resolver
+                    .clone()
+                    .or_else(|| requester_context.project_path_resolver.clone()),
+            ),
+        }?;
         let crate::compiler_frontend::ast::generic_functions::MaterialisedGenericAst {
             build_result,
             string_table: generated_string_table,
@@ -1534,10 +1713,11 @@ impl FrontendModuleBuildContext<'_> {
         } = materialised;
         let AstBuildResult {
             ast: mut generated_ast,
-            materialisation_context: generated_context,
+            materialisation_context: generated_context_builder,
             deferred_generic_requests: nested_requests,
             ..
         } = build_result;
+        let generated_context = generated_context_builder.finish_preparation();
         let nested_requests = install_generated_request_contracts(
             &nested_requests,
             &generated_context,
@@ -1701,7 +1881,7 @@ impl FrontendModuleBuildContext<'_> {
     fn recheck_generated_borrows(
         &self,
         worklist: &mut GeneratedFunctionWorklist,
-        materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
         compiler: &CompilerFrontend,
     ) -> Result<bool, CompilerMessages> {
         let generated_summaries = worklist.completed_summaries();
@@ -1766,12 +1946,12 @@ impl FrontendModuleBuildContext<'_> {
 // -------------------------
 
 fn install_exact_concrete_call_summaries(
-    context: &mut crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    context: &mut crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder,
     hir: &HirModule,
     borrow_analysis: &BorrowCheckReport,
 ) -> Result<bool, CompilerError> {
     let mut changed = false;
-    for contract in context.imported_functions_by_local_path.values_mut() {
+    for contract in context.imported_functions_mut().values_mut() {
         let function_id = match &contract.target {
             SourceFunctionTarget::Imported { origin, .. } => {
                 let Some(function_id) = hir.function_ids_by_origin.get(origin).copied() else {
@@ -1840,7 +2020,7 @@ fn collect_external_import_candidates_for_packages(
 }
 
 fn exact_private_call_summaries(
-    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
 ) -> FxHashMap<
     crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
     PublicCallSummary,
@@ -1950,7 +2130,7 @@ struct CanonicalGeneratedRequest {
 
 fn install_generated_request_contracts(
     requests: &[GenericFunctionInstantiationRequest],
-    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
     templates: &FxHashMap<
         crate::compiler_frontend::symbols::interned_path::InternedPath,
         GenericFunctionTemplate,
@@ -2064,7 +2244,7 @@ fn install_generated_request_contracts(
 
 fn canonicalize_generated_request_evidence(
     request: &GenericFunctionInstantiationRequest,
-    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
     external_registry: &ExternalPackageRegistry,
 ) -> Result<Box<[CanonicalEvidenceIdentity]>, CompilerError> {
     if request.evidence.is_empty() {

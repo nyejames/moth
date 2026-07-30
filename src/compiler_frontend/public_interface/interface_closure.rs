@@ -328,6 +328,7 @@ impl<'a> InterfaceClosure<'a> {
             }
             CanonicalTypeIdentity::Builtin(_)
             | CanonicalTypeIdentity::ModulePrivateNominal(_)
+            | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
             | CanonicalTypeIdentity::ExternalOpaque(_)
             | CanonicalTypeIdentity::Collection(_)
             | CanonicalTypeIdentity::OrderedMap(_)
@@ -454,6 +455,10 @@ fn type_references_selected_declaration(
                     .iter()
                     .any(|argument| type_references_selected_declaration(argument, selected))
         }
+        CanonicalTypeIdentity::ModulePrivateGenericInstance(instance) => instance
+            .arguments()
+            .iter()
+            .any(|argument| type_references_selected_declaration(argument, selected)),
         CanonicalTypeIdentity::Builtin(_)
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
         | CanonicalTypeIdentity::ExternalOpaque(_)

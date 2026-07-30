@@ -216,7 +216,7 @@ pub enum InvalidConfigReason {
         directory: StringId,
         candidates: Vec<StringId>,
     },
-    ConfigImportRootViolation,
+    ConfigImportUnsupported,
     SourceFileFolderCollision {
         file_name: StringId,
         folder_name: StringId,
@@ -371,7 +371,7 @@ impl InvalidConfigReason {
             | Self::ValueCouldNotFold
             | Self::UnsupportedPackageFoldersValue
             | Self::EmptyProjectSetting
-            | Self::ConfigImportRootViolation => {}
+            | Self::ConfigImportUnsupported => {}
         }
     }
 }

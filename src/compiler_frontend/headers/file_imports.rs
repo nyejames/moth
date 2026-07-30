@@ -23,6 +23,7 @@ type FileImportResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
 struct ImportItemRecord {
     provider: StructuralProviderReference,
+    authored_provider: StructuralProviderReference,
     alias: Option<StringId>,
     location: SourceLocation,
     alias_location: Option<SourceLocation>,
@@ -95,6 +96,8 @@ fn parse_and_record_import_clause(
     }
 
     for item in items {
+        let mut authored_provider = item.provider.clone();
+        authored_provider.from_grouped = item.from_grouped;
         let normalized_path = normalize_import_dependency_path(
             &item.provider.path,
             &token_stream.src_path,
@@ -108,8 +111,9 @@ fn parse_and_record_import_clause(
                 provider: StructuralProviderReference {
                     path: normalized_path,
                     path_location: item.provider.path_location,
-                    from_grouped: item.provider.from_grouped,
+                    from_grouped: item.from_grouped,
                 },
+                authored_provider,
                 alias: item.alias,
                 location: clause_location.clone(),
                 alias_location: item.alias_location,
@@ -146,6 +150,7 @@ fn record_import_item(state: &mut HeaderFileParseState, record: ImportItemRecord
             .insert(record.provider.path.to_owned());
         state.file_imports.push(FileImport {
             provider: record.provider,
+            authored_provider: record.authored_provider,
             alias: record.alias,
             location: record.location,
             alias_location: record.alias_location,

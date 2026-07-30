@@ -1,4 +1,4 @@
-import @./sizes { capacity }
+import @sizes { capacity }
 
 render_facade || -> String:
     items ~{capacity String} = {}

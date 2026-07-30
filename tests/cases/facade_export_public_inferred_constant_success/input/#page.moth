@@ -1,4 +1,4 @@
-import @./sub {
+import @sub {
     PublicData,
     public_value,
 }

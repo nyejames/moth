@@ -1,3 +1,5 @@
+entry = "."
+
 [backends.html]
 mode = "success"
 warnings = "forbid"

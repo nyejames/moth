@@ -11,7 +11,7 @@ mod callable;
 mod canonical;
 mod nominal;
 mod traits;
-mod values;
+pub(in crate::compiler_frontend::ast) mod values;
 
 #[cfg(test)]
 pub(crate) use nominal::imported_nominal_path;

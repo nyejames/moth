@@ -460,9 +460,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
         [data:
             [: Source-backed package roots]
             [: Partial]
-            [: Targeted AST-backed config loading, known-key and shape enforcement, config support declarations, source-backed package imports, project-local/relative config import rejection, generic package-root discovery, collision detection and public-surface enforcement coverage.]
+            [: Targeted AST-backed config loading, known-key and shape enforcement, self-contained config import rejection, generic package-root discovery, collision detection and public-surface enforcement coverage.]
             [: Frontend / HTML]
-            [: Source-backed packages and regular modules share module-root and visibility rules. Authored config entries are folded known top-level [$html:<code>#</code>] constants in [$html:<code>config.moth</code>]. Import/type support declarations are accepted, while plain config bindings and trait metadata are rejected. Config imports may target Core or Builder packages only.]
+            [: Source-backed packages and regular modules share module-root and visibility rules. [$html:<code>config.moth</code>] is compiled as one self-contained source before package discovery and rejects every import before path resolution.]
         ]
 
         [data:

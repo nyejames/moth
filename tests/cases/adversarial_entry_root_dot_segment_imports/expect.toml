@@ -8,5 +8,5 @@ diagnostic_codes = ["MOTH-IMPORT-0016"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-IMPORT-0016"
 reason = "invalid_import_path.parent_directory_segment"
-path = "input/src/pages/#page.moth"
+path = "input/#page.moth"
 line = 1

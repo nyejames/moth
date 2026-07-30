@@ -16,7 +16,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{ChoiceId, FieldId, HirValueId, RegionId, StructId};
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 /// Shared carrier tag for variant construction in HIR.
 ///
@@ -53,6 +53,65 @@ pub struct HirVariantField {
 pub struct HirMapEntry {
     pub key: HirExpression,
     pub value: HirExpression,
+}
+
+impl HirExpression {
+    /// Remap the interned names retained directly by executable expression payloads.
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        match &mut self.kind {
+            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+                place.remap_string_ids(remap);
+            }
+            HirExpressionKind::BinOp { left, right, .. } => {
+                left.remap_string_ids(remap);
+                right.remap_string_ids(remap);
+            }
+            HirExpressionKind::UnaryOp { operand, .. }
+            | HirExpressionKind::TupleGet { tuple: operand, .. }
+            | HirExpressionKind::FallibleUnwrapSuccess { result: operand }
+            | HirExpressionKind::FallibleUnwrapError { result: operand }
+            | HirExpressionKind::Cast {
+                source: operand, ..
+            }
+            | HirExpressionKind::VariantPayloadGet {
+                source: operand, ..
+            } => operand.remap_string_ids(remap),
+            HirExpressionKind::StructConstruct { fields, .. } => {
+                for (_, value) in fields {
+                    value.remap_string_ids(remap);
+                }
+            }
+            HirExpressionKind::Collection(elements)
+            | HirExpressionKind::TupleConstruct { elements } => {
+                for element in elements {
+                    element.remap_string_ids(remap);
+                }
+            }
+            HirExpressionKind::Range { start, end } => {
+                start.remap_string_ids(remap);
+                end.remap_string_ids(remap);
+            }
+            HirExpressionKind::VariantConstruct { fields, .. } => {
+                for field in fields {
+                    if let Some(name) = &mut field.name {
+                        *name = remap.get(*name);
+                    }
+                    field.value.remap_string_ids(remap);
+                }
+            }
+            HirExpressionKind::MapLiteral(entries) => {
+                for entry in entries {
+                    entry.key.remap_string_ids(remap);
+                    entry.value.remap_string_ids(remap);
+                }
+            }
+            HirExpressionKind::Int(_)
+            | HirExpressionKind::Float(_)
+            | HirExpressionKind::Bool(_)
+            | HirExpressionKind::Char(_)
+            | HirExpressionKind::StringLiteral(_) => {}
+        }
+    }
 }
 
 /// Compiler-owned map operation kinds used in HIR.

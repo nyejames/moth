@@ -1,8 +1,8 @@
-//! Per-file import path extraction for Moth source files.
+//! Single-pass source loading, tokenisation and structural-import extraction.
 //!
 //! Tokenizes a single source file and returns the import paths declared in it.
-// Import scanning preserves the same `SourceDiscoveryError` boundary as reachable-file discovery,
-// so syntax diagnostics and file/tooling failures stay typed until the Stage 0 boundary.
+//! Source discovery retains the same `SourceDiscoveryError` boundary so syntax diagnostics and
+//! file/tooling failures stay typed until the Stage 0 boundary.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::const_paths::{
@@ -36,18 +36,6 @@ pub(super) struct ScannedImportSource {
     /// WHY: frontend header preparation consumes this retained stream instead of re-tokenizing
     ///      the source text, so each discovered `.moth` file is lexed exactly once.
     pub(super) tokens: FileTokens,
-}
-
-// -------------------------
-//  Import Path Extraction
-// -------------------------
-
-pub(crate) fn extract_import_provider_references(
-    file_path: &Path,
-    style_directives: &StyleDirectiveRegistry,
-    string_table: &mut StringTable,
-) -> Result<Vec<StructuralProviderReference>, SourceDiscoveryError> {
-    Ok(scan_imports_with_source(file_path, style_directives, string_table)?.imports)
 }
 
 pub(super) fn scan_imports_with_source(

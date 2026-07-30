@@ -24,7 +24,8 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
-    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    GeneratedDeclarationIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
@@ -516,7 +517,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
 
     let prepared = preparation_context
         .prepare_module(
-            super::ModuleOriginInput::Synthetic(stable_origin.clone()),
+            stable_origin.clone(),
             &input_files,
             &canonical_entry,
             local_table,
@@ -602,10 +603,13 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         .materialisation_context
         .as_ref()
         .expect("a successful semantic module retains its materialisation context");
-    assert_eq!(
-        materialisation_context.generic_function_templates().len(),
-        1,
-        "the production semantic path should retain one generic free-function template body"
+    let identity = GeneratedDeclarationIdentity::Public(OriginFunctionId::new_free(
+        stable_origin,
+        "identity".to_owned(),
+    ));
+    assert!(
+        materialisation_context.contains_template(&identity),
+        "the production semantic path should retain the declared generic free-function template"
     );
 }
 
@@ -671,7 +675,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         project_path_resolver: Some(project_path_resolver.clone()),
     }
     .prepare_module(
-        super::ModuleOriginInput::Synthetic(stable_origin.clone()),
+        stable_origin.clone(),
         &input_files,
         &canonical_entry,
         local_table,

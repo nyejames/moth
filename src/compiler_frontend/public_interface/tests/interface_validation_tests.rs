@@ -22,6 +22,7 @@ use super::test_support::{module_origin, struct_origin};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
     CanonicalTraitIdentity, CanonicalTypeIdentity, ExternalOpaqueTypeIdentity,
+    ModulePrivateGenericInstanceTypeIdentity, ModulePrivateNominalIdentity,
     StableTraitRequirementIdentity,
 };
 use crate::compiler_frontend::external_packages::{
@@ -435,6 +436,82 @@ fn rejects_declaration_category_mismatch() {
     .expect_err("semantic category drift must fail publication");
 
     assert!(error.msg.contains("disagrees with semantic category"));
+}
+
+#[test]
+fn rejects_direct_private_nominal_before_interface_closure() {
+    let origin = OriginFunctionId::new_free(module_origin(), "expose_private".to_owned());
+    let declaration = PublicDeclarationRecord {
+        origin: OriginDeclarationId::Function(origin),
+        semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            category: PublicFunctionCategory::GenericTemplate(PublicGenericTemplateDescriptor {
+                generic_parameters: Vec::new(),
+            }),
+            parameters: Vec::new(),
+            returns: vec![PublicReturnTypeSlot {
+                type_identity: CanonicalTypeIdentity::ModulePrivateNominal(
+                    ModulePrivateNominalIdentity::new(
+                        module_origin(),
+                        "Hidden".to_owned(),
+                        OriginTypeCategory::Struct,
+                    ),
+                ),
+            }],
+            error_return: None,
+        }),
+    };
+
+    let error = PublicSemanticInterface::close_from_local(
+        local_interface(Vec::new(), vec![declaration], Vec::new()),
+        &SourceProviderImportSet::default(),
+        &ExternalPackageRegistry::default(),
+    )
+    .expect_err("artefact-private nominals cannot enter provider closure");
+
+    assert!(error.msg.contains("artefact-private type identity"));
+}
+
+#[test]
+fn rejects_nested_private_generic_instance_before_publication() {
+    let private_instance = CanonicalTypeIdentity::ModulePrivateGenericInstance(
+        ModulePrivateGenericInstanceTypeIdentity::new(
+            ModulePrivateNominalIdentity::new(
+                module_origin(),
+                "HiddenBox".to_owned(),
+                OriginTypeCategory::Struct,
+            ),
+            vec![CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)].into_boxed_slice(),
+        ),
+    );
+    let origin = OriginFunctionId::new_free(module_origin(), "expose_nested_private".to_owned());
+    let interface = PublicSemanticInterface {
+        module_origin: module_origin(),
+        export_bindings: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: OriginDeclarationId::Function(origin),
+            semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+                category: PublicFunctionCategory::GenericTemplate(
+                    PublicGenericTemplateDescriptor {
+                        generic_parameters: Vec::new(),
+                    },
+                ),
+                parameters: Vec::new(),
+                returns: vec![PublicReturnTypeSlot {
+                    type_identity: CanonicalTypeIdentity::Option(Box::new(private_instance)),
+                }],
+                error_return: None,
+            }),
+        }],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+
+    let error = interface
+        .validate_for_publication()
+        .expect_err("nested artefact-private instances cannot publish");
+
+    assert!(error.msg.contains("artefact-private type identity"));
 }
 
 #[test]

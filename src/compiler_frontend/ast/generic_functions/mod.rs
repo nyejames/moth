@@ -27,7 +27,9 @@ pub(crate) use instances::{
     GenericFunctionInstance, GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,
 };
 pub(crate) use materialisation::{
-    MaterialisedGenericAst, ModuleMaterialisationContext, bootstrap_call_summary_from_signature,
+    MaterialisedGenericAst, ModuleMaterialisationContext, ModuleMaterialisationEnvironmentInput,
+    ModuleMaterialisationInput, ModuleMaterialisationPreparation,
+    ModuleMaterialisationPreparationBuilder, bootstrap_call_summary_from_signature,
 };
 pub(crate) use templates::GenericFunctionTemplate;
 

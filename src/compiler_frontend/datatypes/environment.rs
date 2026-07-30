@@ -1092,6 +1092,19 @@ impl TypeEnvironment {
         self.canonical_identities.get(&type_id)
     }
 
+    /// Iterate every exact stable identity paired with its environment-local handle.
+    ///
+    /// Materialisation blueprint extraction uses this canonical index rather than the
+    /// source-spelling table, because interface closure may retain hidden imported nominals that
+    /// deliberately have no consumer-local path.
+    pub(crate) fn canonical_type_identities(
+        &self,
+    ) -> impl Iterator<Item = (&CanonicalTypeIdentity, TypeId)> {
+        self.canonical_type_ids
+            .iter()
+            .map(|(identity, type_id)| (identity, *type_id))
+    }
+
     /// Returns the struct definition for a nominal ID, if it is a struct.
     pub fn struct_definition(&self, id: NominalTypeId) -> Option<&StructTypeDefinition> {
         match self.nominal_registry.get(id.0 as usize)? {

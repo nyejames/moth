@@ -10,6 +10,8 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+use crate::compiler_frontend::datatypes::builtin_type_ids;
+use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::display::display_type;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalAccessKind, ExternalFunctionId, ExternalFunctionLowerings,
@@ -26,6 +28,417 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[test]
+fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
+    let dir = temp_dir("graph_outcomes_independent_diagnostics");
+    fs::create_dir_all(dir.join("provider")).expect("should create provider module");
+    fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
+    fs::create_dir_all(dir.join("independent")).expect("should create independent module");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("#page.moth"),
+        "import @provider { run }\nvalue = run()\n",
+    )
+    .expect("should write blocked consumer");
+    fs::write(
+        dir.join("consumer/#mod.moth"),
+        "import @provider { run }\nvalue = run()\n",
+    )
+    .expect("should write second blocked consumer");
+    fs::write(
+        dir.join("provider/+mod.moth"),
+        "export:\n    run || -> Int:\n        return missing_provider_value\n    ;\n;\n",
+    )
+    .expect("should write diagnosed provider");
+    fs::write(
+        dir.join("independent/#mod.moth"),
+        "value = missing_independent_value\n",
+    )
+    .expect("should write independent diagnosed module");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let messages = match compile_project_frontend(
+        &mut config,
+        &[],
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("both provider and independent modules should be diagnosed"),
+        Err(messages) => messages,
+    };
+
+    assert_eq!(
+        messages.error_count(),
+        2,
+        "the provider and independent branch should each diagnose once; blocked consumers should emit no cascades"
+    );
+    let diagnosed_paths = messages
+        .error_diagnostics()
+        .map(|diagnostic| {
+            diagnostic
+                .primary_location
+                .scope
+                .to_path_buf(&messages.string_table)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        diagnosed_paths
+            .iter()
+            .any(|path| path.ends_with("provider/+mod.moth")),
+        "provider diagnostic should be retained: {diagnosed_paths:?}"
+    );
+    assert!(
+        diagnosed_paths
+            .iter()
+            .any(|path| path.ends_with("independent/#mod.moth")),
+        "independent branch should continue and retain its diagnostic: {diagnosed_paths:?}"
+    );
+    assert!(
+        diagnosed_paths
+            .iter()
+            .all(|path| { !path.ends_with("#page.moth") && !path.ends_with("consumer/#mod.moth") }),
+        "blocked consumers should not be semantically compiled: {diagnosed_paths:?}"
+    );
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[test]
+fn directory_graph_retains_diagnostics_from_later_independent_source_packages() {
+    let dir = temp_dir("graph_outcomes_source_package_diagnostics");
+    let first_package = dir.join("packages/first");
+    let second_package = dir.join("packages/second");
+    fs::create_dir_all(&first_package).expect("should create first package");
+    fs::create_dir_all(&second_package).expect("should create second package");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(dir.join("#page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(
+        first_package.join("#mod.moth"),
+        "export:\n    first || -> Int:\n        return missing_first_package_value\n    ;\n;\n",
+    )
+    .expect("should write first diagnosed package");
+    fs::write(
+        second_package.join("#mod.moth"),
+        "export:\n    second || -> Int:\n        return missing_second_package_value\n    ;\n;\n",
+    )
+    .expect("should write second diagnosed package");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface.source_packages.register_filesystem_root(
+        "first",
+        first_package,
+        PackageOrigin::Builder,
+    );
+    frontend_surface.source_packages.register_filesystem_root(
+        "second",
+        second_package,
+        PackageOrigin::Builder,
+    );
+
+    let messages = match compile_project_frontend(
+        &mut config,
+        &[],
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("both independent source packages should be diagnosed"),
+        Err(messages) => messages,
+    };
+
+    assert!(
+        messages.error_count() >= 2,
+        "both diagnosed source packages should retain their errors"
+    );
+    let diagnosed_paths = messages
+        .error_diagnostics()
+        .map(|diagnostic| {
+            diagnostic
+                .primary_location
+                .scope
+                .to_path_buf(&messages.string_table)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        diagnosed_paths
+            .iter()
+            .any(|path| path.ends_with("packages/first/#mod.moth")),
+        "first package diagnostic should be retained: {diagnosed_paths:?}"
+    );
+    assert!(
+        diagnosed_paths
+            .iter()
+            .any(|path| path.ends_with("packages/second/#mod.moth")),
+        "later independent package should still compile: {diagnosed_paths:?}"
+    );
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[test]
+fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store() {
+    let dir = temp_dir("generated_const_template_projection");
+    fs::create_dir_all(&dir).expect("should create project root");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("#page.moth"),
+        r#"shell #= [:<span>[$slot]</span>]
+unused_insert #= [$insert("unused"): unused]
+
+wrap type T |value T| -> String:
+    return [shell: generated]
+;
+
+result = wrap(42)
+io.line(result)
+"#,
+    )
+    .expect("should write entry");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let frontend = compile_project_frontend(
+        &mut config,
+        &[],
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("same-module generated constants should use their own TIR store");
+    let (_, sidecars) = frontend.into_parts();
+
+    assert_eq!(
+        sidecars.len(),
+        1,
+        "the concrete wrap request needs one sidecar"
+    );
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[test]
+fn generated_sidecars_reconstruct_complete_generic_nominal_members() {
+    let dir = temp_dir("generated_nominal_blueprints");
+    fs::create_dir_all(dir.join("provider")).expect("should create provider module");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("provider/#mod.moth"),
+        r#"identity type T |value T| -> T:
+    return value
+;
+
+export:
+    forward type T |value T| -> T:
+        return identity(value)
+    ;
+;
+"#,
+    )
+    .expect("should write provider");
+    fs::write(
+        dir.join("#page.moth"),
+        r#"import @provider { forward }
+
+export:
+    Box type T = |
+        value T,
+    |
+
+    Maybe type T ::
+        Some | value T |,
+        Empty,
+    ;
+;
+
+PrivateBox type T = |
+    value T,
+|
+
+box Box of Int = Box(42)
+same_box Box of Int = forward(box)
+maybe Maybe of String = Maybe::Some("stable")
+same_maybe Maybe of String = forward(maybe)
+private_box PrivateBox of Bool = PrivateBox(true)
+same_private_box PrivateBox of Bool = forward(private_box)
+"#,
+    )
+    .expect("should write entry");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let frontend = compile_project_frontend(
+        &mut config,
+        &[],
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("public generic nominal arguments should materialise");
+    let (_, sidecars) = frontend.into_parts();
+
+    assert_eq!(
+        sidecars.len(),
+        6,
+        "each outer request and nested private identity request needs one sidecar"
+    );
+    for sidecar in sidecars {
+        let argument = sidecar
+            .identity
+            .type_arguments()
+            .first()
+            .expect("generated request should have one type argument");
+        let base_name = match argument {
+            crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::GenericInstance(
+                instance,
+            ) => instance.base().defining_name(),
+            crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::ModulePrivateGenericInstance(
+                instance,
+            ) => instance.base().defining_path(),
+            _ => panic!("request argument should retain generic-instance identity"),
+        };
+        let environment = &sidecar.module.executable.type_environment;
+        let instance_type_id = environment
+            .type_id_for_canonical_identity(argument)
+            .expect("generated environment should intern the request type");
+
+        match base_name {
+            "Box" => {
+                let fields = environment
+                    .fields_for(instance_type_id)
+                    .expect("generated Box instance should expose substituted fields");
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].type_id, builtin_type_ids::INT);
+            }
+            "Maybe" => {
+                let variants = environment
+                    .variants_for(instance_type_id)
+                    .expect("generated Maybe instance should expose substituted variants");
+                assert_eq!(variants.len(), 2);
+                let ChoiceVariantPayloadDefinition::Record { fields } = &variants[0].payload else {
+                    panic!("Some should retain its record payload");
+                };
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].type_id, builtin_type_ids::STRING);
+                assert!(matches!(
+                    variants[1].payload,
+                    ChoiceVariantPayloadDefinition::Unit
+                ));
+            }
+            name if name.ends_with("PrivateBox") => {
+                let fields = environment
+                    .fields_for(instance_type_id)
+                    .expect("generated private Box instance should expose substituted fields");
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].type_id, builtin_type_ids::BOOL);
+            }
+            other => panic!("unexpected generic nominal request base {other}"),
+        }
+    }
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[test]
+fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
+    let dir = temp_dir("generated_hidden_facade_nominal");
+    fs::create_dir_all(dir.join("facade/provider")).expect("should create provider module");
+    fs::create_dir_all(dir.join("generics")).expect("should create generic provider module");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("facade/provider/#mod.moth"),
+        r#"export:
+    Hidden = |
+        value Int,
+    |
+
+    Wrapper = |
+        hidden Hidden,
+    |
+
+    make || -> Wrapper:
+        return Wrapper(Hidden(42))
+    ;
+;
+"#,
+    )
+    .expect("should write provider");
+    fs::write(
+        dir.join("facade/#mod.moth"),
+        r#"export:
+    import @provider { Wrapper, make }
+;
+"#,
+    )
+    .expect("should write facade");
+    fs::write(
+        dir.join("generics/#mod.moth"),
+        r#"export:
+    identity type T |value T| -> T:
+        return value
+    ;
+;
+"#,
+    )
+    .expect("should write generic provider");
+    fs::write(
+        dir.join("#page.moth"),
+        r#"import @facade { Wrapper, make }
+import @generics { identity }
+
+wrapped Wrapper = identity(make())
+"#,
+    )
+    .expect("should write entry");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let frontend = compile_project_frontend(
+        &mut config,
+        &[],
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("facade-hidden nominal closure should materialise");
+    let (_, sidecars) = frontend.into_parts();
+
+    assert_eq!(sidecars.len(), 1);
+    let sidecar = &sidecars[0];
+    let wrapper_identity = sidecar
+        .identity
+        .type_arguments()
+        .first()
+        .expect("identity request should retain Wrapper");
+    let environment = &sidecar.module.executable.type_environment;
+    let wrapper_type_id = environment
+        .type_id_for_canonical_identity(wrapper_identity)
+        .expect("generated environment should intern Wrapper");
+    let wrapper_fields = environment
+        .fields_for(wrapper_type_id)
+        .expect("generated Wrapper should retain its field");
+    assert_eq!(wrapper_fields.len(), 1);
+
+    let hidden_fields = environment
+        .fields_for(wrapper_fields[0].type_id)
+        .expect("facade-hidden provider nominal should retain its fields");
+    assert_eq!(hidden_fields.len(), 1);
+    assert_eq!(hidden_fields[0].type_id, builtin_type_ids::INT);
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
 
 #[derive(Debug)]
 struct DummyJsImportProvider {
@@ -436,7 +849,7 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     )
     .expect("provider-backed imports should compile");
 
-    let module = modules.into_iter().next().expect("expected one module");
+    let module = modules.first().expect("expected one module");
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -490,9 +903,9 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     )
     .expect("unreachable provider-backed call should compile");
 
-    let module = modules.into_iter().next().expect("expected one module");
+    let module = modules.first().expect("expected one module");
     assert!(
-        module_contains_external_module_export(&module, "getNumber"),
+        module_contains_external_module_export(module, "getNumber"),
         "HIR should keep the unreachable function body and provider package metadata"
     );
     assert!(
@@ -1407,7 +1820,7 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     )
     .expect("repeated JS imports should compile");
 
-    let module = modules.into_iter().next().expect("expected one module");
+    let module = modules.first().expect("expected one module");
 
     assert_eq!(
         module.link_facts.external_import_candidates.len(),
