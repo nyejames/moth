@@ -36,6 +36,17 @@ If a feature could be added without changing Moth's core design, it's
 deferred. If adding it would require rethinking the language model, it's
 outside scope.
 
+### Diagnostic distinction
+
+A deferred-feature diagnostic tells the author that accepted syntax hasn't
+landed yet. An outside-design-scope diagnostic tells the author that the form
+conflicts with the language model and won't be accepted without an explicit
+design change.
+
+Both use structured `CompilerDiagnostic`. The distinction matters because the
+remedy differs: a deferred feature needs implementation progress, while an
+outside-scope form needs a different approach or a language philosophy change.
+
 The progress matrix at @../../progress (Progress matrix) reports whether a
 deferred surface is implemented today. This page explains whether the surface
 belongs in the language at all.

@@ -16,6 +16,8 @@ Moth keeps the source language deliberately small. Compiler complexity is accept
 | Static reuse | Generic functions and explicit trait bounds |
 | Runtime heterogeneity | Choices |
 | Expected failure | `Error!`, postfix propagation and `catch` |
+| Invariant failure | `assert` |
+| Explicit result-like domain values | Ordinary choices |
 | Platform integration | Builder packages, external packages and source-backed packages |
 | Memory safety | GC baseline plus mandatory borrow and lifetime-region validation |
 | Mutation | Explicit exclusive access rather than implicit mutation |
@@ -27,6 +29,3 @@ Moth keeps the source language deliberately small. Compiler complexity is accept
 
 - @#deferred-and-outside-scope (Deferred and outside scope)
 - @#excluded-language-families (Excluded language families)
-
-For the complete compiler-facing scope list, see
-@../../language-overview.md (Language overview).

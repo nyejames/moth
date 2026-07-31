@@ -12,13 +12,17 @@ General closures, anonymous function values, generic function values and higher-
 
 Dynamic trait values and trait objects require erased wrappers, runtime dispatch, dynamic-safety rules, backend-specific runtime support and a second meaning for trait names. Use choices for runtime heterogeneity and generic trait bounds for static reuse.
 
-### Trait system extensions
+### Trait-level programming
 
-Trait inheritance, trait aliases, trait composition, default methods, associated types, associated constants, generic traits and generic trait methods turn traits into a type-level programming system rather than simple method contracts.
+Trait inheritance, trait aliases, trait composition, default methods, associated types and associated constants turn traits into a type-level programming system rather than simple method contracts.
+
+### Generic traits and generic trait methods
+
+Generic traits and generic trait methods make trait solving significantly more complex and create Rust-like abstraction patterns.
 
 ### Conformance extensions
 
-Blanket, conditional, negative or specialised conformance requires coherence and specialisation rules outside Moth's simplicity target. Structural conformance must not silently imply conformance.
+Blanket, conditional, negative or specialised conformance requires coherence and specialisation rules outside Moth's simplicity target. Structural conformance must not silently imply conformance. `Type must TRAIT` stays explicit.
 
 ### Constraint extensions
 
@@ -26,7 +30,7 @@ Type-set constraints, union constraints, underlying-type constraints and user-de
 
 ### Operator overloading
 
-Operators remain compiler-owned and predictable.
+Operators stay compiler-owned and predictable. No source-visible operator overloading.
 
 ### Source-authored receiver extensions
 
@@ -36,26 +40,39 @@ Source-authored receiver methods for builtins, imported types, dependency packag
 
 User-defined `HASHABLE`, custom map hashers or comparers and user-defined keys for builtin maps are rejected. Builtin map syntax stays scalar-keyed. More sophisticated maps belong in packages as ordinary structs.
 
-### First-class results and exceptions
+### First-class result values
 
-First-class public `Result` values and result pattern matching are rejected. `Error!`, postfix `!` and `catch` are the language error path. Users can define ordinary choices when they want explicit result values.
+First-class public `Result` values and result pattern matching stay outside the language. `Error!`, postfix `!` and `catch` form the error path. Authors can define ordinary choices when they want explicit result-like domain values.
 
-### Reflection and type-level programming
+### Exceptions and invariant assertions
 
-Reflection, runtime type IDs, compile-time type inspection and type-returning functions encourage generic metaprogramming and weaken static readability. Higher-kinded types, type functions, partial type application and parameterised type aliases introduce a type-level abstraction language.
+Expected failures use `Error!`. Invariants use `assert`. No public exception system. The two lanes stay distinct: `Error!` handles recoverable failure, `assert` handles impossible invariant violation.
+
+### Reflection and type introspection
+
+Reflection, runtime type IDs, compile-time type inspection and type-returning functions encourage generic metaprogramming and weaken static readability.
+
+### Higher-kinded types
+
+Higher-kinded types, type functions, partial type application and parameterised type aliases introduce a type-level abstraction language.
 
 ### Const generics
 
 User const generics beyond fixed collection capacity are rejected. Capacity syntax remains a small built-in collection feature, not a general type parameter system.
 
-### Source-visible memory internals
+### Source-visible memory annotation systems
 
-Source-visible RC, retain/release, weak ownership, finalisers and unrestricted dynamic shared ownership are outside language design scope. Internal backend RC remains allowed for already-legal topology.
+Source-visible lifetime, reference-category and ownership annotation systems stay outside the language. Moth omits explicit reference types and lifetime syntax, not references themselves. The compiler tracks ownership and lifetimes internally.
+
+### Source-visible RC and dynamic shared ownership
+
+Source-visible RC, retain/release, weak ownership, finalisers and unrestricted dynamic shared ownership are outside language design scope. Internal backend RC remains allowed for already-legal topology. Diagnostics, common-owner groups, `copy` and builder lifecycle roots replace source-level RC.
+
+### Backend-specific semantics leaking into source
+
+Backend-specific observable semantics must not leak into the language. Source semantics stay backend-neutral. Backends receive validated topology and may not reconsider source legality.
 
 ### Read next
 
 - @#design-principles (Design principles)
 - @#deferred-and-outside-scope (Deferred and outside scope)
-
-For the complete compiler-facing scope list, see
-@../../language-overview.md (Language overview).
