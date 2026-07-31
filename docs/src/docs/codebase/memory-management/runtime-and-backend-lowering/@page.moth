@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Memory management) / Runtime and backend memory lowering
 
-    # Runtime and backend memory lowering
-
     Backends may choose different allocation and GC representations. They may not choose different language semantics.
 ]
 

@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 18. HTML assembly and output
 
-    # Building and writing the final page
-
     The HTML builder assembles records into a document and owned output set, ending at the greeting fragment.
 ]
 

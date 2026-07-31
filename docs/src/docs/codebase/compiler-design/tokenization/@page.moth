@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 05. Tokenization
 
-    # From characters to located tokens
-
     Lexical analysis cuts character streams into located tokens and prepares document source kinds for shared later stages.
 ]
 

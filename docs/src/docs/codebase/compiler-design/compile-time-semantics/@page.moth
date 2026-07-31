@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 08. Compile-time semantics
 
-    # Constants, generics, traits and casts before HIR
-
     Folded constants, concrete generic requests, static trait evidence and explicit casts finish before HIR begins.
 ]
 

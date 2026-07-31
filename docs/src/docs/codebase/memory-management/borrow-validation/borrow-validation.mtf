@@ -1,4 +1,6 @@
 
+# Borrow validation
+
 ## Design contract
 
 Borrow validation runs after HIR generation. It reads coherent, validated HIR, enforces source-language access safety and optional transfer safety, and writes analysis facts beside HIR.

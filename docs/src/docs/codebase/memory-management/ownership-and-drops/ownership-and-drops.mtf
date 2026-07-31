@@ -1,4 +1,6 @@
 
+# Ownership and drops
+
 ## Design contract
 
 Moth ownership is an optimisation state layered over GC-safe source semantics. It isn't a separate source type system.

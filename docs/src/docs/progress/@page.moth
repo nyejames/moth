@@ -52,7 +52,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Status legend
+    ## Status legend
 
     [styled_table:
         [header: [: Status] [: Meaning] ]
@@ -88,7 +88,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
         ]
     ]
 
-    # Coverage legend
+    ## Coverage legend
 
     [styled_table:
         [header: [: Coverage] [: Meaning] ]
@@ -116,7 +116,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Core Alpha surface
+    ## Core Alpha surface
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage] [: Runtime target] [: Notes] ]
@@ -404,7 +404,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Core and builder packages
+    ## Core and builder packages
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage] [: Runtime target] [: Notes] ]
@@ -492,7 +492,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Compiler-owned builtin surfaces
+    ## Compiler-owned builtin surfaces
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage] [: Runtime target] [: Notes] ]
@@ -540,7 +540,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Reactivity V1
+    ## Reactivity V1
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage] [: Current surface] ]
@@ -576,7 +576,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Experimental backend surfaces
+    ## Experimental backend surfaces
 
     [styled_table:
         [header: [: Surface] [: Status] [: Current role] [: Alpha rule] ]
@@ -605,7 +605,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Compiler implementation and tooling
+    ## Compiler implementation and tooling
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage] [: Current status] ]
@@ -620,7 +620,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Deferred, rejected, and outside-scope surfaces
+    ## Deferred, rejected, and outside-scope surfaces
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage / diagnostic direction] [: Notes] ]
@@ -831,7 +831,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    # Maintenance rule
+    ## Maintenance rule
 
     This matrix should stay concise and current.
 

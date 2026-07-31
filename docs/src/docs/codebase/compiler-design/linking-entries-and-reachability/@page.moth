@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 15. Linking, entries and reachability
 
-    # Choosing what runs
-
     Compilation and activation stay separate. Entry assembly selects roots and builds a reachable function union.
 ]
 

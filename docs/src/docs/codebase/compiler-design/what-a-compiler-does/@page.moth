@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 01. What a compiler does
 
-    # What a compiler does
-
     Between source text and a finished page sits a ladder of representations. This article names the jobs on that ladder and the owners who hold them.
 ]
 

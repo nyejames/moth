@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 16. Target planning and validation
 
-    # Deciding where code can run
-
     Per-function target assignment and validation catch capability mismatches before any backend emits code.
 ]
 

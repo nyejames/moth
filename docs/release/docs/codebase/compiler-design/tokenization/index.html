@@ -398,7 +398,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Compiler design</a> / 05. Tokenization</p><h1>From characters to located tokens</h1><p>Lexical analysis cuts character streams into located tokens and prepares document source kinds for shared later stages.</p></section>
+    <section class="container"><p><a href="../">Compiler design</a> / 05. Tokenization</p><p>Lexical analysis cuts character streams into located tokens and prepares document source kinds for shared later stages.</p></section>
     <section class="container"><h1>From characters to located tokens</h1><p>A parser that stares at an undifferentiated character stream spends its life guessing. Where does the identifier end? Is <code>=</code> part of <code>==</code> or a lonely assignment? Did a string already open?</p><p><strong>Tokenization</strong> (lexical analysis) cuts the stream into <strong>tokens</strong>: small classified chunks with spelling and source locations. Later stages stop arguing about character boundaries and start arguing about meaning.</p><h2>Token boundaries and spelling</h2><p>A token carries at least:</p><ul><li>a <strong>kind</strong> (identifier, string literal, keyword-like form, delimiter, operator, ...)</li><li>the <strong>authored spelling</strong> as it appeared in source</li><li>a <strong>source location</strong> span pointing back at the file</li></ul><p>Take the page import:</p><pre style=""><code class='codeblock'>
     import <span class='moth-code-operator'>@</span>greeting <span class='moth-code-parenthesis'>{</span> greet <span class='moth-code-parenthesis'>}</span>
     </code></pre><p>A lexer might emit a sequence in this spirit:</p><table style="">

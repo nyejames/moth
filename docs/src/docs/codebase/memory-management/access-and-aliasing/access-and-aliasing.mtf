@@ -1,4 +1,6 @@
 
+# Access and aliasing
+
 ## Design contract
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**

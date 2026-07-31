@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 13. Borrow validation and drops
 
-    # Borrow checking, race prevention and inferred destruction
-
     Data-flow over HIR enforces shared and exclusive access, infers moves and records advisory drops beside unchanged HIR.
 ]
 

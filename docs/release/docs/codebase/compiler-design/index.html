@@ -398,7 +398,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Codebase</a> / Compiler design</p><h1>Compiler design: source to page</h1><p>One chronological route follows a Moth project from source files to generated HTML. Along the way it teaches common compiler terms, Moth&#39;s architecture and the design choices that set the language apart.</p></section>
+    <section class="container"><p><a href="../">Codebase</a> / Compiler design</p><p>One chronological route follows a Moth project from source files to generated HTML. Along the way it teaches common compiler terms, Moth&#39;s architecture and the design choices that set the language apart.</p></section>
     <section class="container"><h1>From Moth source to a webpage</h1><p>A compiler turns source text into something a machine can run or display. It does that in stages. Each stage removes one kind of ambiguity and hands a clearer structure to the next.</p><p>This series walks one small Moth project from files on disk to a generated HTML page. If you write Rust, you already know functions, enums, structs and ownership as a user. You may not know terms like <em>intermediate representation</em>, <em>link plan</em> or <em>borrow validation</em> yet. That is fine. Each term shows up when the example needs it.</p><p>These pages teach. They do not define compiler behaviour. Accepted architecture lives in the design documents. Current support lives in the progress matrix. Sequencing lives in the roadmap. When code and design disagree, design wins for this tour.</p><h2>The project you will carry</h2><p>Keep this tree in mind for the whole series:</p><pre style=""><code class='codeblock'>
     compiler_walkthrough/
     ├── config.moth

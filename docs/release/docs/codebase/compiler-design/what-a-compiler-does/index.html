@@ -398,7 +398,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Compiler design</a> / 01. What a compiler does</p><h1>What a compiler does</h1><p>Between source text and a finished page sits a ladder of representations. This article names the jobs on that ladder and the owners who hold them.</p></section>
+    <section class="container"><p><a href="../">Compiler design</a> / 01. What a compiler does</p><p>Between source text and a finished page sits a ladder of representations. This article names the jobs on that ladder and the owners who hold them.</p></section>
     <section class="container"><h1>What a compiler does</h1><p>You type source. Something emits <code>&lt;p&gt;Hello, Priya!&lt;/p&gt;</code>. Between those two facts sits a chain of transformations. Each step is a bit less like human prose and a bit more like something a machine can use.</p><p>People often shrink that chain to a slogan: &quot;the compiler turns code into machine instructions.&quot; That slogan fails the greeting project early. The page may never touch native machine code. It still needs tokens, types, control-flow graphs, link plans and a builder that writes HTML. That work still counts as compiling.</p><h2>Meaning versus representation</h2><p><strong>Source meaning</strong> answers: what did the author intend under the language rules?</p><p><strong>Target representation</strong> answers: what concrete form will a host execute or display?</p><p><strong>Transformation</strong> answers: how do we move from one to the other without losing the meaning we care about?</p><p>The project tree enters as authored text:</p><pre style=""><code class='codeblock'>
     compiler_walkthrough/
     ├── config.moth

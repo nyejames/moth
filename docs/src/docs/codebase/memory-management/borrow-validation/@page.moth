@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Memory management) / Borrow validation
 
-    # Borrow validation
-
     Borrow validation runs after HIR generation. It writes analysis facts beside HIR without changing it. Lifetime topology is a separate later analysis.
 ]
 

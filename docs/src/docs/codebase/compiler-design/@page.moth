@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Codebase) / Compiler design
 
-    # Compiler design: source to page
-
     One chronological route follows a Moth project from source files to generated HTML. Along the way it teaches common compiler terms, Moth's architecture and the design choices that set the language apart.
 ]
 

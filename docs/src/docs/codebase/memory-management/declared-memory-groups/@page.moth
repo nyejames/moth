@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Memory management) / Declared memory groups
 
-    # Declared memory groups
-
     **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
     A declared memory group is a hard semantic lifetime region. Values placed into a group belong to that group for their full lifetime. Accepted design with implementation deferred.

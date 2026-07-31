@@ -400,7 +400,7 @@ body {
     </nav>
      <h1 style="font-size: 2em;text-align: center;"> PROGRESS MATRIX</h1>
     <section class="container"><p>This page tracks Moth&#39;s current implementation progress.</p><p>It is the source of truth for what the compiler currently supports, partially supports, cleanly rejects, keeps experimental, defers, or treats as outside scope. It is not a full language reference, roadmap, or test manifest.</p><p>The compiler and memory design references may describe accepted end-state architecture that has not fully landed. This matrix determines what the compiler supports today.</p><p>Use this together with <code>tests/cases/manifest.toml</code> when changing language features.</p><h2>How to read and edit this page</h2><ul><li>Keep rows focused on current compiler behavior.</li><li>Put user-facing explanations and examples in docs pages under <code>docs/src/docs/**</code>.</li><li>Put implementation sequencing, active project plans and proposals that have not been accepted as design in <code>docs/roadmap/roadmap.md</code>.</li><li>Put accepted end-state architecture in the relevant compiler, memory or language design reference even when the implementation is incomplete.</li><li>Put compiler architecture and stage ownership in <code>docs/compiler-design-overview.md</code>.</li><li>Put contributor workflow, benchmarking and tooling details in <code>CONTRIBUTING.md</code>.</li><li>Prefer short coverage summaries over long fixture lists unless fixture names identify a fragile surface.</li><li>Use the status labels from this page&#39;s legend. Put nuance such as removed, reserved, not Alpha, or backend-specific in the notes column instead of inventing new status labels.</li></ul><h2>Alpha target</h2><p>The supported Alpha target is:</p><ul><li>frontend parsing and diagnostics</li><li>typed AST construction</li><li>HIR lowering</li><li>borrow validation</li><li>JavaScript backend</li><li>HTML project builder</li><li>docs-style static site generation</li></ul></section>
-    <section class="container"><h1>Status legend</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    <section class="container"><h2>Status legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -442,7 +442,7 @@ body {
             </tr>
                 
 
-    </table><h1>Coverage legend</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    </table><h2>Coverage legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -475,7 +475,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h1>Core Alpha surface</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    <section class="container"><h2>Core Alpha surface</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -768,7 +768,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h1>Core and builder packages</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    <section class="container"><h2>Core and builder packages</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -861,7 +861,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h1>Compiler-owned builtin surfaces</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    <section class="container"><h2>Compiler-owned builtin surfaces</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -914,7 +914,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h1>Reactivity V1</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    <section class="container"><h2>Reactivity V1</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -955,7 +955,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h1>Experimental backend surfaces</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    <section class="container"><h2>Experimental backend surfaces</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -989,7 +989,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h1>Compiler implementation and tooling</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    <section class="container"><h2>Compiler implementation and tooling</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -1009,7 +1009,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h1>Deferred, rejected, and outside-scope surfaces</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+    <section class="container"><h2>Deferred, rejected, and outside-scope surfaces</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
         
         <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
@@ -1225,7 +1225,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h1>Maintenance rule</h1><p>This matrix should stay concise and current.</p><ul><li>Move workflow and benchmark details to <code>CONTRIBUTING.md</code>.</li><li>Move implementation sequencing, active project plans and proposals that have not been accepted as design to <code>docs/roadmap/roadmap.md</code>.</li><li>Move accepted end-state architecture to the canonical compiler, memory or language design reference, even when implementation is incomplete.</li><li>Move syntax examples and beginner explanations to docs pages under <code>docs/src/docs/**</code>.</li><li>Move compiler architecture details to <code>docs/compiler-design-overview.md</code>.</li><li>Keep this page focused on support status, coverage level, clean rejection, target-gating, and experimental status.</li></ul></section>
+    <section class="container"><h2>Maintenance rule</h2><p>This matrix should stay concise and current.</p><ul><li>Move workflow and benchmark details to <code>CONTRIBUTING.md</code>.</li><li>Move implementation sequencing, active project plans and proposals that have not been accepted as design to <code>docs/roadmap/roadmap.md</code>.</li><li>Move accepted end-state architecture to the canonical compiler, memory or language design reference, even when implementation is incomplete.</li><li>Move syntax examples and beginner explanations to docs pages under <code>docs/src/docs/**</code>.</li><li>Move compiler architecture details to <code>docs/compiler-design-overview.md</code>.</li><li>Keep this page focused on support status, coverage level, clean rejection, target-gating, and experimental status.</li></ul></section>
     <script>
     function __moth_is_ref(value) {
     return value !== null && typeof value === "object" && value.__moth_ref === true;

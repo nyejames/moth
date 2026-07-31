@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 07. AST semantics and types
 
-    # Giving syntax checked meaning
-
     Name resolution, type identity and receiving-boundary rules turn ordered shells into typed semantic structure.
 ]
 

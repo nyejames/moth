@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 03. Starting a build
 
-    # A build starts before source compilation
-
     A build chooses its command, builder and folded project values before any page source enters the compiler.
 ]
 

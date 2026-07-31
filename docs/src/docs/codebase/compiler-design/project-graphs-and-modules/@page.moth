@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 04. Project graphs and modules
 
-    # Turning folders into a compiler graph
-
     Folders become a canonical source graph with providers, consumers and one compile per physical module.
 ]
 

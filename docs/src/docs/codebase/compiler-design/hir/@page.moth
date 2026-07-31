@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 11. HIR
 
-    # Lowering meaning into explicit control flow
-
     HIR linearises evaluation order, records link facts and becomes the first backend-facing semantic IR.
 ]
 

@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Memory management) / Ownership and drops
 
-    # Ownership and drops
-
     Ownership is an optimisation state layered over GC-safe semantics. The compiler transfers destruction responsibility only where static analysis proves it's safe.
 ]
 

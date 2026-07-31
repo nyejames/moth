@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 14. Module artefacts and reuse
 
-    # Packaging a module once
-
     Immutable artefact lanes and fingerprints let one module serve every entry without entry-specific recompilation.
 ]
 

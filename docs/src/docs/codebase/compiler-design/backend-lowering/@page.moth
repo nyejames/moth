@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 17. Backend lowering
 
-    # Turning HIR into JavaScript and Wasm
-
     Lowerers translate validated HIR into target code without reopening source or rewriting language meaning.
 ]
 

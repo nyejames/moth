@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Memory management) / Lifetime regions and escape validation
 
-    # Lifetime regions and escape validation
-
     Every allocation has exactly one semantic lifetime owner. GC cannot bypass topology validation.
 ]
 

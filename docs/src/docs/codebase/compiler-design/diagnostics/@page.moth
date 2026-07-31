@@ -10,8 +10,6 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 10. Diagnostics
 
-    # Compiler errors as structured data
-
     User failures and internal failures travel separate lanes as structured payloads with deferred rendering.
 ]
 
