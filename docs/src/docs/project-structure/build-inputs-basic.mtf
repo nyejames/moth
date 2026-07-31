@@ -2,6 +2,10 @@ Build inputs let you declare named values that resolve before the compiler
 processes your source modules. They feed settings like version strings and
 feature flags into ordinary compile-time constants.
 
+**Accepted deferred syntax.** Build inputs are queued implementation work.
+The examples below show the accepted end-state contract, not current
+compiler support. See @../../progress (Progress) for implementation status.
+
 ### A simple build input
 
 [codeblock, $code("moth"):

@@ -8,7 +8,7 @@ exports declarations that external consumers can import. Without it, the
 project has no externally consumable package surface.
 
 The facade rejects top-level runtime work and page fragments. It only exports
-API declarations.
+API declarations. Support roots follow the same rule.
 
 ### How it reaches descendant modules
 

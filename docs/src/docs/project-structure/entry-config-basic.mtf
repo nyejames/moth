@@ -1,6 +1,11 @@
 Entry config lets each normal module root carry its own builder settings and
 access project-level values through `@project`.
 
+**Accepted deferred syntax.** `@project` and entry-local `config:` blocks are
+queued implementation work. The examples below show the accepted end-state
+contract, not current compiler support. See @../../progress (Progress) for
+implementation status.
+
 ### Using `@project`
 
 Import `@project` to read project fields like `version` or `entry_root` inside a
@@ -21,7 +26,7 @@ metadata for that entry:
 
 [codeblock, $code("moth"):
     config:
-        html |
+        html #= |
             title #= "About",
         |
     ;

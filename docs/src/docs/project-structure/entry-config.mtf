@@ -24,7 +24,7 @@ Internal project modules may expose declarations derived from project values. Th
 [codeblock, $code("moth"):
     import @project { version, entry_root }
 
-    page_title #= [: [project_name] v[version]]
+    page_title #= [: v[version]]
 ]
 
 ### Entry-local `config:` blocks
