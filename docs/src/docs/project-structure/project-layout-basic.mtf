@@ -12,9 +12,9 @@ Each source directory can have one `@*.moth` file that marks it as a module. The
 
 ### Shared scoped packages
 
-A `+*.moth` file in a source directory marks it as a scoped support package. For example, `shared/+package.moth` creates the `@shared` package, visible within its nearest ancestor module's subtree.
+A `+*.moth` file in a source directory marks it as a scoped support package. For example, `shared/+package.moth` creates `@shared`. Its owner module, normal sibling modules and their descendants may import it. Other support packages in the same scope and the package's private implementation subtree cannot.
 
-Current scaffolds may create an empty `lib/` folder. It has no special meaning in the accepted package design.
+The current scaffold creates an empty legacy `lib/` folder. It has no special meaning in the accepted package design.
 
 ### Outputs are generated
 
