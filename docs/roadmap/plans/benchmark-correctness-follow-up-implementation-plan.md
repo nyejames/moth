@@ -1,30 +1,31 @@
-# Benchmark and build-system closeout plan
+# Benchmark and output-system final correction plan
 
 ## Purpose
 
-Finish the benchmark correctness follow-up, repair the two stale benchmark fixtures, apply the bounded build-system corrections found by the closeout audit, record clean baselines and remove this plan from active work.
+Correct the remaining output ownership, dev-server and filesystem-safety defects found after the benchmark closeout review. Keep the accepted benchmark harness intact, remove duplicated output policy and record trustworthy baselines only after the final code is committed and validated.
 
-Phases 1 through 6 are complete. Their implementation detail belongs in Git history and tests, not in this remaining-work plan.
+This plan intentionally stays off the roadmap until the current language documentation migration reaches a safe pause. It must be completed before another canonical-module slice changes `src/build_system/build.rs` or the output subsystem.
 
 ## Current state
 
 ```text
-WORK_ID: benchmark-build-closeout
+WORK_ID: benchmark-output-final-corrections
 WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
-AUDIT_BASE_REVISION: c54eafa116e9cba46e01bf65d3d3e6bd7a1bde69
-STATUS: complete
-CURRENT_SLICE: complete
-COMPLETED: Phases 1-7F all complete. 8 fixture imports migrated. Output manifest v4 with builder identity + build profile. Directory output settings validated. Output batch preflight before writing. CLI and dev share one output plan. index.md corrected. Clean baselines recorded. just validate passes. Final audit passed with corrections applied.
-BLOCKERS: none
-NEXT_ACTION: none
-LATEST_REPORTED_VALIDATION: just validate passes (Clippy, 3855 workspace tests, 1812 integration executions, docs check, bench-ci)
+REVIEW_BASE: c162458b3f22c48e5b277e3c777909e1a59cdbce
+IMPLEMENTATION_UNDER_REVIEW: 780215f05d96b4bdf8d8deb03005b2522335caa1
+STATUS: ready for implementation, intentionally not linked from the roadmap
+CURRENT_SLICE: Phase 0 - refresh the output boundary and baseline
+ACCEPTED: benchmark fixture import migration, typed benchmark manifest, shared benchmark execution, isolated file-entry outputs, repository mutation checks, split workload/measurement identity, protocol-aware history, profile drift identity and bounded bench-ci
+OPEN_CORRECTIONS: manifest owner conflicts fail open, scaffolded release manifests claim dev ownership, output planning is duplicated between CLI and dev, output preflight is incomplete, failed stale cleanup loses ownership, one primary integration case no longer tests its contract, comments/tests retain completed-phase drift and July baselines are not trustworthy
+DEPENDENCY: rebase and review before implementation if canonical-module or config work changes build.rs, project config output fields, dev build orchestration or output manifests
+NEXT_ACTION: complete Phase 0, then implement Phase 1 only and stop for review
 ```
 
-Keep this block concise. Update it after each accepted slice. Git history is the implementation record.
+Keep this capsule concise. Update it only at accepted checkpoints. Git history remains the implementation record.
 
 ## Required authorities
 
-Read these before implementation and before the final audit:
+Read these before implementation and before each review checkpoint:
 
 - `AGENTS.md`
 - `docs/compiler-design-overview.md`
@@ -37,332 +38,699 @@ Read these before implementation and before the final audit:
 - `docs/src/docs/progress/@page.moth`
 - `benchmarks/README.md`
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md`
+- `docs/roadmap/plans/project-config-and-recursive-schemas-plan.md`
 - this plan
 
-The compiler overview owns semantic artefacts and compiler stages. The build-system design owns Stage 0, project orchestration, output policy and manifests. The language overview owns import syntax. The canonical module plan owns canonical artefact retention and module hot-path cleanup.
+The build-system design owns command profile selection, output roots, writer policy, manifests and stale cleanup. The compiler overview owns compiler stages and diagnostic boundaries. The style guide owns module shape, comments and readable data flow. The testing guide owns test placement and primary contract ownership.
 
 ## Accepted foundation
 
-Keep the completed benchmark system unless this plan names a narrow correction:
+Do not rewrite these completed systems:
 
-- one typed `benchmarks/manifest.toml`
-- strict CLI exit status and exact opt-in `MOTH_BENCH status` records
-- one shared execution path for preflight and measurement
-- isolated file-entry build outputs under `target/benchmark-work/`
-- repository-state verification before persistence
-- explicit `full_tree` and `partitioned` fingerprint boundaries
-- separate source workload and case measurement fingerprints
-- protocol-aware normal history and profile drift
-- fail-closed timing and counter parsing
-- non-recording `bench-ci` as the normal validation gate
+- `benchmarks/manifest.toml` is the only benchmark case authority
+- CLI failures return non-zero status
+- benchmark status and timing records fail closed
+- preflight and measurement use the shared benchmark executor
+- single-file benchmark builds run below `target/benchmark-work/`
+- repository mutation blocks normal and profile persistence
+- source workload identity and case measurement identity stay separate
+- normal history and profile drift compare only compatible identities
+- `bench-ci` preflights the full inventory and measures a bounded quick set
+- the eight extensionless benchmark imports migrated from `@./name` to module-root-relative `@name`
+- explicit provider imports such as `@./metrics.js` remain valid
 
-Do not restore text case lists, path-derived case identities, source-import fallbacks or a second command-construction path.
+Do not restore text case lists, path-derived identities, file-relative Moth imports, permissive output parsing or another benchmark command-construction path.
 
-## Build-system audit verdict
+## Scope boundary
 
-The build system has a coherent Stage 0 and output-cleanup direction. `output_cleanup.rs` is a valid focused owner. The frontend benchmark API also reuses production path validation, bootstrap and frontend compilation rather than maintaining a second compiler path.
+This plan owns:
 
-Three closeout corrections belong here:
+- selected build-profile identity for output policy
+- output-root validation and resolved output plans
+- output manifest ownership and recovery states
+- output batch preflight and emission inputs
+- stale manifest cleanup retention
+- CLI and dev reuse of the same output plan
+- scaffold interaction with manifests
+- focused diagnostics, tests and baseline regeneration
 
-1. Two benchmark projects still use removed file-relative source imports.
-2. Output manifests identify a builder but not the selected build profile. A builder or ownership mismatch enters limited safe mode and can then be overwritten instead of failing before output mutation.
-3. Directory output settings can resolve to an absolute path or the project root. The current writer validates individual output paths while emitting them, so a late invalid path can leave earlier files written.
+This plan does not own:
 
-One documentation correction also belongs here. `index.md` still names deleted Stage 0 files such as `reachable_file_discovery.rs` and `import_scanning.rs`.
+- canonical module artefact retention or graph outcome redesign
+- provider indexes, materialisation worklists or generated summary convergence
+- recursive project config schemas or migration to `html.dev_output` and `html.release_output`
+- removal of transitional `package_folders`
+- final builder-selection syntax
+- transactional rollback for arbitrary mid-write filesystem failures
+- source-language or import semantics
 
-The following findings are real but already owned by the canonical module plan. Do not duplicate them in this plan:
+Transfer findings to their owning plan rather than implementing a second path here.
 
-- retain `CompiledModuleArtifact`, provider interfaces and graph outcomes through `ProjectFrontendCompilation` and `ProjectCompilation`
-- remove early flattening back to `Vec<Module>`
-- replace repeated provider, materialisation-context and stable-identity linear scans with build-owned indexes
-- narrow generated summary convergence instead of rescanning every base module and sidecar
-- avoid cloning complete prepared source payloads
-- split the oversized `build.rs` and `frontend_orchestration.rs` owners after their final data boundaries settle
+## Confirmed defects
 
-The queued config and module work owns removal of legacy `package_folders`, the current flat config storage and structural support-package migration. Existing module-root marker cleanup owns stale internal `#page` or hash-root naming. Do not pull those changes into benchmark closeout.
+### Manifest ownership is advisory instead of authoritative
 
-Complete this plan before resuming a canonical-module slice that edits `build.rs` or `output_cleanup.rs`. If that work resumes first, rebase and stop for an ownership review rather than merging two competing payload shapes.
+A known v4 builder or profile mismatch currently becomes limited safe mode. The writer emits new files, warns and replaces the manifest with the active owner. This contradicts the accepted rule that another builder or profile causes a structured conflict before output mutation.
 
-## Non-negotiable rules
+### The scaffold writes the wrong release owner
 
-- `@./...` remains invalid for Moth source imports.
-- Explicit provider imports with an extension, such as `@./metrics.js`, remain valid where the active provider supports them.
-- Do not add a compatibility fallback or globally replace every `@./` spelling.
-- Benchmark fixtures provide performance workloads. Canonical language correctness remains owned by focused tests under `tests/cases/` and stage-local Rust tests.
-- Output ownership must be checked before creating, deleting or writing output files.
-- Directory project output roots must be relative to the project root, outside `entry_root` and distinct between development and release profiles.
-- Single-file command output semantics stay unchanged. Benchmark isolation already supplies a safe working directory for file-entry cases.
-- Keep one output manifest reader, one owner comparison and one output-file preflight.
-- Do not add broad filesystem traits, generic path utilities, compatibility wrappers or parallel manifest formats.
-- Baseline recording starts from a clean committed worktree and happens only after every non-recording gate passes.
+`manifest_template()` always emits `profile: dev`, while the scaffolder writes the same text to both `dev/.moth_manifest` and `release/.moth_manifest`. Once ownership becomes fail-closed, a new project's first release build would reject its own release directory.
 
-## Phase 7A - Repair the stale benchmark fixtures
+### CLI and dev do not consume one complete output plan
 
-This is a fixture migration, not a compiler change.
+The current `OutputPlan` carries only an output root and optional project directory. Its comment claims profile ownership that the type does not contain. The dev writer reconstructs its project boundary from `entry_file.parent()` and continues using an output directory chosen before the latest build. A config change can therefore leave dev writing and watching the old root.
 
-Apply these exact substitutions:
+### Output preflight is only lexical
+
+The writer checks relative syntax and exact duplicate paths, then joins destinations again during emission. It does not reject symlink escapes, file/child path conflicts or deterministic case-only collisions. Failed stale deletion is warned about but omitted from the next manifest, so the build system loses ownership of a file it failed to remove.
+
+### Test ownership and comments drifted
+
+`skipped_directory_collision_ignored` no longer contains the skipped directory collision named by its primary contract. Several tests encode fail-open owner mismatch, phase-number banners remain and config/bootstrap comments still describe removed import behaviour. Some new config diagnostics have only implementation-shaped Rust coverage.
+
+### Recorded baselines cannot prove the final code revision
+
+The implementation, fixture changes, plan completion and two baseline updates were squashed into one commit. The July summary also retains runs already identified as contaminated. New baselines must be recorded from a clean committed correction revision and committed separately without amendment.
+
+## Required ownership model
+
+The final code must have one owner for each fact.
+
+### Build profile
+
+Define one build-system profile enum for command policy, conceptually:
+
+```rust
+pub enum BuildProfile {
+    Dev,
+    Release,
+}
+```
+
+Derive it once through one shared `from_flags` helper. Output policy and the HTML builder consume that value. Keep the full flag slice only for unrelated feature flags. Convert to any frontend-specific profile type at one explicit compiler boundary. The output subsystem must not depend on `FrontendBuildProfile`.
+
+### Builder identity and output owner
+
+The selected artefact builder supplies one stable closed identity. The current implementation may keep a small enum because HTML is the only production artefact builder.
+
+```rust
+pub struct OutputOwner {
+    pub builder: BuilderKind,
+    pub profile: BuildProfile,
+}
+```
+
+`OutputOwner` is the only builder/profile pair. Do not duplicate its fields inside `CleanupPolicy`, `OutputPlan`, manifest state and caller-local tuples.
+
+Preferred boundary:
+
+- `BackendBuilder` exposes its stable `BuilderKind`
+- command policy supplies `BuildProfile`
+- `ValidatedOutputPlan` stores the resulting `OutputOwner`
+- `CleanupPolicy` stores only deletion scope such as managed extensions
+- the manifest stores the same `OutputOwner`
+
+Audit `BuilderKind::Generic`. It must not remain as a production fallback that lets unrelated future builders share one manifest identity. Remove it when it is test-only or replace it with an explicit test-only identity. Do not introduce a builder registry in this plan.
+
+### Validated output settings and plan
+
+Validate and normalise directory output settings once during bootstrap. Keep the result outside the transitional flat `Config` storage so the queued recursive-config plan can replace that storage cleanly.
+
+Conceptual shape:
+
+```rust
+pub struct ValidatedDirectoryOutputSettings {
+    pub dev: ValidatedOutputFolder,
+    pub release: ValidatedOutputFolder,
+}
+
+pub struct ValidatedOutputFolder {
+    pub relative_path: PathBuf,
+    pub resolved_path: PathBuf,
+    pub location: SourceLocation,
+}
+
+pub struct ValidatedOutputPlan {
+    pub output_root: PathBuf,
+    pub project_root: PathBuf,
+    pub entry_root: PathBuf,
+    pub owner: OutputOwner,
+    pub setting_location: SourceLocation,
+}
+```
+
+Exact names may vary. Preserve these facts and do not add a broad build context bag.
+
+`BuildBootstrap` should carry the validated directory settings. `BuildResult` should carry the selected directory output plan when the entry is a directory project. Single-file command output remains a separate explicit plan using the command working directory and the source-file boundary.
+
+### Prepared output batch
+
+The writer owns one preflight result with every final destination already resolved.
+
+```rust
+pub struct PreparedOutputWrite {
+    pub files: Vec<PreparedOutputFile>,
+    pub managed_paths: HashSet<PathBuf>,
+    pub cleanup: PreparedOutputCleanup,
+}
+```
+
+Store output indexes or borrowed records plus final destinations. Emission must not rejoin or reinterpret paths after preflight.
+
+## Module layout
+
+Create a focused output subsystem instead of expanding `build.rs` and `output_cleanup.rs` further:
 
 ```text
-benchmarks/module-root-role-mix/api/@api.moth
-    import @./detail {detail_tag}
-    ->
-    import @detail {detail_tag}
-
-benchmarks/module-root-role-mix/lib/toolkit/@kit.moth
-    import @./parts {join_parts}
-    ->
-    import @parts {join_parts}
-
-benchmarks/parallelism/few-modules-many-files-each/site/@page.moth
-    import @./copy { site_title }
-    ->
-    import @copy { site_title }
-
-    import @./panel { render_site_panel }
-    ->
-    import @panel { render_site_panel }
-
-benchmarks/parallelism/few-modules-many-files-each/site/panel.moth
-    import @./stats { stats_label }
-    ->
-    import @stats { stats_label }
-
-benchmarks/parallelism/few-modules-many-files-each/admin/@page.moth
-    import @./copy { admin_title }
-    ->
-    import @copy { admin_title }
-
-    import @./panel { render_admin_panel }
-    ->
-    import @panel { render_admin_panel }
-
-benchmarks/parallelism/few-modules-many-files-each/admin/panel.moth
-    import @./stats { stats_label }
-    ->
-    import @stats { stats_label }
+src/build_system/output/
+├── mod.rs
+├── policy.rs
+├── manifest.rs
+└── writer.rs
 ```
 
-Then search every benchmark `.moth` and `.mtf` file for `import @./`.
+Responsibilities:
 
-Classify each remaining match:
+- `mod.rs`: subsystem map and narrow exports
+- `policy.rs`: `BuildProfile`, `OutputOwner`, output-folder classification and resolved plans
+- `manifest.rs`: manifest parsing, owner comparison, stale cleanup and persistence
+- `writer.rs`: output-batch preflight and emission
 
-- extensionless Moth source or content import: migrate it to module-root-relative syntax
-- explicit provider file with a registered extension such as `.js`: leave it unchanged
-- ambiguous match: stop and report the file, import and active provider contract
+Keep shared destination containment helpers private to this subsystem. Do not move them to `utils.rs`.
 
-Do not add new correctness fixtures for these eight substitutions. Existing import-resolution tests own the language rule. The benchmark gate owns proof that the workloads compile.
+Move existing output code directly and update call sites in the same slice. Do not leave compatibility re-exports, deprecated aliases or duplicate old modules. `build.rs` keeps build orchestration and the builder/backend handoff. It must not remain the implementation owner for output writing.
 
-### Phase 7A validation
+If current file shape makes a directory module materially worse, stop and propose a smaller flat layout with the same ownership boundaries. Do not keep adding unrelated functions to `build.rs` by default.
 
-Run:
+## Phase 0 - Refresh and baseline
 
-```bash
-just bench-validate
-just bench-ci
-just bench-frontend-check
-just bench-check
-```
+Before editing code:
 
-Acceptance:
+1. Record revision, branch and `git status --porcelain`.
+2. Reload the required authorities and current implementations.
+3. Inventory every use of:
+   - `CleanupPolicy`
+   - `OutputOwner`
+   - `BuilderKind`
+   - `FrontendBuildProfile` in build/output code
+   - `OutputPlan`
+   - `resolve_project_output_root`
+   - `resolve_directory_output_plan`
+   - `WriteOptions`
+   - `prepare_output_cleanup`
+   - `read_build_manifest`
+   - `manifest_template`
+   - `skipped_directory_collision_ignored`
+4. Confirm whether any commit after `c162458b3f22c48e5b277e3c777909e1a59cdbce` changed these owners.
+5. Run the current targeted output tests and `just validate` once. Record failures without changing expectations.
 
-- both named frontend cases pass
-- every manifest case passes preflight
-- no extensionless `import @./` remains under `benchmarks/`
-- explicit provider-relative imports remain unchanged
-- no benchmark history or summary is recorded
-- repository state is unchanged apart from the intended fixture edits
+Stop when canonical-module or config work has already changed the same data boundaries. Rebase this plan against that work before implementation.
 
-Commit this slice separately:
+### Phase 0 checkpoint
 
-```text
-bench: migrate remaining module-root-relative fixtures
-```
+Confirm:
 
-## Phase 7B - Enforce output-root and manifest ownership
+- the accepted benchmark harness remains green
+- the defect tests still encode fail-open ownership
+- scaffolded dev and release manifests are identical
+- no current production builder needs an extensible runtime builder registry
+- the planned module split does not overlap an active canonical-module slice
 
-This slice closes the independent build-system audit finding before new baselines are recorded.
+## Phase 1 - Centralise profile, owner and output-plan policy
 
-### 7B.1 Validate directory output settings once
+### 1A - Add the build-system profile owner
 
-Use the current project-config and builder validation boundary. Do not bolt checks onto the benchmark harness.
+- Add `BuildProfile` under the output policy owner.
+- Add one `BuildProfile::from_flags` or equivalent helper.
+- Replace repeated `Flag::Release` profile selection in output resolution and HTML builder setup.
+- Keep unrelated flag checks local.
+- Add one explicit conversion only where the compiler frontend requires its own profile type.
+- Remove `FrontendBuildProfile` imports from output policy, manifests and cleanup tests.
 
-For directory projects, reject development or release output settings that are:
+### 1B - Make `OutputOwner` the actual owner
 
-- empty
-- absolute or platform-prefixed
-- `.` or contain `..`
-- equal to the project root after normalisation
-- equal to or inside `entry_root`
-- equal to each other after normalisation
+- Make the selected builder expose its stable `BuilderKind` through the existing builder abstraction.
+- Construct one `OutputOwner` from builder identity and selected profile.
+- Store that owner in the validated output plan.
+- Remove duplicated `builder_kind` and `build_profile` fields from `CleanupPolicy`.
+- Remove constructors or accessors that reconstruct an owner from duplicated state.
+- Keep managed extension ownership in `CleanupPolicy`.
 
-Use a structured config diagnostic with the relevant setting location. Do not report these user-controlled values as `CompilerError`.
+Do not add string-backed dynamic identities or a registry. A closed enum matches the current builder surface.
 
-Keep single-file output behaviour separate. A direct single-file build may still write to the command working directory. File-entry benchmarks remain isolated by `BenchmarkExecutionWorkspace`.
+### 1C - Validate output folders through one classifier
 
-If the queued config migration has already replaced `dev_folder` and `output_folder`, apply the same invariant to the new builder-owned fields. Do not restore the legacy fields.
+Implement one pure output-folder classifier used by config diagnostics and plan construction.
 
-### 7B.2 Give output manifests a complete owner
+Reject:
 
-Replace builder-only manifest ownership with one small typed value containing:
+- empty paths
+- absolute paths
+- root or platform prefix components
+- `.` components
+- `..` components
+- a resolved path equal to the project root
+- a resolved path equal to or below an explicitly configured non-root `entry_root`
+- development and release paths that normalise to the same result
 
-- stable builder identity
-- build profile: development or release
+Do not silently accept Windows drive-relative prefixes.
 
-The HTML builder must construct its cleanup policy with the selected profile. Do not infer profile later from an output folder name.
+The current implementation still permits transitional empty or `.` entry roots in projects that have not migrated to the final config design. Do not implement the broader strict-entry-root migration here. When that transitional form is active, validate the output against the project root and keep the existing source-index exclusion policy. Record the limitation for the recursive-config plan.
 
-Bump the output manifest from v3 to v4. The v4 header must store builder identity, profile and managed extensions.
+Replace the incorrectly named `EqualsProjectRoot` use when the path equals `entry_root`. Either use the existing inside-entry-root diagnostic for equality or add an exact entry-root reason. Remove any reason variant the classifier can no longer produce.
 
-Policy:
+### 1D - Produce validated settings once
 
-- matching v4 owner and managed extension set: normal cleanup
-- matching v4 owner with changed managed extension set: limited safe mode, preserve old files and write the new v4 manifest after a successful build
-- different v4 builder or profile: structured ownership conflict before any output mutation
-- v3 manifest: legacy limited safe mode because it has no profile identity, then write v4 after a successful build
-- missing, unreadable or unsupported manifests: keep the existing conservative limited-safe behaviour
+- Make project config/bootstrap return `ValidatedDirectoryOutputSettings` after aggregating user diagnostics.
+- Carry it in `BuildBootstrap` rather than adding another optional field to transitional `Config`.
+- Select one `ValidatedOutputPlan` from those settings and the command profile.
+- Carry the selected plan in successful directory `BuildResult` data.
+- Keep single-file output planning explicit and separate.
+- Delete `resolve_project_output_root` and the old incomplete `OutputPlan` once all callers migrate.
 
-Do not silently replace a current v4 manifest owned by another builder or profile.
+### 1E - Put CLI and dev on the same plan
 
-### 7B.3 Preflight the complete output batch before writing
+CLI build:
 
-Before `create_dir_all`, stale cleanup or the first artefact write:
+- consume the `ValidatedOutputPlan` returned by the build
+- stop reconstructing output root, project root or owner
 
-- validate every non-`NotBuilt` relative output path
-- reject duplicate output destinations in the generic writer
-- compute the complete managed-path set once
-- load and validate manifest ownership
+Dev:
 
-Only after that preflight succeeds may emission start.
+- use the same plan constructor during the initial bootstrap needed to start the server after a diagnosed build
+- make `ProjectBuildExecutor` resolve the authoritative plan from each successful build result
+- remove the stale `output_dir` argument from `DevBuildExecutor::build_and_write`
+- return the plan used for the successful write with the build result
+- update `BuildState.output_dir` and the watch scope when config changes the output root
+- stop deriving the project boundary from `entry_file.parent()`
+- retain the previous known plan when a rebuild fails before a new config can be accepted
 
-Keep HTML's source-aware duplicate-route and tracked-asset diagnostics. They provide richer source ownership than the generic writer. The generic preflight is the final filesystem contract and must not reconstruct HTML route meaning.
+The initial dev bootstrap may remain because the server needs a location even when semantic compilation fails. It must reuse the same config and output-policy owners, not a separate parser or resolver.
 
-Prefer one named prepared batch such as `PreparedOutputWrite` over parallel vectors or repeated scans. Keep it local to the output subsystem.
+### Phase 1 tests
 
-### 7B.4 Keep callers on one output plan
+Add focused tests for:
 
-Review CLI build and dev-server setup together.
+- one profile selection helper
+- absolute, parent, current, prefix and empty output paths
+- output equal to or inside an explicit entry root
+- output equal to project root
+- distinct normalised dev/release roots
+- exact diagnostic reason and source location for each public diagnostic family
+- a real dev execution changing `dev_folder` and then writing and watching the new root
+- CLI and dev plans built through the production helper with equal owner and root facts
+- single-file planning remaining independent of directory output rules
 
-- resolve the selected output root and profile through one build-system helper
-- pass one typed ownership value into output writing
-- do not let CLI and dev reconstruct manifest identity separately
-- preserve `AlwaysWrite` for direct builds and `SkipUnchanged` for dev rebuilds
-- preserve the existing separation where `build_project` compiles without writing
+Delete the existing test that calls `resolve_directory_output_plan` twice and labels the result as CLI/dev parity.
 
-Do not create a general build context bag. Use a narrow output plan or write context with only root, project boundary, owner, source location and write mode.
-
-### Phase 7B tests
-
-Add or update focused Rust tests outside production files:
-
-- empty directory output setting is rejected
-- absolute and parent-traversing output settings are rejected
-- output inside `entry_root` is rejected
-- identical development and release roots are rejected
-- valid distinct project-relative roots resolve unchanged
-- matching v4 owner performs stale cleanup
-- development then release against the same v4 root fails before writing
-- different builder identity fails before writing
-- a v3 manifest enters limited safe mode and upgrades only after success
-- managed-extension drift for the same owner preserves old files
-- a duplicate or invalid later output path causes zero files to be written
-- CLI and dev produce the same owner identity for the same profile
-
-Remove or rewrite tests that assert empty directory output folders fall back to the project root. That behaviour conflicts with the accepted output contract.
-
-### Phase 7B validation
+### Phase 1 validation
 
 Run:
 
 ```bash
 cargo fmt
+cargo test --workspace --quiet project_config -- --format terse
 cargo test --workspace --quiet build_orchestration -- --format terse
-cargo test --workspace --quiet build_cleanup -- --format terse
 cargo test --workspace --quiet dev_server -- --format terse
 cargo test --test cli_exit_status --quiet
 just bench-validate
 just validate
 ```
 
-Acceptance:
+### Phase 1 review checkpoint
 
-- no output file or manifest changes on an ownership or preflight failure
-- the output owner has one typed representation
-- v3 support exists only in the manifest reader
-- no caller infers ownership from a path spelling
-- no new lint allowance or compatibility wrapper exists
+Stop for review. Confirm:
 
-Commit this slice separately:
+- profile selection exists once
+- owner identity exists once
+- output settings are classified once during bootstrap
+- CLI and dev consume the same plan type
+- no caller reconstructs project root or owner from path spelling
+- output code no longer imports a frontend profile type
+- no compatibility wrapper preserves the old output resolver
 
-```text
-build: enforce output profile ownership
+## Phase 2 - Make manifest ownership fail closed and remove scaffold manifests
+
+### 2A - Separate parsing, recovery and ownership conflict
+
+The manifest reader should parse filesystem state without deciding that every mismatch is recoverable.
+
+Use explicit states equivalent to:
+
+```rust
+pub enum ManifestReadResult {
+    Uninitialised,
+    Recoverable {
+        reason: ManifestRecoveryReason,
+    },
+    Valid(BuildManifest),
+}
+
+pub struct BuildManifest {
+    pub owner: OutputOwner,
+    pub managed_extensions: BTreeSet<String>,
+    pub paths: Vec<PathBuf>,
+}
 ```
 
-## Phase 7C - Correct build-system navigation and audit drift
+Recovery states may include:
 
-Update `index.md` to match the current `create_project_modules` module map.
+- missing manifest in a non-empty existing output root
+- unreadable manifest
+- unsupported or legacy version
+- invalid metadata
+- same-owner managed-extension drift
 
-At minimum:
+A missing manifest in an absent or empty output root is `Uninitialised` and should not print a warning.
 
-- remove references to deleted `reachable_file_discovery.rs` and `import_scanning.rs`
-- describe `source_discovery.rs` as the retained single-file traversal owner
-- describe `source_scanning.rs` as the single-file lexical/import extraction owner only where that remains current
-- list `provider_store.rs`, `prepared_module.rs`, `module_namespace.rs` and the current canonical directory owners accurately
+A known v4 owner mismatch is not recoverable. `prepare_output_cleanup` must return a structured diagnostic before directory creation, output writes, stale deletion or manifest replacement.
 
-Review touched source comments for stale claims about the output manifest version, ownership and empty-root fallback.
+### 2B - Add one structured ownership diagnostic
 
-Do not use this phase to refactor `build.rs`, `frontend_orchestration.rs`, canonical artefact storage, provider indexes, package discovery or config schema. Record any newly discovered overlap in the canonical module or config plan instead of adding another implementation path here.
+Use the normal user-facing diagnostic lane. Carry structured facts for:
 
-Review the progress matrix. Update it only if the implemented output support or coverage status changes materially. Do not add a cosmetic row.
+- output root
+- existing builder identity
+- existing profile
+- active builder identity
+- active profile
+- active output setting location or the single-file entry fallback
 
-Commit this slice separately when it contains more than plan-state updates:
+Do not format this as an internal compiler error. Do not make the diagnostic payload depend on build-system enum types if that creates a compiler-to-build-system dependency. Intern stable rendered owner names at the boundary when needed.
 
-```text
-docs: align build-system output ownership references
-```
+### 2C - Remove manifests from `moth new`
 
-## Phase 7D - Run the complete non-recording gate
+Delete:
 
-Start from a committed worktree. Capture `git status --porcelain` before and after each benchmark command.
+- `manifest_template()`
+- `DEV_MANIFEST`
+- `RELEASE_MANIFEST`
+- scaffold conflict ownership for those files
+- force-overwrite handling for generated manifests
+- tests that require dev and release manifests to match
 
-Run in this order:
+Keep output directories only when current scaffold UX still needs them. The first successful build owns manifest creation.
+
+Add tests proving:
+
+- a fresh scaffold contains no manifest
+- the first dev build writes a dev-owned manifest
+- the first release build writes a release-owned manifest
+- the two builds succeed independently on default roots
+
+### 2D - Enforce no-mutation conflicts
+
+For both builder and profile mismatch:
+
+- create an existing output file and manifest
+- capture their bytes
+- attempt the conflicting build
+- assert a structured diagnostic
+- assert output and manifest bytes are unchanged
+- assert no new output directory or file appears
+
+Do not keep tests that expect owner mismatch to succeed in limited safe mode.
+
+### Phase 2 validation
+
+Run:
 
 ```bash
-cargo fmt --check
+cargo fmt
+cargo test --workspace --quiet build_cleanup -- --format terse
+cargo test --workspace --quiet new_html_project -- --format terse
+cargo test --workspace --quiet build_orchestration -- --format terse
+cargo run --quiet -- tests --terse
+just bench-validate
+just validate
+```
+
+### Phase 2 review checkpoint
+
+Stop for review. Confirm:
+
+- another owner cannot be overwritten
+- first builds do not warn about a missing manifest
+- scaffold code knows nothing about manifest format
+- v3 exists only as a reader-side recovery input
+- owner comparison is implemented once
+- conflict tests prove zero mutation
+
+## Phase 3 - Complete output batch preflight and stale ownership retention
+
+### 3A - Prepare final destinations once
+
+Move output emission from `build.rs` into the output writer owner.
+
+Preflight receives:
+
+- the validated output plan
+- project output records
+- cleanup policy
+- write mode
+
+It produces final destinations once. Emission consumes those prepared destinations without joining paths again.
+
+### 3B - Reject the complete conflict set before writing
+
+Preflight must reject:
+
+- empty or non-normal relative paths
+- exact duplicate destinations
+- a file destination that is an ancestor of another output
+- a child output whose ancestor is another non-directory output
+- file and directory records claiming the same destination
+- deterministic ASCII case-only collisions
+- an existing symlink or symlinked ancestor that resolves outside the validated output root
+
+An explicit directory record may contain child outputs. Sort normalised destination keys once and check adjacent and ancestor relationships rather than adding an avoidable quadratic scan.
+
+Reuse one output-subsystem containment helper for writer preflight and stale cleanup. Do not duplicate canonicalisation logic.
+
+### 3C - Keep generic and HTML conflict owners separate
+
+The HTML builder retains source-aware diagnostics for duplicate routes and tracked asset conflicts. The generic writer enforces final filesystem invariants only.
+
+Do not reconstruct route, module or tracked-asset semantics in the writer.
+
+### 3D - Preserve ownership after failed stale deletion
+
+Return a cleanup report that distinguishes:
+
+- removed stale paths
+- safe inside-root paths that remain because deletion failed
+- invalid or escaping manifest entries that were ignored
+
+When deletion of a safe existing stale path fails, retain it in the next manifest so a later build can retry. Do not lose ownership after printing a warning.
+
+Invalid or escaping manifest entries must never be deleted or copied into a new current manifest.
+
+If manifest persistence fails, return the infrastructure failure. Do not claim successful cleanup.
+
+### Phase 3 tests
+
+Add focused writer tests for:
+
+- symlink escape rejection
+- file/child prefix conflict with zero writes
+- explicit directory plus child success
+- file/directory same-path rejection
+- ASCII case-only collision rejection
+- an invalid later path producing zero writes
+- a manifest owner conflict producing zero writes
+- failed stale deletion remaining in the next manifest
+- invalid manifest paths never being re-emitted
+- emission consuming prepared destinations rather than rebuilding them
+
+Keep one pure reader test for each manifest classification and one writer-boundary test for behaviour. Merge redundant tests that repeat the same recovery outcome.
+
+### Phase 3 validation
+
+Run:
+
+```bash
+cargo fmt
+cargo test --workspace --quiet output -- --format terse
+cargo test --workspace --quiet build_cleanup -- --format terse
+cargo test --workspace --quiet build_orchestration -- --format terse
+just bench-validate
+just bench-ci
+just validate
+```
+
+### Phase 3 review checkpoint
+
+Stop for review. Confirm:
+
+- every logical and ownership failure occurs before the first write
+- destination paths are resolved once
+- writer and cleanup share containment code
+- no HTML semantics leaked into the generic writer
+- failed stale cleanup remains owned
+- the output module split reduced `build.rs` rather than adding wrappers
+
+## Phase 4 - Restore test ownership and remove style drift
+
+### 4A - Remove the hollow primary integration case
+
+Delete `skipped_directory_collision_ignored` and its manifest entry unless a current accepted behaviour still needs that exact contract.
+
+Do not keep a primary case named for a configured skipped-directory collision when its fixture contains only a homepage.
+
+If a real current contract exists, replace the fixture with an accepted scenario and strong artefact assertions. Stop and document the authority before doing this. Do not re-allow output directories inside an explicit source entry root to preserve the old case.
+
+### 4B - Add canonical config integration coverage
+
+Add focused integration cases for the public config behaviour:
+
+1. invalid output-folder shape, with one representative path and exact stable reason
+2. output equal to or inside explicit `entry_root`
+3. development and release output roots not distinct
+4. manifest owner conflict when a build is run against an already-owned root, when the integration harness can express this without test-only hooks
+
+Use exact reason keys, source locations and backend intent. Keep pure path variants in Rust unit tests rather than multiplying integration fixtures.
+
+Each non-smoke case needs one clear contract and role under `tests/cases/manifest.toml`.
+
+### 4C - Prune implementation-shaped and duplicate tests
+
+Remove or merge:
+
+- the tautological CLI/dev plan test
+- reader and writer tests that assert the same classification without a distinct boundary
+- completed `Phase 7B` banners
+- comments that say v3 while constructing v4 data
+- tests that inspect dead owner accessors
+- assertions that only check `is_err()` when a stable reason or no-mutation fact is the real contract
+
+Keep test-only utilities with the test module that owns them. Do not create a broad shared filesystem test framework.
+
+### 4D - Clean code and comment drift
+
+Review every touched file against the style guide.
+
+Required corrections include:
+
+- remove `OutputOwner` constructors or accessors that are no longer the authority
+- remove absolute-path fallback branches made unreachable by validation
+- remove unused diagnostic payload fields or render them meaningfully
+- correct comments that claim config may import Core or Builder packages
+- remove comments that restate signatures
+- keep WHAT/WHY comments for owner comparison, recovery policy, symlink containment and stale retention
+- move inline imports to the module header
+- use descriptive names and clear intermediate values
+- keep functions focused and split long mixed-responsibility functions
+- avoid new lint allowances
+
+Do not refactor unrelated canonical module, config schema or backend code while touching imports.
+
+### 4E - Align documentation without roadmap churn
+
+Update only current authorities and navigation affected by the implementation:
+
+- `docs/build-system-design.md` when exact manifest recovery or output-plan wording needs clarification
+- `index.md` when the output module map changes
+- `benchmarks/README.md` only when baseline or non-recording command behaviour changes
+- the canonical module plan's validation note to remove the now-fixed benchmark fixture blocker, without advancing its current slice
+- this plan capsule to `implementation complete, review pending`
+
+Do not add this plan to the roadmap. Do not edit generated docs directly.
+
+### Phase 4 validation
+
+Run:
+
+```bash
+cargo fmt
 cargo test --workspace --quiet -- --format terse
 cargo run --quiet -- tests --terse
 cargo run --quiet -- check docs --terse
 just bench-validate
 just bench-ci
-just bench-frontend-check
 just bench-check
+just bench-frontend-check
 just validate
+```
+
+### Phase 4 review checkpoint
+
+Stop for an independent read-only audit. Do not mark the plan complete yet.
+
+The review must confirm:
+
+- one primary test owner per public behaviour
+- no hollow or renamed contract remains
+- no duplicate profile, owner, root or manifest logic exists
+- output modules follow the style guide
+- comments describe current ownership rather than completed phases
+- no queued config or canonical-module work was pulled into this plan
+
+## Phase 5 - Clean history and record trustworthy baselines
+
+Do this only after the Phase 4 audit accepts the code and the correction commits are on the branch.
+
+### 5A - Commit implementation before measuring
+
+The complete correction implementation must be committed before any recording command runs.
+
+Do not squash baseline commits into implementation commits. Do not amend a commit after a baseline records its revision.
+
+### 5B - Back up and inspect history
+
+Back up under `/tmp`:
+
+- `benchmarks/local-data/runs.jsonl`
+- profile history when present
+- `benchmarks/summaries/2026-07-Summary.md`
+
+Use a one-off script under `/tmp` to parse local JSONL and print every candidate record before removal.
+
+Remove only records proven invalid by revision, protocol, suite and timestamp. Expected candidates include the reviewed July 26, July 27 and July 31 runs, but do not delete by date alone when local identity proves otherwise.
+
+Remove matching tracked summary blocks. Leave older historical records intact when they are clearly labelled and not selected as a current baseline.
+
+### 5C - Run the complete non-recording gate
+
+Capture `git status --porcelain` before and after each benchmark command:
+
+```bash
+just bench-validate
+just bench-ci
+just bench-check
+just bench-frontend-check
 ```
 
 Requirements:
 
 - every command passes
-- non-recording benchmark commands leave repository state unchanged
-- no root-level generated HTML appears
-- no output ownership test leaves temporary project artefacts behind
-- the two fixture cases pass through the in-process frontend path
-- the complete CLI and frontend suites compile cleanly
+- repository state remains unchanged
+- no root-level generated output appears
+- scaffold tests leave no project artefacts
+- all current history identities are complete
 
-Do not continue to baseline recording after a flaky or unexplained failure. Re-run only after identifying the cause. Do not weaken a case, remove a gate or change quick selection to hide it.
+Then run:
 
-## Phase 7E - Record clean protocol baselines
+```bash
+just validate
+```
 
-Do this only after Phase 7D passes on the exact committed revision to be measured.
+### 5D - Record CLI baseline
 
-Back up local history and the current monthly summary under `/tmp`.
-
-Inspect current local history before deleting anything. Remove only records that are invalid under the completed protocol or were already identified as contaminated by repository-root file output. Print the exact removed records from a one-off `/tmp` script. Do not add permanent migration code and do not guess by date alone.
-
-Record the suites separately:
+From the clean committed correction revision:
 
 ```bash
 just bench
 ```
 
-Inspect and commit only the intended end-to-end CLI summary update.
+Inspect the local record and tracked summary. Commit only the intended CLI summary change:
+
+```text
+bench: record corrected CLI baseline
+```
+
+Do not amend this commit.
+
+### 5E - Record frontend baseline
 
 Return to a clean worktree, then run:
 
@@ -370,108 +738,137 @@ Return to a clean worktree, then run:
 just bench-frontend
 ```
 
-Inspect and commit only the intended frontend summary update.
-
-Do not amend either baseline commit. Do not invent or hand-edit timing values.
-
-Acceptance:
-
-- both records use the current benchmark protocol and history format
-- every current case has complete source and measurement identity
-- each run records a clean start revision
-- no comparison is made against changed workload or measurement identity
-- summary blocks and case counts match the current manifest
-- raw benchmark and profile data remain local
-- the tracked diff contains only the intended summary changes
-
-Suggested commits:
+Inspect the local record and tracked summary. Commit only the intended frontend summary change:
 
 ```text
-bench: record clean CLI baseline
-bench: record clean frontend baseline
+bench: record corrected frontend baseline
 ```
 
-## Phase 7F - Final audit and close the plan
+Do not amend this commit.
 
-Perform one repository-aware audit after the baseline commits.
+### Baseline acceptance
 
-### Benchmark system
+- both runs start clean
+- recorded revisions already contain the final implementation
+- every case has complete source and measurement identity
+- changed workload or measurement identity produces no speed claim
+- summary case counts match the manifest
+- no contaminated run remains selected in the top summary
+- raw history remains local
+- timing values are generated, never hand-edited
 
-- one typed manifest owns every case
-- every case passes shared preflight
-- preflight, measurement, observation and Samply use one invocation authority
-- file-entry builds remain below `target/benchmark-work/`
-- repository mutation blocks persistence
-- source and measurement identity remain separate
-- normal and profile history reject incompatible comparisons
-- timing parsing fails closed
-- non-recording commands do not mutate the checkout
-- no extensionless source import uses `@./`
+## Phase 6 - Final closeout audit
 
-### Build-system output
+Run one final repository-aware audit after both baseline commits.
 
-- directory output roots are safe, relative, outside `entry_root` and profile-distinct
-- manifest v4 stores builder and profile identity
-- another owner cannot be overwritten
-- every output batch is validated before the first write
-- cleanup removes only manifest-owned paths
-- CLI and dev share ownership resolution
-- user-controlled output mistakes use structured diagnostics
-- filesystem and invariant failures stay on the infrastructure lane
+### Output ownership
 
-### Quality and ownership
+- one build-system profile selector
+- one stable builder identity
+- one `OutputOwner`
+- one validated output plan
+- one manifest parser and owner comparison
+- owner mismatch fails before mutation
+- scaffold contains no manifest-format knowledge
+- CLI and dev use the same plan
+- dev updates output and watch roots after accepted config changes
 
-- no completed Phase 1 through 6 implementation detail remains in this plan
-- no duplicate output owner, manifest reader or path preflight exists
-- no compatibility shim preserves v3 as a current producer
-- no module-plan finding was reimplemented here
-- no broad utility module, trait hierarchy or context bag was added
-- touched modules follow file-size, function-size, naming and WHAT/WHY guidance
-- tests protect user behaviour or hidden subsystem invariants rather than implementation accidents
-- `index.md` names only current files and owners
+### Filesystem safety
 
-Run one final:
+- complete destination preflight occurs before writing
+- symlink escapes are rejected
+- exact, prefix, file/directory and case-only conflicts are rejected
+- emission uses prepared destinations
+- stale cleanup deletes only current-owner paths
+- failed safe deletions remain tracked
+- invalid manifest entries never broaden deletion
+
+### Benchmark integrity
+
+- all cases preflight successfully
+- non-recording commands do not mutate the repository
+- file-entry builds remain isolated
+- current normal and profile history require complete identity
+- clean CLI and frontend baselines exist on committed revisions
+
+### Quality
+
+- output code has one clear module owner
+- `build.rs` is smaller and keeps orchestration only
+- no compatibility shim preserves old output APIs
+- no output-specific helper moved to broad utilities
+- no dead diagnostic fields, stale comments or phase banners remain
+- tests follow primary contract ownership and live outside production files
+- no queued config or canonical-module work was duplicated
+
+Run:
 
 ```bash
+cargo fmt --check
 just validate
+just bench-validate
+just bench-ci
+just bench-check
+just bench-frontend-check
 ```
 
-Then update:
+When Samply is installed, also run one file-entry build profile case and confirm the repository stays unchanged:
 
-- this plan state to `complete`
-- the canonical module plan's validation note to remove the benchmark-fixture blocker, without advancing its implementation slice
-- `docs/roadmap/roadmap.md` to remove this plan from active work and place it under completed work or remove the link if completed plans are intentionally deleted
+```bash
+just profile-case speed_test_build raw-index
+```
 
-Do not delete this plan until its final commits and recorded baseline revisions are easy to locate from Git history.
+When Samply is unavailable, state that exact omission. Automated profile invocation and persistence tests remain mandatory.
+
+After independent review accepts every item, update this plan capsule to `complete`. Leave it off the roadmap unless the user explicitly asks for roadmap placement.
 
 ## Stop conditions
 
 Stop and report the exact conflict when:
 
-- an extensionless benchmark import cannot be expressed through the owning module root
-- fixing a fixture appears to require restoring file-relative source resolution
-- output ownership requires changing compiler or source-language semantics
-- the active config plan has already replaced the fields this plan would validate
-- the canonical module plan has concurrently changed `ProjectFrontendCompilation`, `ProjectCompilation`, `build.rs` or output ownership
-- a second current manifest producer or output writer appears necessary
-- output preflight cannot prevent mutation before a user-controlled failure
-- a current history record lacks complete identity
-- a baseline command changes source, config or benchmark fixtures
-- any required gate remains red
+- canonical-module work has changed `build.rs` or output subsystem boundaries since the review base
+- recursive-config work has replaced flat output fields or config bootstrap results
+- owner conflict handling appears to require a source-language exception
+- CLI and dev cannot share one plan without preserving two policy implementations
+- manifest recovery would overwrite a known current-format foreign owner
+- symlink safety requires following an untrusted path outside the output root
+- output preflight still permits a logical failure after the first write
+- a user-facing config error cannot retain a structured diagnostic and useful location
+- a test can pass only by weakening the accepted output contract
+- a baseline command mutates source, config or benchmark fixtures
+- any required validation gate remains red
 
-Preserve completed work, record the failing command and do not invent a fallback.
+Preserve accepted work, record the failing command and do not invent a permissive fallback.
+
+## Suggested commit sequence
+
+Keep implementation and measurement changes reviewable:
+
+1. `build: centralise output profile and plans`
+2. `build: reject output manifest owner conflicts`
+3. `build: preflight resolved output destinations`
+4. `tests: restore output-system contract coverage`
+5. `docs: align output ownership and closeout state`
+6. `bench: record corrected CLI baseline`
+7. `bench: record corrected frontend baseline`
+
+Each implementation commit must pass its focused tests. Commits 2, 3 and 5 must pass `just validate` before proceeding. Baseline commits must remain separate and must not be amended.
 
 ## Final agent report
 
 The implementing agent must report:
 
-- commits created and one-line purpose for each
-- the exact eight fixture import substitutions
-- any remaining `import @./` matches and why each is a valid provider import
-- output manifest version and ownership fields
-- tests and validation commands that ran
-- repository-state evidence around non-recording benchmark commands
-- CLI and frontend baseline commits and summary result
-- any omitted Samply runtime validation
-- every finding transferred to the canonical module or config plan
-- confirmation that `just validate` passed
+- commit list and one-line purpose for each
+- files added, moved, removed and materially changed
+- final output module ownership map
+- manifest version and all read classifications
+- final `OutputOwner` and `ValidatedOutputPlan` facts
+- removed duplicated or dead APIs
+- integration contracts added or removed
+- exact validation commands and results
+- before/after repository state for non-recording benchmark commands
+- whether the Samply runtime check ran
+- local history records removed and the identity used to select them
+- CLI and frontend baseline commits and summary values without claiming an optimisation
+- findings transferred to canonical-module or recursive-config plans
+- any remaining limitation or omitted validation
