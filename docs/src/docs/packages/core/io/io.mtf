@@ -67,11 +67,11 @@ Input polling lives under `io.input.*`. The handle type `io.input.Input` stays o
 
 ### Keyboard helpers
 
-Keyboard helpers track held, pressed, released and last-edge states.
+Keyboard helpers track down, pressed, released and last-edge states.
 
 | Helper | Signature | Access |
 |---|---|---|
-| `key_held(input, key)` | `Input, String -> Bool` | shared |
+| `key_down(input, key)` | `Input, String -> Bool` | shared |
 | `key_pressed(input, key)` | `Input, String -> Bool` | shared |
 | `key_released(input, key)` | `Input, String -> Bool` | shared |
 | `last_key_pressed(input)` | `Input -> String?` | shared |
@@ -86,10 +86,12 @@ Pointer helpers track button state and position.
 | Helper | Signature | Access |
 |---|---|---|
 | `pointer_down(input, button)` | `Input, String -> Bool` | shared |
-| `pointer_up(input, button)` | `Input, String -> Bool` | shared |
-| `pointer_held(input, button)` | `Input, String -> Bool` | shared |
+| `pointer_pressed(input, button)` | `Input, String -> Bool` | shared |
+| `pointer_released(input, button)` | `Input, String -> Bool` | shared |
 | `pointer_x(input)` | `Input -> Float` | shared |
 | `pointer_y(input)` | `Input -> Float` | shared |
+| `last_pointer_pressed(input)` | `Input -> String?` | shared |
+| `last_pointer_released(input)` | `Input -> String?` | shared |
 
 Pointer buttons use `"left"`, `"middle"` and `"right"`. Pointer coordinates use `Float` values.
 

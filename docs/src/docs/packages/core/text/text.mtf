@@ -33,9 +33,13 @@ All functions stay infallible at the Moth level. They do not return through `Err
 
 All parameters use shared access. No function requires mutable access. `length` returns a fresh `Int`. The predicate functions return fresh `Bool` values.
 
-### Backend behaviour
+### Length unit
 
-HTML-JS lowers each function to a JavaScript runtime helper. Text length follows JavaScript string length behaviour on the current HTML JavaScript path.
+`text.length` returns the number of Unicode scalar values in the string. A Unicode scalar value is a Unicode code point excluding surrogate code points. This is the same unit `Char` represents.
+
+A string of N `Char` values reports `text.length` of N. Surrogate pairs in the runtime encoding do not inflate the count.
+
+Implementation gap: the current HTML-JS lowering uses JavaScript `String.prototype.length`, which counts UTF-16 code units rather than Unicode scalar values. For strings containing characters outside the Basic Multilingual Plane, the JS result is higher than the language-level count. See @../../../../progress (progress matrix) for the recorded drift.
 
 HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
 

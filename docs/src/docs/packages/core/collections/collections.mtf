@@ -59,6 +59,10 @@ Authors interact with collections through language-level syntax and receiver met
 
 HTML-JS lowers the host functions to JavaScript runtime helpers. HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
 
+### Deferred surfaces
+
+Deferred collection surfaces include HTML-Wasm lowering, map operations as direct host functions, collection equality, collection iteration protocol, sortable collections, deque operations, fixed-capacity collections and specialised collection variants. See @../../../../progress (progress matrix) for current status.
+
 ### Related concepts
 
 - For collection literal syntax and typing see @../../../../collections (Collections).

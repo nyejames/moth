@@ -430,7 +430,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Supported]
             [: Targeted direct, grouped, aliased, namespace, const, arity, type, missing-symbol, and non-imported access coverage.]
             [: JS / HTML]
-            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It is explicit-import only. Non-JS support is backend-specific and tracked under experimental surfaces.]
+            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It is explicit-import only. Non-JS support is backend-specific and tracked under experimental surfaces. Implementation gap: the current HTML-JS lowering does not enforce the checked numeric contract for non-finite results from math functions. Accepted design requires non-finite results to be rejected. Stage B or a dedicated numeric plan must add the missing boundary checks.]
         ]
 
         [data:
@@ -438,7 +438,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Targeted runtime, JS helper, arity, type-error, edge-case, unsupported-builder, and Wasm-unsupported coverage.]
             [: JS / HTML]
-            [: [$html:<code>@core/text</code>] exposes string helpers such as length, emptiness, containment, prefix, and suffix checks. Receiver-method forms and non-JS lowerings remain deferred.]
+            [: [$html:<code>@core/text</code>] exposes string helpers such as length, emptiness, containment, prefix, and suffix checks. Receiver-method forms and non-JS lowerings remain deferred. Implementation gap: the language-level contract defines text.length as counting Unicode scalar values, consistent with Char. The current HTML-JS lowering uses JavaScript UTF-16 code-unit length. Strings containing characters outside the Basic Multilingual Plane report a higher count than the language-level value. Stage B or a dedicated plan must correct the lowering.]
         ]
 
         [data:

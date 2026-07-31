@@ -56,7 +56,7 @@ All functions take `Float` parameters and return `Float`. Parameters stay positi
 | `max(a, b)` | `Float, Float` | `Float` |
 | `clamp(x, min, max)` | `Float, Float, Float` | `Float` |
 
-All functions stay infallible at the Moth level. They do not return through `Error!`. Non-finite `Float` results from operations such as `sqrt(-1.0)` follow the ordinary `Float` domain rules of the backend.
+All functions stay infallible at the Moth level. They do not return through `Error!`. Moth-level non-finite `Float` results from operations such as `sqrt(-1.0)` follow the checked numeric contract: `NaN`, positive infinity and negative infinity are not valid Moth `Float` values and boundaries that can introduce a non-finite result must reject it. Implementation gap: the current HTML-JS lowering does not enforce the checked numeric contract for `@core/math` functions. See @../../../../progress (progress matrix) for the recorded drift.
 
 ### Access and return contracts
 

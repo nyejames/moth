@@ -16,7 +16,7 @@ Bring in the functions you need with a grouped import.
 
 ### Available functions
 
-- `length(text)` returns the number of characters as `Int`
+- `length(text)` returns the number of Unicode scalar values as `Int`
 - `is_empty(text)` returns `Bool`
 - `contains(text, substring)` returns `Bool`
 - `starts_with(text, prefix)` returns `Bool`
