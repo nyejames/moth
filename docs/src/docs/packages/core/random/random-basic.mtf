@@ -19,4 +19,4 @@ Bring in the functions you need with a grouped import.
 - `random_int(min, max)` returns an `Int` from `min` to `max` inclusive
 
 If `min` exceeds `max` in `random_int`, the bounds swap.
-For the full function contract, backend behaviour and deferred surfaces, see @random (Core random advanced).
+For the full function contract, backend behaviour and deferred surfaces, see @./ (Core random advanced).

@@ -60,4 +60,4 @@ Pointer helpers report button state and coordinates.
 ]
 
 Buttons use `"left"`, `"middle"` and `"right"`. Coordinates use `Float` values.
-For the full contract including backend behaviour, teardown rules and deferred surfaces, see @io (Core IO advanced).
+For the full contract including backend behaviour, teardown rules and deferred surfaces, see @./ (Core IO advanced).

@@ -35,4 +35,4 @@ You can also import the whole namespace and access members through field access.
 - `min(a, b)`, `max(a, b)`, `clamp(x, min, max)` for comparisons
 
 All functions take `Float` values and return `Float`.
-For the full function list, backend behaviour and deferred surfaces, see @math (Core math advanced).
+For the full function list, backend behaviour and deferred surfaces, see @./ (Core math advanced).

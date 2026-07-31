@@ -18,4 +18,4 @@ Most Core packages require explicit imports:
     import @core/math {sin}
     import @core/time {mark_now}
 ]
-For the full prelude contract, collision rules and builder ownership, see @prelude (Prelude policy advanced).
+For the full prelude contract, collision rules and builder ownership, see @./ (Prelude policy advanced).

@@ -55,4 +55,4 @@ There is no remote fetching, lockfile or version resolution yet. Use `+*.moth` s
 
 - For project-local packages see @#project-local-packages (Project-local packages).
 - For import path families see @#import-paths (Import paths).
-- For Core package API details see @core (Core packages).
+- For Core package API details see @./core (Core packages).

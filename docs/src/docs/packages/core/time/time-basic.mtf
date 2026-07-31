@@ -55,4 +55,4 @@ Use `Timestamp` for real-world UTC instants that may be logged, stored or exchan
 ]
 
 `timestamp_from_iso_string` takes the fallible path because invalid strings can fail. Handle it with `!` or `catch`.
-For the full function list, backend behaviour and deferred surfaces, see @time (Core time advanced).
+For the full function list, backend behaviour and deferred surfaces, see @./ (Core time advanced).

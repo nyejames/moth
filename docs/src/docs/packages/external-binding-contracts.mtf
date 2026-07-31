@@ -98,5 +98,5 @@ The V1 value-only profile defers WIT resources, callbacks, async operations, fut
 
 - For package origin and backing see @#package-origins-and-backing (Package origins and backing).
 - For import path rules see @#import-paths (Import paths).
-- For Core package API details see @core (Core packages).
-- For Builder package API details see @builder (Builder packages).
+- For Core package API details see @./core (Core packages).
+- For Builder package API details see @./builder (Builder packages).

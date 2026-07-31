@@ -23,4 +23,4 @@ Bring in the functions you need with a grouped import.
 - `ends_with(text, suffix)` returns `Bool`
 
 All functions take `String` values and return `Int` or `Bool`.
-For the full function contract, backend behaviour and deferred surfaces, see @text (Core text advanced).
+For the full function contract, backend behaviour and deferred surfaces, see @./ (Core text advanced).
