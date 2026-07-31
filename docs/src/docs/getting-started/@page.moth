@@ -55,7 +55,7 @@ page_head #= language_theme_head
         [data:
             [$md:`new html`]
             [: Creates a complete HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there.         It then asks for a project name, a .gitignore choice and creates the full default scaffold including `src/@page.moth`, output manifests and an optional .gitignore. The scaffold may also create an empty `lib/` folder as a temporary placeholder. It has no special meaning in the accepted package design. Use structural `+*.moth` packages under the source tree for project-local packages.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the default scaffold including `src/@page.moth`, an empty legacy `lib/` placeholder, output manifests and an optional .gitignore. The `lib/` folder has no special meaning in the accepted package design. Use structural `+*.moth` packages under the source tree for project-local packages.]
         ]
 
         [data:
@@ -79,7 +79,7 @@ page_head #= language_theme_head
         [data:
             [$md:`tests`]
             [: Runs the compiler integration test suite. (developer tool)]
-            [$md: Mainly useful when working on the compiler itself. Use `--backend html` or `--backend html_wasm` to focus one backend profile.]
+            [$md: Mainly useful when working on the compiler itself. Use `--terse` for compact output or `--backend html` / `--backend html_wasm` to focus one backend profile.]
         ]
     ]
 ]
@@ -104,8 +104,8 @@ page_head #= language_theme_head
 
         [data:
             [$md:`--terse`]
-            [$md:`check` only]
-            [: Prints compact diagnostics for tools, logs and LLM workflows.]
+            [$md:`check`, `tests`]
+            [: Prints compact diagnostics or test summaries for tools, logs and LLM workflows.]
         ]
 
         [data:
@@ -125,7 +125,7 @@ page_head #= language_theme_head
 #[section, $md:
     ## Create a new HTML project
 
-    The scaffold creates a complete default project including config, a starter page, package folder, output folders with build manifests and an optional .gitignore.
+    The scaffold creates a default project with config, a starter page, generated output folders, build manifests and an optional .gitignore.
     The HTML project builder itself has more rules than this page needs to cover. See @../project-structure (the project structure guide) for page layout, routing, assets, fragments and generated output details.
 
     Start a new project:
@@ -189,6 +189,7 @@ page_head #= language_theme_head
         ├── config.moth
         ├── src/
         │   └── @page.moth
+        ├── lib/
         ├── dev/
         │   └── .moth_manifest
         ├── release/
@@ -197,9 +198,9 @@ page_head #= language_theme_head
     ]
 
     - `dev/` and `release/` are output folders.
-    - .moth_manifest files are build-system metadata for safe stale-output cleanup.
+    - `.moth_manifest` files are build-system metadata for safe stale-output cleanup.
     - `src/@page.moth` is the conventional module root with a starter page. The filename is cosmetic.
-    - The scaffold may create an empty `lib/` folder as a temporary placeholder. It has no special meaning. Use structural `+*.moth` packages under the source tree for project-local packages.
+    - The current scaffold creates an empty legacy `lib/` placeholder. It has no special package meaning. Use structural `+*.moth` packages under the source tree for project-local packages.
 
     ### Using --force
 
