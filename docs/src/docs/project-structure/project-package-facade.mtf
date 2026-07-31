@@ -59,4 +59,4 @@ Imported build-value namespaces are scoped to one project or package compilation
 
 - For module root rules see @#module-roots (Module roots).
 - For package origins and backing see @../packages/#package-origins-and-backing (Package origins and backing).
-- For the full facade contract see @https://github.com/sjmorig/moth/blob/main/docs/build-system-design.md (Build system design).
+- For the full facade contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).
