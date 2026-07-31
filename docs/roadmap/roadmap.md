@@ -11,6 +11,7 @@ Use the [Progress Matrix](docs/src/docs/progress/#page.moth) as a reference for 
 
 ## Active implementation work
 
+- [Migrating from # to @ for module root file prefix](./plans/module-root-at-marker-migration-plan.md)
 - [Canonical module compilation and scoped packages](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
 - [Benchmark system follow up corrections - phase 7 onwards left](./plans/benchmark-correctness-follow-up-implementation-plan.md)
 
