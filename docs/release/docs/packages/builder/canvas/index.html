@@ -728,15 +728,15 @@ body {
         assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;canvas not found&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
 
-    ctx <span class='moth-code-operator'>=</span> context_<span class='moth-code-number'>2</span>d<span class='moth-code-parenthesis'>(</span>canvas<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    ctx <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> context_<span class='moth-code-number'>2</span>d<span class='moth-code-parenthesis'>(</span>canvas<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
         assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;no 2D context&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
 
-    <span class='moth-code-operator'>~</span>set_fill_style<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-string'>&quot;red&quot;</span><span class='moth-code-parenthesis'>)</span>
-    <span class='moth-code-operator'>~</span>fill_rect<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-parenthesis'>)</span>
+    set_fill_style<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-string'>&quot;red&quot;</span><span class='moth-code-parenthesis'>)</span>
+    fill_rect<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><h3>Opaque types</h3><p>The package exposes opaque handle types. You can&#39;t construct or inspect them. You obtain them through functions.</p><ul><li><code>CanvasElement</code> from <code>get_canvas</code> or <code>create_canvas</code></li><li><code>Canvas2d</code> from <code>context_2d</code></li><li><code>CanvasGradient</code> from gradient creation functions</li><li><code>CanvasImage</code> from <code>get_image</code> or <code>create_image</code></li><li><code>CanvasImageData</code> from <code>get_image_data</code> or <code>create_image_data</code></li><li><code>CanvasPattern</code> from <code>create_pattern</code></li><li><code>CanvasTextMetrics</code> from <code>measure_text</code></li></ul><h3>Mutable access</h3><p>Functions that change the canvas need mutable access with <code>~</code>. Query functions use shared access. The <code>~</code> goes before the value you&#39;re mutating.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- mutating: needs ~</span>
-    <span class='moth-code-operator'>~</span>fill_rect<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>100.0</span>, <span class='moth-code-number'>100.0</span><span class='moth-code-parenthesis'>)</span>
+    <span class='moth-code-comment'>-- mutating: needs ~ on the argument</span>
+    fill_rect<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>100.0</span>, <span class='moth-code-number'>100.0</span><span class='moth-code-parenthesis'>)</span>
 
     <span class='moth-code-comment'>-- querying: shared access, no ~</span>
     width <span class='moth-code-operator'>=</span> canvas_width<span class='moth-code-parenthesis'>(</span>canvas<span class='moth-code-parenthesis'>)</span>

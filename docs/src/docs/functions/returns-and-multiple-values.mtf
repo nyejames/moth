@@ -68,3 +68,7 @@ unavailable.
 
 The alias and freshness summary lattice is compiler-owned semantic information.
 It is not source syntax, a source type or a signature category.
+
+The current compiler still parses source-authored return-alias syntax. Stage
+B removes the obsolete parser path and its AST and HIR variants. See
+@../../progress (progress matrix) for the current implementation gap.

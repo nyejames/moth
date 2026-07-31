@@ -46,6 +46,14 @@ import @package-origins-and-backing-basic {
     content as package_origins_and_backing_basic,
 }
 
+import @external-binding-contracts {
+    content as external_binding_contracts,
+}
+
+import @external-binding-contracts-basic {
+    content as external_binding_contracts_basic,
+}
+
 import @styles {
     navbar,
     section,
@@ -129,6 +137,16 @@ page_head #= language_theme_head
         [$insert("advanced"):[package_origins_and_backing]]
 
         [package_origins_and_backing_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):external-binding-contracts]
+        [$insert("title"):External binding contracts]
+        [$insert("advanced"):[external_binding_contracts]]
+
+        [external_binding_contracts_basic]
     ]
 ]
 

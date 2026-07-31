@@ -590,26 +590,33 @@ fn build_source_provider_imports<'a>(
     // files. Ensure their completed interfaces are in the provider set even when the consumer
     // module does not import them directly, so the implicit template scope can collect their
     // constant exports.
+    //
+    // Only packages declared as implicit-scope candidates are injected. The current set is
+    // limited to `@html` because the `.mtf` implicit scope is the only consumer. Other
+    // completed source packages stay out of the provider set unless explicitly imported.
     let explicit_prefixes: rustc_hash::FxHashSet<String> = imports
         .iter()
         .filter_map(|import| import.imported_path.first().cloned())
         .collect();
 
+    const IMPLICIT_TEMPLATE_SCOPE_PREFIXES: &[&str] = &["html"];
+
     let implicit_provider_imports: Vec<SourceProviderImport<'a>> = completed_source_packages
         .iter()
         .filter(|package| !explicit_prefixes.contains(&package.import_prefix))
-        .filter_map(|package| {
-            package
-                .interface()
-                .ok()
-                .map(|interface| SourceProviderImport {
-                    importer_source: Vec::new(),
-                    imported_path: vec![package.import_prefix.clone()],
-                    from_grouped: false,
-                    interface,
-                })
+        .filter(|package| {
+            IMPLICIT_TEMPLATE_SCOPE_PREFIXES.contains(&package.import_prefix.as_str())
         })
-        .collect();
+        .map(|package| {
+            let interface = package.interface()?;
+            Ok(SourceProviderImport {
+                importer_source: Vec::new(),
+                imported_path: vec![package.import_prefix.clone()],
+                from_grouped: false,
+                interface,
+            })
+        })
+        .collect::<Result<_, CompilerError>>()?;
 
     imports.extend(implicit_provider_imports);
 

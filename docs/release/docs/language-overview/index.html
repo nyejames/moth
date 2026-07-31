@@ -969,8 +969,8 @@ body {
     first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
     second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;world&quot;</span>
     message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>first, second<span class='moth-code-parenthesis'>]</span>
-    </code></pre><p>Don&#39;t use <code>+</code> to join strings. <code>+</code> is for numbers only:</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- WRONG: this won&#39;t compile</span>
+    </code></pre><p>Don&#39;t use <code>+</code> to join strings. <code>+</code> is for numbers only. The current compiler still accepts string <code>+</code> but the accepted rule rejects it:</p><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- WRONG: this should not compile</span>
     <span class='moth-code-comment'>-- message = first + second</span>
     </code></pre><h3>Strings are read-only</h3><p>A quoted string like <code>&quot;Hello&quot;</code> is read-only content. You can reassign a mutable binding to point at a different string, but you can&#39;t change the string itself.</p><p>Square brackets belong to templates. Collections use curly braces instead.</p>
     </div>
@@ -985,8 +985,8 @@ body {
         <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
     <span class='moth-code-parenthesis'>]</span>
     </code></pre><h3>Quoted string slices</h3><p>Double quotes create escaped string slices. They support exactly these escapes:</p><ul><li><code>\\</code> for a backslash</li><li><code>\&quot;</code> for a double quote</li><li><code>\n</code> for a newline</li><li><code>\r</code> for a carriage return</li><li><code>\t</code> for a tab</li></ul><p>Every other escape is invalid. A backslash can&#39;t continue a quoted string across a physical newline.</p><p>A quoted string slice is read-only content. It has no character or substring mutation surface and isn&#39;t concatenated with <code>+</code>. A slice may be read, compared, passed, returned, stored and inserted into templates. A mutable binding that currently holds a slice may be reassigned. That doesn&#39;t make the slice contents mutable.</p><pre style=""><code class='codeblock'>
-    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
-    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Aisha&quot;</span>  <span class='moth-code-comment'>-- reassigns the binding, doesn&#39;t mutate the slice</span>
+    name <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Aisha&quot;</span>  <span class='moth-code-comment'>-- reassigns the mutable binding, doesn&#39;t mutate the slice</span>
     </code></pre><h3>Characters</h3><p>Single quotes create <code>Char</code> values.</p><h3>Template strings</h3><p>Square brackets create string templates. Templates produce owned string values and may fold at compile time or lower to runtime string construction.</p><p>Templates are the idiomatic and canonical way to:</p><ul><li>concatenate strings</li><li>interpolate values</li><li>build runtime or compile-time text</li><li>produce strings that need full template composition</li></ul><pre style=""><code class='codeblock'>
     first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
     second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;world&quot;</span>
@@ -1000,7 +1000,7 @@ body {
 
     <span class='moth-code-comment'>-- INVALID: + is a numeric operator only</span>
     joined <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
-    </code></pre><p>The compiler rejects <code>String + String</code> and every mixed string <code>+</code> form with the ordinary invalid-operator diagnostic.</p><h3>One semantic <code>String</code> type</h3><p>Quoted slices and template-produced strings share one <code>String</code> type at ordinary typed boundaries. They share:</p><ul><li>parameter and return compatibility</li><li>equality</li><li>choice payload equality</li><li>collection and map value use</li><li><code>String</code> map-key use</li><li>casts</li><li>IO and external <code>StringContent</code> boundaries</li><li>template insertion</li><li>aliases and generic use where <code>String</code> is concrete</li></ul><p>Construction origin doesn&#39;t create hidden equality, hashing, map-key or call-compatibility rules.</p><h3>Equality</h3><p><code>String</code> supports <code>is</code> and <code>is not</code>. <code>String</code> doesn&#39;t support ordering operators (<code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>).</p><pre style=""><code class='codeblock'>
+    </code></pre><p>Source <code>String + String</code> is invalid. The accepted rule is that <code>+</code> is a numeric operator only and the compiler should reject all string <code>+</code> forms. The current compiler still accepts source string <code>+</code> and construction-origin-dependent equality checks. Stage B removes both. See <a href="../../../progress">progress matrix</a> for the current implementation gap.</p><h3>One semantic <code>String</code> type</h3><p>Quoted slices and template-produced strings share one <code>String</code> type at ordinary typed boundaries. They share:</p><ul><li>parameter and return compatibility</li><li>equality</li><li>choice payload equality</li><li>collection and map value use</li><li><code>String</code> map-key use</li><li>casts</li><li>IO and external <code>StringContent</code> boundaries</li><li>template insertion</li><li>aliases and generic use where <code>String</code> is concrete</li></ul><p>Construction origin doesn&#39;t create hidden equality, hashing, map-key or call-compatibility rules.</p><h3>Equality</h3><p><code>String</code> supports <code>is</code> and <code>is not</code>. <code>String</code> doesn&#39;t support ordering operators (<code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>).</p><pre style=""><code class='codeblock'>
     slice <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;hello&quot;</span>
     template <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> hello<span class='moth-code-parenthesis'>]</span>
 
@@ -1009,7 +1009,7 @@ body {
 
     <span class='moth-code-comment'>-- INVALID: ordering is not supported</span>
     <span class='moth-code-comment'>-- ordered = slice &lt; template</span>
-    </code></pre><h3>Binding reassignment versus content mutation</h3><p>A mutable binding that holds a string can be reassigned. The string content itself is always read-only. There is no in-place string mutation API.</p><pre style=""><code class='codeblock'>
+    </code></pre><h3>Binding reassignment versus content mutation</h3><p>A mutable binding that holds a string can be reassigned. Quoted slices are immutable. Templates produce owned <code>String</code> values. The current source surface does not yet expose in-place string mutation operations.</p><pre style=""><code class='codeblock'>
     text <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;initial&quot;</span>
     text <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;replacement&quot;</span>  <span class='moth-code-comment'>-- valid: reassigns the binding</span>
 

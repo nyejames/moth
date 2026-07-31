@@ -36,6 +36,7 @@ All helpers are compile-time `#String` constants that produce HTML strings. They
 | `img` | `<img>` with `src`, `alt` and `style` slots |
 | `div` | `<div>` container |
 | `span` | `<span>` inline container |
+| `canvas` | `<canvas>` with `id` and `style` slots |
 
 #### Formatting helpers
 
@@ -83,7 +84,7 @@ The `Canvas` struct provides receiver methods for drawing: `set_fill_style`, `fi
 [codeblock, $code("moth"):
     import @html {get_canvas}
 
-    canvas = get_canvas("my-canvas") catch:
+    canvas ~= get_canvas("my-canvas") catch:
         assert(false, "canvas not found")
     ;
 

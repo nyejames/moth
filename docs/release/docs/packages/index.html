@@ -1137,6 +1137,67 @@ body {
     </table><p>Origin and backing don&#39;t change import syntax or module visibility. Source-backed packages contain ordinary modules with strict <code>export:</code> public surfaces. Binding-backed packages expose typed external symbols registered by the builder.</p><h3>Prelude is visibility policy</h3><p>The prelude is implicit-import policy, not an origin or backing. It exposes the bare <code>io</code> namespace as an alias to <code>@core/io</code>. Package metadata belongs to <code>@core/io</code>, while bare-name visibility belongs to the prelude.</p><h3>Builder-selected availability</h3><p>The builder decides which packages exist. Unsupported packages are rejected with an unsupported-by-builder diagnostic. The HTML builder opts into <code>@html</code>, <code>@web/canvas</code> and current optional Core packages.</p><h3>Binding-backed package constraints</h3><p>Binding-backed packages expose free functions, constants and opaque types. They don&#39;t expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments, default parameters and reactive parameters are source-function features.</p><p>The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package needs a Wasm lowering before that backend can use it.</p><h3>No package manager yet</h3><p>There is no remote fetching, lockfile or version resolution yet. Use <code>+*.moth</code> support packages for project-local source-backed packages, builder-provided package imports for built-in capabilities and annotated <code>.js</code> wrappers for direct browser integration.</p><h3>Related concepts</h3><ul><li>For project-local packages see <a href="#project-local-packages">Project-local packages</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For Core package API details see @core (Core packages).</li></ul>
     </div>
     </fieldset></section>
+    <section class="container"><fieldset class="doc-level">
+        <legend class="visually-hidden">
+            Choose the explanation level: External binding contracts
+    </legend>
+
+    <input
+        class="doc-level__input doc-level__input--basic"
+        type="radio"
+        name="external-binding-contracts-level"
+                    id="external-binding-contracts-basic"
+                    value="basic"
+                    checked
+                >
+
+                <input
+                    class="doc-level__input doc-level__input--advanced"
+                    type="radio"
+                    name="external-binding-contracts-level"
+                    id="external-binding-contracts-advanced"
+                    value="advanced"
+                >
+
+                <header class="doc-level__header">
+                    <h2 class="doc-level__title" id="external-binding-contracts">
+                        External binding contracts
+    </h2>
+
+    <div class="doc-level__switch">
+        <label
+            class="doc-level__option doc-level__option--basic"
+            for="external-binding-contracts-basic"
+                        >
+                            Basic
+                        </label>
+
+                        <label
+                            class="doc-level__option doc-level__option--advanced"
+                            for="external-binding-contracts-advanced"
+                        >
+                            Advanced
+                        </label>
+                    </div>
+                </header>
+
+                <div class="doc-level__panel doc-level__panel--basic">
+                    
+
+
+
+            <p>External binding packages give you typed functions and opaque types from code written outside Moth. The HTML builder supports annotated JavaScript imports and will support WIT component imports in the future.</p><h3>Annotated JavaScript</h3><p>You can import <code>.js</code> files that use <code>@moth.opaque</code> and <code>@moth.sig</code> annotations. The annotations tell the compiler what Moth names and types to expose.</p><pre style=""><code class='codeblock'>
+    import <span class='moth-code-operator'>@</span>vendor<span class='moth-code-operator'>/</span>drawing.js <span class='moth-code-keyword'>as</span> drawing
+    </code></pre><p>JavaScript export names are runtime details. Moth names come from annotations, not from the JavaScript export.</p><h3>What JavaScript can export</h3><p>The builder accepts <code>export function name(...) { ... }</code> and block-bodied arrow exports. <code>@moth.sig</code> annotations expose free functions.</p><h3>What JavaScript can&#39;t export</h3><p>The builder rejects default exports, re-exports, CommonJS, classes, callbacks, async functions, property accessors and multi-success returns. These don&#39;t map to Moth&#39;s type system.</p><h3>Values cross by value</h3><p>Moth values that cross into JavaScript go by value. JavaScript can&#39;t hold references into Moth storage. Opaque handles represent foreign identities, not Moth references.</p><h3>WIT is deferred</h3><p>Future Wasm component imports will use a value-only WIT profile. WIT resources, callbacks, async and streams are deferred. See <a href="#external-binding-contracts">External binding contracts advanced</a> for the full deferred surface.</p><h3>Remember</h3><ul><li>Annotated <code>.js</code> files need <code>@moth.opaque</code> and <code>@moth.sig</code> annotations.</li><li>JavaScript names are runtime details. Moth names come from annotations.</li><li>Values cross by value. No references into Moth storage.</li><li>WIT value-only imports are deferred.</li></ul><h3>Read next</h3><p>For the full binding contract, rejected JS features and deferred WIT surfaces, see <a href="#external-binding-contracts">External binding contracts
+    advanced</a>.</p>
+    </div>
+
+    <div class="doc-level__panel doc-level__panel--advanced">
+        <p>External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder supports two binding profiles: annotated project-local JavaScript imports and future value-only WIT component imports.</p><h3>Annotated JavaScript imports</h3><p>The HTML builder supports annotated single-file <code>.js</code> imports through <code>@moth.opaque</code> and <code>@moth.sig</code>. JavaScript export names are runtime implementation details. Moth names come from annotations.</p><pre style=""><code class='codeblock'>
+    import <span class='moth-code-operator'>@</span>vendor<span class='moth-code-operator'>/</span>drawing.js <span class='moth-code-keyword'>as</span> drawing
+    </code></pre><h4>Supported JavaScript export forms</h4><ul><li><code>export function name(...) { ... }</code></li><li>block-bodied arrow exports</li></ul><p><code>@moth.sig</code> annotations expose free functions. <code>this</code> receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports.</p><h4>Rejected JavaScript features</h4><ul><li>arbitrary dependency graphs</li><li>default exports</li><li>re-exports</li><li>CommonJS</li><li>classes</li><li>JS constants</li><li>property accessors</li><li>callbacks</li><li>async functions</li><li>collections or options in JS signatures</li><li>generic external types</li><li>receiver methods</li><li>multi-success JS returns</li></ul><h3>Restricted host-binding profile</h3><p>Existing Core, Builder and JavaScript-backed bindings use a restricted host-binding profile:</p><ul><li>ordinary Moth values cross by value</li><li>host code may not retain references into ordinary Moth storage</li><li>opaque handles represent foreign identities rather than Moth reference types</li></ul><p>Observable external resources require explicit close or teardown. Host finalisation timing must not define language behaviour.</p><h3>WIT value-only component profile</h3><p>Future general Wasm library imports use a value-only WIT component profile:</p><ul><li>supported arguments lower from shared reads into independent component values</li><li>results lift into independent Moth result graphs</li><li>no Moth alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary</li></ul><h3>Deferred WIT surfaces</h3><p>WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references are deferred beyond the V1 value-only profile.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="#import-paths">Import paths</a>.</li><li>For Core package API details see @core (Core packages).</li><li>For Builder package API details see @builder (Builder packages).</li></ul>
+    </div>
+    </fieldset></section>
     <section class="container"><h2>Package reference pages</h2><ul><li>@core (Core packages)</li><li>@builder (Builder packages)</li></ul></section>
     <section class="container"><nav class="doc-pager" aria-label="Language documentation">
         <a

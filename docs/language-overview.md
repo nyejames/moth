@@ -48,10 +48,13 @@ The following surfaces are intentionally outside Moth's language design scope.
 | Source-authored receiver methods for builtins, imported types, dependency package types, external opaque types, or types declared in another file | Source-authored receiver methods belong only to the same file as their nominal receiver type. Use free functions for other types. |
 | User-defined `HASHABLE`, custom map hashers/comparers, and user-defined keys for builtin maps | Builtin map syntax stays scalar-keyed. More sophisticated maps belong in packages as ordinary structs. |
 | First-class public `Result` values and result pattern matching | `Error!`, postfix `!`, and `catch` are the language error path. Users can define ordinary choices when they want explicit result values. |
-| Exceptions | Expected failures use `Error!`; invariants use `assert`. |
+| Exceptions | Expected failures use `Error!`; invariants use `assert`. The two lanes stay distinct: `Error!` handles recoverable failure, `assert` handles impossible invariant violation. |
 | Reflection, runtime type IDs, compile-time type inspection, and type-returning functions | These encourage generic meta-programming and weaken static readability. |
 | Higher-kinded types, type functions, partial type application, and parameterized type aliases | These introduce a type-level abstraction language. |
 | User const generics beyond fixed collection capacity | Capacity syntax remains a small built-in collection feature, not a general type parameter system. |
+| Source-visible lifetime, reference-category, and ownership annotation systems | Moth omits explicit reference types and lifetime syntax, not references themselves. The compiler tracks ownership and lifetimes internally. |
+| Source-visible RC, retain/release, weak ownership, finalizers, and unrestricted dynamic shared ownership | Internal backend RC remains allowed for already-legal topology. Diagnostics, common-owner groups, `copy`, and builder lifecycle roots replace source-level RC. |
+| Backend-specific observable semantics leaking into source | Source semantics stay backend-neutral. Backends receive validated topology and may not reconsider source legality. |
 
 ## Related references
 
@@ -439,7 +442,9 @@ parse_number |text String| -> Int, Error!:
     return 42
 ;
 
-value = parse_number(text)!
+load || -> Int, Error!:
+    return parse_number(text)!
+;
 
 fallback = parse_number(text) catch:
     then 0
@@ -652,7 +657,9 @@ Input polling is available under `io.input.*` on HTML-JS. The handle type
 but cannot construct it with struct syntax or inspect fields.
 
 ```moth
-input ~= io.input.new()!
+input ~= io.input.new() catch:
+    assert(false, "input not available")
+;
 
 io.input.update(~input)
 
@@ -1546,7 +1553,7 @@ Package metadata has two orthogonal axes:
 
 Core packages require explicit imports unless they are part of the prelude. Unsupported builder packages are rejected with an unsupported-by-builder diagnostic. Source-backed packages expose compiled immutable interfaces backed by support roots, the project package facade or builder-supplied source.
 
-The HTML builder's `@html` source-backed package exposes authored HTML helpers, including `canvas`, `CANVAS_ID`, `get_canvas_context`, `Canvas`, and `get_canvas`. Its cosmetic root filename is currently `packages/html/@mod.moth`, but its public API comes from the root's `export:` block. `Canvas` is a source-owned wrapper around the raw external context, so method-style calls such as `~drawing.fill_rect(...)` come from ordinary Moth receiver methods rather than external package metadata. The raw `@web/canvas` symbols themselves are not re-exported through `@html`. Import raw drawing APIs directly from `@web/canvas` when needed.
+The HTML builder's `@html` source-backed package exposes authored HTML helpers, including `canvas`, `get_canvas_context`, `Canvas`, and `get_canvas`. Its cosmetic root filename is currently `packages/html/@mod.moth`, but its public API comes from the root's `export:` block. `Canvas` is a source-owned wrapper around the raw external context, so method-style calls such as `~drawing.fill_rect(...)` come from ordinary Moth receiver methods rather than external package metadata. The raw `@web/canvas` symbols themselves are not re-exported through `@html`. Import raw drawing APIs directly from `@web/canvas` when needed.
 
 ### External platform package imports
 
@@ -1575,7 +1582,7 @@ Rules:
 
 Initial optional core packages:
 - `@core/math`: `PI`, `TAU`, `E`, and `Float` math helpers.
-- `@core/text`: `length`, `is_empty`, `contains`, `starts_with`, `ends_with`.
+- `@core/text`: `length`, `is_empty`, `contains`, `starts_with`, `ends_with`. `text.length` counts Unicode scalar values, matching `Char`, which represents one Unicode scalar. The current JS lowering uses UTF-16 code units and does not yet match the accepted contract.
 - `@core/random`: `random_float`, `random_int`; `random_int(min, max)` is inclusive at both ends and swaps bounds when `min > max`; seeded random is deferred.
 - `@core/time`: opaque `Duration`, `TimeMark`, and `Timestamp` types; monotonic `mark_now`, `elapsed_since`, and `duration_between`; duration construction/conversion helpers; Unix timestamp construction/conversion helpers; and fallible ISO timestamp parsing/formatting.
 

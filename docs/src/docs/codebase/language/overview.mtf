@@ -165,6 +165,7 @@ slice.
 - `docs/src/docs/packages/public-reexports.mtf`
 - `docs/src/docs/packages/project-local-packages.mtf`
 - `docs/src/docs/packages/package-origins-and-backing.mtf`
+- `docs/src/docs/packages/external-binding-contracts.mtf`
 
 ### Moth template files
 
@@ -185,9 +186,9 @@ Each unsuffixed file has a paired `-basic.mtf` teaching version.
 
 Each public route imports both levels.
 
-These files are written in the intended final shape. They do not supersede
-`docs/language-overview.md` until the complete language migration and parity
-review have been approved.
+These files contain the technically complete focused surface under review.
+They do not supersede `docs/language-overview.md` until the writing pass,
+parity review and authority switch are approved.
 
 ## Public documentation
 

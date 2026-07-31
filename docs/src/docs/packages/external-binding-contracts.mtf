@@ -1,0 +1,61 @@
+External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder supports two binding profiles: annotated project-local JavaScript imports and future value-only WIT component imports.
+
+### Annotated JavaScript imports
+
+The HTML builder supports annotated single-file `.js` imports through `@moth.opaque` and `@moth.sig`. JavaScript export names are runtime implementation details. Moth names come from annotations.
+
+[codeblock, $code("moth"):
+    import @vendor/drawing.js as drawing
+]
+
+#### Supported JavaScript export forms
+
+- `export function name(...) { ... }`
+- block-bodied arrow exports
+
+`@moth.sig` annotations expose free functions. `this` receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports.
+
+#### Rejected JavaScript features
+
+- arbitrary dependency graphs
+- default exports
+- re-exports
+- CommonJS
+- classes
+- JS constants
+- property accessors
+- callbacks
+- async functions
+- collections or options in JS signatures
+- generic external types
+- receiver methods
+- multi-success JS returns
+
+### Restricted host-binding profile
+
+Existing Core, Builder and JavaScript-backed bindings use a restricted host-binding profile:
+
+- ordinary Moth values cross by value
+- host code may not retain references into ordinary Moth storage
+- opaque handles represent foreign identities rather than Moth reference types
+
+Observable external resources require explicit close or teardown. Host finalisation timing must not define language behaviour.
+
+### WIT value-only component profile
+
+Future general Wasm library imports use a value-only WIT component profile:
+
+- supported arguments lower from shared reads into independent component values
+- results lift into independent Moth result graphs
+- no Moth alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary
+
+### Deferred WIT surfaces
+
+WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references are deferred beyond the V1 value-only profile.
+
+### Related concepts
+
+- For package origin and backing see @#package-origins-and-backing (Package origins and backing).
+- For import path rules see @#import-paths (Import paths).
+- For Core package API details see @core (Core packages).
+- For Builder package API details see @builder (Builder packages).

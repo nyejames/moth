@@ -50,3 +50,9 @@ If any variant contains an unsupported payload field, equality for the whole
 choice type is rejected.
 
 Payload matching remains available regardless of equality support.
+
+The current compiler does not fully implement option payload equality inside
+choices. Choice variants that carry option payloads may not participate in
+automatic equality even when the inner type supports it. Stage B closes this
+gap. See @../../progress (progress matrix) for the current implementation
+status.

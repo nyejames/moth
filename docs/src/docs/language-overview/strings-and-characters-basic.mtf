@@ -37,10 +37,11 @@ Use templates to join strings together. Put the parts inside square brackets:
     message = [first, second]
 ]
 
-Don't use `+` to join strings. `+` is for numbers only:
+Don't use `+` to join strings. `+` is for numbers only. The current compiler
+still accepts string `+` but the accepted rule rejects it:
 
 [codeblock, $code("moth"):
-    -- WRONG: this won't compile
+    -- WRONG: this should not compile
     -- message = first + second
 ]
 

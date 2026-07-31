@@ -1,0 +1,53 @@
+External binding packages give you typed functions and opaque types from code
+written outside Moth. The HTML builder supports annotated JavaScript imports
+and will support WIT component imports in the future.
+
+### Annotated JavaScript
+
+You can import `.js` files that use `@moth.opaque` and `@moth.sig`
+annotations. The annotations tell the compiler what Moth names and types to
+expose.
+
+[codeblock, $code("moth"):
+    import @vendor/drawing.js as drawing
+]
+
+JavaScript export names are runtime details. Moth names come from
+annotations, not from the JavaScript export.
+
+### What JavaScript can export
+
+The builder accepts `export function name(...) { ... }` and block-bodied
+arrow exports. `@moth.sig` annotations expose free functions.
+
+### What JavaScript can't export
+
+The builder rejects default exports, re-exports, CommonJS, classes,
+callbacks, async functions, property accessors and multi-success returns.
+These don't map to Moth's type system.
+
+### Values cross by value
+
+Moth values that cross into JavaScript go by value. JavaScript can't hold
+references into Moth storage. Opaque handles represent foreign identities,
+not Moth references.
+
+### WIT is deferred
+
+Future Wasm component imports will use a value-only WIT profile. WIT
+resources, callbacks, async and streams are deferred. See
+@#external-binding-contracts (External binding contracts advanced) for the
+full deferred surface.
+
+### Remember
+
+- Annotated `.js` files need `@moth.opaque` and `@moth.sig` annotations.
+- JavaScript names are runtime details. Moth names come from annotations.
+- Values cross by value. No references into Moth storage.
+- WIT value-only imports are deferred.
+
+### Read next
+
+For the full binding contract, rejected JS features and deferred WIT
+surfaces, see @#external-binding-contracts (External binding contracts
+advanced).

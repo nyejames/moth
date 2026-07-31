@@ -24,6 +24,7 @@ directly.
 ### Available helpers
 
 - `p`, `h1` through `h6`, `small`, `large`, `div`, `span` for structure
+- `canvas` for `<canvas>` elements with `id` and `style` slots
 - `bold`, `italic`, `underline`, `strikethrough` for formatting
 - `codeblock`, `table`, `th`, `td` for code and tables
 - `img` for images with `src`, `alt` and `style` slots
@@ -36,7 +37,7 @@ directly.
 [codeblock, $code("moth"):
     import @html {get_canvas}
 
-    canvas = get_canvas("my-canvas") catch:
+    canvas ~= get_canvas("my-canvas") catch:
         assert(false, "canvas not found")
     ;
 

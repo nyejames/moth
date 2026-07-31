@@ -15,12 +15,12 @@ Bring in the functions you need with a grouped import.
         assert(false, "canvas not found")
     ;
 
-    ctx = context_2d(canvas) catch:
+    ctx ~= context_2d(canvas) catch:
         assert(false, "no 2D context")
     ;
 
-    ~set_fill_style(~ctx, "red")
-    ~fill_rect(~ctx, 10.0, 10.0, 50.0, 50.0)
+    set_fill_style(~ctx, "red")
+    fill_rect(~ctx, 10.0, 10.0, 50.0, 50.0)
 ]
 
 ### Opaque types
@@ -42,8 +42,8 @@ Functions that change the canvas need mutable access with `~`. Query functions
 use shared access. The `~` goes before the value you're mutating.
 
 [codeblock, $code("moth"):
-    -- mutating: needs ~
-    ~fill_rect(~ctx, 0.0, 0.0, 100.0, 100.0)
+    -- mutating: needs ~ on the argument
+    fill_rect(~ctx, 0.0, 0.0, 100.0, 100.0)
 
     -- querying: shared access, no ~
     width = canvas_width(canvas)
