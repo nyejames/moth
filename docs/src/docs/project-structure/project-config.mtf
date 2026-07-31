@@ -1,4 +1,6 @@
-`config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery, and is one self-contained compile-time source file with no source imports or package resolution.
+**Accepted deferred design.** This page defines the final grouped project-config contract. The current compiler still uses a transitional flat config shape and legacy `package_folders` discovery. See @../progress (Progress) for current support.
+
+`config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source imports or package resolution.
 
 ### Canonical config
 
@@ -40,7 +42,7 @@ A direct primitive or optional field of `project` may declare a build-input cont
 
 Accepted imported-value types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
 
-See @https://github.com/sjmorig/moth/blob/main/docs/build-system-design.md (Build system design) for the full `#Import` and `@project` contract.
+See @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design) for the full `#Import` and `@project` contract.
 
 ### Rejected in config
 
