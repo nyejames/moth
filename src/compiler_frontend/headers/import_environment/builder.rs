@@ -19,7 +19,7 @@ use crate::compiler_frontend::public_interface::{
     PublicDeclarationSemantics, SourceProviderImportSet,
 };
 use crate::compiler_frontend::source_packages::root_file::{
-    import_path_references_config_file, import_path_references_module_root_file,
+    import_path_references_config_file, import_path_references_support_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -252,9 +252,11 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         // 5. Resolve and register explicit imports.
         if let Some(imports) = self.module_symbols.file_imports_by_source.get(source_file) {
             for import in imports {
-                // Reject direct imports of module-root files and canonical config files.
-                // Root files are imported through their directory, not by filename.
-                if import_path_references_module_root_file(
+                // Reject direct imports of support-root files and canonical config files.
+                // Normal `@*.moth` root references are already caught by the path parser's
+                // LeadingAtInPathComponent rejection. Support roots and config files need
+                // this later check because `+` and `config` are valid path component characters.
+                if import_path_references_support_root_file(
                     &import.provider.path,
                     import.from_grouped,
                     self.string_table,

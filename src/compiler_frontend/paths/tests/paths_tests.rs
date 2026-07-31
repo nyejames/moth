@@ -338,15 +338,46 @@ fn parse_file_path_accepts_backslash_separator() {
 }
 
 #[test]
-fn parse_file_path_accepts_hash_prefixed_file_names() {
-    let paths = first_path_token_values("import @docs { @asset.moth, subfolder/@page.moth }\n");
-    assert_eq!(
-        paths,
-        vec![
-            "docs/@asset.moth".to_string(),
-            "docs/subfolder/@page.moth".to_string(),
-        ]
+fn parse_file_path_rejects_at_prefixed_grouped_entry() {
+    assert_tokenize_path_error(
+        "import @docs { @asset.moth }\n",
+        PathKind::LeadingAtInPathComponent,
     );
+}
+
+#[test]
+fn parse_file_path_rejects_at_prefixed_nested_grouped_entry() {
+    assert_tokenize_path_error(
+        "import @docs { subfolder/@page.moth }\n",
+        PathKind::LeadingAtInPathComponent,
+    );
+}
+
+#[test]
+fn parse_file_path_rejects_double_at_in_bare_path() {
+    assert_tokenize_path_error("import @@pages\n", PathKind::LeadingAtInPathComponent);
+}
+
+#[test]
+fn parse_file_path_accepts_ordinary_module_directory_import() {
+    // `import @pages` is valid: the `@` introducer is consumed by the lexer and `pages`
+    // is an ordinary path component, not a root-file reference.
+    let paths = first_path_token_values("import @pages\n");
+    assert_eq!(paths, vec!["pages".to_string()]);
+}
+
+#[test]
+fn parse_file_path_accepts_nested_module_directory_import() {
+    // `import @pages/article` is valid: neither component starts with `@`.
+    let paths = first_path_token_values("import @pages/article\n");
+    assert_eq!(paths, vec!["pages/article".to_string()]);
+}
+
+#[test]
+fn parse_file_path_accepts_grouped_import_from_module_directory() {
+    // `import @pages { symbol }` is valid: the grouped entry `symbol` does not start with `@`.
+    let paths = first_path_token_values("import @pages { symbol }\n");
+    assert_eq!(paths, vec!["pages/symbol".to_string()]);
 }
 
 #[test]

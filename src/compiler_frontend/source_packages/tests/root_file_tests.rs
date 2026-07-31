@@ -1,9 +1,8 @@
 use super::root_file::{
     PreparedSourcePackageRoots, file_name_is_config_file, file_name_is_legacy_hash_root_file,
     file_name_is_module_root_file, file_name_is_normal_module_root_file,
-    file_name_is_support_root_file, import_component_is_normal_module_root_file,
-    import_component_is_support_root_file, import_path_references_config_file,
-    import_path_references_module_root_file, module_root_file_name_from_import_component,
+    file_name_is_support_root_file, import_component_is_support_root_file,
+    import_path_references_config_file, import_path_references_support_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -35,22 +34,6 @@ fn classifies_legacy_hash_prefixed_moth_root_filenames() {
     assert!(!file_name_is_legacy_hash_root_file("home.moth"));
     assert!(!file_name_is_legacy_hash_root_file("#home.js"));
     assert!(!file_name_is_legacy_hash_root_file("#.moth"));
-}
-
-#[test]
-fn import_components_accept_extensionless_normal_module_roots_only() {
-    assert!(import_component_is_normal_module_root_file("@home"));
-    assert!(import_component_is_normal_module_root_file("@home.moth"));
-    assert!(!import_component_is_normal_module_root_file("@home.js"));
-    assert!(!import_component_is_normal_module_root_file("@home.page"));
-    assert_eq!(
-        module_root_file_name_from_import_component("@home"),
-        Some("@home.moth".to_owned())
-    );
-    assert_eq!(
-        module_root_file_name_from_import_component("@home.moth"),
-        Some("@home.moth".to_owned())
-    );
 }
 
 #[test]
@@ -95,26 +78,26 @@ fn config_import_classification_uses_the_source_component() {
 }
 
 #[test]
-fn normal_module_root_import_classification_uses_the_source_component() {
+fn support_root_import_classification_uses_the_source_component() {
     let mut string_table = StringTable::new();
 
-    let bare_normal_root = path(&["modules", "@home"], &mut string_table);
-    assert!(import_path_references_module_root_file(
-        &bare_normal_root,
+    let bare_support_root = path(&["modules", "+pkg"], &mut string_table);
+    assert!(import_path_references_support_root_file(
+        &bare_support_root,
         false,
         &string_table
     ));
 
-    let grouped_normal_root = path(&["modules", "@home.moth", "symbol"], &mut string_table);
-    assert!(import_path_references_module_root_file(
-        &grouped_normal_root,
+    let grouped_support_root = path(&["modules", "+pkg.moth", "symbol"], &mut string_table);
+    assert!(import_path_references_support_root_file(
+        &grouped_support_root,
         true,
         &string_table
     ));
 
-    let ordinary_at_extension = path(&["modules", "@home.js"], &mut string_table);
-    assert!(!import_path_references_module_root_file(
-        &ordinary_at_extension,
+    let ordinary_plus_extension = path(&["modules", "+pkg.js"], &mut string_table);
+    assert!(!import_path_references_support_root_file(
+        &ordinary_plus_extension,
         false,
         &string_table
     ));

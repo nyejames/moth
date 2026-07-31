@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-IMPORT-0008"]
-message_contains = ["@home.moth"]
+diagnostic_codes = ["MOTH-SYNTAX-0018"]
+message_contains = ["not part of the module name"]

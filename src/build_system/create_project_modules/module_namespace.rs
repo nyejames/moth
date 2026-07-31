@@ -35,7 +35,7 @@ use crate::compiler_frontend::paths::path_normalization::{
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source_packages::root_file::{
-    import_path_references_config_file, import_path_references_module_root_file,
+    import_path_references_config_file, import_path_references_support_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -924,12 +924,12 @@ fn resolve_entry(
     }
 }
 
-/// Reject direct module-root and config paths before namespace absence can change the diagnostic.
+/// Reject direct support-root and config paths before namespace absence can change the diagnostic.
 fn reject_direct_special_file_import(
     provider: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
     string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    if import_path_references_module_root_file(&provider.path, provider.from_grouped, string_table)
+    if import_path_references_support_root_file(&provider.path, provider.from_grouped, string_table)
         || import_path_references_config_file(&provider.path, provider.from_grouped, string_table)
     {
         return Err(CompilerDiagnostic::direct_special_file_import(

@@ -350,6 +350,11 @@ pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
         PathKind::GroupedPrefixTrailingSeparator => {
             "Grouped path prefix cannot end with a separator."
         }
+        PathKind::LeadingAtInPathComponent => {
+            "The leading '@' starts an import path and is not part of the module name.\n\
+             Import the module directory, for example `import @pages`.\n\
+             Normal module-root filenames such as `@page.moth` are not imported directly."
+        }
     }
 }
 

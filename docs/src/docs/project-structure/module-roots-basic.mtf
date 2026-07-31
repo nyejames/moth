@@ -6,7 +6,13 @@ The filename after `@` does not matter. `@page.moth`, `@mod.moth` and `@api.moth
 
 ### Import the module, not the root file
 
-You cannot import `@api.moth` directly. Import the module through its directory path to access its public surface.
+Normal module-root files have no direct import form. Import the directory's public module surface.
+
+The `@` in `@page.moth` marks the file as a module root on disk. The `@` in `import @pages` starts an import path. They share the same symbol but are not combined. Do not write `import @@pages` — the second `@` is invalid.
+
+```moth
+import @pages
+```
 
 ### Two roles
 

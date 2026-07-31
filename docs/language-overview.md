@@ -1493,7 +1493,9 @@ export:
 - `.moth` source imports are extensionless.
 - Direct project/local JavaScript imports require `.js` and a builder `.js` external import provider.
 - Invalid namespace path stems require explicit aliases.
-- Direct imports of any `@*.moth` or `+*.moth` root file and `config.moth` are invalid.
+- Normal module-root files have no direct import form. Import the directory's public module surface.
+- `@@name` is invalid. The leading `@` in `import @path` starts an import path and is not part of the module name. A second `@` in any path component is rejected.
+- Direct imports of `+*.moth` support root files and `config.moth` are invalid.
 
 ### Module roots, runtime, public APIs and packages
 

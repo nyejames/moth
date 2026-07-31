@@ -452,6 +452,13 @@ pub enum PathKind {
     NestedGroupNeedsPrefix,
     GroupedEntryEmpty,
     GroupedPrefixTrailingSeparator,
+    /// A path component starts with `@` after the import introducer was consumed.
+    ///
+    /// WHAT: the first `@` in `import @path` introduces the import path. A second `@` in
+    ///       any component (such as `@@pages` or `@helper/@home`) is not a valid module name.
+    /// WHY: normal module-root filenames such as `@page.moth` are cosmetic filesystem markers,
+    ///      not import names. The module's import identity comes from its directory.
+    LeadingAtInPathComponent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

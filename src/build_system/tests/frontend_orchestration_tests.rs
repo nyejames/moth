@@ -1443,7 +1443,7 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     // mismatch rather than trusting the loose expected-origin argument.
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let entry_path = temp_dir.path().join("@page.moth");
-    fs::write(&entry_path, "#page\n").expect("test source file should be written");
+    fs::write(&entry_path, "").expect("test source file should be written");
     let canonical_entry = fs::canonicalize(&entry_path).expect("file should canonicalize");
 
     let mut string_table = StringTable::new();

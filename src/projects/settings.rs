@@ -29,8 +29,6 @@ pub const MARKDOWN_EXTENSION: &str = "md";
 /// Dotted Markdown extension.
 pub const MARKDOWN_SUFFIX: &str = ".md";
 
-pub const COMP_PAGE_KEYWORD: &str = "#page";
-pub const GLOBAL_PAGE_KEYWORD: &str = "#global";
 pub const INDEX_PAGE_NAME: &str = "index.html";
 pub const CONFIG_FILE_NAME: &str = "config.moth";
 

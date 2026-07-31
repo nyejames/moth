@@ -407,7 +407,7 @@ fn zero_public_exports_still_validates_active_origin() {
     // Hidden invariant: the active root origin is validated from the table even when the module
     // has zero directly-defined public exports. An in-range active root whose table entry is
     // None must still fail, proving lookup and validation run before any header is inspected.
-    let (headers, mut string_table) = parse_single_file_headers_with_table("#page\n");
+    let (headers, mut string_table) = parse_single_file_headers_with_table("");
 
     let file_path = PathBuf::from("src/@page.moth");
     let source_files = SourceFileTable::build(

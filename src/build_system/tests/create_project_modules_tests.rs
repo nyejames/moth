@@ -1987,8 +1987,8 @@ fn module_root_relative_import_resolves_from_the_entry_root() {
 }
 
 #[test]
-fn discover_all_modules_finds_multiple_hash_entries_per_root() {
-    let root = temp_dir("multi_hash_entries");
+fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
+    let root = temp_dir("multiple_normal_roots");
     let src = root.join("src");
     fs::create_dir_all(src.join("nested")).expect("should create nested folder");
 
@@ -1997,15 +1997,16 @@ fn discover_all_modules_finds_multiple_hash_entries_per_root() {
         "entry_root #= \"src\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "io.line([: [\"page\"]])\n").expect("should write #page");
+    fs::write(src.join("@page.moth"), "io.line([: [\"page\"]])\n")
+        .expect("should write entry normal root");
     fs::create_dir_all(src.join("layout")).expect("should create layout folder");
     fs::write(
         src.join("layout/@layout.moth"),
         "io.line([: [\"layout\"]])\n",
     )
-    .expect("should write #layout");
+    .expect("should write layout normal root");
     fs::write(src.join("nested/@lib.moth"), "io.line([: [\"lib\"]])\n")
-        .expect("should write nested #lib");
+        .expect("should write nested normal root");
     fs::write(src.join("nested/file.moth"), "io.line([: [\"regular\"]])\n")
         .expect("should write regular");
 
@@ -5861,45 +5862,44 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
 
 #[test]
 fn indexed_namespace_rejects_direct_entry_root_import() {
-    for (import_path, expected_code) in [
-        ("@page", "MOTH-IMPORT-0008"),
-        ("@page.moth", "MOTH-IMPORT-0020"),
-    ] {
-        let root = temp_dir("indexed_namespace_direct_entry_root_rejected");
-        let src = root.join("src");
-        fs::create_dir_all(&src).expect("should create source root");
+    // Path components starting with `@` are now rejected by the path parser before
+    // namespace resolution. The `@` introducer is consumed by the lexer, so any
+    // component starting with `@` is a `@@` form that has no valid import meaning.
+    let root = temp_dir("indexed_namespace_direct_entry_root_rejected");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source root");
 
-        fs::write(
-            root.join(settings::CONFIG_FILE_NAME),
-            "entry_root #= \"src\"\n",
-        )
-        .expect("should write config");
-        fs::write(
-            src.join("@page.moth"),
-            format!("import @{import_path} {{ symbol }}\n#[:page]\n"),
-        )
-        .expect("should write entry root");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "import @@page { symbol }\n#[:page]\n",
+    )
+    .expect("should write entry root");
 
-        let mut config = Config::new(root.clone());
-        let style_directives = test_style_directives();
-        parse_project_config_for_test(
-            &mut config,
-            &root.join(settings::CONFIG_FILE_NAME),
-            &style_directives,
-        )
-        .expect("config should parse");
-        let resolver = configured_resolver(&config);
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
 
-        let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
-            Ok(_) => panic!(
-                "direct entry-root import {import_path} must use the direct-special diagnostic"
-            ),
-            Err(messages) => messages,
-        };
-        assert_eq!(first_error_diagnostic(&messages).kind.code(), expected_code);
+    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
+        Ok(_) => panic!("direct entry-root @@page import must be rejected by the path parser"),
+        Err(messages) => messages,
+    };
+    assert_eq!(
+        first_error_diagnostic(&messages).kind.code(),
+        "MOTH-SYNTAX-0018"
+    );
 
-        fs::remove_dir_all(&root).expect("should remove temp root");
-    }
+    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -5933,14 +5933,12 @@ fn indexed_namespace_rejects_direct_nested_child_root_import() {
     let resolver = configured_resolver(&config);
 
     let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
-        Ok(_) => panic!(
-            "direct nested-child root imports must be rejected as direct special file imports"
-        ),
+        Ok(_) => panic!("direct nested-child root imports must be rejected by the path parser"),
         Err(messages) => messages,
     };
     assert_eq!(
         first_error_diagnostic(&messages).kind.code(),
-        "MOTH-IMPORT-0008"
+        "MOTH-SYNTAX-0018"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");

@@ -48,7 +48,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source_packages::root_file::{
-    import_component_is_config_file, module_root_file_name_from_import_component,
+    import_component_is_config_file, import_component_is_support_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -620,19 +620,21 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
 
 /// Determine which special file name is referenced by an import path.
 ///
-/// WHAT: inspects path components to find a module-root or canonical config reference.
-/// WHY: the direct-special-file diagnostic covers all special files, and renderers
-/// should name the specific file when possible so the author knows which file to avoid
-/// importing directly.
+/// WHAT: inspects path components to find a support-root or canonical config reference.
+/// WHY: the direct-special-file diagnostic covers support roots and config files, and
+/// renderers should name the specific file when possible so the author knows which file
+/// to avoid importing directly. Normal `@*.moth` root references are caught earlier by
+/// the path parser's `LeadingAtInPathComponent` rejection.
 pub(crate) fn special_file_name_from_path(
     path: &InternedPath,
     string_table: &StringTable,
 ) -> String {
-    // Root-file markers (`@` or `+`) are unambiguous even when an earlier folder is named `config`.
+    // Support-root markers (`+`) are unambiguous even when an earlier folder shares a name.
     for component in path.as_components() {
         let segment = string_table.resolve(*component);
-        if let Some(file_name) = module_root_file_name_from_import_component(segment) {
-            return file_name;
+        if import_component_is_support_root_file(segment) {
+            let suffix = if segment.contains('.') { "" } else { ".moth" };
+            return format!("{segment}{suffix}");
         }
     }
 
@@ -654,28 +656,24 @@ fn named_value_or_default(
         .unwrap_or_else(|| fallback.to_string())
 }
 
-/// Build a human-facing suggestion for a direct module-root-file import.
+/// Build a human-facing suggestion for a direct support-root-file import.
 ///
-/// WHAT: inspects the import path and produces a hint that names the directory the author
-/// should import instead of the root file.
-/// WHY: the `@`/`+` prefix on root filenames is cosmetic and does not appear in import paths.
-///      Authors who write `import @helper/@page { symbol }` should be told to use
+/// WHAT: inspects the import path and produces a hint that names the package directory the
+/// author should import instead of the support root file.
+/// WHY: the `+` prefix on support root filenames is cosmetic and does not appear in import
+///      paths. Authors who write `import @helper/+page { symbol }` should be told to use
 ///      `import @helper { symbol }` instead.
-pub(crate) fn module_root_import_suggestion(
+pub(crate) fn support_root_import_suggestion(
     path: &InternedPath,
     string_table: &StringTable,
 ) -> String {
-    use crate::compiler_frontend::source_packages::root_file::{
-        import_component_is_module_root_file, import_component_is_normal_module_root_file,
-    };
-
     let components = path.as_components();
     let mut suggestion_path: Vec<String> = Vec::new();
     let mut found_root_component = false;
 
     for component in components {
         let segment = string_table.resolve(*component);
-        if import_component_is_module_root_file(segment) {
+        if import_component_is_support_root_file(segment) {
             found_root_component = true;
             continue;
         }
@@ -683,18 +681,6 @@ pub(crate) fn module_root_import_suggestion(
     }
 
     if !found_root_component {
-        return String::new();
-    }
-
-    // Drop the trailing symbol component from grouped imports so the suggestion is the
-    // module directory path, not the symbol.
-    if suggestion_path.len() > 1 && import_component_is_normal_module_root_file(&suggestion_path[0])
-    {
-        // Bare import like `@@page` — no directory to suggest, just advise dropping the prefix.
-        return " Drop the `@`/`+` prefix and import the module directory instead.".to_owned();
-    }
-
-    if suggestion_path.is_empty() {
         return String::new();
     }
 
@@ -706,9 +692,9 @@ pub(crate) fn module_root_import_suggestion(
 
     let directory = suggestion_path.join("/");
     if directory.is_empty() {
-        " Import the module directory `@` instead of the root file.".to_owned()
+        " Import the support package directory instead of the root file.".to_owned()
     } else {
-        format!(" Import the module directory `@{directory}` instead of the root file.")
+        format!(" Import the support package `@{directory}` instead of the root file.")
     }
 }
 

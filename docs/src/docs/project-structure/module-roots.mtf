@@ -23,7 +23,34 @@ A source directory may contain at most one non-config `@*.moth` file. Two or mor
 
 ### Direct root-file imports are rejected
 
-Import the module boundary, not the root filename. Direct imports of normal module-root files are rejected. Use the directory path to import a module's public surface.
+Normal module-root files have no direct import form. Import the directory's public module surface.
+
+The `@` in `@page.moth` is a filesystem marker identifying a normal module root. The `@` in `import @pages` is the source syntax that introduces an import path. These use the same symbol to visually connect module roots and import roots, but they are not concatenated. The module's import identity comes from its directory or registered package name. The cosmetic root filename is never an import name.
+
+Given this structure:
+
+[codeblock, $code("text"):
+    src/
+    ├── @site.moth
+    └── pages/
+        ├── @page.moth
+        └── article.moth
+]
+
+Valid:
+
+[codeblock, $code("moth"):
+    import @pages
+]
+
+Invalid:
+
+[codeblock, $code("moth"):
+    import @@pages
+    import @@page
+]
+
+Neither `@page.moth` nor `@site.moth` is imported directly. Do not add the root file's leading `@` to an import path.
 
 ### Normal files belong to the surrounding module
 

@@ -213,6 +213,17 @@ fn validate_path_component(
         )));
     }
 
+    // Reject a path component that starts with `@` after the import introducer was consumed.
+    // WHAT: the first `@` in `import @path` is the import-path introducer consumed by the lexer.
+    //      A second `@` starting any component (such as `@@pages` or `@helper/@home`) is not a
+    //      valid module name. Normal module-root filenames are cosmetic filesystem markers.
+    if !was_quoted && component.starts_with('@') {
+        return Err(Box::new(CompilerDiagnostic::invalid_path(
+            PathKind::LeadingAtInPathComponent,
+            stream.new_location(),
+        )));
+    }
+
     if component == "." || component == ".." {
         if allow_relative_marker {
             return Ok(());
