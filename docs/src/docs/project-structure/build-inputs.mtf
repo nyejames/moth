@@ -1,3 +1,5 @@
+**Accepted deferred design.** This page defines the final source contract. The current compiler does not yet implement this surface. See @../progress (Progress) for current status.
+
 Build inputs let config and source declare named primitive values that resolve before module AST compilation. They feed project identity, feature flags and environment-specific settings into ordinary compile-time constants.
 
 ### Direct project `#Import` fields
@@ -73,4 +75,4 @@ The resolved value enters module AST as an ordinary folded constant. It creates 
 
 - For the config file see @#project-config (Project config).
 - For `@project` see @#entry-config (Entry config).
-- For the full build-input contract see @../../../../build-system-design.md (Build system design).
+- For the full build-input contract see @https://github.com/sjmorig/moth/blob/main/docs/build-system-design.md (Build system design).

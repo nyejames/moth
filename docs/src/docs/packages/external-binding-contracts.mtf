@@ -2,10 +2,35 @@ External binding packages expose typed functions, constants and opaque types imp
 
 ### Annotated JavaScript imports
 
-The HTML builder supports annotated single-file `.js` imports through `@moth.opaque` and `@moth.sig`. JavaScript export names are runtime implementation details. Moth names come from annotations.
+The HTML builder supports annotated single-file `.js` imports through `@moth.opaque` and `@moth.sig`. `@moth.sig` declares each exposed function. `@moth.opaque` is required only when signatures use foreign opaque handle types. A function-only module may use `@moth.sig` without `@moth.opaque`. JavaScript export names are runtime implementation details. Moth names come from annotations.
 
 [codeblock, $code("moth"):
     import @vendor/drawing.js as drawing
+]
+
+#### Annotated JavaScript example
+
+[codeblock, $code("js"):
+    /**
+     * @moth.sig emphasize |text String| -> String
+     */
+    export const emphasize = (text) => {
+        return `**${text}**`;
+    };
+
+
+    /**
+     * @moth.sig join_label |prefix String, body String| -> String
+     */
+    export function joinLabel(prefix, body) {
+        return `${prefix}: ${body}`;
+    }
+]
+
+The Moth import uses the annotation names, not the JavaScript export names:
+
+[codeblock, $code("moth"):
+    import @vendor/drawing.js { emphasize, join_label }
 ]
 
 #### Supported JavaScript export forms
@@ -14,6 +39,22 @@ The HTML builder supports annotated single-file `.js` imports through `@moth.opa
 - block-bodied arrow exports
 
 `@moth.sig` annotations expose free functions. `this` receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports.
+
+#### Exact signature subset
+
+- parameters are positional and typed
+- mutable parameters use `name ~Type`
+- signatures have zero or one success return
+- an optional final `Error!` channel is allowed
+- `Error!` must be final
+- generic signatures are rejected
+- option and collection types are rejected
+- callbacks are rejected
+- multi-success returns are rejected
+- `this` receiver-shaped signatures are rejected for external package registration
+- opaque types must be declared through `@moth.opaque` before use where required
+- JavaScript export names are runtime implementation details
+- Moth names come from annotations
 
 #### Rejected JavaScript features
 
@@ -27,23 +68,23 @@ The HTML builder supports annotated single-file `.js` imports through `@moth.opa
 - callbacks
 - async functions
 - collections or options in JS signatures
-- generic external types
+- generic external type
 - receiver methods
 - multi-success JS returns
 
 ### Restricted host-binding profile
 
-Existing Core, Builder and JavaScript-backed bindings use a restricted host-binding profile:
+Existing Core, Builder and JavaScript-backed bindings follow a restricted host-binding profile:
 
 - ordinary Moth values cross by value
 - host code may not retain references into ordinary Moth storage
 - opaque handles represent foreign identities rather than Moth reference types
 
-Observable external resources require explicit close or teardown. Host finalisation timing must not define language behaviour.
+Observable external resources require explicit close or teardown. Host finalisation timing does not define language behaviour.
 
 ### WIT value-only component profile
 
-Future general Wasm library imports use a value-only WIT component profile:
+WIT component imports are accepted but deferred. Future general Wasm library imports use a value-only WIT component profile:
 
 - supported arguments lower from shared reads into independent component values
 - results lift into independent Moth result graphs
@@ -51,7 +92,7 @@ Future general Wasm library imports use a value-only WIT component profile:
 
 ### Deferred WIT surfaces
 
-WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references are deferred beyond the V1 value-only profile.
+The V1 value-only profile defers WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references.
 
 ### Related concepts
 

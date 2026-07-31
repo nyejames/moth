@@ -45,4 +45,4 @@ A `.md` file belongs to the module that contains its directory. It follows the s
 - For import syntax see @#markdown-imports (Markdown imports).
 - For renderer features see @#rendering-contract (Rendering contract).
 - For choosing between formats see @#choosing-a-content-format (Choosing a content format).
-- For Moth template files see @../moth-templates/#moth-template-files (Moth template files).
+- For Moth template files see @../moth-templates/#moth-template-files-files (Moth template files).

@@ -37,4 +37,4 @@ Moth template files are available in HTML project builds. The `.mtf` body sees a
 - For the Markdown subset see @#implicit-markdown (Implicit Markdown).
 - For import syntax see @#content-imports (Content imports).
 - For scope rules see @#template-scope (Template scope).
-- For limitations see @#moth-template-limits (Moth template limits).
+- For limitations see @#moth-template-files-limits (Moth template limits).

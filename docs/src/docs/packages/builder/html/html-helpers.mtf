@@ -19,7 +19,7 @@ A `.moth` file that needs specific `@html` symbols can import them explicitly:
     import @html {table, th, td}
 ]
 
-Same-directory module root constants and `@html` constants don't shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See @../../../moth-templates/#collision-semantics (Template scope) for the full collision contract.
+Same-directory module root constants and `@html` constants don't shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See @../../../moth-templates/#template-scope (Template scope) for the full collision contract.
 
 ### Exported constants
 
@@ -114,5 +114,5 @@ The canvas wrapper functions call through to `@web/canvas`, which emits JavaScri
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For import path rules see @../../#import-paths (Import paths).
-- For `.mtf` implicit scope see @../../../moth-templates/#collision-semantics (Template scope).
+- For `.mtf` implicit scope see @../../../moth-templates/#template-scope (Template scope).
 - For the `@web/canvas` runtime package see @../canvas (@web/canvas).

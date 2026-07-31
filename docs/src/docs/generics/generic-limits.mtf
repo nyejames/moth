@@ -62,4 +62,4 @@ Deferred surfaces may land in future Alpha iterations. Outside-scope surfaces re
 ### Related concepts
 
 - For trait bounds see @../traits/#generic-trait-bounds (Generic trait bounds).
-- For the current implementation status see @../../progress (Progress matrix).
+- For the current implementation status see @../progress (Progress matrix).

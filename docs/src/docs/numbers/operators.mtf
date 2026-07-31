@@ -30,7 +30,7 @@ Moth keeps equality and logical operators readable.
 - Choices and options have additional equality rules in their own references.
 
 `+` is a numeric operator only. Source string concatenation uses templates. See
-@../language-overview/strings-and-characters (Strings and characters) for the
+@../language-overview/#strings-and-characters (Strings and characters) for the
 canonical concatenation form.
 
 ### Precedence and associativity

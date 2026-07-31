@@ -168,6 +168,6 @@ Groups give authors explicit control over allocation lifetime without exposing r
 - @#lifetimes-and-result-shapes (Lifetimes and result shapes)
 
 For the formal group semantics, see
-@../../codebase/memory-management/declared-memory-groups (Declared memory groups).
+@../codebase/memory-management/declared-memory-groups (Declared memory groups).
 For implementation sequencing, see
-@../../../../roadmap/plans/grouped-memory-design.md (Grouped memory design plan).
+@https://github.com/sjmorig/moth/blob/main/docs/roadmap/plans/grouped-memory-design.md (Grouped memory design plan) (Grouped memory design plan).

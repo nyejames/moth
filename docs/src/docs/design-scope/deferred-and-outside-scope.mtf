@@ -47,7 +47,7 @@ Both use structured `CompilerDiagnostic`. The distinction matters because the
 remedy differs: a deferred feature needs implementation progress, while an
 outside-scope form needs a different approach or a language philosophy change.
 
-The progress matrix at @../../progress (Progress matrix) reports whether a
+The progress matrix at @../progress (Progress matrix) reports whether a
 deferred surface is implemented today. This page explains whether the surface
 belongs in the language at all.
 

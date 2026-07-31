@@ -442,15 +442,15 @@ parse_number |text String| -> Int, Error!:
     return 42
 ;
 
-load || -> Int, Error!:
+load |text String| -> Int, Error!:
     return parse_number(text)!
 ;
 
-fallback = parse_number(text) catch:
+fallback = parse_number("42") catch:
     then 0
 ;
 
-inline_fallback = parse_number(text) catch |err| then err.code
+inline_fallback = parse_number("42") catch |err| then err.code
 ```
 
 The inline catch binding is local to its fallback expression. First-class public `Result` values are outside language design scope. The special `!` return is only for the error path. Success values use the normal return list.
@@ -482,7 +482,7 @@ Value-producing blocks are not general expressions and are rejected in function 
 value = if condition then 1 else 0
 state = if status is Ready then "ready" else "waiting"
 name = if maybe_name is |name| then name else "guest"
-fallback = parse_number(text) catch then 0
+fallback = parse_number("42") catch then 0
 
 name, score = load_user(id) catch |err|:
     io.line(err.message)
@@ -1592,7 +1592,7 @@ Time package split:
 - Use `Duration` for elapsed amounts.
 - `timestamp_from_iso_string` is fallible and must be handled with postfix `!` or `catch`.
 
-The HTML builder supports annotated single-file `.js` imports through `@moth.opaque` and `@moth.sig`. JavaScript export names are runtime implementation details; Moth names come from annotations. Supported JS export forms are `export function name(...) { ... }` and block-bodied arrow exports. `@moth.sig` annotations expose free functions; `this` receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports. Unsupported JS features include arbitrary dependency graphs, default exports, re-exports, CommonJS, classes, JS constants, property accessors, callbacks, async functions, collections/options in JS signatures, generic external types, receiver methods, and multi-success JS returns.
+The HTML builder supports annotated single-file `.js` imports through `@moth.opaque` and `@moth.sig`. `@moth.sig` declares each exposed function. `@moth.opaque` is required only when signatures use foreign opaque handle types. A function-only module may use `@moth.sig` without `@moth.opaque`. JavaScript export names are runtime implementation details. Moth names come from annotations. Supported JS export forms are `export function name(...) { ... }` and block-bodied arrow exports. `@moth.sig` annotations expose free functions. `this` receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports. The exact signature subset: parameters are positional and typed, mutable parameters use `name ~Type`, signatures have zero or one success return, an optional final `Error!` channel is allowed, `Error!` must be final, generic signatures are rejected, option and collection types are rejected, callbacks are rejected, multi-success returns are rejected, `this` receiver-shaped signatures are rejected for external package registration, opaque types must be declared through `@moth.opaque` before use where required, JavaScript export names are runtime implementation details, and Moth names come from annotations. Unsupported JS features include arbitrary dependency graphs, default exports, re-exports, CommonJS, classes, JS constants, property accessors, callbacks, async functions, collections/options in JS signatures, generic external types, receiver methods, and multi-success JS returns.
 
 Deferred package-system features:
 - package manager, versions, remote fetching, lockfiles, and override/shadowing rules

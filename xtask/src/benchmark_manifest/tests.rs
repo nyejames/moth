@@ -1624,12 +1624,10 @@ fn non_existent_generated_descendant_exclude_accepted() {
     let directory = tempdir().expect("temporary repository should exist");
     fs::create_dir_all(directory.path().join("project")).expect("directory should be creatable");
     create_entry(directory.path(), "project/main.moth");
-    let contents = full_tree_manifest("project", "case")
-        .replace(r#"entry = "project""#, r#"entry = "project""#)
-        .replace(
-            "fingerprint_excludes = []",
-            "fingerprint_excludes = [\"project/dev\"]",
-        );
+    let contents = full_tree_manifest("project", "case").replace(
+        "fingerprint_excludes = []",
+        "fingerprint_excludes = [\"project/dev\"]",
+    );
     let path = write_manifest(directory.path(), &contents);
     load_manifest_at(&path, directory.path())
         .expect("non-existent generated descendant exclude should be accepted");

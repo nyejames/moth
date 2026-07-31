@@ -1,6 +1,6 @@
 `@core/time` separates elapsed time from wall-clock time. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
 
-`@core/time` carries Core origin with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@core/time` carries Core origin with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
 ### Import roots
 
@@ -93,7 +93,7 @@ All parameters use shared access. No function requires mutable access. All retur
 
 HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `to_iso_string` lowers to `(new Date(#0)).toISOString()`. Duration and timestamp construction helpers lower to inline JavaScript expressions.
 
-HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 
 ### Unsupported source forms
 
@@ -105,9 +105,9 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (
 
 ### Deferred surfaces
 
-Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings remain deferred. Browser animation-frame integration belongs in a future web-specific package rather than `@core/time`. See @../../../../progress (progress matrix) for current status.
+Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings remain deferred. Browser animation-frame integration belongs in a future web-specific package rather than `@core/time`. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
-- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For import path rules see @../../#import-paths (Import paths).

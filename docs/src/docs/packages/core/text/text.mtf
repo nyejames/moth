@@ -1,6 +1,6 @@
 `@core/text` provides helper functions for `String` values. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
 
-`@core/text` carries Core origin with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@core/text` carries Core origin with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
 ### Import roots
 
@@ -39,9 +39,9 @@ All parameters use shared access. No function requires mutable access. `length` 
 
 A string of N `Char` values reports `text.length` of N. Surrogate pairs in the runtime encoding do not inflate the count.
 
-Implementation gap: the current HTML-JS lowering uses JavaScript `String.prototype.length`, which counts UTF-16 code units rather than Unicode scalar values. For strings containing characters outside the Basic Multilingual Plane, the JS result is higher than the language-level count. See @../../../../progress (progress matrix) for the recorded drift.
+Implementation gap: the current HTML-JS lowering uses JavaScript `String.prototype.length`, which counts UTF-16 code units rather than Unicode scalar values. For strings containing characters outside the Basic Multilingual Plane, the JS result is higher than the language-level count. See @../../../progress (progress matrix) for the recorded drift.
 
-HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 
 ### Unsupported source forms
 
@@ -52,10 +52,10 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (
 
 ### Deferred surfaces
 
-Deferred text surfaces include receiver-method forms, string splitting and joining, case conversion, trimming, replacement, regular expressions, character iteration, Unicode normalisation and non-JS lowerings. See @../../../../progress (progress matrix) for current status.
+Deferred text surfaces include receiver-method forms, string splitting and joining, case conversion, trimming, replacement, regular expressions, character iteration, Unicode normalisation and non-JS lowerings. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
-- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For import path rules see @../../#import-paths (Import paths).
-- For `String` language semantics see @../../../../strings-and-characters (Strings and characters).
+- For `String` language semantics see @../../../language-overview/#strings-and-characters (Strings and characters).

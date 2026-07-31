@@ -23,6 +23,7 @@ pub(crate) struct BenchmarkRepositorySnapshot {
     commit: String,
     tracked_diff: Vec<u8>,
     untracked_files: Vec<UntrackedFileSnapshot>,
+    #[expect(dead_code)]
     porcelain_status: Vec<u8>,
 }
 

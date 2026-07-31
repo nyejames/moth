@@ -12,7 +12,7 @@ The bare `io` namespace behaves as a compile-time alias to `@core/io`. It does n
 
 ### Compiler-owned bare symbols
 
-The compiler-owned `Error` type stays available as a bare language symbol for `Error!` flows. It works as a compiler-owned builtin, not a prelude symbol. The prelude registry does not register it. See @../../../../errors (Errors, options and assertions) for the `Error` contract.
+The compiler-owned `Error` type stays available as a bare language symbol for `Error!` flows. It works as a compiler-owned builtin, not a prelude symbol. The prelude registry does not register it. See @../../../errors (Errors, options and assertions) for the `Error` contract.
 
 ### Collision policy
 
@@ -44,5 +44,5 @@ The builder provides the prelude. The HTML builder registers the `io` namespace 
 ### Related concepts
 
 - For Core IO see @../io (Core IO).
-- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
-- For `Error` and error handling see @../../../../errors (Errors, options and assertions).
+- For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
+- For `Error` and error handling see @../../../errors (Errors, options and assertions).

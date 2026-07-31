@@ -70,6 +70,6 @@ A `.mtf` file's `content` is subject to the same module visibility rules as othe
 
 ### Related concepts
 
-- For moth template file structure see @#moth-template-files (Moth template files).
+- For moth template file structure see @#moth-template-files-files (Moth template files).
 - For scope rules see @#template-scope (Template scope).
 - For visibility rules see @../packages/#module-visibility (Module visibility).

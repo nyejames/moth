@@ -1,6 +1,6 @@
 `@core/io` owns console output and input polling. The prelude injects the bare `io` namespace as a compile-time alias to `@core/io`, so normal source files can call `io.line(...)` without an explicit import. An explicit `import @core/io` binds the same `io` namespace. An alias such as `import @core/io as output` creates a file-local namespace name.
 
-`@core/io` belongs to the binding-backed Core package family. It exposes free functions and one opaque type. It does not expose source-defined receiver methods. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@core/io` belongs to the binding-backed Core package family. It exposes free functions and one opaque type. It does not expose source-defined receiver methods. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
 ### Console helpers
 
@@ -115,10 +115,10 @@ Browser input events arrive through the host event loop. A synchronous infinite 
 
 ### Deferred IO surfaces
 
-Deferred IO domains include filesystem and path IO, fetch and network IO, timers, sleep, intervals, frame and tick APIs, targeted DOM and canvas input sources, physical key-code APIs, typed key and button choices, text entry and IME or composition, touch gestures, gamepads, drag and drop, clipboard, wheel scrolling, file picker APIs, full ordered event queues, pressed and released collections, relative or DPI-scaled pointer coordinates, configurable default suppression and non-JS lowerings. See @../../../../progress (progress matrix) for current target availability.
+Deferred IO domains include filesystem and path IO, fetch and network IO, timers, sleep, intervals, frame and tick APIs, targeted DOM and canvas input sources, physical key-code APIs, typed key and button choices, text entry and IME or composition, touch gestures, gamepads, drag and drop, clipboard, wheel scrolling, file picker APIs, full ordered event queues, pressed and released collections, relative or DPI-scaled pointer coordinates, configurable default suppression and non-JS lowerings. See @../../../progress (progress matrix) for current target availability.
 
 ### Related concepts
 
 - For prelude policy see @../prelude (Prelude policy).
-- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For import path rules see @../../#import-paths (Import paths).

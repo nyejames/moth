@@ -3,7 +3,7 @@ access project-level values through `@project`.
 
 **Accepted deferred syntax.** `@project` and entry-local `config:` blocks are
 queued implementation work. The examples below show the accepted end-state
-contract, not current compiler support. See @../../progress (Progress) for
+contract, not current compiler support. See @../progress (Progress) for
 implementation status.
 
 ### Using `@project`
@@ -27,7 +27,7 @@ metadata for that entry:
 [codeblock, $code("moth"):
     config:
         html #= |
-            title #= "About",
+            title = "About",
         |
     ;
 ]

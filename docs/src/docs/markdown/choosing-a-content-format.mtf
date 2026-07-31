@@ -32,6 +32,6 @@ Core packages and project-local source-backed packages are not content formats. 
 
 ### Related concepts
 
-- For Moth template files see @../moth-templates/#moth-template-files (Moth template files).
+- For Moth template files see @../moth-templates/#moth-template-files-files (Moth template files).
 - For plain Markdown see @#markdown-files (Markdown files).
 - For templates see @../templates/#template-basics (Template basics).

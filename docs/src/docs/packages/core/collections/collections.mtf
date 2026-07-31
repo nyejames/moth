@@ -1,6 +1,6 @@
 `@core/collections` forms the binding-backed Core package that provides runtime functions for compiler-owned collection methods. Authors do not import `@core/collections` directly. The compiler lowers collection receiver methods to calls against this package.
 
-`@core/collections` belongs to the Core origin package family with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@core/collections` belongs to the Core origin package family with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
 ### Binding-backed behaviour
 
@@ -57,14 +57,14 @@ Authors interact with collections through language-level syntax and receiver met
 
 ### Backend behaviour
 
-HTML-JS lowers the host functions to JavaScript runtime helpers. HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+HTML-JS lowers the host functions to JavaScript runtime helpers. HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 
 ### Deferred surfaces
 
-Deferred collection surfaces include HTML-Wasm lowering, map operations as direct host functions, collection equality, collection iteration protocol, sortable collections, deque operations, fixed-capacity collections and specialised collection variants. See @../../../../progress (progress matrix) for current status.
+Deferred collection surfaces include HTML-Wasm lowering, map operations as direct host functions, collection equality, collection iteration protocol, sortable collections, deque operations, fixed-capacity collections and specialised collection variants. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
-- For collection literal syntax and typing see @../../../../collections (Collections).
-- For the full collection method contract see @../../../../collections/#collection-operations (Collection operations).
-- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For collection literal syntax and typing see @../../../collections (Collections).
+- For the full collection method contract see @../../../collections/#collection-operations (Collection operations).
+- For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).

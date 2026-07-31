@@ -4,11 +4,10 @@
 
 ```text
 STATUS: active
-CURRENT_STAGE: Stage A technical documentation closeout
-LAST_REVIEWED_DOCS_COMMIT: 604eb03c3b9b0ece7189990742109aec83934ec0
-NEXT_ACTION: repair the docs source module graph, then complete the remaining correctness audit
-STAGE_A_BLOCKER: docs release builds currently stop at the invalid docs style module layout
-STAGE_B: blocked until Stage A and the later writing-style pass are reviewed and accepted
+CURRENT_STAGE: Stage W writing-style pass
+STAGE_A: technical corrections pending final example, link and validation closeout
+NEXT_ACTION: continue Stage W while completing the bounded Stage A corrections
+STAGE_B: blocked until Stage A and Stage W are both reviewed and accepted
 STAGE_C: blocked until compiler semantic realignment is complete
 ```
 
@@ -636,6 +635,23 @@ Reproduce each item before changing it:
 Add focused unit, HIR and integration coverage as appropriate.
 
 Any accepted semantic correction discovered during Stage A, including a Core Text length contract or checked external Float boundary, must be assigned here or to an explicitly approved dedicated plan before Stage C.
+
+### Implicit template-scope provider follow-up
+
+The current implicit `@html` provider fix uses a hard-coded prefix list:
+
+```rust
+const IMPLICIT_TEMPLATE_SCOPE_PREFIXES: &[&str] = &["html"];
+```
+
+It also injects the provider into consumer modules more broadly than the semantic requirement. Stage B must:
+
+- move implicit template-scope capability into builder or package capability metadata
+- keep one semantic owner for which packages enter `.mtf` implicit scope
+- inject the provider only for modules whose semantic source set includes `.mtf` files
+- preserve explicit imports
+- ensure unrelated source packages are never implicitly visible
+- add focused regression coverage
 
 ## Stage B validation
 

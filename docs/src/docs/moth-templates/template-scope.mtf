@@ -39,18 +39,19 @@ Authors resolve collisions by renaming the module-root export.
 [codeblock, $code("moth"):
     -- docs/@docs.moth
     export:
-        -- INVALID: @html already exposes `p`, so this collides.
-        p #= [p: Custom paragraph]
+        -- INVALID when this root is paired with a .mtf file because @html also exposes p.
+        p #= [: Custom paragraph]
     ;
 ]
 
 [codeblock, $code("moth"):
     -- docs/@docs.moth
     export:
-        -- Correct: rename to avoid the collision.
-        my_p #= [p: Custom paragraph]
+        my_p #= [: Custom paragraph]
     ;
 ]
+
+The collision occurs when the same-directory root and implicit `@html` surface are combined for a `.mtf` body.
 
 This follows the same no-shadowing model as ordinary source visibility.
 
@@ -60,7 +61,7 @@ The accepted collision model rejects same-name imports from both surfaces with
 a visible-name diagnostic. The current compiler resolves some collisions through
 local-over-HTML precedence rather than diagnosing them. Stage B of the language
 documentation plan removes the overwrite path and registers both surfaces
-through one visible-name registry. See @../../codebase/progress (Progress) for
+through one visible-name registry. See @../progress (Progress) for
 the recorded drift.
 
 ### Nested templates
@@ -107,4 +108,4 @@ Content helpers such as `codeblock` work only where the builder environment prov
 
 - For the full template directive list see @../templates/#template-directives (Template directives).
 - For `$md` formatting see @../templates/#markdown-formatting (Markdown formatting).
-- For limitations see @#moth-template-limits (Moth template limits).
+- For limitations see @#moth-template-files-limits (Moth template limits).

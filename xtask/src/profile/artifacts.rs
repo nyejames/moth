@@ -442,7 +442,7 @@ fn format_run_manifest_json(
                     escape(&identity.source_fingerprint),
                     escape(&identity.measurement_fingerprint),
                 ),
-                None => format!(
+                None => String::from(
                     ",\n      \"workload_id\": null,\n      \"source_fingerprint\": null,\n      \"measurement_fingerprint\": null"
                 ),
             };

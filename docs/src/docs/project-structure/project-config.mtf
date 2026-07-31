@@ -40,7 +40,7 @@ A direct primitive or optional field of `project` may declare a build-input cont
 
 Accepted imported-value types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
 
-See `docs/build-system-design.md` for the full `#Import` and `@project` contract.
+See @https://github.com/sjmorig/moth/blob/main/docs/build-system-design.md (Build system design) for the full `#Import` and `@project` contract.
 
 ### Rejected in config
 

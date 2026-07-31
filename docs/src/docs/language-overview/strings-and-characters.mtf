@@ -73,7 +73,7 @@ Source `String + String` is invalid. The accepted rule is that `+` is a
 numeric operator only and the compiler should reject all string `+` forms.
 The current compiler still accepts source string `+` and
 construction-origin-dependent equality checks. Stage B removes both. See
-@../../../progress (progress matrix) for the current implementation gap.
+@../progress (progress matrix) for the current implementation gap.
 
 ### One semantic `String` type
 

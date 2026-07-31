@@ -1,3 +1,5 @@
+**Partial implementation.** The source-package and module foundations are partially implemented. The complete external facade and project-context contract remains partial. This page defines the accepted final contract.
+
 The project package facade exposes a project's public API to external consumers. It is an API-only module compiled through the ordinary compiler pipeline with project-facade visibility supplied by Stage 0.
 
 ### The facade root
@@ -57,4 +59,4 @@ Imported build-value namespaces are scoped to one project or package compilation
 
 - For module root rules see @#module-roots (Module roots).
 - For package origins and backing see @../packages/#package-origins-and-backing (Package origins and backing).
-- For the full facade contract see @../../../../build-system-design.md (Build system design).
+- For the full facade contract see @https://github.com/sjmorig/moth/blob/main/docs/build-system-design.md (Build system design).

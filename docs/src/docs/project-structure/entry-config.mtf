@@ -1,3 +1,5 @@
+**Accepted deferred design.** `@project`, source `#Import` and entry-local `config:` blocks are queued implementation work. This page defines the accepted final contract. The current compiler does not yet implement these surfaces. See @../progress (Progress) for current status.
+
 Entry config covers `@project` and entry-local `config:` blocks. Both feed builder metadata and compile-time values into normal module roots.
 
 ### `@project`
@@ -67,4 +69,4 @@ Only active artefact-builder settings contribute entry activity.
 
 - For build inputs see @#build-inputs (Build inputs).
 - For module root rules see @#module-roots (Module roots).
-- For the full entry config contract see @../../../../build-system-design.md (Build system design).
+- For the full entry config contract see @https://github.com/sjmorig/moth/blob/main/docs/build-system-design.md (Build system design).

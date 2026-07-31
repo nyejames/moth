@@ -37,15 +37,10 @@ Use templates to join strings together. Put the parts inside square brackets:
     message = [first, second]
 ]
 
-Don't use `+` to join strings. `+` is for numbers only. The current compiler
-still accepts string `+` but the accepted rule rejects it:
+Don't use `+` to join strings. `+` is for numbers only. Use templates to
+concatenate strings.
 
-[codeblock, $code("moth"):
-    -- WRONG: this should not compile
-    -- message = first + second
-]
-
-### Strings are read-only
+### Read-only strings
 
 A quoted string like `"Hello"` is read-only content. You can reassign a
 mutable binding to point at a different string, but you can't change the

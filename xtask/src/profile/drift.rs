@@ -380,8 +380,10 @@ pub struct DriftCaseInput {
     /// Typed measurement identity from the current run.
     pub identity: Option<crate::bench_types::BenchmarkMeasurementIdentity>,
     /// The command executed (descriptive fact, not comparison authority).
+    #[expect(dead_code)]
     pub command: String,
     /// Arguments passed to the command (descriptive fact, not comparison authority).
+    #[expect(dead_code)]
     pub args: Vec<String>,
     /// Stage timings from the observation pass.
     pub stage_timings: Vec<BenchmarkMetric>,

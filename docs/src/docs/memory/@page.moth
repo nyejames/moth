@@ -51,7 +51,7 @@ page_head #= language_theme_head
 
     Moth defaults to reference semantics, explicit copies and inferred moves. Existing values use shared read-only access. Mutation requires explicit exclusive access. The compiler infers moves while keeping copies explicit.
 
-    These pages cover source-facing memory behaviour. For the formal memory model, borrow validation and backend lowering, see @../../codebase/memory-management (Memory management).
+    These pages cover source-facing memory behaviour. For the formal memory model, borrow validation and backend lowering, see @../codebase/memory-management (Memory management).
 ]
 
 #[section:

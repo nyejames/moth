@@ -1,6 +1,6 @@
 `@core/math` provides `Float` constants and helper functions. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
 
-`@core/math` carries Core origin with ExternalBinding backing. See @../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@core/math` carries Core origin with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
 ### Import roots
 
@@ -56,7 +56,7 @@ All functions take `Float` parameters and return `Float`. Parameters stay positi
 | `max(a, b)` | `Float, Float` | `Float` |
 | `clamp(x, min, max)` | `Float, Float, Float` | `Float` |
 
-All functions stay infallible at the Moth level. They do not return through `Error!`. Moth-level non-finite `Float` results from operations such as `sqrt(-1.0)` follow the checked numeric contract: `NaN`, positive infinity and negative infinity are not valid Moth `Float` values and boundaries that can introduce a non-finite result must reject it. Implementation gap: the current HTML-JS lowering does not enforce the checked numeric contract for `@core/math` functions. See @../../../../progress (progress matrix) for the recorded drift.
+All functions stay infallible at the Moth level. They do not return through `Error!`. Moth-level non-finite `Float` results from operations such as `sqrt(-1.0)` follow the checked numeric contract: `NaN`, positive infinity and negative infinity are not valid Moth `Float` values and boundaries that can introduce a non-finite result must reject it. Implementation gap: the current HTML-JS lowering does not enforce the checked numeric contract for `@core/math` functions. See @../../../progress (progress matrix) for the recorded drift.
 
 ### Access and return contracts
 
@@ -66,7 +66,7 @@ All parameters use shared access. No function requires mutable access. Every fun
 
 HTML-JS lowers each function to a JavaScript `Math` expression. `clamp` lowers to `Math.min(Math.max(x, min), max)`. Constants fold into the expression at compile time.
 
-HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (progress matrix) for current target availability.
+HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 
 ### Unsupported source forms
 
@@ -76,10 +76,10 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (
 
 ### Deferred surfaces
 
-Deferred math surfaces include integer math helpers, checked overflow modes, broader numeric tower support and non-JS lowerings. See @../../../../progress (progress matrix) for current status.
+Deferred math surfaces include integer math helpers, checked overflow modes, broader numeric tower support and non-JS lowerings. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
-- For package origin and backing see @../#package-origins-and-backing (Package origins and backing).
+- For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For import path rules see @../../#import-paths (Import paths).
-- For `Float` language semantics see @../../../../numbers (Numbers).
+- For `Float` language semantics see @../../../numbers (Numbers).

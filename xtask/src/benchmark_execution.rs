@@ -311,11 +311,11 @@ fn execute_frontend_case(
 ) -> Result<BenchmarkCaseExecution, BenchmarkCaseFailure> {
     // Register compiler output directories for cleanup so the frontend build
     // does not leave artifacts in the repository after the run.
-    if let Some(workload) = context.manifest.workload_for(case) {
-        if workload.entry_kind == BenchmarkEntryKind::Directory {
-            let entry_path = context.manifest.repository_root.join(&workload.entry);
-            context.workspace.register_directory_artifacts(&entry_path);
-        }
+    if let Some(workload) = context.manifest.workload_for(case)
+        && workload.entry_kind == BenchmarkEntryKind::Directory
+    {
+        let entry_path = context.manifest.repository_root.join(&workload.entry);
+        context.workspace.register_directory_artifacts(&entry_path);
     }
 
     let report = run_one_frontend_case(context.manifest, case).map_err(|message| {

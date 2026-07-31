@@ -90,7 +90,7 @@ The accepted language removes general bare-name capture from every full-match
 position and removes `String` from relational pattern subjects. The current
 compiler still accepts some of these removed forms. Stage B of the language
 documentation plan removes the obsolete parser and analysis paths. See
-@../../../codebase/progress (Progress) for the recorded drift.
+@../progress (Progress) for the recorded drift.
 
 ### Choice payload capture contract
 

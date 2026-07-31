@@ -452,6 +452,7 @@ fn build_identity_from_record(
 /// `None` identity so comparisons skip these records as incomparable.
 #[derive(Debug, Deserialize)]
 struct LegacyV6Run {
+    #[expect(dead_code)]
     format_version: u32,
     benchmark_protocol_version: u32,
     timestamp: String,
@@ -476,6 +477,7 @@ struct LegacyV6Run {
 struct LegacyV6Case {
     case_id: String,
     workload_id: Option<String>,
+    #[expect(dead_code)]
     workload_fingerprint: Option<String>,
     group_name: String,
     runner: BenchmarkRunner,
