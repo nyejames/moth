@@ -18,13 +18,19 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 ## Queued implementation chain
 
 - [TIR follow up cleanup](./plans/tir-corrections-and-simplification-plan.md)
-- [Project config, imported build values and anonymous records](./plans/import_values_anonymous_records_plan.md)
+- [Anonymous const records](./plans/anonymous-const-records-plan.md)
+- [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
+- [Imported build values and project globals](./plans/imported-build-values-and-project-globals-plan.md)
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
 - Improve the `tmp/test_brackets.mtf` error example.
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md)
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
+- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
+- [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
+
+The package dependency plan is design-gated. Its implementation remains blocked until its declaration, alias, resolver and future package-manager boundaries are reviewed and accepted.
 
 Diagnostics may continue independently. The queued implementation chain remains ordered by hard dependency.
 
@@ -32,7 +38,7 @@ Do not mark a plan active unless its current-state capsule says it is active.
 
 ## Completed
 
-- [Migrating from # to @ for module root file prefix](./plans/module-root-at-marker-migration-plan.md)
+- Module root marker migration from `#` to `@`
 
 ---
 
@@ -83,7 +89,7 @@ rendered span classes.
 ## Genuinely deferred items
 
 - final builder selection syntax and a possible Moth-native build script system
-- package declaration syntax, registries, remote fetching, version solving and lockfiles
+- remote package registries, fetching, version solving, lockfiles, publishing and package-manager policy beyond the design-gated package dependency foundations plan
 - persistent artefact serialisation and precompiled package caches
 - explicit output transformation pipeline syntax
 - cross-page browser chunk sharing beyond physical variant reuse
@@ -178,6 +184,8 @@ These surfaces are intentionally not roadmap items unless the language philosoph
 # Future Design Notes
 
 ## Package manager ideas
+
+The [package dependency declarations and package-manager foundations plan](./plans/package-dependency-declarations-and-manager-foundations-plan.md) owns the design-gated declaration, alias and resolver boundary. The notes below remain exploratory package-manager policy and must not be implemented before that design review.
 
 - Should try to prevent dependency explosion as much as possible, make adding dependencies with lots of dependencies harder or discouraged.
 - Idea of "Golden" packages (and silver, bronze etc):
