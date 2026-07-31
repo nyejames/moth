@@ -409,38 +409,38 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             background-color: rgb(109, 232, 138) <td style="padding: 0.1em 0.5em; "> Supported</td>
+                 background-color: rgb(109, 232, 138) <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Implemented for the Alpha surface and expected to compile, type check, lower, and run through the JS / HTML pipeline.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             background-color: rgb(223, 162, 100) <td style="padding: 0.1em 0.5em; "> Partial</td>
+                 background-color: rgb(223, 162, 100) <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> A useful subset is implemented, but some sub-surfaces are intentionally deferred, target-gated, or still being shaped before Alpha.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             background-color: rgb(232, 109, 171) <td style="padding: 0.1em 0.5em; "> Experimental</td>
+                 background-color: rgb(232, 109, 171) <td style="padding: 0.1em 0.5em; "> Experimental</td>
      <td style="padding: 0.1em 0.5em; "> Present in the repo, but not part of the Alpha stability promise.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             background-color: rgb(232, 109, 171) <td style="padding: 0.1em 0.5em; "> Deferred</td>
+                 background-color: rgb(232, 109, 171) <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Planned or design-compatible, but not part of the current implemented Alpha surface.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             background-color: rgb(232, 109, 171) <td style="padding: 0.1em 0.5em; "> Rejected</td>
+                 background-color: rgb(232, 109, 171) <td style="padding: 0.1em 0.5em; "> Rejected</td>
      <td style="padding: 0.1em 0.5em; "> Not accepted by the compiler today and expected to fail with a structured diagnostic.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             background-color: rgb(232, 109, 171) <td style="padding: 0.1em 0.5em; "> Outside Scope</td>
+                 background-color: rgb(232, 109, 171) <td style="padding: 0.1em 0.5em; "> Outside Scope</td>
      <td style="padding: 0.1em 0.5em; "> Intentionally not planned for Moth's language design. Syntax should be rejected with structured diagnostics when encountered.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table><h1>Coverage legend</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
@@ -451,28 +451,28 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Broad</td>
+                 <td style="padding: 0.1em 0.5em; "> Broad</td>
      <td style="padding: 0.1em 0.5em; "> Multiple focused cases exist, including success and failure coverage.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Targeted</td>
+                 <td style="padding: 0.1em 0.5em; "> Targeted</td>
      <td style="padding: 0.1em 0.5em; "> Dedicated coverage exists, but not across all important edges.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Thin</td>
+                 <td style="padding: 0.1em 0.5em; "> Thin</td>
      <td style="padding: 0.1em 0.5em; "> Coverage exists indirectly or through only a small number of cases.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> None</td>
+                 <td style="padding: 0.1em 0.5em; "> None</td>
      <td style="padding: 0.1em 0.5em; "> No clear canonical coverage found.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table></section>
     <section class="container"><h1>Core Alpha surface</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
@@ -484,288 +484,288 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Active module roots and implicit start</td>
+                 <td style="padding: 0.1em 0.5em; "> Active module roots and implicit start</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad active-root start, dependency-sort, normal-file top-level rejection, imported-root suppression, fragment-order, and API-only artifact-filtering coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HTML builder</td>
      <td style="padding: 0.1em 0.5em; "> Only active module roots run top-level runtime code. Imported roots expose their public API without replaying runtime work. API-only roots remain importable but emit no HTML page artifact. The implicit <code>start</code> function is build-system-owned and not importable or callable as a user declaration.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Structured diagnostics</td>
+                 <td style="padding: 0.1em 0.5em; "> Structured diagnostics</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad import, config, project-structure, syntax, type, rule, borrow, backend-feature, and warning coverage plus targeted compiler-owned reason and primary/secondary source-remapping assertions.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend</td>
      <td style="padding: 0.1em 0.5em; "> User-facing failures use typed <code>CompilerDiagnostic</code> payloads with stable codes and optional qualified reason keys. Integration expectations consume that identity and fixture-relative source locations without reconstructing payload taxonomy. Infrastructure and invariant failures use <code>CompilerError</code>. Type diagnostics are <code>TypeId</code>-first at semantic boundaries.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Variables, assignment, and scoped blocks</td>
+                 <td style="padding: 0.1em 0.5em; "> Variables, assignment, and scoped blocks</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad declaration, reassignment, mutability, scope, shadowing, undefined-mutation, block-scope, and diagnostic coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Mutable writes require mutable places. <code>block:</code> creates a lexical/control-flow scope. Bare labeled scopes are rejected.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Control flow</td>
+                 <td style="padding: 0.1em 0.5em; "> Control flow</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad parser, HIR, integration, dispatcher, branch, loop, break, continue, and match lowering coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Branch-heavy CFG cases and loop exits remain important regression surfaces.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Assertions</td>
+                 <td style="padding: 0.1em 0.5em; "> Assertions</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad parser, diagnostics, HIR lowering, backend artifact, and integration coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HIR / JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> <code>assert</code> is a statement-only language intrinsic. It is always checked, unrecoverable, and accepts optional string-literal messages. <code>assert(false)</code> is statically terminal.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Functions and calls</td>
-     <td style="padding: 0.1em 0.5em; "> Supported</td>
+                 <td style="padding: 0.1em 0.5em; "> Functions and calls</td>
+     <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad declaration, terminality, call validation, named and positional arguments, defaults, parameter passing, external calls, and return coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS / HTML</td>
-     <td style="padding: 0.1em 0.5em; "> Named calls and defaulted parameters are supported. Non-unit success-return functions are validated for all-path terminality before HIR. External and compiler-owned builtin calls remain positional-only.</td>
-        </tr>
+     <td style="padding: 0.1em 0.5em; "> Named calls and defaulted parameters are supported. Non-unit success-return functions are validated for all-path terminality before HIR. External and compiler-owned builtin calls remain positional-only. Implementation gap: the current compiler still parses source-authored return-alias syntax (parameter-name return slots). Accepted design removes source-authored alias returns; return slots contain types and channels only. The compiler infers freshness and alias effects. Stage B of the docs language migration plan removes the obsolete parser, AST and HIR support.</td>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Default arguments and field defaults</td>
+                 <td style="padding: 0.1em 0.5em; "> Default arguments and field defaults</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad function parameter default, struct field default, named-call default skipping, constructor default skipping, and diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Function parameters and struct fields can define defaults with <code>=</code>. Choice payload defaults, choice default variants, and broad default semantics outside function/struct construction remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Templates and style directives</td>
+                 <td style="padding: 0.1em 0.5em; "> Templates and style directives</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad template parsing, directive, slot, const/runtime fragment, template control-flow, markdown inline-code, diagnostics, and JS/HTML integration coverage.</td>
      <td style="padding: 0.1em 0.5em; "> HTML / JS</td>
      <td style="padding: 0.1em 0.5em; "> Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, <code>$children</code> / <code>$fresh</code> routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, import namespace member access in template heads (e.g. namespace-dot-member expressions), and const expansion guards. Full match-style template heads and full CommonMark remain outside the current surface. Templates are represented in an AST-local Template IR (TIR) during parsing, composition, folding, formatting, and HIR handoff preparation; TIR is internal, behaviour-preserving, and does not change template language semantics. Post-TIR performance follow-ups are deferred and tracked in the roadmap.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Moth template <code>.mtf</code> content assets</td>
+                 <td style="padding: 0.1em 0.5em; "> Moth template <code>.mtf</code> content assets</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Targeted compiler-integrated import, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics, and integration coverage.</td>
      <td style="padding: 0.1em 0.5em; "> HTML builder / frontend</td>
-     <td style="padding: 0.1em 0.5em; "> <code>.mtf</code> files are builder-supported source assets that synthesize one private compile-time <code>content #String</code> constant from an implicit <code>$md</code> template body. Nested templates with no explicit directive also default to <code>$md</code>, and any explicit nested directive overrides that default. They import extensionlessly into <code>.moth</code>, can be re-exported through a module root's <code>export:</code> block, and must fully fold. They are not entries, config files, standalone HTML files, or general source handlers.</td>
-        </tr>
+     <td style="padding: 0.1em 0.5em; "> <code>.mtf</code> files are builder-supported source assets that synthesize one private compile-time <code>content #String</code> constant from an implicit <code>$md</code> template body. Nested templates with no explicit directive also default to <code>$md</code>, and any explicit nested directive overrides that default. They import extensionlessly into <code>.moth</code>, can be re-exported through a module root's <code>export:</code> block, and must fully fold. They are not entries, config files, standalone HTML files, or general source handlers. Implementation gap: the current compiler resolves implicit scope collisions through local-over-HTML precedence rather than the accepted no-shadowing collision model. Stage B of the docs language migration plan removes the overwrite path and registers both surfaces through one visible-name registry.</td>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Plain Markdown <code>.md</code> content assets</td>
+                 <td style="padding: 0.1em 0.5em; "> Plain Markdown <code>.md</code> content assets</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad extensionless import, grouped alias, module-root re-export, parser options, raw HTML, literal links/images, collision, direct-extension, and module-root rejection coverage.</td>
      <td style="padding: 0.1em 0.5em; "> HTML builder / frontend</td>
      <td style="padding: 0.1em 0.5em; "> <code>.md</code> files are plain Markdown content assets that render to HTML at compile time and synthesize one private <code>content #String</code> constant. They do not parse Moth imports, declarations, interpolation, templates, frontmatter, metadata, or same-directory module-root scope. Links/images render literally and are not tracked assets in V1.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Builder-supported source file kinds</td>
+                 <td style="padding: 0.1em 0.5em; "> Builder-supported source file kinds</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Targeted moth template and Markdown source-kind registry, extensionless resolution, unsupported-kind diagnostics, source discovery, and tokenizer/preparation coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Stage 0 / frontend</td>
      <td style="padding: 0.1em 0.5em; "> Builders can declare non-<code>.moth</code> source file kinds that participate in source import discovery and frontend preparation. The HTML builder implements moth template <code>.mtf</code> and plain Markdown <code>.md</code> content assets.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Structs, records, and receiver methods</td>
+                 <td style="padding: 0.1em 0.5em; "> Structs, records, and receiver methods</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad parser, constructor, default, receiver, cross-file, borrow, and diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Source-authored receiver methods are statically resolved and belong to the same file as their nominal receiver type. External packages do not expose receiver methods.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Choices</td>
+                 <td style="padding: 0.1em 0.5em; "> Choices</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad declaration, constructor, import, return, assignment, match, payload, JS carrier-shape, and structural equality coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Unit and record-payload variants are supported. Payload fields are immutable. Payload shorthand, direct payload field access, nested payload patterns, recursive choices, choice defaults, and tagged/default declarations remain deferred or rejected.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Pattern matching</td>
+                 <td style="padding: 0.1em 0.5em; "> Pattern matching</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, and diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
-     <td style="padding: 0.1em 0.5em; "> Literal patterns, choice variants, payload extraction, relational patterns, guards, and <code>else =&gt;</code> arms are supported. Wildcard patterns and no-op body placeholders are rejected. Full relational overlap analysis and nested choice payload patterns remain deferred.</td>
-        </tr>
+     <td style="padding: 0.1em 0.5em; "> Literal patterns, choice variants, payload extraction, relational patterns, guards, and <code>else =&gt;</code> arms are supported. Wildcard patterns and no-op body placeholders are rejected. Full relational overlap analysis and nested choice payload patterns remain deferred. Implementation gap: the current compiler still accepts some removed general bare-name capture forms and <code>String</code> relational pattern subjects. Accepted design removes general capture from full-match positions and limits relational patterns to <code>Int</code>, <code>Float</code> and <code>Char</code>. Stage B of the docs language migration plan removes the obsolete parser and analysis paths.</td>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Collections</td>
+                 <td style="padding: 0.1em 0.5em; "> Collections</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad literal, mutation, builtin method, indexing, loop, result, fixed-capacity, AST/HIR, JS helper, and diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Growable <code>{T}</code> and fixed <code>{N T}</code> collections are distinct semantic types. Fixed capacities accept positive literals or bare visible <code>#Int</code> constants. Collection <code>get</code>, <code>set</code>, <code>push</code>, and <code>remove</code> are fallible, and <code>length</code> is infallible.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Hash maps</td>
-     <td style="padding: 0.1em 0.5em; "> Supported</td>
+                 <td style="padding: 0.1em 0.5em; "> Hash maps</td>
+     <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad frontend, HIR, borrow, JS, backend-validation, diagnostics, and integration coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML / backend validation for other targets</td>
-     <td style="padding: 0.1em 0.5em; "> V1 supports insertion-ordered scalar-keyed maps with <code>{K = V}</code> types, map literals, compiler-owned map members, HIR map operations, borrow validation, and JS runtime lowering. Unsupported key families, const maps, equality, language hashsets, and non-JS lowering details remain deferred or outside scope.</td>
-        </tr>
+     <td style="padding: 0.1em 0.5em; "> V1 supports insertion-ordered scalar-keyed maps with <code>{K = V}</code> types, map literals, compiler-owned map members, HIR map operations, borrow validation, and JS runtime lowering. Unsupported key families, const maps, equality, language hashsets, and non-JS lowering details remain deferred or outside scope. Implementation gap: the current compiler may apply value-shape checks that create hidden equality or map-key rules based on string construction origin. Accepted design requires uniform content equality and hashing for every runtime <code>String</code>. Stage B of the docs language migration plan removes the value-shape checks.</td>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Results, options, multiple returns, and multi-bind</td>
+                 <td style="padding: 0.1em 0.5em; "> Results, options, multiple returns, and multi-bind</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad option, fallible return, postfix propagation, catch, value-producing block, multi-return, multi-bind, and diagnostic coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> <code>Error!</code>, postfix <code>!</code>, <code>catch</code>, value-producing blocks, and multi-bind are supported. First-class public Result values and result-pattern matching remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Constants and compile-time folding</td>
+                 <td style="padding: 0.1em 0.5em; "> Constants and compile-time folding</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad top-level constant, dependency sorting, template folding, numeric folding, const-record, external constant, config, and diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend</td>
      <td style="padding: 0.1em 0.5em; "> Top-level compile-time constants such as <code>name #= value</code> must fully fold. Same-file constant evaluation follows source order unless dependency sorting can order top-level declarations. Const records are compile-time field-access-only values.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Type aliases</td>
+                 <td style="padding: 0.1em 0.5em; "> Type aliases</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad builtin, imported, collection, option, generic instance, alias-to-alias, remap, and diagnostic coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend</td>
      <td style="padding: 0.1em 0.5em; "> Aliases are transparent and do not create nominal identity. Fully concrete generic aliases are supported. Parameterized aliases remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Arithmetic, explicit casts, and copy</td>
+                 <td style="padding: 0.1em 0.5em; "> Arithmetic, explicit casts, and copy</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad arithmetic, precedence, checked numeric, cast parser/AST/HIR/JS, const-folding, explicit copy, and diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Runtime numeric operations lower through checked HIR operations. Explicit <code>cast</code> uses compiler-owned builtin cast policies and evidence. Scalar constructor-style conversions are removed. Const <code>Error</code> materialization, branching const catch handlers, and Wasm cast lowering remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Float formatting and boundary validation</td>
+                 <td style="padding: 0.1em 0.5em; "> Float formatting and boundary validation</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Targeted stable formatting, finite-source, external-boundary, HIR statement, JS helper, and validator coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Moth-owned Float formatting is used for AST folding, runtime template interpolation, and casts. External Float success returns are validated before ordinary Moth code observes them.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Type checking and coercion</td>
+                 <td style="padding: 0.1em 0.5em; "> Type checking and coercion</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad type compatibility, contextual promotion, strict expression typing, call argument, return, declaration, and diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend</td>
      <td style="padding: 0.1em 0.5em; "> Strict expression typing stays separate from contextual declaration, return, parameter, template/string, and explicit-cast boundaries.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Traits</td>
+                 <td style="padding: 0.1em 0.5em; "> Traits</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad declaration, conformance, visibility, generic-bound receiver-call, trait-name rejection, core cast trait metadata, incompatibility metadata, public API leak, and diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend static semantics</td>
      <td style="padding: 0.1em 0.5em; "> Static trait declarations, explicit same-file nominal conformances, reusable evidence, trait incompatibility metadata, and generic bounds are implemented. Dynamic trait values, trait aliases/composition, associated items, inheritance, generic traits/methods, conditional/specialized conformance, default methods, and standard trait taxonomy remain deferred or outside scope.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Strings, coercion and IO/template boundaries</td>
-     <td style="padding: 0.1em 0.5em; "> Supported</td>
+                 <td style="padding: 0.1em 0.5em; "> Strings, coercion and IO/template boundaries</td>
+     <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad quoted-escape, string-content coercion and IO/template rejection coverage, plus targeted external <code>StringContent</code> signature coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS</td>
-     <td style="padding: 0.1em 0.5em; "> Quoted strings decode only <code>\\</code>, <code>\"</code>, <code>\n</code>, <code>\r</code> and <code>\t</code>. Invalid escapes are rejected by the tokenizer. Template heads and reusable external string-content signatures accept supported string values. Console helpers such as <code>io.line(...)</code> use the same boundary, so complex values must be extracted or interpolated into templates before output.</td>
-        </tr>
+     <td style="padding: 0.1em 0.5em; "> Quoted strings decode only <code>\\</code>, <code>\"</code>, <code>\n</code>, <code>\r</code> and <code>\t</code>. Invalid escapes are rejected by the tokenizer. Template heads and reusable external string-content signatures accept supported string values. Console helpers such as <code>io.line(...)</code> use the same boundary, so complex values must be extracted or interpolated into templates before output. Implementation gap: the current compiler still accepts source <code>String + String</code> and compile-time string-add folding. Accepted design rejects source string concatenation with <code>+</code>; templates remain the canonical concatenation form. Stage B of the docs language migration plan removes the obsolete typing and folding paths.</td>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Borrow validation and ownership analysis</td>
+                 <td style="padding: 0.1em 0.5em; "> Borrow validation and ownership analysis</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad borrow, aliasing, mutable/exclusive access, branch merge, loop, short-circuit, future-use, optional-transfer, advisory drop-site, hashmap, aggregate-storage, reactivity and adversarial coverage.</td>
      <td style="padding: 0.1em 0.5em; "> HIR analysis / JS GC baseline</td>
      <td style="padding: 0.1em 0.5em; "> Borrow validation enforces shared/exclusive access while optional transfer and drop facts remain advisory. Path-dependent or imprecise transfer proof falls back to borrowing, and existing values stored in maps and collections retain shared semantics. GC remains the language baseline representation. Lifetime-region and escape validation remains deferred below.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Lifetime-region and escape validation</td>
+                 <td style="padding: 0.1em 0.5em; "> Lifetime-region and escape validation</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> None</td>
      <td style="padding: 0.1em 0.5em; "> Backend-neutral design</td>
      <td style="padding: 0.1em 0.5em; "> Accepted architecture exists; no implementation owner has landed. GC does not bypass the future semantic validation.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Declared memory groups (`group` / `into`)</td>
+                 <td style="padding: 0.1em 0.5em; "> Declared memory groups (`group` / `into`)</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> None</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HIR / lifetime analysis / all backends</td>
      <td style="padding: 0.1em 0.5em; "> Accepted end-state syntax; not current source support. Canonical semantics live under `docs/src/docs/codebase/memory-management/declared-memory-groups/`; implementation sequencing in `docs/roadmap/plans/grouped-memory-design.md`.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> WIT value-only component integration</td>
+                 <td style="padding: 0.1em 0.5em; "> WIT value-only component integration</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> None</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / build / backends</td>
      <td style="padding: 0.1em 0.5em; "> Accepted closed external-boundary profile; no current import validator or runtime integration.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Paths and imports</td>
+                 <td style="padding: 0.1em 0.5em; "> Paths and imports</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad source import, namespace import, grouped import, binding-backed package, public-surface, module-boundary, collision and project-structure coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HTML builder</td>
      <td style="padding: 0.1em 0.5em; "> Source and module namespace records are shallow. External package namespace records support nested symbol paths such as <code>io.input.new</code> and <code>io.input.Input</code>. Direct symbol-path imports remain rejected. Cross-module and source-backed package access goes through the target root's <code>export:</code> public surface.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Binding-backed platform packages</td>
+                 <td style="padding: 0.1em 0.5em; "> Binding-backed platform packages</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad package import, external constant, external signature, provider-created JS package, runtime asset/glue, core package, prelude, and backend validation coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS</td>
      <td style="padding: 0.1em 0.5em; "> Rust-side and provider-created binding-backed packages expose free functions, opaque types and compile-time scalar constants. Project-local and builder-owned annotated <code>.js</code> files can create JS-backed package surfaces. Binding-backed packages do not expose receiver methods. Unsupported reachable calls for an active backend fail before lowering.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> HTML project builds</td>
+                 <td style="padding: 0.1em 0.5em; "> HTML project builds</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad routing, API-only artifact filtering, document shell, metadata, tracked asset, config, output cleanup, external JS glue, and page-fragment coverage.</td>
      <td style="padding: 0.1em 0.5em; "> HTML / JS</td>
      <td style="padding: 0.1em 0.5em; "> This is the release-critical project backend. Only roots with HTML artifact activity participate in page, runtime asset, tracked asset, and homepage planning. HTML-Wasm behavior is tracked under experimental surfaces.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Logical expressions</td>
+                 <td style="padding: 0.1em 0.5em; "> Logical expressions</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad precedence, grouping, invalid operand, not, comparison, short-circuit, and JS operator mapping coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Keep short-circuit behavior covered through artifact-shaped tests.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> If statements and conditions</td>
+                 <td style="padding: 0.1em 0.5em; "> If statements and conditions</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad condition validation, nested condition, Bool requirement, same-line else-if rejection, and JS lowering coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Conditions require Bool unless the specific syntax is an option or match-style selector.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Char</td>
+                 <td style="padding: 0.1em 0.5em; "> Char</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad success coverage with targeted diagnostic coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Additional malformed-char diagnostics are cleanup, not a core Alpha blocker.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Named arguments and call-site mutability</td>
+                 <td style="padding: 0.1em 0.5em; "> Named arguments and call-site mutability</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad function-call, constructor-call, duplicate, unknown, missing, ordering, and tilde diagnostics coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Fresh rvalues can satisfy mutable parameters without <code>~</code>. Existing places still require explicit <code>~</code>.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table></section>
     <section class="container"><h1>Core and builder packages</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
@@ -777,88 +777,88 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Prelude policy</td>
+                 <td style="padding: 0.1em 0.5em; "> Prelude policy</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Targeted prelude symbol registration, namespace-alias plumbing, and collision rejection coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS</td>
      <td style="padding: 0.1em 0.5em; "> The builtin prelude policy registers <code>io</code> as a namespace alias to <code>@core/io</code> and leaves compiler-owned <code>Error</code> as a bare language symbol. There is no <code>@core/prelude</code> package.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Core IO package</td>
+                 <td style="padding: 0.1em 0.5em; "> Core IO package</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Console helpers, prelude/explicit namespace imports, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper emission, and backend unsupported-call diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS / HTML-Wasm validation</td>
      <td style="padding: 0.1em 0.5em; "> <code>@core/io</code> exposes <code>io.print</code>, <code>io.line</code>, <code>io.debug</code>, <code>io.warn</code>, <code>io.error</code>, and <code>io.input.*</code>. The prelude injects <code>io</code> as a compile-time namespace alias, not a runtime value. Deferred IO domains such as filesystem, network, timers, event queues, targeted input sources, and non-JS lowerings belong in the roadmap.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Core math package</td>
+                 <td style="padding: 0.1em 0.5em; "> Core math package</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Targeted direct, grouped, aliased, namespace, const, arity, type, missing-symbol, and non-imported access coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> <code>@core/math</code> exposes Float math functions and scalar constants. It is explicit-import only. Non-JS support is backend-specific and tracked under experimental surfaces.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Core text package</td>
+                 <td style="padding: 0.1em 0.5em; "> Core text package</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Targeted runtime, JS helper, arity, type-error, edge-case, unsupported-builder, and Wasm-unsupported coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> <code>@core/text</code> exposes string helpers such as length, emptiness, containment, prefix, and suffix checks. Receiver-method forms and non-JS lowerings remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Core random package</td>
+                 <td style="padding: 0.1em 0.5em; "> Core random package</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Targeted import, JS helper, runtime smoke, arity, type-error, and Wasm-unsupported coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> <code>@core/random</code> exposes random Float and inclusive random Int helpers. Seeded random and non-JS lowerings remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Core time package</td>
+                 <td style="padding: 0.1em 0.5em; "> Core time package</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Targeted import, grouped alias, namespace, helper, runtime smoke, fallible parse/catch, arity/type diagnostic, old-name rejection, opaque-field rejection, and backend validation coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> <code>@core/time</code> exposes opaque Duration, TimeMark, and Timestamp values plus the first JS-backed time helper slice. Calendar/time-zone APIs, timers, animation scheduling, and non-JS lowerings remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Source-backed package roots</td>
+                 <td style="padding: 0.1em 0.5em; "> Source-backed package roots</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
-     <td style="padding: 0.1em 0.5em; "> Targeted AST-backed config loading, known-key and shape enforcement, config support declarations, source-backed package imports, project-local/relative config import rejection, generic package-root discovery, collision detection and public-surface enforcement coverage.</td>
+     <td style="padding: 0.1em 0.5em; "> Targeted AST-backed config loading, known-key and shape enforcement, self-contained config import rejection, generic package-root discovery, collision detection and public-surface enforcement coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
-     <td style="padding: 0.1em 0.5em; "> Source-backed packages and regular modules share module-root and visibility rules. Authored config entries are folded known top-level <code>#</code> constants in <code>config.moth</code>. Import/type support declarations are accepted, while plain config bindings and trait metadata are rejected. Config imports may target Core or Builder packages only.</td>
-        </tr>
+     <td style="padding: 0.1em 0.5em; "> Source-backed packages and regular modules share module-root and visibility rules. <code>config.moth</code> is compiled as one self-contained source before package discovery and rejects every import before path resolution.</td>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Builder-provided source-backed packages</td>
+                 <td style="padding: 0.1em 0.5em; "> Builder-provided source-backed packages</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Targeted builder source-backed package root registration and HTML Builder package coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Builders expose source-backed packages through <code>BuilderSurface.source_packages</code>. The HTML builder provides <code>@html</code> as a source-backed package. Builder and project-local prefix collisions are hard config errors.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Project-local packages</td>
+                 <td style="padding: 0.1em 0.5em; "> Project-local packages</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Targeted config-defined package folders, import resolution, generic hash-root, and public-surface coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Project-local source-backed packages are discovered structurally from scoped <code>+*.moth</code> support packages and the optional project-root facade. No <code>package_folders</code> config setting exists. Each support package's containing directory supplies its name. Stage 0 requires exactly one direct <code>#*.moth</code> or <code>+*.moth</code> root with a non-empty cosmetic name. The filename after <code>#</code> or <code>+</code> has no semantic role and the root's strict <code>export:</code> block defines its public surface.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Builder runtime packages</td>
+                 <td style="padding: 0.1em 0.5em; "> Builder runtime packages</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Targeted built-in JS-backed package, runtime asset, runtime module, import-map, glue, and backend validation coverage.</td>
      <td style="padding: 0.1em 0.5em; "> HTML / JS</td>
      <td style="padding: 0.1em 0.5em; "> Builder-owned runtime packages such as <code>@web/canvas</code> are binding-backed packages. They share the specialised external package registry and HTML external JS asset/glue pipeline with provider-created imports.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table></section>
     <section class="container"><h1>Compiler-owned builtin surfaces</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
@@ -870,48 +870,48 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Collection methods</td>
+                 <td style="padding: 0.1em 0.5em; "> Collection methods</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad JS helper, fallible get/set/push/remove, infallible length, removed indexed-write, bounds, and mutable-receiver coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Collection get, set, push, remove, and length are compiler-owned members. Mutating calls require explicit mutable receiver access, and fallible members require <code>!</code> or <code>catch</code> handling.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Error helper methods</td>
+                 <td style="padding: 0.1em 0.5em; "> Error helper methods</td>
      <td style="padding: 0.1em 0.5em; "> Rejected</td>
      <td style="padding: 0.1em 0.5em; "> Public helper-call removal coverage. Hidden JS metadata helper coverage remains backend-internal.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS runtime internal</td>
      <td style="padding: 0.1em 0.5em; "> Public <code>err.bubble()</code>, location, trace, and <code>@core/error</code> helper calls are not exposed.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Receiver methods</td>
+                 <td style="padding: 0.1em 0.5em; "> Receiver methods</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad same-file struct/choice receiver, aligned generic receiver, imported receiver type, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision, and mutability coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Source-authored receiver methods travel with receiver type visibility. They are never grouped-imported, aliased, or exposed as namespace-record fields.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Fallible suffix handling</td>
+                 <td style="padding: 0.1em 0.5em; "> Fallible suffix handling</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad propagation, shared then catch recovery, catch handler, template-boundary, explicit HIR branch, direct-return, call-argument, receiver-base, match-guard, and obsolete HIR propagation-expression removal coverage.</td>
      <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
      <td style="padding: 0.1em 0.5em; "> Fallible calls lower through explicit success/error HIR control flow. Value-producing catch recovery uses shared value-block result locals. Collection and map fallible members use the same path.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Builtin Error type</td>
+                 <td style="padding: 0.1em 0.5em; "> Builtin Error type</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Constructor, default-field, named-argument, public field, and backend-generated Error coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS</td>
      <td style="padding: 0.1em 0.5em; "> Public fields are <code>message</code> and <code>code</code>. Hidden location/trace metadata remains backend-internal.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table></section>
     <section class="container"><h1>Reactivity V1</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
@@ -923,36 +923,36 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Reactive declarations and parameters</td>
+                 <td style="padding: 0.1em 0.5em; "> Reactive declarations and parameters</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Frontend syntax, AST/HIR metadata, borrow invalidation facts, JS lowering, HTML-JS mounting, and unsupported sink/backend diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> V1 supports <code>$Type</code> / <code>$=</code> local declarations and <code>$T</code> parameters as source metadata, not wrapper <code>TypeId</code>s. Reactive declarations are runtime-local and not importable/exportable top-level declarations.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Reactive template subscriptions</td>
+                 <td style="padding: 0.1em 0.5em; "> Reactive template subscriptions</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Template-head parsing, source validation, subscription metadata, AST/HIR propagation, reachability, borrow invalidation, JS helper lowering, HTML-JS mounting, and unsupported sink/backend diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> V1 accepts one bare reactive source identifier in template head/capture positions through <code>$(source)</code>. Snapshot reads remain ordinary captures. Field paths, calls, computed expressions, ordinary expression use, and compile-time templates are rejected.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> HTML-JS reactive runtime fragments</td>
+                 <td style="padding: 0.1em 0.5em; "> HTML-JS reactive runtime fragments</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> JS reactive source, scheduler, template-string runtime helper, slot mounting/rerender registration, and unsupported sink coverage.</td>
      <td style="padding: 0.1em 0.5em; "> V1 live sink support is top-level runtime HTML fragments in the HTML-JS builder. Fine-grained DOM updates, nested live regions, keyed diffing, and other UI runtime strategies are deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Reactive follow-ups</td>
+                 <td style="padding: 0.1em 0.5em; "> Reactive follow-ups</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> No accepted syntax beyond V1 source subscriptions.</td>
      <td style="padding: 0.1em 0.5em; "> Deferred surfaces include reactive-aware template control flow, field/path subscriptions, collection item subscriptions, expression dependency tracking, derived reactive values, live IO sinks, template-owned event/action/effect syntax, <code>$bind</code>, typed component messages, and HTML-Wasm reactive runtime support.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table></section>
     <section class="container"><h1>Experimental backend surfaces</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
@@ -964,29 +964,29 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> HTML-Wasm</td>
+                 <td style="padding: 0.1em 0.5em; "> HTML-Wasm</td>
      <td style="padding: 0.1em 0.5em; "> Experimental</td>
      <td style="padding: 0.1em 0.5em; "> Backend experiment and integration path for future Wasm output. Ordinary active-root `start` execution and non-reactive runtime page fragments use the shared HTML builder slot/hydration contract. Reactive mounting remains unsupported.</td>
      <td style="padding: 0.1em 0.5em; "> Keep behind <code>--html-wasm</code>. Tests may pin current behavior, but Alpha support is JS / HTML.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Wasm backend</td>
+                 <td style="padding: 0.1em 0.5em; "> Wasm backend</td>
      <td style="padding: 0.1em 0.5em; "> Experimental</td>
      <td style="padding: 0.1em 0.5em; "> Long-term backend direction with current HIR-to-Wasm-LIR lowering, runtime contracts, request validation, debug output, and binary emission work.</td>
      <td style="padding: 0.1em 0.5em; "> Do not count Wasm support as an Alpha blocker except for clean diagnostics and no-panic guarantees on covered paths.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Wasm payload/runtime parity</td>
+                 <td style="padding: 0.1em 0.5em; "> Wasm payload/runtime parity</td>
      <td style="padding: 0.1em 0.5em; "> Experimental</td>
      <td style="padding: 0.1em 0.5em; "> Covered paths validate or lower selected payload, assert, generic, map, collection, numeric, cast, reactive, and external-call cases.</td>
      <td style="padding: 0.1em 0.5em; "> Backend parity progress belongs here, not repeated in every feature row.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table></section>
     <section class="container"><h1>Compiler implementation and tooling</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
@@ -998,15 +998,15 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Frontend Arena + Semantic Invariant Optimisation</td>
+                 <td style="padding: 0.1em 0.5em; "> Frontend Arena + Semantic Invariant Optimisation</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad benchmark, profiling, adversarial-fixture, scope-frame, capacity-estimate, and validation coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Implemented pieces include frontend token/header stats, conservative capacity estimates, AST-owned scope-frame arenas, production scope-arena seeding, external package registry clone reduction, and adversarial benchmark fixtures. Broader expression, template/render-plan, HIR, bump-allocation, and persistent-cache migrations remain deferred until profiling justifies them.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table></section>
     <section class="container"><h1>Deferred, rejected, and outside-scope surfaces</h1><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
@@ -1018,211 +1018,211 @@ body {
 
 
 
-                
+                    
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Trait ecosystem extensions</td>
+                 <td style="padding: 0.1em 0.5em; "> Trait ecosystem extensions</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Current implemented trait diagnostics are tracked in the core Traits row.</td>
      <td style="padding: 0.1em 0.5em; "> Default methods, associated items, inheritance/composition, generic traits, specialized conformance, deriving, operator traits, formatting/display coercion, hashing, ordering, iteration, serialization, downcasting/reflection, and broad standard trait taxonomy remain outside the Alpha trait slice.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Post-TIR template performance follow-ups</td>
+                 <td style="padding: 0.1em 0.5em; "> Post-TIR template performance follow-ups</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Not part of the current Alpha surface.</td>
      <td style="padding: 0.1em 0.5em; "> Deferred items are source-span-backed template body text, a per-template parse cache, a formatter-output cache, dev-mode source-hash keyed template reuse, dependency-aware invalidation for imported consts/directives, formatter algorithm rewrites if profiling justifies them, incremental module/template compilation after module-boundary incremental builds exist, and parallel nested-template folding after a separate profiling-backed plan.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Async / concurrency scopes</td>
+                 <td style="padding: 0.1em 0.5em; "> Async / concurrency scopes</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Reserved keyword diagnostics for async statement/declaration positions.</td>
      <td style="padding: 0.1em 0.5em; "> Future async syntax is design-only. Current async statement and declaration positions are rejected with structured diagnostics.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Checked scopes</td>
+                 <td style="padding: 0.1em 0.5em; "> Checked scopes</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Reserved keyword diagnostics for checked statement/declaration positions.</td>
      <td style="padding: 0.1em 0.5em; "> Checked/effect semantics are not designed yet.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Labeled scopes</td>
+                 <td style="padding: 0.1em 0.5em; "> Labeled scopes</td>
      <td style="padding: 0.1em 0.5em; "> Rejected</td>
      <td style="padding: 0.1em 0.5em; "> Targeted labeled-scope diagnostic coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Bare <code>label:</code> syntax is not supported. Use <code>block:</code> for ordinary scoped blocks.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Legacy and foreign-language syntax</td>
+                 <td style="padding: 0.1em 0.5em; "> Legacy and foreign-language syntax</td>
      <td style="padding: 0.1em 0.5em; "> Rejected</td>
      <td style="padding: 0.1em 0.5em; "> Targeted diagnostics for common TypeScript/Rust/JS-shaped mistakes.</td>
      <td style="padding: 0.1em 0.5em; "> Compatibility syntax is not planned Alpha surface.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Public panic/recover syntax</td>
+                 <td style="padding: 0.1em 0.5em; "> Public panic/recover syntax</td>
      <td style="padding: 0.1em 0.5em; "> Rejected</td>
      <td style="padding: 0.1em 0.5em; "> Unknown-name and assert result-handling diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> There is no public panic keyword, <code>#panic</code> directive, recover, catch_panic, or public panic payload. Expected failures use <code>Error!</code> and <code>catch</code>.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Assertion extensions</td>
+                 <td style="padding: 0.1em 0.5em; "> Assertion extensions</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Current assert diagnostics and backend trap coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Deferred surfaces include debug-only assertions, runtime/const assertion-message expressions, additional explicit stop helpers, catchable panic semantics, and richer non-JS trap payloads.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Choice payload field access</td>
+                 <td style="padding: 0.1em 0.5em; "> Choice payload field access</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Targeted direct-field-access diagnostic coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Use pattern matching to extract payload fields until variant narrowing/refinement is designed.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Choice nested payload patterns and richer exhaustiveness</td>
+                 <td style="padding: 0.1em 0.5em; "> Choice nested payload patterns and richer exhaustiveness</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Targeted nested-pattern deferred diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> Exhaustiveness is tag-level for now. General pattern binding renames are also deferred outside choice payload capture renames.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Choice defaults and tagged declarations</td>
+                 <td style="padding: 0.1em 0.5em; "> Choice defaults and tagged declarations</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Targeted diagnostics for choice defaults/default variants where present.</td>
      <td style="padding: 0.1em 0.5em; "> Variant defaults, default payload fields, and tagged/default declaration sugar remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Choice recursive types</td>
+                 <td style="padding: 0.1em 0.5em; "> Choice recursive types</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Targeted recursive declaration deferred diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> Requires layout and indirection design.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> `as` keyword domains</td>
+                 <td style="padding: 0.1em 0.5em; "> `as` keyword domains</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Targeted success and invalid-position diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> <code>as</code> is valid for type aliases, namespace/grouped import aliases, and choice payload capture renames. Other positions are rejected.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Module-root export/re-export syntax</td>
+                 <td style="padding: 0.1em 0.5em; "> Module-root export/re-export syntax</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Targeted authored export, grouped re-export, alias, source/external symbol, privacy, duplicate, placement, and strict-block rejection coverage.</td>
      <td style="padding: 0.1em 0.5em; "> A module root's single strict <code>export:</code> block exposes public authored declarations and grouped re-exports. Legacy inline <code>export</code> forms, bare namespace exports, wildcard exports, function alias values, and automatic method re-export through type aliases are rejected.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Source-backed package HIR caching</td>
+                 <td style="padding: 0.1em 0.5em; "> Source-backed package HIR caching</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> No precompiled source-backed package cache.</td>
      <td style="padding: 0.1em 0.5em; "> Source-backed packages are compiled from source each build. Caching is deferred until the package system is stable.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Package manager</td>
+                 <td style="padding: 0.1em 0.5em; "> Package manager</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> No package manager, remote registries, lockfiles, or dependency resolver.</td>
      <td style="padding: 0.1em 0.5em; "> Package management, versioning, lockfiles, and remote fetching remain roadmap work.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> External JS package expansion</td>
+                 <td style="padding: 0.1em 0.5em; "> External JS package expansion</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> JS provider diagnostics reject unsupported public binding forms.</td>
      <td style="padding: 0.1em 0.5em; "> The HTML builder supports annotated single-file <code>.js</code> imports and builder-owned JS-backed packages. JS constants, classes, dependency graphs, default exports, re-exports, CommonJS, callbacks, async functions, generic external types, collection/option signatures, and multi-success returns remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Namespace / wildcard imports</td>
+                 <td style="padding: 0.1em 0.5em; "> Namespace / wildcard imports</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Source, module public surface, external package, nested external value/type traversal, and wildcard rejection coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Namespace imports are compile-time records. Source and module records stay shallow. External package records can expose nested symbol paths such as <code>io.input.new</code> and <code>io.input.Input</code>. Wildcard imports remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Generic type infrastructure</td>
+                 <td style="padding: 0.1em 0.5em; "> Generic type infrastructure</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
      <td style="padding: 0.1em 0.5em; "> Broad TypeId, nominal instance, alias, constructor, import, HIR validation, trait-bound, and diagnostic coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Generic structs, choices, concrete aliases, generic free functions, aligned generic receiver methods, and trait-bound validation use canonical <code>TypeId</code> identity before HIR.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Generic functions</td>
+                 <td style="padding: 0.1em 0.5em; "> Generic functions</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad declaration, body validation, inference, instantiation, module-boundary import, diagnostics, fallible return, and non-value-use coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Generic free functions infer from immediate call arguments and immediate expected result context only. They emit concrete instances before HIR and are not first-class values.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Trait bounds on generics</td>
+                 <td style="padding: 0.1em 0.5em; "> Trait bounds on generics</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad declaration-site bound, visible evidence, module public-surface privacy, receiver-call, nominal generic instance, and negative diagnostic coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Bounds use <code>is</code>. Concrete generic calls and nominal generic instances require visible reusable evidence. File-local evidence-backed dispatch remains outside scope.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Explicit generic call-site application</td>
+                 <td style="padding: 0.1em 0.5em; "> Explicit generic call-site application</td>
      <td style="padding: 0.1em 0.5em; "> Rejected</td>
      <td style="padding: 0.1em 0.5em; "> Targeted diagnostics for of, angle, square, and typed-argument call-site forms.</td>
      <td style="padding: 0.1em 0.5em; "> Generic calls use ordinary call syntax and inference only. Use annotations at receiving sites when inference needs help.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Recursive generic types</td>
+                 <td style="padding: 0.1em 0.5em; "> Recursive generic types</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Targeted recursive generic type diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> Requires layout and indirection design.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Nested generic type application</td>
+                 <td style="padding: 0.1em 0.5em; "> Nested generic type application</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Targeted nested <code>of</code> diagnostics and alias workaround coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Name intermediate concrete aliases instead of writing nested inline generic applications.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Parameterized generic aliases</td>
+                 <td style="padding: 0.1em 0.5em; "> Parameterized generic aliases</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Targeted rejection where covered.</td>
      <td style="padding: 0.1em 0.5em; "> Aliases to fully concrete generic instances are supported. Aliases with their own parameters remain deferred.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Generic external package functions</td>
+                 <td style="padding: 0.1em 0.5em; "> Generic external package functions</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> External signature validation rejects unsupported generic external surfaces.</td>
      <td style="padding: 0.1em 0.5em; "> External packages currently expose concrete functions, opaque types, and constants only.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Type values and type-level compile-time evaluation</td>
+                 <td style="padding: 0.1em 0.5em; "> Type values and type-level compile-time evaluation</td>
      <td style="padding: 0.1em 0.5em; "> Outside Scope</td>
      <td style="padding: 0.1em 0.5em; "> Invalid syntax or ordinary name/type diagnostics.</td>
      <td style="padding: 0.1em 0.5em; "> Type-returning functions, runtime type IDs, type-level conditionals, and compile-time type inspection are outside the current language design.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> General function-value surfaces</td>
+                 <td style="padding: 0.1em 0.5em; "> General function-value surfaces</td>
      <td style="padding: 0.1em 0.5em; "> Outside Scope</td>
      <td style="padding: 0.1em 0.5em; "> Generic function value diagnostics and invalid syntax diagnostics where covered.</td>
      <td style="padding: 0.1em 0.5em; "> General closures, anonymous function values, generic function values, higher-order polymorphism, and hidden event-handler function values are outside the current language design.</td>
-        </tr>
+            </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Rich numeric redesign</td>
+                 <td style="padding: 0.1em 0.5em; "> Rich numeric redesign</td>
      <td style="padding: 0.1em 0.5em; "> Deferred</td>
      <td style="padding: 0.1em 0.5em; "> Current numeric coverage is tracked in the core arithmetic and Float rows.</td>
      <td style="padding: 0.1em 0.5em; "> Numeric check elision, explicit unchecked numeric modes, narrower numeric types, BigInt, Decimal, and broader numeric tower work remain deferred.</td>
-        </tr>
-            
+            </tr>
+                
 
     </table></section>
     <section class="container"><h1>Maintenance rule</h1><p>This matrix should stay concise and current.</p><ul><li>Move workflow and benchmark details to <code>CONTRIBUTING.md</code>.</li><li>Move implementation sequencing, active project plans and proposals that have not been accepted as design to <code>docs/roadmap/roadmap.md</code>.</li><li>Move accepted end-state architecture to the canonical compiler, memory or language design reference, even when implementation is incomplete.</li><li>Move syntax examples and beginner explanations to docs pages under <code>docs/src/docs/**</code>.</li><li>Move compiler architecture details to <code>docs/compiler-design-overview.md</code>.</li><li>Keep this page focused on support status, coverage level, clean rejection, target-gating, and experimental status.</li></ul></section>
@@ -1346,8 +1346,8 @@ body {
 
     function __moth_make_error(message, code, location, trace) {
     return {
-    b_fld0: message,
-    b_fld1: code,
+    f_6d657373616765: message,
+    f_636f6465: code,
     __moth_location: location ?? null,
     __moth_trace: trace ?? null
     };
@@ -1358,12 +1358,12 @@ body {
     }
 
     function __moth_error_message(error) {
-    const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
+    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
     function __moth_error_code(error) {
-    const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
+    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
@@ -1517,17 +1517,17 @@ body {
     return String(value);
     }
 
-    function b_fn6() {
-    let b_l24 = __moth_binding(undefined);
+    function b_fn0() {
+    let b_l0 = __moth_binding(undefined);
 
-    __moth_assign_value(b_l24, []);
-    return __moth_read(b_l24);
+    __moth_assign_value(b_l0, []);
+    return __moth_read(b_l0);
     }
 
     </script>
     <script>
     (function () {
-      if (typeof b_fn6 === "function") b_fn6();
+      if (typeof b_fn0 === "function") b_fn0();
     })();
     </script>
   </body>

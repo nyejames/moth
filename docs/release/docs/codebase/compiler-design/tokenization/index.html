@@ -545,8 +545,8 @@ body {
 
     function __moth_make_error(message, code, location, trace) {
     return {
-    b_fld0: message,
-    b_fld1: code,
+    f_6d657373616765: message,
+    f_636f6465: code,
     __moth_location: location ?? null,
     __moth_trace: trace ?? null
     };
@@ -557,12 +557,12 @@ body {
     }
 
     function __moth_error_message(error) {
-    const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
+    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
     function __moth_error_code(error) {
-    const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
+    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
@@ -716,17 +716,17 @@ body {
     return String(value);
     }
 
-    function b_fn6() {
-    let b_l24 = __moth_binding(undefined);
+    function b_fn0() {
+    let b_l0 = __moth_binding(undefined);
 
-    __moth_assign_value(b_l24, []);
-    return __moth_read(b_l24);
+    __moth_assign_value(b_l0, []);
+    return __moth_read(b_l0);
     }
 
     </script>
     <script>
     (function () {
-      if (typeof b_fn6 === "function") b_fn6();
+      if (typeof b_fn0 === "function") b_fn0();
     })();
     </script>
   </body>

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Core Collections | Moth</title>
+    <title>Core collections | Moth</title>
     <meta name="description" content="Ordered collection literals and common collection methods.">
     <style>
 /*!
@@ -319,6 +319,279 @@ body {
         border-bottom-width: 1px;
         padding: 0rem 2rem 0rem 2rem;
     }</style>
+    <style>.doc-level,
+    .doc-pager {
+        --doc-level-accent: #3f8f4e;
+        --doc-level-accent-hover: #337740;
+        --doc-level-border: #d7dfd8;
+        --doc-level-switch-background: #f1f5f1;
+        --doc-level-selected-background: #ffffff;
+        --doc-level-text: #202722;
+        --doc-level-muted: #687169;
+        --doc-level-focus: #2877d4;
+    }
+
+    .doc-level {
+        min-inline-size: 0;
+        margin: 2rem 0;
+        padding: 0;
+        border: 0;
+        color: var(--doc-level-text);
+    }
+
+    .visually-hidden,
+    .doc-level__input {
+        position: absolute;
+        inline-size: 1px;
+        block-size: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .doc-level__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-block-end: 1.25rem;
+    }
+
+    .doc-level__title {
+        margin: 0;
+    }
+
+    .doc-level__switch {
+        display: inline-grid;
+        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+        gap: 0.2rem;
+        flex: none;
+        padding: 0.22rem;
+        border: 1px solid var(--doc-level-border);
+        border-radius: 0.75rem;
+        background: var(--doc-level-switch-background);
+    }
+
+    .doc-level__option {
+        padding: 0.42rem 0.8rem;
+        border-radius: 0.55rem;
+        color: var(--doc-level-muted);
+        font-size: 0.875rem;
+        font-weight: 650;
+        line-height: 1.3;
+        text-align: center;
+        cursor: pointer;
+        user-select: none;
+
+        transition:
+            color 130ms ease,
+            background-color 130ms ease,
+            box-shadow 130ms ease;
+    }
+
+    .doc-level__option:hover {
+        color: var(--doc-level-accent-hover);
+    }
+
+    .doc-level__input--basic:checked
+        ~ .doc-level__header
+        .doc-level__option--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__header
+        .doc-level__option--advanced {
+        color: var(--doc-level-accent);
+        background: var(--doc-level-selected-background);
+        box-shadow:
+            0 1px 2px rgb(20 40 24 / 10%),
+            0 0 0 1px rgb(63 143 78 / 8%);
+    }
+
+    .doc-level__input--basic:focus-visible
+        ~ .doc-level__header
+        .doc-level__option--basic,
+    .doc-level__input--advanced:focus-visible
+        ~ .doc-level__header
+        .doc-level__option--advanced {
+        outline: 3px solid var(--doc-level-focus);
+        outline-offset: 2px;
+    }
+
+    .doc-level__panel {
+        display: none;
+    }
+
+    .doc-level__input--basic:checked
+        ~ .doc-level__panel--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__panel--advanced {
+        display: block;
+    }
+
+    .doc-pager {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 1rem;
+        margin-block: 3rem 1rem;
+    }
+
+    .doc-pager--single {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .doc-pager--single .doc-pager__link {
+        width: min(100%, 32rem);
+    }
+
+    .doc-pager--single .doc-pager__link--previous {
+        justify-self: start;
+    }
+
+    .doc-pager--single .doc-pager__link--next {
+        justify-self: end;
+    }
+
+    .doc-pager__link {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        min-inline-size: 0;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--doc-level-border);
+        border-radius: 0.75rem;
+        color: var(--doc-level-text);
+        text-decoration: none;
+        background: var(--doc-level-selected-background);
+
+        transition:
+            color 130ms ease,
+            border-color 130ms ease,
+            box-shadow 130ms ease;
+    }
+
+    .doc-pager__link:hover {
+        color: var(--doc-level-accent-hover);
+        border-color: var(--doc-level-accent);
+        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+    }
+
+    .doc-pager__link:focus-visible {
+        outline: 3px solid var(--doc-level-focus);
+        outline-offset: 2px;
+    }
+
+    .doc-pager__link--next {
+        align-items: flex-end;
+        text-align: right;
+    }
+
+    .doc-pager__direction {
+        color: var(--doc-level-muted);
+        font-size: 0.8rem;
+        font-weight: 650;
+        letter-spacing: 0.03rem;
+        text-transform: uppercase;
+    }
+
+    .doc-pager__title {
+        font-size: 1rem;
+        font-weight: 650;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        .doc-level__input--basic:checked
+            ~ .doc-level__panel--basic,
+        .doc-level__input--advanced:checked
+            ~ .doc-level__panel--advanced {
+            animation: doc-level-enter 150ms ease-out;
+        }
+
+        @keyframes doc-level-enter {
+            from {
+                opacity: 0;
+                transform: translateY(0.2rem);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    }
+
+    @media (max-width: 36rem) {
+        .doc-level__header {
+            align-items: stretch;
+            flex-direction: column;
+        }
+
+        .doc-level__switch {
+            align-self: flex-start;
+        }
+
+        .doc-pager {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .doc-pager__link--next {
+            align-items: flex-start;
+            text-align: left;
+        }
+
+        .doc-pager--single .doc-pager__link {
+            width: 100%;
+            justify-self: stretch;
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .doc-level,
+        .doc-pager {
+            --doc-level-accent: #80c98c;
+            --doc-level-accent-hover: #a0d9a9;
+            --doc-level-border: #3a493d;
+            --doc-level-switch-background: #202a22;
+            --doc-level-selected-background: #303c32;
+            --doc-level-text: #edf2ee;
+            --doc-level-muted: #a8b3aa;
+            --doc-level-focus: #75b7ff;
+        }
+    }
+
+    @media print {
+        .doc-level__input,
+        .doc-level__switch,
+        .doc-pager {
+            display: none;
+        }
+
+        .doc-level__panel {
+            display: block;
+        }
+
+        .doc-level__panel--advanced {
+            margin-block-start: 1.5rem;
+            padding-block-start: 1.5rem;
+            border-block-start: 1px solid;
+        }
+
+        .doc-level__panel--basic::before,
+        .doc-level__panel--advanced::before {
+            display: block;
+            margin-block-end: 0.75rem;
+            font-weight: 700;
+        }
+
+        .doc-level__panel--basic::before {
+            content: "Basic";
+        }
+
+        .doc-level__panel--advanced::before {
+            content: "Advanced";
+        }
+    }</style>
 
   </head>
   <body style="">
@@ -398,24 +671,63 @@ body {
             </a>
         </div>
     </nav>
-     <h1 style="font-size: 2em;text-align: center;"> CORE COLLECTIONS</h1>
-    <section class="container"><p>Collections are ordered, zero-indexed groups of one element type. Non-empty literals infer their element type from their items. Empty literals need an explicit collection type. Growable collections use <code>{T}</code>, while fixed collections use <code>{N T}</code> with a compile-time maximum length.</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
+    <section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Core packages</a> / Core collections</p><h1>Core collections</h1><p>Collections hold ordered groups of values. You create them with literals and work with them through built-in methods backed by <code>@core/collections</code>.</p></section>
+    <section class="container"><fieldset class="doc-level">
+        <legend class="visually-hidden">
+            Choose the explanation level: Collection methods
+    </legend>
+
+    <input
+        class="doc-level__input doc-level__input--basic"
+        type="radio"
+        name="collection-methods-level"
+                    id="collection-methods-basic"
+                    value="basic"
+                    checked
+                >
+
+                <input
+                    class="doc-level__input doc-level__input--advanced"
+                    type="radio"
+                    name="collection-methods-level"
+                    id="collection-methods-advanced"
+                    value="advanced"
+                >
+
+                <header class="doc-level__header">
+                    <h2 class="doc-level__title" id="collection-methods">
+                        Collection methods
+    </h2>
+
+    <div class="doc-level__switch">
+        <label
+            class="doc-level__option doc-level__option--basic"
+            for="collection-methods-basic"
+                        >
+                            Basic
+                        </label>
+
+                        <label
+                            class="doc-level__option doc-level__option--advanced"
+                            for="collection-methods-advanced"
+                        >
+                            Advanced
+                        </label>
+                    </div>
+                </header>
+
+                <div class="doc-level__panel doc-level__panel--basic">
+                    
+
+
+
+            <p>Collections hold ordered groups of values. You create them with literals and work with them through built-in methods.</p><h3>Creating collections</h3><p>Growable collections use <code>{T}</code>. Fixed collections use <code>{N T}</code> with a compile-time maximum length.</p><pre style=""><code class='codeblock'>
     values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
     empty_values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
     fixed_values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>2</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>Common methods are compiler-owned and use receiver syntax:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
+    </code></pre><p>Non-empty literals infer their element type from their items. Empty literals need an explicit collection type.</p><h3>Common methods</h3><p>Collection methods use receiver syntax. <code>push</code>, <code>get</code>, <code>set</code> and <code>remove</code> take the fallible path, so they need <code>!</code> or <code>catch</code>. <code>length</code> stays infallible.</p><pre style=""><code class='codeblock'>
+    values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
+
     <span class='moth-code-operator'>~</span>values.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>4</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     ;
 
@@ -425,7 +737,53 @@ body {
 
     <span class='moth-code-operator'>~</span>values.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>99</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     ;
-    </code></pre><p><code>get</code>, <code>set</code>, <code>push</code>, and <code>remove</code> are fallible. <code>length</code> is infallible. See <a href="../../../collections">Collections</a> for the language rules around mutability, fixed capacity, and empty literal typing.</p></section>
+
+    count <span class='moth-code-operator'>=</span> values.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
+    </code></pre><p><code>push</code> appends after the last element. <code>get</code> reads at an index. <code>set</code> replaces an element. <code>remove</code> takes an element out and shifts later elements down. <code>length</code> returns the logical length, not the fixed capacity.</p><h3>Remember</h3><ul><li>Use <code>{T}</code> for growable collections and <code>{N T}</code> for fixed collections.</li><li><code>push</code>, <code>get</code>, <code>set</code> and <code>remove</code> take the fallible path. Handle them with <code>!</code> or <code>catch</code>.</li><li><code>length</code> stays infallible.</li><li><code>set</code>, <code>push</code> and <code>remove</code> need <code>~</code> on the receiver.</li></ul><h3>Read next</h3><p>For the full language rules around collection literals, mutability and fixed capacity, see <a href="../../../../collections">Collections</a>. For the binding-backed contract behind these methods, see @collections (Core collections advanced).</p>
+    </div>
+
+    <div class="doc-level__panel doc-level__panel--advanced">
+        <p><code>@core/collections</code> forms the binding-backed Core package that provides runtime functions for compiler-owned collection methods. Authors do not import <code>@core/collections</code> directly. The compiler lowers collection receiver methods to calls against this package.</p><p><code>@core/collections</code> belongs to the Core origin package family with ExternalBinding backing. See <a href="../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3>Binding-backed behaviour</h3><p>The package registers five host functions that implement the compiler-owned collection member operations:</p><p>| Host function | Compiler-owned member | Receiver access | |---|---|---| | <code>__moth_collection_get</code> | <code>get(index)</code> | shared | | <code>__moth_collection_set</code> | <code>set(index, value)</code> | mutable | | <code>__moth_collection_push</code> | <code>push(value)</code> | mutable | | <code>__moth_collection_remove</code> | <code>remove(index)</code> | mutable | | <code>__moth_collection_length</code> | <code>length()</code> | shared |</p><p>These host functions use inferred ABI types for the collection element and value parameters. The index parameter is <code>I32</code>. The length return is <code>I32</code>. Fallible operations return through the builtin <code>Error!</code> channel.</p><h3>Source-visible surface</h3><p>Authors interact with collections through language-level syntax and receiver methods, not through direct imports of <code>@core/collections</code>. The compiler-owned methods include:</p><ul><li><code>get(index)</code> returns the element at <code>index</code> or fails with <code>Error!</code></li><li><code>set(index, value)</code> replaces the element at <code>index</code> or fails with <code>Error!</code></li><li><code>push(value)</code> appends <code>value</code> after the last element or fails with <code>Error!</code></li><li><code>remove(index)</code> removes and returns the element at <code>index</code> or fails with <code>Error!</code></li><li><code>length()</code> returns the logical length as <code>Int</code></li></ul><p><code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> take the fallible path. <code>length</code> stays infallible. <code>set</code>, <code>push</code> and <code>remove</code> require mutable receiver access through <code>~</code>.</p><pre style=""><code class='codeblock'>
+    values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
+
+    <span class='moth-code-operator'>~</span>values.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>4</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    ;
+
+    first <span class='moth-code-operator'>=</span> values.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+        then <span class='moth-code-number'>0</span>
+    ;
+
+    <span class='moth-code-operator'>~</span>values.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>99</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    ;
+
+    count <span class='moth-code-operator'>=</span> values.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
+    </code></pre><h3>No direct import</h3><p><code>@core/collections</code> carries no source-visible import surface. Do not write <code>import @core/collections</code>. The package exists to back the compiler-owned methods that receiver syntax invokes.</p><h3>Unsupported source forms</h3><ul><li>Direct imports of <code>@core/collections</code> are not part of the author surface.</li><li>Square-bracket indexing is not supported. Use <code>get</code> and <code>set</code>.</li><li>Assignment through <code>get</code> was removed.</li><li>Builtin member arguments are positional-only. Named arguments are not supported.</li></ul><h3>Backend behaviour</h3><p>HTML-JS lowers the host functions to JavaScript runtime helpers. HTML-Wasm lacks a Wasm lowering for these functions. See <a href="../../../../progress">progress matrix</a> for current target availability.</p><h3>Related concepts</h3><ul><li>For collection literal syntax and typing see <a href="../../../../collections">Collections</a>.</li><li>For the full collection method contract see <a href="../../../../collections/#collection-operations">Collection operations</a>.</li><li>For package origin and backing see <a href="../#package-origins-and-backing">Package origins and backing</a>.</li></ul>
+    </div>
+    </fieldset></section>
+    <section class="container"><nav class="doc-pager" aria-label="Language documentation">
+        <a
+            class="doc-pager__link doc-pager__link--previous"
+            href="../io/"
+                    rel="prev"
+                >
+                    <span class="doc-pager__direction">← Previous</span>
+                    <span class="doc-pager__title">Core IO</span>
+                </a>
+
+                <a
+                    class="doc-pager__link doc-pager__link--next"
+                    href="../math/"
+                    rel="next"
+                >
+                    <span class="doc-pager__direction">Next →</span>
+                    <span class="doc-pager__title">Core math</span>
+                </a>
+
+                
+
+
+
+    </nav></section>
     <script>
     function __moth_is_ref(value) {
     return value !== null && typeof value === "object" && value.__moth_ref === true;
@@ -546,8 +904,8 @@ body {
 
     function __moth_make_error(message, code, location, trace) {
     return {
-    b_fld0: message,
-    b_fld1: code,
+    f_6d657373616765: message,
+    f_636f6465: code,
     __moth_location: location ?? null,
     __moth_trace: trace ?? null
     };
@@ -558,12 +916,12 @@ body {
     }
 
     function __moth_error_message(error) {
-    const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
+    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
     function __moth_error_code(error) {
-    const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
+    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
@@ -717,17 +1075,17 @@ body {
     return String(value);
     }
 
-    function b_fn6() {
-    let b_l24 = __moth_binding(undefined);
+    function b_fn0() {
+    let b_l0 = __moth_binding(undefined);
 
-    __moth_assign_value(b_l24, []);
-    return __moth_read(b_l24);
+    __moth_assign_value(b_l0, []);
+    return __moth_read(b_l0);
     }
 
     </script>
     <script>
     (function () {
-      if (typeof b_fn6 === "function") b_fn6();
+      if (typeof b_fn0 === "function") b_fn0();
     })();
     </script>
   </body>

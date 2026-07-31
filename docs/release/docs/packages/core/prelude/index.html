@@ -319,6 +319,279 @@ body {
         border-bottom-width: 1px;
         padding: 0rem 2rem 0rem 2rem;
     }</style>
+    <style>.doc-level,
+    .doc-pager {
+        --doc-level-accent: #3f8f4e;
+        --doc-level-accent-hover: #337740;
+        --doc-level-border: #d7dfd8;
+        --doc-level-switch-background: #f1f5f1;
+        --doc-level-selected-background: #ffffff;
+        --doc-level-text: #202722;
+        --doc-level-muted: #687169;
+        --doc-level-focus: #2877d4;
+    }
+
+    .doc-level {
+        min-inline-size: 0;
+        margin: 2rem 0;
+        padding: 0;
+        border: 0;
+        color: var(--doc-level-text);
+    }
+
+    .visually-hidden,
+    .doc-level__input {
+        position: absolute;
+        inline-size: 1px;
+        block-size: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .doc-level__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-block-end: 1.25rem;
+    }
+
+    .doc-level__title {
+        margin: 0;
+    }
+
+    .doc-level__switch {
+        display: inline-grid;
+        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+        gap: 0.2rem;
+        flex: none;
+        padding: 0.22rem;
+        border: 1px solid var(--doc-level-border);
+        border-radius: 0.75rem;
+        background: var(--doc-level-switch-background);
+    }
+
+    .doc-level__option {
+        padding: 0.42rem 0.8rem;
+        border-radius: 0.55rem;
+        color: var(--doc-level-muted);
+        font-size: 0.875rem;
+        font-weight: 650;
+        line-height: 1.3;
+        text-align: center;
+        cursor: pointer;
+        user-select: none;
+
+        transition:
+            color 130ms ease,
+            background-color 130ms ease,
+            box-shadow 130ms ease;
+    }
+
+    .doc-level__option:hover {
+        color: var(--doc-level-accent-hover);
+    }
+
+    .doc-level__input--basic:checked
+        ~ .doc-level__header
+        .doc-level__option--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__header
+        .doc-level__option--advanced {
+        color: var(--doc-level-accent);
+        background: var(--doc-level-selected-background);
+        box-shadow:
+            0 1px 2px rgb(20 40 24 / 10%),
+            0 0 0 1px rgb(63 143 78 / 8%);
+    }
+
+    .doc-level__input--basic:focus-visible
+        ~ .doc-level__header
+        .doc-level__option--basic,
+    .doc-level__input--advanced:focus-visible
+        ~ .doc-level__header
+        .doc-level__option--advanced {
+        outline: 3px solid var(--doc-level-focus);
+        outline-offset: 2px;
+    }
+
+    .doc-level__panel {
+        display: none;
+    }
+
+    .doc-level__input--basic:checked
+        ~ .doc-level__panel--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__panel--advanced {
+        display: block;
+    }
+
+    .doc-pager {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 1rem;
+        margin-block: 3rem 1rem;
+    }
+
+    .doc-pager--single {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .doc-pager--single .doc-pager__link {
+        width: min(100%, 32rem);
+    }
+
+    .doc-pager--single .doc-pager__link--previous {
+        justify-self: start;
+    }
+
+    .doc-pager--single .doc-pager__link--next {
+        justify-self: end;
+    }
+
+    .doc-pager__link {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        min-inline-size: 0;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--doc-level-border);
+        border-radius: 0.75rem;
+        color: var(--doc-level-text);
+        text-decoration: none;
+        background: var(--doc-level-selected-background);
+
+        transition:
+            color 130ms ease,
+            border-color 130ms ease,
+            box-shadow 130ms ease;
+    }
+
+    .doc-pager__link:hover {
+        color: var(--doc-level-accent-hover);
+        border-color: var(--doc-level-accent);
+        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+    }
+
+    .doc-pager__link:focus-visible {
+        outline: 3px solid var(--doc-level-focus);
+        outline-offset: 2px;
+    }
+
+    .doc-pager__link--next {
+        align-items: flex-end;
+        text-align: right;
+    }
+
+    .doc-pager__direction {
+        color: var(--doc-level-muted);
+        font-size: 0.8rem;
+        font-weight: 650;
+        letter-spacing: 0.03rem;
+        text-transform: uppercase;
+    }
+
+    .doc-pager__title {
+        font-size: 1rem;
+        font-weight: 650;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        .doc-level__input--basic:checked
+            ~ .doc-level__panel--basic,
+        .doc-level__input--advanced:checked
+            ~ .doc-level__panel--advanced {
+            animation: doc-level-enter 150ms ease-out;
+        }
+
+        @keyframes doc-level-enter {
+            from {
+                opacity: 0;
+                transform: translateY(0.2rem);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    }
+
+    @media (max-width: 36rem) {
+        .doc-level__header {
+            align-items: stretch;
+            flex-direction: column;
+        }
+
+        .doc-level__switch {
+            align-self: flex-start;
+        }
+
+        .doc-pager {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .doc-pager__link--next {
+            align-items: flex-start;
+            text-align: left;
+        }
+
+        .doc-pager--single .doc-pager__link {
+            width: 100%;
+            justify-self: stretch;
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .doc-level,
+        .doc-pager {
+            --doc-level-accent: #80c98c;
+            --doc-level-accent-hover: #a0d9a9;
+            --doc-level-border: #3a493d;
+            --doc-level-switch-background: #202a22;
+            --doc-level-selected-background: #303c32;
+            --doc-level-text: #edf2ee;
+            --doc-level-muted: #a8b3aa;
+            --doc-level-focus: #75b7ff;
+        }
+    }
+
+    @media print {
+        .doc-level__input,
+        .doc-level__switch,
+        .doc-pager {
+            display: none;
+        }
+
+        .doc-level__panel {
+            display: block;
+        }
+
+        .doc-level__panel--advanced {
+            margin-block-start: 1.5rem;
+            padding-block-start: 1.5rem;
+            border-block-start: 1px solid;
+        }
+
+        .doc-level__panel--basic::before,
+        .doc-level__panel--advanced::before {
+            display: block;
+            margin-block-end: 0.75rem;
+            font-weight: 700;
+        }
+
+        .doc-level__panel--basic::before {
+            content: "Basic";
+        }
+
+        .doc-level__panel--advanced::before {
+            content: "Advanced";
+        }
+    }</style>
 
   </head>
   <body style="">
@@ -398,25 +671,97 @@ body {
             </a>
         </div>
     </nav>
-     <h1 style="font-size: 2em;text-align: center;"> PRELUDE POLICY</h1>
-    <section class="container"><p>The prelude is visibility policy, not an <code>@core/prelude</code> package. It defines the tiny set of names available without an explicit import. It keeps common output and builtin error handling convenient without making every Core package global.</p><p>The <code>io</code> namespace is available in normal source files and exposes Core IO helpers such as <code>io.line(...)</code>. Compiler-owned <code>Error</code> is also available for <code>Error!</code> flows.</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
+    <section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Core packages</a> / Prelude policy</p><h1>Prelude policy</h1><p>The prelude gives you a few names without an import. It keeps common output convenient without making every Core package global.</p></section>
+    <section class="container"><fieldset class="doc-level">
+        <legend class="visually-hidden">
+            Choose the explanation level: Prelude surface
+    </legend>
+
+    <input
+        class="doc-level__input doc-level__input--basic"
+        type="radio"
+        name="prelude-surface-level"
+                    id="prelude-surface-basic"
+                    value="basic"
+                    checked
+                >
+
+                <input
+                    class="doc-level__input doc-level__input--advanced"
+                    type="radio"
+                    name="prelude-surface-level"
+                    id="prelude-surface-advanced"
+                    value="advanced"
+                >
+
+                <header class="doc-level__header">
+                    <h2 class="doc-level__title" id="prelude-surface">
+                        Prelude surface
+    </h2>
+
+    <div class="doc-level__switch">
+        <label
+            class="doc-level__option doc-level__option--basic"
+            for="prelude-surface-basic"
+                        >
+                            Basic
+                        </label>
+
+                        <label
+                            class="doc-level__option doc-level__option--advanced"
+                            for="prelude-surface-advanced"
+                        >
+                            Advanced
+                        </label>
+                    </div>
+                </header>
+
+                <div class="doc-level__panel doc-level__panel--basic">
+                    
+
+
+
+            <p>The prelude gives you a few names without an import. It keeps common output convenient without making every Core package global.</p><h3>What you get without importing</h3><p>The <code>io</code> namespace comes available in normal source files. It exposes Core IO helpers such as <code>io.line(...)</code>.</p><pre style=""><code class='codeblock'>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Hello from the prelude&quot;</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>Most Core packages still require imports:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
+    </code></pre><p>The compiler-owned <code>Error</code> type also stays available for <code>Error!</code> flows.</p><h3>What still needs an import</h3><p>Most Core packages require explicit imports:</p><pre style=""><code class='codeblock'>
     import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>sin<span class='moth-code-parenthesis'>}</span>
     import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>time <span class='moth-code-parenthesis'>{</span>mark_now<span class='moth-code-parenthesis'>}</span>
-    </code></pre></section>
+    </code></pre><h3>Remember</h3><ul><li>The prelude forms visibility policy, not a package. No <code>@core/prelude</code> exists to import.</li><li><code>io</code> stands as the only namespace alias the prelude registers.</li><li><code>Error</code> works as a compiler-owned builtin, not a prelude symbol.</li></ul><h3>Read next</h3><p>For the full prelude contract, collision rules and builder ownership, see @prelude (Prelude policy advanced).</p>
+    </div>
+
+    <div class="doc-level__panel doc-level__panel--advanced">
+        <p>The prelude forms visibility policy, not an <code>@core/prelude</code> package. It defines the small set of names available without an explicit import. No <code>@core/prelude</code> package exists to import.</p><h3>Registered prelude surface</h3><p>The prelude registers one namespace alias:</p><p>| Bare name | Alias target | Exposes | |---|---|---| | <code>io</code> | <code>@core/io</code> | Core IO console and input helpers |</p><p>The bare <code>io</code> namespace behaves as a compile-time alias to <code>@core/io</code>. It does not act as a runtime value. An explicit <code>import @core/io</code> binds the same <code>io</code> namespace. An explicit <code>import @core/io as output</code> creates a file-local namespace name that shadows the prelude alias.</p><h3>Compiler-owned bare symbols</h3><p>The compiler-owned <code>Error</code> type stays available as a bare language symbol for <code>Error!</code> flows. It works as a compiler-owned builtin, not a prelude symbol. The prelude registry does not register it. See <a href="../../../../errors">Errors, options and assertions</a> for the <code>Error</code> contract.</p><h3>Collision policy</h3><p>Prelude names participate in the ordinary no-shadowing collision model. Same-file declarations, source imports, binding imports, aliases, prelude symbols and builtins cannot silently shadow one another. The prelude registers <code>io</code> as a reserved name first, then inserts it only if not shadowed.</p><h3>What the prelude does not include</h3><p>Most Core packages require explicit imports:</p><pre style=""><code class='codeblock'>
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>sin<span class='moth-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>time <span class='moth-code-parenthesis'>{</span>mark_now<span class='moth-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>text <span class='moth-code-parenthesis'>{</span>length<span class='moth-code-parenthesis'>}</span>
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>random <span class='moth-code-parenthesis'>{</span>random_int<span class='moth-code-parenthesis'>}</span>
+    </code></pre><p>The prelude does not expose <code>@core/collections</code> directly. Collection methods work as compiler-owned receiver methods that lower to <code>@core/collections</code> host functions. See <a href="../collections">Core collections</a> for that relationship.</p><h3>Builder ownership</h3><p>The builder provides the prelude. The HTML builder registers the <code>io</code> namespace alias through the Core prelude registration. The prelude surface forms the minimal universal starting point. Builders must provide it, but the actual implementations live in specific Core packages such as <code>@core/io</code>.</p><h3>Unsupported source forms</h3><ul><li><code>import @core/prelude</code> lacks validity. No <code>@core/prelude</code> package exists.</li><li>The prelude does not expose a namespace record that can be passed as a runtime value.</li><li>The prelude does not expose <code>@core/math</code>, <code>@core/text</code>, <code>@core/random</code>, <code>@core/time</code> or <code>@core/collections</code> without explicit imports.</li></ul><h3>Related concepts</h3><ul><li>For Core IO see <a href="../io">Core IO</a>.</li><li>For package origin and backing see <a href="../#package-origins-and-backing">Package origins and backing</a>.</li><li>For <code>Error</code> and error handling see <a href="../../../../errors">Errors, options and assertions</a>.</li></ul>
+    </div>
+    </fieldset></section>
+    <section class="container"><nav class="doc-pager" aria-label="Language documentation">
+        <a
+            class="doc-pager__link doc-pager__link--previous"
+            href="../"
+                    rel="prev"
+                >
+                    <span class="doc-pager__direction">← Previous</span>
+                    <span class="doc-pager__title">Core packages</span>
+                </a>
+
+                <a
+                    class="doc-pager__link doc-pager__link--next"
+                    href="../io/"
+                    rel="next"
+                >
+                    <span class="doc-pager__direction">Next →</span>
+                    <span class="doc-pager__title">Core IO</span>
+                </a>
+
+                
+
+
+
+    </nav></section>
     <script>
     function __moth_is_ref(value) {
     return value !== null && typeof value === "object" && value.__moth_ref === true;
@@ -537,8 +882,8 @@ body {
 
     function __moth_make_error(message, code, location, trace) {
     return {
-    b_fld0: message,
-    b_fld1: code,
+    f_6d657373616765: message,
+    f_636f6465: code,
     __moth_location: location ?? null,
     __moth_trace: trace ?? null
     };
@@ -549,12 +894,12 @@ body {
     }
 
     function __moth_error_message(error) {
-    const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
+    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
     function __moth_error_code(error) {
-    const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
+    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
@@ -708,17 +1053,17 @@ body {
     return String(value);
     }
 
-    function b_fn6() {
-    let b_l24 = __moth_binding(undefined);
+    function b_fn0() {
+    let b_l0 = __moth_binding(undefined);
 
-    __moth_assign_value(b_l24, []);
-    return __moth_read(b_l24);
+    __moth_assign_value(b_l0, []);
+    return __moth_read(b_l0);
     }
 
     </script>
     <script>
     (function () {
-      if (typeof b_fn6 === "function") b_fn6();
+      if (typeof b_fn0 === "function") b_fn0();
     })();
     </script>
   </body>

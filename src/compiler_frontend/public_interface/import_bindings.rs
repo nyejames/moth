@@ -100,6 +100,25 @@ impl<'a> SourceProviderImportSet<'a> {
     pub(super) fn interfaces(&self) -> impl Iterator<Item = &'a PublicSemanticInterface> + '_ {
         self.imports.iter().map(|binding| binding.interface)
     }
+
+    /// Find the completed interface for one source package by its import prefix.
+    ///
+    /// WHAT: returns the `PublicSemanticInterface` for the first provider import whose
+    ///       `imported_path` starts with `prefix`, or `None` when no matching provider exists.
+    /// WHY: the Moth template implicit scope needs the `@html` package's constant exports
+    ///      even when the consumer module does not import `@html` directly. The build system
+    ///      injects builder source package interfaces into the set for this purpose.
+    pub(crate) fn interface_for_prefix(&self, prefix: &str) -> Option<&'a PublicSemanticInterface> {
+        self.imports
+            .iter()
+            .find(|binding| {
+                binding
+                    .imported_path
+                    .first()
+                    .is_some_and(|first| first == prefix)
+            })
+            .map(|binding| binding.interface)
+    }
 }
 
 fn path_matches_owned_components(

@@ -586,6 +586,33 @@ fn build_source_provider_imports<'a>(
         }
     }
 
+    // Builder source-backed packages such as @html are implicitly available to Moth template
+    // files. Ensure their completed interfaces are in the provider set even when the consumer
+    // module does not import them directly, so the implicit template scope can collect their
+    // constant exports.
+    let explicit_prefixes: rustc_hash::FxHashSet<String> = imports
+        .iter()
+        .filter_map(|import| import.imported_path.first().cloned())
+        .collect();
+
+    let implicit_provider_imports: Vec<SourceProviderImport<'a>> = completed_source_packages
+        .iter()
+        .filter(|package| !explicit_prefixes.contains(&package.import_prefix))
+        .filter_map(|package| {
+            package
+                .interface()
+                .ok()
+                .map(|interface| SourceProviderImport {
+                    importer_source: Vec::new(),
+                    imported_path: vec![package.import_prefix.clone()],
+                    from_grouped: false,
+                    interface,
+                })
+        })
+        .collect();
+
+    imports.extend(implicit_provider_imports);
+
     Ok(SourceProviderImportSet::new(imports))
 }
 

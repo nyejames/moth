@@ -692,7 +692,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     }
 
     fn register_implicit_moth_template_constant_scope(
-        &self,
+        &mut self,
         file_visibility: &mut FileVisibility,
         source_file: &InternedPath,
     ) {
@@ -765,18 +765,54 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     }
 
     fn collect_html_public_export_constants(
-        &self,
+        &mut self,
         implicit_constants: &mut FxHashMap<StringId, InternedPath>,
     ) {
-        let Some(entries) = self
+        // When the @html source package root file headers are in the current module (test
+        // fixtures), the header-built source_package_public_exports map contains the entries.
+        // In production the map key exists with zero entries because the @html headers belong
+        // to a separate compiled module, so fall through to the provider interface path.
+        if let Some(entries) = self
             .module_symbols
             .source_package_public_exports
             .get("html")
-        else {
+            .filter(|entries| !entries.is_empty())
+        {
+            self.collect_constant_exports(entries, implicit_constants, None);
+            return;
+        }
+
+        // In production, the @html source package is a separate compiled module. Its completed
+        // PublicSemanticInterface is available through the source provider import set. Collect
+        // constant declarations directly from the interface, since the header-built map is empty.
+        let Some(interface) = self.source_provider_imports.interface_for_prefix("html") else {
             return;
         };
 
-        self.collect_constant_exports(entries, implicit_constants, None);
+        for binding in &interface.export_bindings {
+            let Some(declaration) = interface.declaration(binding.origin()) else {
+                continue;
+            };
+
+            if !matches!(
+                declaration.semantics,
+                PublicDeclarationSemantics::Constant(_)
+            ) {
+                continue;
+            }
+
+            let name_id = self.string_table.intern(binding.public_name());
+
+            // The synthetic path serves as the consumer-local identity for this cross-module
+            // constant. Register the declaration record so the constant dependency checker
+            // classifies it as an imported constant rather than a non-constant source reference.
+            let synthetic_path = InternedPath::from_components(vec![name_id]);
+            self.environment
+                .imported_declarations_by_local_path
+                .entry(synthetic_path.clone())
+                .or_insert_with(|| declaration.clone());
+            implicit_constants.insert(name_id, synthetic_path);
+        }
     }
 
     fn collect_same_directory_public_export_constants(

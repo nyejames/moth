@@ -11,6 +11,9 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
     DiagnosticPayload, SyntaxDiagnosticKind,
@@ -18,6 +21,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions, bind_module_headers,
     prepare_file_from_tokens, prepare_header_syntax,
@@ -31,7 +35,15 @@ use crate::compiler_frontend::pipeline::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
+use crate::compiler_frontend::public_interface::{
+    PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
+    PublicSemanticInterface, SourceProviderImport, SourceProviderImportSet,
+};
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{
+    ExportBinding, OriginConstantId, OriginDeclarationId, StableModuleOriginIdentity,
+    StablePackageIdentity,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -288,12 +300,43 @@ impl MothTemplateScopeFixture {
         Ok((ast, string_table))
     }
 
+    fn compile_moth_template_ast_with_providers(
+        &self,
+        moth_template_relative_path: &str,
+        prepared_relative_paths: &[&str],
+        source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<'_>,
+    ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+        let (ast, string_table) = self
+            .compile_module_ast_with_providers(prepared_relative_paths, source_provider_imports)?;
+
+        self.assert_ast_contains_moth_template_content(
+            &ast,
+            &string_table,
+            moth_template_relative_path,
+        );
+
+        Ok((ast, string_table))
+    }
+
     fn compile_module_ast(
         &self,
         prepared_relative_paths: &[&str],
     ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
-        let (headers, mut string_table) =
-            self.prepare_and_bind_headers_for(prepared_relative_paths)?;
+        self.compile_module_ast_with_providers(
+            prepared_relative_paths,
+            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        )
+    }
+
+    fn compile_module_ast_with_providers(
+        &self,
+        prepared_relative_paths: &[&str],
+        source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<'_>,
+    ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+        let (headers, mut string_table) = self.prepare_and_bind_headers_with_providers(
+            prepared_relative_paths,
+            source_provider_imports,
+        )?;
         let sorted_headers = resolve_module_dependencies(headers, &mut string_table)
             .map_err(first_diagnostic_from_bag)?;
         let entry_dir =
@@ -357,6 +400,23 @@ impl MothTemplateScopeFixture {
     fn prepare_and_bind_headers_for(
         &self,
         prepared_relative_paths: &[&str],
+    ) -> Result<
+        (
+            crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
+            StringTable,
+        ),
+        Box<CompilerDiagnostic>,
+    > {
+        self.prepare_and_bind_headers_with_providers(
+            prepared_relative_paths,
+            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        )
+    }
+
+    fn prepare_and_bind_headers_with_providers(
+        &self,
+        prepared_relative_paths: &[&str],
+        source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<'_>,
     ) -> Result<
         (
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
@@ -445,7 +505,7 @@ impl MothTemplateScopeFixture {
             prepared_syntax,
             &external_package_registry,
             &ExternalImportResolutionTable::default(),
-            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+            source_provider_imports,
             Some(&self.project_path_resolver),
             &mut string_table,
         )
@@ -960,6 +1020,62 @@ fn exported_html_functions_are_not_visible_to_moth_template_body() {
         ),
         "non-constant filtering should fail during semantic lookup, got {diagnostic:?}"
     );
+}
+
+#[test]
+fn moth_template_sees_html_constants_through_provider_interface_without_html_headers() {
+    // Simulates the production path: @html is a separate compiled module whose completed
+    // PublicSemanticInterface is available through SourceProviderImportSet, but whose source
+    // headers are NOT in the consumer module's prepared files. The .mtf implicit scope must
+    // collect constant exports from the provider interface.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant]")]);
+
+    let html_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("html"),
+        "html".to_owned(),
+        ModuleRootRole::Normal,
+    );
+
+    let constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        html_origin.clone(),
+        "test_constant".to_owned(),
+    ));
+
+    let html_interface = PublicSemanticInterface {
+        module_origin: html_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            html_origin.clone(),
+            "test_constant".to_owned(),
+            constant_origin.clone(),
+        )],
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: constant_origin,
+            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                folded_value: PublicFoldedValue::String("from html".to_owned()),
+            }),
+        }],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+
+    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
+        importer_source: Vec::new(),
+        imported_path: vec!["html".to_owned()],
+        from_grouped: false,
+        interface: &html_interface,
+    }]);
+
+    let (ast, string_table) = fixture
+        .compile_moth_template_ast_with_providers(
+            "src/intro.mtf",
+            &["src/intro.mtf"],
+            &provider_imports,
+        )
+        .expect(".mtf body should see @html constant through provider interface");
+
+    folded_content_contains(&ast, &string_table, "from html");
 }
 
 #[test]

@@ -444,7 +444,7 @@ body {
     -> deterministic target assignment
     -> JavaScript and Wasm outputs
     -> HTML, runtime assets and output manifest
-    </code></pre><p>Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.</p><p><strong>Diagram placeholder:</strong> Pipeline from project tree to HTML output</p><p><em>Caption: simplified Moth walkthrough, not a universal compiler taxonomy.</em> <em>Question: which step still looks like source, and which first looks like something a host can run?</em></p><h2>Four owners you will meet again</h2><p><strong>Build system.</strong> Selects the command, discovers source, builds graphs, schedules modules, plans entries and writes files to disk.</p><p><strong>Compiler frontend and analysis.</strong> Prepares syntax, binds interfaces, checks semantics, lowers HIR and validates access.</p><p><strong>Artefact builder.</strong> Assembles selected compiler facts into an output plan for one kind of project, such as an HTML page.</p><p><strong>Target backends.</strong> Lower validated functions and runtime needs into JavaScript, Wasm and glue.</p><p>A fact has one owner. Later stages consume that fact. They do not rebuild it from source text.</p><h2>How to read the series</h2><p>Read in order. The path groups ideas by time of appearance, not by internal crate name.</p><ol><li><a href="./what-a-compiler-does">01. What a compiler does</a></li><li><a href="./moth-design-choices">02. Why Moth makes different choices</a></li><li><a href="./starting-a-build">03. Starting a build</a></li><li><a href="./project-graphs-and-modules">04. Project graphs and modules</a></li><li><a href="./tokenization">05. Tokenization</a></li><li><a href="./declarations-imports-and-ordering">06. Declarations, imports and ordering</a></li><li><a href="./ast-semantics-and-types">07. AST semantics and types</a></li><li><a href="./compile-time-semantics">08. Compile-time semantics</a></li><li><a href="./templates-and-tir">09. Templates and TIR</a></li><li><a href="./diagnostics">10. Diagnostics</a></li><li><a href="./hir">11. HIR</a></li><li><a href="./memory-management-and-gc">12. Memory management and GC</a></li><li><a href="./borrow-validation-and-drops">13. Borrow validation and drops</a></li><li><a href="./module-artefacts-and-reuse">14. Module artefacts and reuse</a></li><li><a href="./linking-entries-and-reachability">15. Linking, entries and reachability</a></li><li><a href="./target-planning-and-validation">16. Target planning and validation</a></li><li><a href="./backend-lowering">17. Backend lowering</a></li><li><a href="./html-assembly-and-output">18. HTML assembly and output</a></li></ol><p>This landing page acts as article 00.</p><h2>Status language on every page</h2><p>Later articles label four kinds of claim:</p><ul><li><strong>Accepted design:</strong> architecture or language contract the authorities already chose</li><li><strong>Current implementation:</strong> behaviour the progress matrix records today</li><li><strong>Queued or active implementation:</strong> named roadmap work still landing</li><li><strong>Deferred or outside scope:</strong> postponed on purpose, or rejected as a language shape</li></ul><p>The series links the progress matrix and roadmap. It does not paste either document into the articles. Accepted architecture stays the main teaching path.</p><h2>Where authority lives</h2><ul><li><code>docs/compiler-design-overview.md</code> for compiler stages, identities, artefacts and validation</li><li><code>docs/build-system-design.md</code> for commands, graphs, builders, linking and outputs</li><li><code>docs/src/docs/codebase/language/overview.mtf</code> for language surface</li><li><code>docs/src/docs/codebase/memory-management/overview.mtf</code> for reference semantics, borrow validation, lifetime regions, ownership and backend lowering</li><li><code>docs/src/docs/progress/#page.moth</code> for what works today</li><li><code>docs/roadmap/roadmap.md</code> for order and deferred design</li></ul><p>Educational pages explain those authorities. They do not outrank them.</p><p>Next: what a compiler does between Priya&#39;s name and a paragraph on a page.</p></section>
+    </code></pre><p>Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.</p><p><strong>Diagram placeholder:</strong> Pipeline from project tree to HTML output</p><p><em>Caption: simplified Moth walkthrough, not a universal compiler taxonomy.</em> <em>Question: which step still looks like source, and which first looks like something a host can run?</em></p><h2>Four owners you will meet again</h2><p><strong>Build system.</strong> Selects the command, discovers source, builds graphs, schedules modules, plans entries and writes files to disk.</p><p><strong>Compiler frontend and analysis.</strong> Prepares syntax, binds interfaces, checks semantics, lowers HIR and validates access.</p><p><strong>Artefact builder.</strong> Assembles selected compiler facts into an output plan for one kind of project, such as an HTML page.</p><p><strong>Target backends.</strong> Lower validated functions and runtime needs into JavaScript, Wasm and glue.</p><p>A fact has one owner. Later stages consume that fact. They do not rebuild it from source text.</p><h2>How to read the series</h2><p>Read in order. The path groups ideas by time of appearance, not by internal crate name.</p><ol><li>@what-a-compiler-does (01. What a compiler does)</li><li>@moth-design-choices (02. Why Moth makes different choices)</li><li>@starting-a-build (03. Starting a build)</li><li>@project-graphs-and-modules (04. Project graphs and modules)</li><li>@tokenization (05. Tokenization)</li><li>@declarations-imports-and-ordering (06. Declarations, imports and ordering)</li><li>@ast-semantics-and-types (07. AST semantics and types)</li><li>@compile-time-semantics (08. Compile-time semantics)</li><li>@templates-and-tir (09. Templates and TIR)</li><li>@diagnostics (10. Diagnostics)</li><li>@hir (11. HIR)</li><li>@memory-management-and-gc (12. Memory management and GC)</li><li>@borrow-validation-and-drops (13. Borrow validation and drops)</li><li>@module-artefacts-and-reuse (14. Module artefacts and reuse)</li><li>@linking-entries-and-reachability (15. Linking, entries and reachability)</li><li>@target-planning-and-validation (16. Target planning and validation)</li><li>@backend-lowering (17. Backend lowering)</li><li>@html-assembly-and-output (18. HTML assembly and output)</li></ol><p>This landing page acts as article 00.</p><h2>Status language on every page</h2><p>Later articles label four kinds of claim:</p><ul><li><strong>Accepted design:</strong> architecture or language contract the authorities already chose</li><li><strong>Current implementation:</strong> behaviour the progress matrix records today</li><li><strong>Queued or active implementation:</strong> named roadmap work still landing</li><li><strong>Deferred or outside scope:</strong> postponed on purpose, or rejected as a language shape</li></ul><p>The series links the progress matrix and roadmap. It does not paste either document into the articles. Accepted architecture stays the main teaching path.</p><h2>Where authority lives</h2><ul><li><code>docs/compiler-design-overview.md</code> for compiler stages, identities, artefacts and validation</li><li><code>docs/build-system-design.md</code> for commands, graphs, builders, linking and outputs</li><li><code>docs/src/docs/codebase/language/overview.mtf</code> for language surface</li><li><code>docs/src/docs/codebase/memory-management/overview.mtf</code> for reference semantics, borrow validation, lifetime regions, ownership and backend lowering</li><li><code>docs/src/docs/progress/#page.moth</code> for what works today</li><li><code>docs/roadmap/roadmap.md</code> for order and deferred design</li></ul><p>Educational pages explain those authorities. They do not outrank them.</p><p>Next: what a compiler does between Priya&#39;s name and a paragraph on a page.</p></section>
     <script>
     function __moth_is_ref(value) {
     return value !== null && typeof value === "object" && value.__moth_ref === true;
@@ -565,8 +565,8 @@ body {
 
     function __moth_make_error(message, code, location, trace) {
     return {
-    b_fld0: message,
-    b_fld1: code,
+    f_6d657373616765: message,
+    f_636f6465: code,
     __moth_location: location ?? null,
     __moth_trace: trace ?? null
     };
@@ -577,12 +577,12 @@ body {
     }
 
     function __moth_error_message(error) {
-    const message = error && error["b_fld0"] !== undefined ? error["b_fld0"] : error && error.message;
+    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
     return typeof message === "string" ? message : String(message ?? "Unknown error");
     }
 
     function __moth_error_code(error) {
-    const code = error && error["b_fld1"] !== undefined ? error["b_fld1"] : error && error.code;
+    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
     return typeof code === "number" ? code : 0;
     }
 
@@ -736,17 +736,17 @@ body {
     return String(value);
     }
 
-    function b_fn6() {
-    let b_l24 = __moth_binding(undefined);
+    function b_fn0() {
+    let b_l0 = __moth_binding(undefined);
 
-    __moth_assign_value(b_l24, []);
-    return __moth_read(b_l24);
+    __moth_assign_value(b_l0, []);
+    return __moth_read(b_l0);
     }
 
     </script>
     <script>
     (function () {
-      if (typeof b_fn6 === "function") b_fn6();
+      if (typeof b_fn0 === "function") b_fn0();
     })();
     </script>
   </body>
