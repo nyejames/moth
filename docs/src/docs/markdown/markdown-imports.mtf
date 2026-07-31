@@ -30,7 +30,7 @@ Content imports follow the same path resolution and module visibility rules as n
 
 ### No automatic page fragment
 
-Importing a `.md` file and inserting its content into a template does not create a page fragment. Only direct top-level templates in the active module root become page fragments.
+Importing a `.md` file and inserting its content into a template does not create a page fragment. Only direct top-level templates in an entry-selected module root become page fragments.
 
 ### Direct extension imports are rejected
 
