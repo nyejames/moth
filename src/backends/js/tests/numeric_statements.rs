@@ -59,7 +59,6 @@ fn lower_minimal_module_with_float_statement(
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -286,7 +285,6 @@ fn lower_minimal_module_with_numeric_op(
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -704,7 +702,6 @@ fn numeric_op_arity_mismatch_returns_error() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(

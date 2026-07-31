@@ -27,9 +27,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, type_id_hint_for_diagnostic_type,
 };
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -325,8 +323,8 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                         Box::new(None),
                         FunctionSignature {
                             parameters: vec![],
-                            returns: vec![ReturnSlot::success(FunctionReturn::Value(
-                                DataType::collection(DataType::StringSlice),
+                            returns: vec![ReturnSlot::success(DataType::collection(
+                                DataType::StringSlice,
                             ))],
                         },
                     );

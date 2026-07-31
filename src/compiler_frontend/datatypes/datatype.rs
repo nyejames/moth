@@ -594,13 +594,13 @@ fn display_function_return_signature(
     let parts = signature
         .success_returns()
         .iter()
-        .map(|return_value| return_value.data_type().display_with_table(string_table))
+        .map(|return_value| return_value.display_with_table(string_table))
         .collect::<Vec<_>>();
 
     if let Some(error_return) = signature.error_return() {
         return format_fallible_signature_parts(
             parts,
-            error_return.data_type().display_with_table(string_table),
+            error_return.display_with_table(string_table),
         );
     }
 

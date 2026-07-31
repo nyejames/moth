@@ -7,7 +7,7 @@ use crate::compiler_frontend::ast::ast_nodes::{MatchExhaustiveness, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::{
     ExpressionKind, FallibleExpressionHandling, FallibleHandling,
 };
-use crate::compiler_frontend::ast::statements::functions::{FunctionReturn, ReturnChannel};
+use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_messages::{
@@ -78,33 +78,7 @@ fn parses_function_parameters_and_return_types() {
         Some("right")
     );
     assert_eq!(signature.returns.len(), 1);
-    assert_eq!(
-        signature.returns[0].value,
-        FunctionReturn::Value(DataType::Int)
-    );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
-    assert!(
-        signature.returns[0].type_id.is_some(),
-        "return type_id should be resolved"
-    );
-}
-
-#[test]
-fn parses_alias_return_candidates_in_function_signatures() {
-    let (ast, string_table) = parse_single_file_ast(
-        "choose |first String, fallback String| -> first or fallback:\n    return first\n;\n",
-    );
-
-    let signature = function_signature_by_name(&ast, &string_table, "choose");
-
-    assert_eq!(signature.returns.len(), 1);
-    assert_eq!(
-        signature.returns[0].value,
-        FunctionReturn::AliasCandidates {
-            parameter_indices: vec![0, 1],
-            data_type: DataType::StringSlice,
-        }
-    );
+    assert_eq!(signature.returns[0].value, DataType::Int);
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         signature.returns[0].type_id.is_some(),
@@ -120,20 +94,14 @@ fn parses_final_error_return_slot_in_function_signature() {
     let signature = function_signature_by_name(&ast, &string_table, "compute");
 
     assert_eq!(signature.returns.len(), 2);
-    assert_eq!(
-        signature.returns[0].value,
-        FunctionReturn::Value(DataType::Int)
-    );
+    assert_eq!(signature.returns[0].value, DataType::Int);
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         signature.returns[0].type_id.is_some(),
         "success return type_id should be resolved"
     );
     assert!(
-        matches!(
-            &signature.returns[1].value,
-            FunctionReturn::Value(DataType::Struct { .. })
-        ),
+        matches!(&signature.returns[1].value, DataType::Struct { .. }),
         "builtin Error should resolve to a struct-shaped diagnostic type"
     );
     assert!(
@@ -153,7 +121,7 @@ fn parses_optional_final_error_return_slot() {
     assert_eq!(signature.returns.len(), 2);
     assert_eq!(
         signature.returns[1].value,
-        FunctionReturn::Value(DataType::Option(Box::new(DataType::StringSlice)))
+        DataType::Option(Box::new(DataType::StringSlice))
     );
     assert_eq!(signature.returns[1].channel, ReturnChannel::Error);
     assert!(
@@ -185,20 +153,6 @@ fn rejects_multiple_error_return_slots() {
         payload,
         DiagnosticPayload::InvalidFunctionSignature {
             reason: InvalidFunctionSignatureReason::MultipleErrorReturnSlots
-        }
-    );
-}
-
-#[test]
-fn rejects_alias_error_return_slot() {
-    let payload = parse_function_diagnostic_payload(
-        "choose |first String, fallback String| -> first or fallback!:\n    return first\n;\n",
-    );
-
-    assert_eq!(
-        payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::AliasCannotBeError
         }
     );
 }
@@ -388,10 +342,10 @@ fn resolves_named_struct_type_in_function_returns() {
     let signature = function_signature_by_name(&ast, &string_table, "clone");
     assert!(matches!(
         signature.returns[0].value,
-        FunctionReturn::Value(DataType::Struct {
+        DataType::Struct {
             const_record: false,
             ..
-        })
+        }
     ));
 }
 
@@ -800,10 +754,7 @@ fn parses_valid_single_return_without_trailing_comma() {
 
     let signature = function_signature_by_name(&ast, &string_table, "compute");
     assert_eq!(signature.returns.len(), 1);
-    assert_eq!(
-        signature.returns[0].value,
-        FunctionReturn::Value(DataType::Int)
-    );
+    assert_eq!(signature.returns[0].value, DataType::Int);
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         signature.returns[0].type_id.is_some(),
@@ -818,19 +769,13 @@ fn parses_valid_multiple_returns_without_trailing_comma() {
 
     let signature = function_signature_by_name(&ast, &string_table, "compute");
     assert_eq!(signature.returns.len(), 2);
-    assert_eq!(
-        signature.returns[0].value,
-        FunctionReturn::Value(DataType::Int)
-    );
+    assert_eq!(signature.returns[0].value, DataType::Int);
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         signature.returns[0].type_id.is_some(),
         "return type_id should be resolved"
     );
-    assert_eq!(
-        signature.returns[1].value,
-        FunctionReturn::Value(DataType::StringSlice)
-    );
+    assert_eq!(signature.returns[1].value, DataType::StringSlice);
     assert_eq!(signature.returns[1].channel, ReturnChannel::Success);
     assert!(
         signature.returns[1].type_id.is_some(),

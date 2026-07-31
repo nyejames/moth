@@ -194,20 +194,14 @@ pub(super) fn create_header(
                     );
                 }
                 for ret in &requirement.signature.returns {
-                    if let crate::compiler_frontend::declaration_syntax::signature_members::FunctionReturnSyntax::Value {
-                        type_annotation,
-                        ..
-                    } = &ret.value
-                    {
-                        collect_type_ordering_hints(
-                            type_annotation,
-                            &generic_parameters,
-                            &full_name,
-                            context,
-                            &mut local_ordering_hints,
-                            &mut capacity_references,
-                        );
-                    }
+                    collect_type_ordering_hints(
+                        &ret.value.type_annotation,
+                        &generic_parameters,
+                        &full_name,
+                        context,
+                        &mut local_ordering_hints,
+                        &mut capacity_references,
+                    );
                 }
             }
 
@@ -292,20 +286,14 @@ pub(super) fn create_header(
             }
 
             for ret in &signature.returns {
-                if let crate::compiler_frontend::declaration_syntax::signature_members::FunctionReturnSyntax::Value {
-                    type_annotation,
-                    ..
-                } = &ret.value
-                {
-                    collect_type_ordering_hints(
-                        type_annotation,
-                        &generic_parameters,
-                        &full_name,
-                        context,
-                        &mut local_ordering_hints,
-                        &mut capacity_references,
-                    );
-                }
+                collect_type_ordering_hints(
+                    &ret.value.type_annotation,
+                    &generic_parameters,
+                    &full_name,
+                    context,
+                    &mut local_ordering_hints,
+                    &mut capacity_references,
+                );
             }
 
             capture_function_body_tokens(token_stream, &mut body, context.string_table)?;

@@ -430,14 +430,6 @@ impl<'a> HirBuilder<'a> {
             entry: entry_block_id,
             params: vec![],
             return_type,
-            return_aliases: success_returns
-                .iter()
-                .map(|return_value| {
-                    return_value
-                        .alias_candidates()
-                        .map(|indices| indices.to_vec())
-                })
-                .collect(),
         };
 
         self.functions_by_name.insert(name.to_owned(), function_id);

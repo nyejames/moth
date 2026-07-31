@@ -69,7 +69,6 @@ fn lower_minimal_reactive_source_module_with_report(
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let mut module = build_module(
@@ -168,7 +167,6 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let mut module = build_module(
@@ -249,7 +247,6 @@ fn lower_placeholder_template_parameter_module(function_name: &str) -> String {
         entry: BlockId(0),
         params: vec![parameter],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let mut module = build_module(

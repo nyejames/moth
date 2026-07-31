@@ -60,7 +60,6 @@ fn host_io_reads_the_underlying_value_before_logging() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -125,7 +124,6 @@ fn auto_invokes_start_function_when_enabled() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, "start_main", vec![block], function, &[]);

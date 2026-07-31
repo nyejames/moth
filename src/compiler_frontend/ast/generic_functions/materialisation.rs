@@ -19,7 +19,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 use crate::compiler_frontend::ast::module_ast::finalization::AstFinalizer;
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAnnotation,
@@ -754,7 +754,6 @@ struct StableFunctionParameter {
 #[derive(Clone)]
 struct StableFunctionReturn {
     return_type: MaterialisationTypeBlueprint,
-    alias_candidates: Option<Box<[usize]>>,
     channel: ReturnChannel,
 }
 
@@ -1502,15 +1501,8 @@ impl StableFunctionSignature {
                 string_table,
             )?;
             let diagnostic_type = diagnostic_type_spelling(type_id, type_environment);
-            let value = match &returned.alias_candidates {
-                Some(indices) => FunctionReturn::AliasCandidates {
-                    parameter_indices: indices.to_vec(),
-                    data_type: diagnostic_type,
-                },
-                None => FunctionReturn::Value(diagnostic_type),
-            };
             returns.push(ReturnSlot {
-                value,
+                value: diagnostic_type,
                 type_id: Some(type_id),
                 reactive_template: None,
                 channel: returned.channel,
@@ -1947,10 +1939,6 @@ impl ModuleMaterialisationPreparation {
                 })?;
                 Ok(StableFunctionReturn {
                     return_type: self.materialisation_type_blueprint(type_id, parameter_slots)?,
-                    alias_candidates: returned
-                        .value
-                        .alias_candidates()
-                        .map(|indices| indices.to_vec().into_boxed_slice()),
                     channel: returned.channel,
                 })
             })
@@ -3913,23 +3901,9 @@ pub(crate) fn bootstrap_call_summary_from_signature(
             }
         })
         .collect();
-    let mut alias_parameters = signature
-        .success_returns()
-        .into_iter()
-        .filter_map(|returned| returned.alias_candidates())
-        .flatten()
-        .copied()
-        .collect::<Vec<_>>();
-    alias_parameters.sort_unstable();
-    alias_parameters.dedup();
-
     PublicCallSummary {
         parameters,
-        return_alias: if alias_parameters.is_empty() {
-            FunctionReturnAliasSummary::Fresh
-        } else {
-            FunctionReturnAliasSummary::AliasParams(alias_parameters)
-        },
+        return_alias: FunctionReturnAliasSummary::Fresh,
     }
 }
 

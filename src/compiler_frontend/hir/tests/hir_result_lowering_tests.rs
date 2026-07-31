@@ -26,9 +26,9 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    alias_candidates_return_slot, error_return_slot, fresh_success_returns, multi_bind_target,
-    param_with_type_id, reference_expr, runtime_expr, runtime_handled_function_call_item,
-    runtime_operand_item, runtime_operator_item, success_return_slot,
+    error_return_slot, fresh_success_returns, multi_bind_target, param_with_type_id,
+    reference_expr, runtime_expr, runtime_handled_function_call_item, runtime_operand_item,
+    runtime_operator_item, success_return_slot,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -265,7 +265,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
                 location.clone(),
             )],
             returns: vec![
-                alias_candidates_return_slot(vec![0], builtin_type_ids::STRING),
+                success_return_slot(builtin_type_ids::STRING),
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
@@ -310,7 +310,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
                 location.clone(),
             )],
             returns: vec![
-                alias_candidates_return_slot(vec![0], builtin_type_ids::STRING),
+                success_return_slot(builtin_type_ids::STRING),
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
@@ -350,11 +350,6 @@ fn direct_return_result_propagation_allows_alias_success_return() {
                 .is_some_and(|path| path == &forward_name)
         })
         .expect("forward function should exist");
-    assert_eq!(
-        forward_function.return_aliases,
-        vec![Some(vec![0])],
-        "forwarding through ! should preserve the declared alias success slot"
-    );
 
     let forward_entry = module
         .blocks

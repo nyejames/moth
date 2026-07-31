@@ -20,7 +20,6 @@
 //! - `parsed_ref_to_data_type` syntax-to-diagnostic spelling (lives in `declaration_syntax::type_syntax`)
 
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
-use crate::compiler_frontend::ast::statements::functions::FunctionReturn;
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionResult, aliases,
     collections::fold_collection_capacity,
@@ -432,12 +431,7 @@ pub(crate) fn resolve_diagnostic_type_to_type_id_opt(
             let return_ids: Box<[TypeId]> = signature
                 .returns
                 .iter()
-                .filter_map(|r| match &r.value {
-                    FunctionReturn::Value(dt) => {
-                        resolve_diagnostic_type_to_type_id_opt(dt, type_environment)
-                    }
-                    _ => None,
-                })
+                .filter_map(|r| resolve_diagnostic_type_to_type_id_opt(&r.value, type_environment))
                 .collect();
             Some(type_environment.intern_function(FunctionTypeKey {
                 parameters: param_ids,
@@ -568,14 +562,8 @@ pub(crate) fn resolve_type(
             }
 
             for return_slot in &mut resolved_signature.returns {
-                match &mut return_slot.value {
-                    FunctionReturn::Value(return_type) => {
-                        *return_type = resolve_type(return_type, location, context, string_table)?;
-                    }
-                    FunctionReturn::AliasCandidates { data_type, .. } => {
-                        *data_type = resolve_type(data_type, location, context, string_table)?;
-                    }
-                }
+                return_slot.value =
+                    resolve_type(&return_slot.value, location, context, string_table)?;
             }
 
             Ok(DataType::Function(

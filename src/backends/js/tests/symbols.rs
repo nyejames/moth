@@ -118,14 +118,12 @@ fn exposes_function_name_map_for_runtime_fragments() {
             entry: BlockId(0),
             params: vec![],
             return_type: types.unit,
-            return_aliases: vec![],
         },
         HirFunction {
             id: FunctionId(1),
             entry: BlockId(1),
             params: vec![],
             return_type: types.unit,
-            return_aliases: vec![],
         },
     ];
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];

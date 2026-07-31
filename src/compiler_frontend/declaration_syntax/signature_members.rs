@@ -10,7 +10,6 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFunctionSignatureReason, InvalidSignatureMemberReason,
-    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -69,15 +68,9 @@ pub enum ReturnChannelSyntax {
 
 /// One parsed function return item before AST type resolution.
 #[derive(Clone, Debug)]
-pub enum FunctionReturnSyntax {
-    Value {
-        type_annotation: ParsedTypeRef,
-        location: SourceLocation,
-    },
-    AliasCandidates {
-        parameter_indices: Vec<usize>,
-        location: SourceLocation,
-    },
+pub struct FunctionReturnSyntax {
+    pub type_annotation: ParsedTypeRef,
+    pub location: SourceLocation,
 }
 
 #[derive(Clone, Debug)]
@@ -111,19 +104,8 @@ impl FunctionReturnSyntax {
     /// Remap return type references and source locations into the merged string table.
     // Called by per-file frontend output remapping before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        match self {
-            FunctionReturnSyntax::Value {
-                type_annotation,
-                location,
-            } => {
-                type_annotation.remap_string_ids(remap);
-                location.remap_string_ids(remap);
-            }
-
-            FunctionReturnSyntax::AliasCandidates { location, .. } => {
-                location.remap_string_ids(remap);
-            }
-        }
+        self.type_annotation.remap_string_ids(remap);
+        self.location.remap_string_ids(remap);
     }
 }
 
@@ -930,45 +912,10 @@ fn parse_return_list_syntax(
 
 fn parse_single_return_item_syntax(
     token_stream: &mut FileTokens,
-    parameters: &[SignatureMemberSyntax],
-    string_table: &mut StringTable,
+    _parameters: &[SignatureMemberSyntax],
+    string_table: &StringTable,
     type_context: TypeAnnotationContext,
 ) -> SignatureMemberParseResult<ReturnSlotSyntax> {
-    let location = token_stream.current_location();
-    if let Some(symbol) = parameter_alias_symbol(token_stream.current_token_kind(), string_table) {
-        if type_context == TypeAnnotationContext::TraitRequirement
-            && parameters
-                .iter()
-                .any(|parameter| parameter.id.name() == Some(symbol))
-        {
-            return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::AliasReturnNotAllowedInTraitRequirement,
-                location,
-            )
-            .into());
-        }
-
-        if parameters
-            .iter()
-            .any(|parameter| parameter.id.name() == Some(symbol))
-        {
-            return parse_alias_return_item_syntax(
-                token_stream,
-                parameters,
-                string_table,
-                location,
-            );
-        }
-
-        if string_table.resolve(symbol) == "Void" {
-            return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::VoidNotAllowed,
-                location,
-            )
-            .into());
-        }
-    }
-
     parse_value_return_type_syntax(token_stream, string_table, type_context)
 }
 
@@ -996,97 +943,11 @@ fn parse_value_return_type_syntax(
     };
 
     Ok(ReturnSlotSyntax {
-        value: FunctionReturnSyntax::Value {
+        value: FunctionReturnSyntax {
             type_annotation,
             location: location.clone(),
         },
         channel,
-        location,
-    })
-}
-
-fn parse_alias_return_item_syntax(
-    token_stream: &mut FileTokens,
-    parameters: &[SignatureMemberSyntax],
-    string_table: &mut StringTable,
-    location: SourceLocation,
-) -> SignatureMemberParseResult<ReturnSlotSyntax> {
-    let mut candidate_indices = Vec::new();
-
-    loop {
-        let Some(current_symbol) =
-            parameter_alias_symbol(token_stream.current_token_kind(), string_table)
-        else {
-            return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::MissingParameterNameInAlias,
-                token_stream.current_location(),
-            )
-            .into());
-        };
-
-        let Some((parameter_index, _parameter)) = parameters
-            .iter()
-            .enumerate()
-            .find(|(_, parameter)| parameter.id.name() == Some(current_symbol))
-        else {
-            return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::UnknownReturnAlias {
-                    name: current_symbol,
-                },
-                location,
-            )
-            .into());
-        };
-
-        if candidate_indices.contains(&parameter_index) {
-            return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::DuplicateParameterInAlias,
-                token_stream.current_location(),
-            )
-            .into());
-        }
-
-        candidate_indices.push(parameter_index);
-        token_stream.advance();
-
-        match token_stream.current_token_kind() {
-            TokenKind::Or => {
-                token_stream.advance();
-                if parameter_alias_symbol(token_stream.current_token_kind(), string_table).is_none()
-                {
-                    return Err(CompilerDiagnostic::invalid_function_signature(
-                        InvalidFunctionSignatureReason::MissingParameterNameInAlias,
-                        token_stream.current_location(),
-                    )
-                    .into());
-                }
-            }
-            _ => break,
-        }
-    }
-
-    if candidate_indices.is_empty() {
-        return Err(CompilerDiagnostic::invalid_function_signature(
-            InvalidFunctionSignatureReason::MissingParameterNameInAlias,
-            location,
-        )
-        .into());
-    }
-
-    if token_stream.current_token_kind() == &TokenKind::Bang {
-        return Err(CompilerDiagnostic::invalid_function_signature(
-            InvalidFunctionSignatureReason::AliasCannotBeError,
-            token_stream.current_location(),
-        )
-        .into());
-    }
-
-    Ok(ReturnSlotSyntax {
-        value: FunctionReturnSyntax::AliasCandidates {
-            parameter_indices: candidate_indices,
-            location: location.clone(),
-        },
-        channel: ReturnChannelSyntax::Success,
         location,
     })
 }
@@ -1121,11 +982,7 @@ fn validate_return_slots_syntax(
     }
 
     for return_slot in returns {
-        if let FunctionReturnSyntax::Value {
-            type_annotation, ..
-        } = &return_slot.value
-            && parsed_type_ref_is_void(type_annotation, string_table)
-        {
+        if parsed_type_ref_is_void(&return_slot.value.type_annotation, string_table) {
             return Err(CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::VoidNotAllowed,
                 token_stream.current_location(),
@@ -1137,31 +994,10 @@ fn validate_return_slots_syntax(
     Ok(())
 }
 
-fn parameter_alias_symbol(token: &TokenKind, string_table: &mut StringTable) -> Option<StringId> {
-    match token {
-        TokenKind::Symbol(symbol) => Some(*symbol),
-        TokenKind::This => Some(string_table.intern("this")),
-        _ => None,
-    }
-}
-
 fn parsed_type_ref_is_void(type_ref: &ParsedTypeRef, string_table: &StringTable) -> bool {
     matches!(
         type_ref,
         ParsedTypeRef::Named { name, .. } if string_table.resolve(*name) == "Void"
-    )
-}
-
-pub(crate) fn alias_return_type_mismatch_diagnostic(
-    existing_type_id: crate::compiler_frontend::datatypes::ids::TypeId,
-    param_type_id: crate::compiler_frontend::datatypes::ids::TypeId,
-    location: SourceLocation,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::type_mismatch(
-        existing_type_id,
-        param_type_id,
-        TypeMismatchContext::General,
-        location,
     )
 }
 

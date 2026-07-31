@@ -55,7 +55,6 @@ fn map_get_statement_lowers_to_helper() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -130,7 +129,6 @@ fn map_set_statement_without_result_emits_plain_call() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -224,7 +222,6 @@ fn map_infallible_ops_lower_to_plain_helpers() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -311,7 +308,6 @@ fn map_remove_statement_lowers_to_helper() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(

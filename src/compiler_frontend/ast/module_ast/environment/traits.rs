@@ -876,21 +876,12 @@ fn return_slot_with_trait_this(
     this_name: StringId,
 ) -> ReturnSlotSyntax {
     ReturnSlotSyntax {
-        value: match &return_slot.value {
-            FunctionReturnSyntax::Value {
-                type_annotation,
-                location,
-            } => FunctionReturnSyntax::Value {
-                type_annotation: parsed_type_with_trait_this(type_annotation, this_name),
-                location: location.clone(),
-            },
-            FunctionReturnSyntax::AliasCandidates {
-                parameter_indices,
-                location,
-            } => FunctionReturnSyntax::AliasCandidates {
-                parameter_indices: parameter_indices.clone(),
-                location: location.clone(),
-            },
+        value: FunctionReturnSyntax {
+            type_annotation: parsed_type_with_trait_this(
+                &return_slot.value.type_annotation,
+                this_name,
+            ),
+            location: return_slot.value.location.clone(),
         },
         channel: return_slot.channel,
         location: return_slot.location.clone(),

@@ -1,8 +1,6 @@
 //! Function signature resolution for AST type resolution.
 
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionResult, resolve_diagnostic_type_to_type_id_checked,
 };
@@ -109,32 +107,15 @@ pub(crate) fn resolve_function_signature(
     let mut resolved_returns = Vec::with_capacity(signature.returns.len());
 
     for return_slot in &signature.returns {
-        let resolved_value = match &return_slot.value {
-            FunctionReturn::Value(data_type) => {
-                FunctionReturn::Value(resolve_named_signature_type(
-                    data_type,
-                    &function_location,
-                    type_resolution_context,
-                    string_table,
-                )?)
-            }
-
-            FunctionReturn::AliasCandidates {
-                parameter_indices,
-                data_type,
-            } => FunctionReturn::AliasCandidates {
-                parameter_indices: parameter_indices.to_owned(),
-                data_type: resolve_named_signature_type(
-                    data_type,
-                    &function_location,
-                    type_resolution_context,
-                    string_table,
-                )?,
-            },
-        };
+        let resolved_value = resolve_named_signature_type(
+            &return_slot.value,
+            &function_location,
+            type_resolution_context,
+            string_table,
+        )?;
 
         let type_id = resolve_diagnostic_type_to_type_id_checked(
-            resolved_value.data_type(),
+            &resolved_value,
             type_resolution_context.type_environment,
             &function_location,
         )?;

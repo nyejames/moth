@@ -33,6 +33,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+
 pub(super) use crate::compiler_frontend::symbols::interned_path::InternedPath;
 pub(super) use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(super) use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
@@ -312,7 +313,6 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
@@ -361,7 +361,6 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
@@ -423,7 +422,6 @@ fn lower_minimal_module_with_cast(
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
@@ -528,7 +526,6 @@ pub(super) fn lower_minimal_module_with_io_call(
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
@@ -606,7 +603,6 @@ pub(super) fn lower_minimal_module_with_io_input_call(
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, function_name, vec![block], function, &[]);

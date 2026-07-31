@@ -166,7 +166,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Broad declaration, terminality, call validation, named and positional arguments, defaults, parameter passing, external calls, and return coverage.]
             [: Frontend / JS / HTML]
-            [: Named calls and defaulted parameters are supported. Non-unit success-return functions are validated for all-path terminality before HIR. External and compiler-owned builtin calls remain positional-only. Implementation gap: the current compiler still parses source-authored return-alias syntax (parameter-name return slots). Accepted design removes source-authored alias returns; return slots contain types and channels only. The compiler infers freshness and alias effects. Stage B of the docs language migration plan removes the obsolete parser, AST and HIR support.]
+            [: Named calls and defaulted parameters are supported. Non-unit success-return functions are validated for all-path terminality before HIR. External and compiler-owned builtin calls remain positional-only. Return slots contain types and channels only. The compiler infers freshness and alias effects from validated bodies and calls. Source-authored return-alias syntax has been removed.]
         ]
 
         [data:

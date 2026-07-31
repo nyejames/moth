@@ -20,7 +20,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
@@ -76,7 +76,7 @@ fn composed_reference(template_id: TemplateIrId) -> TemplateTirReference {
 
 fn string_return_slot() -> ReturnSlot {
     ReturnSlot {
-        value: FunctionReturn::Value(DataType::StringSlice),
+        value: DataType::StringSlice,
         type_id: Some(builtin_type_ids::STRING),
         reactive_template: None,
         channel: ReturnChannel::Success,

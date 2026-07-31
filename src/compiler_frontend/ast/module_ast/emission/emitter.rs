@@ -25,7 +25,7 @@ use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::statements::terminality::{
     terminality_policy_for_signature, validate_function_body_terminality,
@@ -1061,7 +1061,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let start_signature = FunctionSignature {
             parameters: vec![],
             returns: vec![ReturnSlot {
-                value: FunctionReturn::Value(start_return_type),
+                value: start_return_type,
                 type_id: Some(start_return_type_id),
                 reactive_template: None,
                 channel: ReturnChannel::Success,

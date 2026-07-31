@@ -205,19 +205,6 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    /// Lower an expression as a return value.
-    ///
-    /// WHAT: delegates to `lower_expression_for_use` with `JsValueUse::ReturnValue` to
-    /// ensure the expression is wrapped in a return-value binding when needed.
-    /// WHY: return values may need special handling (e.g. temporary binding) that differs
-    /// from plain expression contexts.
-    pub(crate) fn lower_return_value_expression(
-        &mut self,
-        expression: &HirExpression,
-    ) -> Result<String, CompilerError> {
-        self.lower_expression_for_use(expression, JsValueUse::ReturnValue)
-    }
-
     // ------------------------
     //  Variant construction
     // ------------------------

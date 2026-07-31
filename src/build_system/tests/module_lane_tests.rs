@@ -57,7 +57,6 @@ fn minimal_hir_module(start_name_path: InternedPath) -> HirModule {
         entry: BlockId(0),
         params: vec![],
         return_type: NONE,
-        return_aliases: vec![],
     }];
     module.start_function = Some(FunctionId(0));
     module

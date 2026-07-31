@@ -621,7 +621,6 @@ fn function(id: FunctionId, entry: BlockId) -> HirFunction {
         entry,
         params: vec![],
         return_type: builtin_type_ids::NONE,
-        return_aliases: vec![],
     }
 }
 

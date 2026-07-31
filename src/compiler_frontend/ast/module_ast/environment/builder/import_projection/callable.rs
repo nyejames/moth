@@ -248,7 +248,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         CompilerError,
     > {
         use crate::compiler_frontend::ast::statements::functions::{
-            FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+            FunctionSignature, ReturnChannel, ReturnSlot,
         };
 
         let mut parameters = Vec::with_capacity(parameter_surfaces.len());
@@ -295,7 +295,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         for returned in return_surfaces {
             let type_id = self.intern_imported_canonical_type(&returned.type_identity)?;
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
-            let mut slot = ReturnSlot::success(FunctionReturn::Value(diagnostic_type));
+            let mut slot = ReturnSlot::success(diagnostic_type);
             slot.type_id = Some(type_id);
             returns.push(slot);
             return_type_ids.push(type_id);
@@ -305,7 +305,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let type_id = self.intern_imported_canonical_type(error_identity)?;
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
             returns.push(ReturnSlot {
-                value: FunctionReturn::Value(diagnostic_type),
+                value: diagnostic_type,
                 type_id: Some(type_id),
                 reactive_template: None,
                 channel: ReturnChannel::Error,

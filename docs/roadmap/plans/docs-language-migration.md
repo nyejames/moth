@@ -3,13 +3,19 @@
 ## Current state
 
 ```text
+WORK_ID: docs-lang-mig
+WORK_SOURCE: docs/roadmap/plans/docs-language-migration.md
+BASE_REVISION: a1cfe6199
 STATUS: active
-CURRENT_STAGE: Stage B compiler semantic realignment
+CURRENT_SCOPE: B2 unify compiler String semantics
 STAGE_A: complete and accepted
 STAGE_W: complete and accepted
 PRE_B1_CLOSEOUT: complete, full gate green at d82b86d74
-VALIDATION: full gate green at d82b86d74
-NEXT_ACTION: B1 remove source-authored return aliases
+COMPLETED: B1 source-authored return aliases removed (a1cfe6199)
+NEXT_ACTION: B2 unify compiler String semantics
+VALIDATION: just validate green, docs build green, 1812/1812 integration correct
+AUDITS: none
+BLOCKERS: none
 STAGE_C: blocked until Stage B completes
 ```
 

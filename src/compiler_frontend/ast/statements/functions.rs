@@ -26,8 +26,8 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
-    FunctionReturnSyntax, FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax,
-    SignatureMemberSyntax, alias_return_type_mismatch_diagnostic, parse_function_signature_syntax,
+    FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
+    parse_function_signature_syntax,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -44,34 +44,6 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 /// and default-expression helper uniform.
 type SignatureResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
-/// One function return slot, either a concrete value type or a parameter-alias set.
-#[derive(Clone, Debug, PartialEq)]
-pub enum FunctionReturn {
-    Value(DataType),
-    AliasCandidates {
-        parameter_indices: Vec<usize>,
-        data_type: DataType,
-    },
-}
-
-impl FunctionReturn {
-    pub fn data_type(&self) -> &DataType {
-        match self {
-            FunctionReturn::Value(data_type) => data_type,
-            FunctionReturn::AliasCandidates { data_type, .. } => data_type,
-        }
-    }
-
-    pub fn alias_candidates(&self) -> Option<&[usize]> {
-        match self {
-            FunctionReturn::Value(_) => None,
-            FunctionReturn::AliasCandidates {
-                parameter_indices, ..
-            } => Some(parameter_indices.as_slice()),
-        }
-    }
-}
-
 /// Whether a return slot carries success-channel or error-channel values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReturnChannel {
@@ -82,7 +54,7 @@ pub enum ReturnChannel {
 /// Parsed return slot with a value shape, optional resolved type, and channel discriminator.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReturnSlot {
-    pub value: FunctionReturn,
+    pub value: DataType,
     /// Canonical `TypeId` for this return slot, populated during type resolution.
     /// `None` before resolution; `Some` afterwards.
     pub type_id: Option<TypeId>,
@@ -97,7 +69,7 @@ pub struct ReturnSlot {
 }
 
 impl ReturnSlot {
-    pub fn success(value: FunctionReturn) -> Self {
+    pub fn success(value: DataType) -> Self {
         Self {
             value,
             type_id: None,
@@ -107,19 +79,7 @@ impl ReturnSlot {
     }
 
     pub fn data_type(&self) -> &DataType {
-        self.value.data_type()
-    }
-}
-
-impl PartialEq<FunctionReturn> for ReturnSlot {
-    fn eq(&self, other: &FunctionReturn) -> bool {
-        self.channel == ReturnChannel::Success && &self.value == other
-    }
-}
-
-impl PartialEq<ReturnSlot> for FunctionReturn {
-    fn eq(&self, other: &ReturnSlot) -> bool {
-        other == self
+        &self.value
     }
 }
 
@@ -160,7 +120,7 @@ impl FunctionSignature {
         )
     }
 
-    pub fn success_returns(&self) -> Vec<&FunctionReturn> {
+    pub fn success_returns(&self) -> Vec<&DataType> {
         self.returns
             .iter()
             .filter(|slot| slot.channel == ReturnChannel::Success)
@@ -168,7 +128,7 @@ impl FunctionSignature {
             .collect()
     }
 
-    pub fn error_return(&self) -> Option<&FunctionReturn> {
+    pub fn error_return(&self) -> Option<&DataType> {
         self.returns
             .iter()
             .find(|slot| slot.channel == ReturnChannel::Error)
@@ -232,7 +192,6 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     for return_slot in &syntax.returns {
         returns.push(return_slot_from_syntax(
             return_slot,
-            &parameters,
             expression_context,
             type_interner,
             string_table,
@@ -451,10 +410,9 @@ fn token_stream_with_eof(tokens: &[Token]) -> SignatureResult<FileTokens> {
     Ok(FileTokens::new(src_path, tokens_with_eof))
 }
 
-/// Build a `ReturnSlot` from parsed syntax, validating alias-candidate type consistency.
+/// Build a `ReturnSlot` from parsed syntax.
 fn return_slot_from_syntax(
     return_slot: &ReturnSlotSyntax,
-    parameters: &[Declaration],
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -465,62 +423,26 @@ fn return_slot_from_syntax(
         ReturnChannelSyntax::Error => ReturnChannel::Error,
     };
 
-    let value = match &return_slot.value {
-        FunctionReturnSyntax::Value {
-            type_annotation,
-            location,
-        } => {
-            let resolved = resolve_signature_type_annotation(
-                type_annotation.clone(),
-                location,
-                expression_context,
-                type_interner,
-                string_table,
-            );
+    let resolved = resolve_signature_type_annotation(
+        return_slot.value.type_annotation.clone(),
+        &return_slot.value.location,
+        expression_context,
+        type_interner,
+        string_table,
+    );
 
-            let data_type = match resolved {
-                Ok(annotation) => annotation.diagnostic_type,
-                Err(diagnostic) if should_fallback_signature_type(&diagnostic, fallback_policy) => {
-                    // Generic return types may be resolved later once the function's
-                    // declaration-site generic parameter scope is active.
-                    parsed_ref_to_data_type(type_annotation)
-                }
-                Err(diagnostic) => return Err(diagnostic),
-            };
-
-            FunctionReturn::Value(data_type)
+    let data_type = match resolved {
+        Ok(annotation) => annotation.diagnostic_type,
+        Err(diagnostic) if should_fallback_signature_type(&diagnostic, fallback_policy) => {
+            // Generic return types may be resolved later once the function's
+            // declaration-site generic parameter scope is active.
+            parsed_ref_to_data_type(&return_slot.value.type_annotation)
         }
-
-        FunctionReturnSyntax::AliasCandidates {
-            parameter_indices,
-            location,
-        } => {
-            let first_index = parameter_indices[0];
-            let first_parameter = &parameters[first_index];
-            let first_type_id = first_parameter.value.type_id;
-            let mut data_type = first_parameter.value.diagnostic_type.clone();
-
-            for parameter_index in parameter_indices.iter().copied().skip(1) {
-                let parameter = &parameters[parameter_index];
-                if parameter.value.type_id != first_type_id {
-                    return Err(Box::new(alias_return_type_mismatch_diagnostic(
-                        first_type_id,
-                        parameter.value.type_id,
-                        location.clone(),
-                    )));
-                }
-                data_type = parameter.value.diagnostic_type.clone();
-            }
-
-            FunctionReturn::AliasCandidates {
-                parameter_indices: parameter_indices.clone(),
-                data_type,
-            }
-        }
+        Err(diagnostic) => return Err(diagnostic),
     };
 
     Ok(ReturnSlot {
-        value,
+        value: data_type,
         type_id: None,
         reactive_template: None,
         channel,

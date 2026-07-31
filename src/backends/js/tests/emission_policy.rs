@@ -143,7 +143,6 @@ fn function(
         entry: BlockId(entry_block_id),
         params: vec![],
         return_type,
-        return_aliases: vec![],
     }
 }
 

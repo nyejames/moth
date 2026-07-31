@@ -98,22 +98,6 @@ pub(crate) fn invalid_function_signature_message(
         InvalidFunctionSignatureReason::VoidNotAllowed => {
             "Void is not a valid function return declaration.".to_string()
         }
-        InvalidFunctionSignatureReason::UnknownReturnAlias { .. } => {
-            "Unknown return alias. Alias returns must name a function parameter.".to_string()
-        }
-        InvalidFunctionSignatureReason::MissingParameterNameInAlias => {
-            "Expected a parameter name in an alias return declaration.".to_string()
-        }
-        InvalidFunctionSignatureReason::DuplicateParameterInAlias => {
-            "Duplicate parameter used in the same alias return declaration.".to_string()
-        }
-        InvalidFunctionSignatureReason::AliasCannotBeError => {
-            "Alias return declarations cannot be marked as an error slot in v1.".to_string()
-        }
-        InvalidFunctionSignatureReason::AliasReturnNotAllowedInTraitRequirement => {
-            "Trait requirements cannot use return aliases. Write an explicit return type instead."
-                .to_string()
-        }
         InvalidFunctionSignatureReason::MultipleErrorReturnSlots => {
             "Function signatures can only declare one distinguished error return slot.".to_string()
         }

@@ -43,7 +43,6 @@ fn local_slot_assignment_emits_assign_value() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -94,7 +93,6 @@ fn function_parameters_emit_param_binding() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -173,7 +171,6 @@ fn borrow_assignment_emits_assign_borrow() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -267,7 +264,6 @@ fn alias_local_read_emits_bs_read() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -324,7 +320,6 @@ fn alias_only_local_assignment_emits_write() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -408,7 +403,6 @@ fn field_place_emits_bs_field() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let mut module = build_module(
@@ -483,7 +477,6 @@ fn index_place_emits_bs_index() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -552,7 +545,6 @@ fn computed_place_read_composes_with_bs_read() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let mut module = build_module(

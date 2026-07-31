@@ -5,8 +5,8 @@ Counter = |
     step Int,
 |
 
--- Returns an alias of the shared parameter, declared with the `-> value` alias-return form.
-alias_of |value Counter| -> value:
+-- Returns an alias of the shared parameter. Aliasing is inferred from the return expression.
+alias_of |value Counter| -> Counter:
     return value
 ;
 

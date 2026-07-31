@@ -83,7 +83,6 @@ fn integer_division_binop_emits_zero_checked_truncation_path() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -173,7 +172,6 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -243,7 +241,6 @@ fn lowers_option_construct_expression() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, "main", vec![block], function, &[]);
@@ -301,7 +298,6 @@ fn growable_collection_expression_lowers_to_array() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, "main", vec![block], function, &[]);
@@ -361,7 +357,6 @@ fn fixed_collection_expression_lowers_to_wrapper() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, "main", vec![block], function, &[]);
@@ -414,7 +409,6 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, "main", vec![block], function, &[]);
@@ -475,7 +469,6 @@ fn map_literal_with_entries_lowers_to_map_new() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, "main", vec![block], function, &[]);
@@ -526,7 +519,6 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, "main", vec![block], function, &[]);

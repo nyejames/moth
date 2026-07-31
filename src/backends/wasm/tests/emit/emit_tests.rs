@@ -46,7 +46,6 @@ fn lowers_hir_to_wasm_module_bytes() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
 
     let hir_module = build_module(
@@ -125,7 +124,6 @@ fn rejects_invalid_helper_export_policy() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let hir_module = build_module(
         &mut string_table,
@@ -196,7 +194,6 @@ fn rejects_unsupported_wasm_feature_flags() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let hir_module = build_module(
         &mut string_table,
@@ -243,7 +240,6 @@ fn rejects_unsupported_cfg_lowering_strategy() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let hir_module = build_module(
         &mut string_table,

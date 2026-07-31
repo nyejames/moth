@@ -261,9 +261,6 @@ impl DiagnosticPayload {
             DiagnosticPayload::InvalidSignatureMember { .. } => {}
 
             DiagnosticPayload::InvalidFunctionSignature { reason } => {
-                if let InvalidFunctionSignatureReason::UnknownReturnAlias { name } = reason {
-                    *name = remap.get(*name);
-                }
                 if let InvalidFunctionSignatureReason::MissingArrowOrColon { found }
                 | InvalidFunctionSignatureReason::MissingCommaOrColon { found } = reason
                 {

@@ -34,7 +34,6 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: types.int,
-        return_aliases: vec![None],
     };
 
     // Caller: let receiver = 7; let result = bump(receiver); return result
@@ -79,7 +78,6 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         entry: BlockId(1),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
 
     let mut module = HirModule::new();
@@ -149,7 +147,6 @@ fn receiver_method_call_assigns_value_for_fresh_return() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: types.int,
-        return_aliases: vec![None], // fresh return
     };
 
     let call_bump = statement(
@@ -179,7 +176,6 @@ fn receiver_method_call_assigns_value_for_fresh_return() {
         entry: BlockId(1),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
 
     let mut module = HirModule::new();
@@ -227,112 +223,6 @@ fn receiver_method_call_assigns_value_for_fresh_return() {
             "__moth_assign_value({result_name}, {callee_name}("
         )),
         "fresh-return receiver call must assign result with __moth_assign_value"
-    );
-}
-
-/// Verifies that a receiver method with an alias return emits __moth_assign_borrow. [receiver] [alias]
-#[test]
-fn receiver_method_call_assigns_borrow_for_alias_return() {
-    let mut string_table = StringTable::new();
-    let (type_environment, types) = build_type_environment();
-    let region = RegionId(0);
-
-    let callee_block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![],
-        statements: vec![],
-        terminator: HirTerminator::Return(expression(
-            1,
-            HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-            types.int,
-            region,
-            ValueKind::RValue,
-        )),
-    };
-    let callee = HirFunction {
-        id: FunctionId(1),
-        entry: BlockId(0),
-        params: vec![LocalId(0)],
-        return_type: types.int,
-        return_aliases: vec![Some(vec![0])], // alias to arg 0 (receiver)
-    };
-
-    let call_self_ref = statement(
-        1,
-        HirStatementKind::Call {
-            target: CallTarget::Local(FunctionId(1)),
-            args: vec![expression(
-                1,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-                types.int,
-                region,
-                ValueKind::Place,
-            )],
-            result: Some(LocalId(1)),
-        },
-        1,
-    );
-    let caller_block = HirBlock {
-        id: BlockId(1),
-        region,
-        locals: vec![local(0, types.int, region), local(1, types.int, region)],
-        statements: vec![call_self_ref],
-        terminator: HirTerminator::Return(int_expression(2, 0, types.int, region)),
-    };
-    let caller = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(1),
-        params: vec![],
-        return_type: types.int,
-        return_aliases: vec![],
-    };
-
-    let mut module = HirModule::new();
-    module.blocks = vec![callee_block, caller_block];
-    module.functions = vec![caller, callee];
-    module.start_function = Some(FunctionId(0));
-    module.regions = vec![HirRegion::lexical(RegionId(0), None)];
-    module.side_table.bind_function_name(
-        FunctionId(0),
-        InternedPath::from_single_str("main", &mut string_table),
-    );
-    module.side_table.bind_function_name(
-        FunctionId(1),
-        InternedPath::from_single_str("self_ref", &mut string_table),
-    );
-    module.side_table.bind_local_name(
-        LocalId(0),
-        InternedPath::from_single_str("receiver", &mut string_table),
-    );
-    module.side_table.bind_local_name(
-        LocalId(1),
-        InternedPath::from_single_str("alias", &mut string_table),
-    );
-    module
-        .function_origins
-        .insert(FunctionId(0), HirFunctionOrigin::Normal);
-    module
-        .function_origins
-        .insert(FunctionId(1), HirFunctionOrigin::Normal);
-
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
-    .expect("JS lowering should succeed");
-
-    let result_name = expected_dev_local_name("alias", 1);
-    let callee_name = expected_dev_function_name("self_ref", 1);
-
-    assert!(
-        output.source.contains(&format!(
-            "__moth_assign_borrow({result_name}, {callee_name}(",
-        )),
-        "alias-return receiver call must assign result with __moth_assign_borrow"
     );
 }
 

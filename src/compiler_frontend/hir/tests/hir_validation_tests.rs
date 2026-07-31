@@ -42,9 +42,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::tests::hir_expression_lowering_tests::location;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    no_value_expr, reference_expr, success_return_slot,
-};
+use crate::compiler_frontend::tests::type_id_fixture_support::no_value_expr;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -1223,50 +1221,6 @@ fn validator_rejects_missing_region_parent() {
         .expect_err("validator should reject missing region parents");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("missing parent"));
-}
-
-#[test]
-fn validator_rejects_out_of_range_return_alias_metadata() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let p = super::symbol("p", &mut string_table);
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![param(
-                p.clone(),
-                builtin_type_ids::INT,
-                false,
-                test_location(1),
-            )],
-            returns: vec![success_return_slot(builtin_type_ids::INT)],
-        },
-        vec![node(
-            NodeKind::Return(vec![reference_expr(
-                p,
-                builtin_type_ids::INT,
-                test_location(2),
-                ValueMode::ImmutableReference,
-            )]),
-            test_location(2),
-        )],
-        test_location(1),
-    );
-
-    let ast = build_ast(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table).expect("lowering should succeed");
-    let start_index = module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize;
-    module.functions[start_index].return_aliases = vec![Some(vec![1])];
-
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject out-of-range return alias indices");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("out-of-range parameter index"));
 }
 
 #[test]

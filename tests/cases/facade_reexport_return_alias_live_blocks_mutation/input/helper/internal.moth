@@ -4,6 +4,6 @@ Counter = |
     step Int,
 |
 
-alias_of |value Counter| -> value:
+alias_of |value Counter| -> Counter:
     return value
 ;

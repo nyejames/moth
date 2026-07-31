@@ -32,10 +32,6 @@ pub(crate) enum JsValueUse {
     /// Argument to a host or external JS function call.
     /// These cross the Moth-reference ABI boundary and receive raw JS values.
     HostCallArgument,
-
-    /// Return value from a function.
-    /// Preserves alias-return behavior: `Load` passes the binding ref, `Copy` clones.
-    ReturnValue,
 }
 
 impl<'hir> JsEmitter<'hir> {
@@ -72,15 +68,30 @@ impl<'hir> JsEmitter<'hir> {
                     self.lower_call_argument_value(expression)
                 }
             }
+        }
+    }
 
-            JsValueUse::ReturnValue => {
-                // Returns preserve reactive template values so callers can mount or compose them.
-                if self.value_is_reactive_template(expression.id) {
-                    self.lower_reactive_template_value(expression)
-                } else {
-                    self.lower_return_value(expression)
-                }
+    pub(crate) fn lower_fresh_return_value(
+        &mut self,
+        expression: &HirExpression,
+    ) -> Result<String, CompilerError> {
+        match &expression.kind {
+            HirExpressionKind::Load(place) => Ok(format!(
+                "__moth_clone_value(__moth_read({}))",
+                self.lower_place(place)?
+            )),
+            HirExpressionKind::Copy(place) => Ok(format!(
+                "__moth_clone_value(__moth_read({}))",
+                self.lower_place(place)?
+            )),
+            HirExpressionKind::TupleConstruct { elements } => {
+                let lowered = elements
+                    .iter()
+                    .map(|element| self.lower_fresh_return_value(element))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(format!("[{}]", lowered.join(", ")))
             }
+            _ => self.lower_expr(expression),
         }
     }
 
@@ -111,24 +122,6 @@ impl<'hir> JsEmitter<'hir> {
                 self.lower_place(place)?
             )),
             _ => Ok(format!("__moth_binding({})", self.lower_expr(expression)?)),
-        }
-    }
-
-    fn lower_return_value(&mut self, expression: &HirExpression) -> Result<String, CompilerError> {
-        match &expression.kind {
-            HirExpressionKind::Load(place) => self.lower_place(place),
-            HirExpressionKind::Copy(place) => Ok(format!(
-                "__moth_clone_value(__moth_read({}))",
-                self.lower_place(place)?
-            )),
-            HirExpressionKind::TupleConstruct { elements } => {
-                let lowered = elements
-                    .iter()
-                    .map(|element| self.lower_return_value(element))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(format!("[{}]", lowered.join(", ")))
-            }
-            _ => self.lower_expr(expression),
         }
     }
 }

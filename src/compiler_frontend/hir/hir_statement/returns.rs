@@ -18,10 +18,6 @@ impl<'a> HirBuilder<'a> {
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
         let function_id = self.current_function_id_or_error(location)?;
-        let return_aliases = self
-            .function_by_id_or_error(function_id, location)?
-            .return_aliases
-            .clone();
 
         let handled_direct_propagation = values.len() == 1
             && self.lower_fallible_propagating_direct_return(&values[0], location)?;
@@ -31,37 +27,8 @@ impl<'a> HirBuilder<'a> {
 
         let mut lowered_values = Vec::with_capacity(values.len());
 
-        for (return_index, value) in values.iter().enumerate() {
+        for value in values.iter() {
             let lowered_value = self.lower_expression_value_to_current_block(value)?;
-
-            let should_alias = return_aliases
-                .get(return_index)
-                .and_then(|candidates| candidates.as_ref())
-                .is_some();
-
-            let lowered_value = if should_alias {
-                match lowered_value.kind {
-                    HirExpressionKind::Load(_) => lowered_value,
-                    _ => {
-                        return_hir_transformation_error!(
-                            "Explicit alias returns must return a place expression",
-                            self.hir_error_location(location)
-                        )
-                    }
-                }
-            } else {
-                match lowered_value.kind {
-                    HirExpressionKind::Load(place) => self.make_expression(
-                        location,
-                        HirExpressionKind::Copy(place),
-                        lowered_value.ty,
-                        ValueKind::RValue,
-                        lowered_value.region,
-                    ),
-                    _ => lowered_value,
-                }
-            };
-
             lowered_values.push(lowered_value);
         }
 

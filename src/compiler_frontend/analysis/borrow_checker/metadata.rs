@@ -168,7 +168,7 @@ impl<'a> BorrowChecker<'a> {
                 function.id,
                 PublicCallSummary {
                     parameters,
-                    return_alias: declared_return_alias_summary(function),
+                    return_alias: FunctionReturnAliasSummary::Fresh,
                 },
             );
         }
@@ -227,13 +227,7 @@ impl<'a> BorrowChecker<'a> {
             let mut retained_by_function = Vec::with_capacity(self.module.functions.len());
             for function in &self.module.functions {
                 let classified = self.classify_function_return_alias(function)?;
-                let declared = declared_return_alias_summary(function);
-                let retained = retained_return_alias(
-                    &declared,
-                    classified.clone(),
-                    function.return_aliases.is_empty(),
-                );
-                retained_by_function.push((function.id, classified, retained));
+                retained_by_function.push((function.id, classified.clone(), classified));
             }
 
             let mut changed = false;
@@ -255,28 +249,6 @@ impl<'a> BorrowChecker<'a> {
             }
 
             if !changed {
-                for (function_id, classified, _) in retained_by_function {
-                    let Some(function) = self
-                        .module
-                        .functions
-                        .iter()
-                        .find(|function| function.id == function_id)
-                    else {
-                        return Err(self.diagnostics.internal_error(
-                            format!(
-                                "Borrow checker could not resolve function '{}' while validating return aliases",
-                                self.diagnostics.function_name(function_id)
-                            ),
-                            self.diagnostics.function_error_location(function_id),
-                        ));
-                    };
-                    self.validate_return_alias_consistency(
-                        function,
-                        &declared_return_alias_summary(function),
-                        &classified,
-                    )?;
-                }
-
                 return Ok(());
             }
         }
@@ -600,62 +572,6 @@ impl<'a> BorrowChecker<'a> {
                 Ok(parameter.access_kind == ExternalAccessKind::Mutable)
             }
         }
-    }
-
-    fn validate_return_alias_consistency(
-        &self,
-        function: &HirFunction,
-        declared: &FunctionReturnAliasSummary,
-        classified: &FunctionReturnAliasSummary,
-    ) -> Result<(), BorrowCheckError> {
-        let function_location = self.diagnostics.function_error_location(function.id);
-        let function_name = self.diagnostics.function_name(function.id);
-
-        match (declared, classified) {
-            (
-                FunctionReturnAliasSummary::Fresh,
-                FunctionReturnAliasSummary::AliasParams(indices),
-            ) => {
-                return Err(self.diagnostics.internal_error(
-                    format!(
-                        "Return alias metadata for function '{}' declares Fresh, but analysis found aliases to parameter index/indices {:?}",
-                        function_name, indices
-                    ),
-                    function_location,
-                ));
-            }
-            (
-                FunctionReturnAliasSummary::AliasParams(expected_indices),
-                FunctionReturnAliasSummary::AliasParams(observed_indices),
-            ) => {
-                for observed in observed_indices {
-                    if expected_indices.contains(observed) {
-                        continue;
-                    }
-
-                    return Err(self.diagnostics.internal_error(
-                        format!(
-                            "Return alias metadata for function '{}' does not include observed alias parameter index {}",
-                            function_name, observed
-                        ),
-                        function_location,
-                    ));
-                }
-            }
-            (FunctionReturnAliasSummary::AliasParams(_), FunctionReturnAliasSummary::Fresh)
-            | (FunctionReturnAliasSummary::AliasParams(_), FunctionReturnAliasSummary::Unknown) => {
-                return Err(self.diagnostics.internal_error(
-                    format!(
-                        "Return alias metadata for function '{}' declares aliased return values, but analysis could not validate that aliasing shape",
-                        function_name
-                    ),
-                    function_location,
-                ));
-            }
-            _ => {}
-        }
-
-        Ok(())
     }
 
     fn classify_function_return_alias(
@@ -1738,41 +1654,6 @@ impl<'a> BorrowChecker<'a> {
             let block = self.block_by_id_or_error(block_id, function.id)?;
             Ok(terminator_targets(&block.terminator))
         })
-    }
-}
-
-fn declared_return_alias_summary(function: &HirFunction) -> FunctionReturnAliasSummary {
-    let mut alias_indices = function
-        .return_aliases
-        .iter()
-        .filter_map(|candidates| candidates.as_ref())
-        .flatten()
-        .copied()
-        .collect::<Vec<_>>();
-    alias_indices.sort_unstable();
-    alias_indices.dedup();
-
-    if alias_indices.is_empty() {
-        FunctionReturnAliasSummary::Fresh
-    } else {
-        FunctionReturnAliasSummary::AliasParams(alias_indices)
-    }
-}
-
-fn retained_return_alias(
-    declared: &FunctionReturnAliasSummary,
-    classified: FunctionReturnAliasSummary,
-    has_no_return_slots: bool,
-) -> FunctionReturnAliasSummary {
-    match declared {
-        FunctionReturnAliasSummary::AliasParams(indices) => {
-            FunctionReturnAliasSummary::AliasParams(indices.clone())
-        }
-        FunctionReturnAliasSummary::Fresh if has_no_return_slots => {
-            FunctionReturnAliasSummary::Fresh
-        }
-        FunctionReturnAliasSummary::Fresh => classified,
-        FunctionReturnAliasSummary::Unknown => FunctionReturnAliasSummary::Unknown,
     }
 }
 

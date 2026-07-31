@@ -3,7 +3,7 @@ Point = |
     y Int,
 |
 
-self_ref |this Point| -> this:
+self_ref |this Point| -> Point:
     return this
 ;
 

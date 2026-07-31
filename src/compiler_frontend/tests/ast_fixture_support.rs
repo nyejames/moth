@@ -11,7 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     PlaceExpression, PlaceExpressionKind,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::datatypes::{DataType, TypeId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -87,7 +87,7 @@ pub(crate) fn fresh_success_returns(result_type_ids: Vec<TypeId>) -> Vec<ReturnS
     result_type_ids
         .into_iter()
         .map(|type_id| ReturnSlot {
-            value: FunctionReturn::Value(DataType::Inferred),
+            value: DataType::Inferred,
             type_id: Some(type_id),
             reactive_template: None,
             channel: ReturnChannel::Success,

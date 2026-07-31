@@ -97,14 +97,12 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         entry: BlockId(10),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let main = HirFunction {
         id: FunctionId(1),
         entry: BlockId(30),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -221,7 +219,6 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: types.string,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -356,7 +353,6 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.string,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -432,7 +428,6 @@ fn lowers_non_runtime_string_add_as_buffer_concat() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: types.string,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -499,7 +494,6 @@ fn lowers_non_runtime_string_add_with_i64_chunk_via_string_from_i64() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: types.string,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -639,7 +633,6 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -726,7 +719,6 @@ fn deduplicates_static_utf8_segments() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -765,7 +757,6 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -828,7 +819,6 @@ fn synthesizes_export_wrappers_with_stable_names() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -915,7 +905,6 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -976,7 +965,6 @@ fn rejects_unsupported_host_call_with_diagnostic() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -1037,14 +1025,12 @@ fn selected_function_policy_ignores_unselected_host_calls() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
     let unused_function = HirFunction {
         id: FunctionId(1),
         entry: BlockId(10),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -1139,7 +1125,6 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -1250,7 +1235,6 @@ fn multi_fragment_template_produces_all_push_operations() {
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
         return_type: types.string,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -1309,7 +1293,6 @@ fn debug_name_uses_source_name_when_available() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
     let module = build_module(
         &mut string_table,
@@ -1379,7 +1362,6 @@ fn io_console_functions_are_unsupported_in_wasm() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(

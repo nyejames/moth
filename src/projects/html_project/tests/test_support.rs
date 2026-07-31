@@ -59,7 +59,6 @@ pub(crate) fn create_test_hir_module() -> HirModule {
         entry: BlockId(0),
         params: vec![],
         return_type: unit_type,
-        return_aliases: vec![],
     }];
     module.start_function = Some(FunctionId(0));
     module

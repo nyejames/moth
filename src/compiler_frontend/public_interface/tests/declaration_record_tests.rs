@@ -24,7 +24,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ReactiveSource, ReactiveSourceKind,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::{
     ReceiverMethodEntry, ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind,
@@ -188,7 +188,7 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
 
 fn return_slot(type_id: TypeId, channel: ReturnChannel) -> ReturnSlot {
     ReturnSlot {
-        value: FunctionReturn::Value(DataType::Inferred),
+        value: DataType::Inferred,
         type_id: Some(type_id),
         reactive_template: None,
         channel,
@@ -197,7 +197,7 @@ fn return_slot(type_id: TypeId, channel: ReturnChannel) -> ReturnSlot {
 
 fn unresolved_return_slot(channel: ReturnChannel) -> ReturnSlot {
     ReturnSlot {
-        value: FunctionReturn::Value(DataType::Inferred),
+        value: DataType::Inferred,
         type_id: None,
         reactive_template: None,
         channel,

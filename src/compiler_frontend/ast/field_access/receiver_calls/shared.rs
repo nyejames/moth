@@ -15,9 +15,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     call_success_is_optional, non_fallible_handler_reason,
     token_stream_starts_fallible_handling_suffix,
 };
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
@@ -196,7 +194,7 @@ pub(super) fn signature_from_trait_requirement(
             );
 
             ReturnSlot {
-                value: FunctionReturn::Value(diagnostic_type_spelling(type_id, type_environment)),
+                value: diagnostic_type_spelling(type_id, type_environment),
                 type_id: Some(type_id),
                 reactive_template: None,
                 channel: return_slot.channel,

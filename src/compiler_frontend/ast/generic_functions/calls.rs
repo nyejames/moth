@@ -29,9 +29,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     FallibleCallSite, HandledFallibleCall, call_success_is_optional, non_fallible_handler_reason,
     parse_fallible_handling_suffix_for_call_expression,
 };
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
@@ -764,15 +762,7 @@ fn substitute_return_slot(
     };
 
     let data_type = diagnostic_type_spelling(type_id, type_environment);
-    let value = match &slot.value {
-        FunctionReturn::Value(_) => FunctionReturn::Value(data_type),
-        FunctionReturn::AliasCandidates {
-            parameter_indices, ..
-        } => FunctionReturn::AliasCandidates {
-            parameter_indices: parameter_indices.clone(),
-            data_type,
-        },
-    };
+    let value = data_type;
 
     ReturnSlot {
         value,

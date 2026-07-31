@@ -207,7 +207,6 @@ impl<'a> HirBuilder<'a> {
             entry,
             params: vec![],
             return_type,
-            return_aliases: vec![],
         });
     }
 

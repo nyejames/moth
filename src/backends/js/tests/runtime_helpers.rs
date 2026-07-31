@@ -381,7 +381,6 @@ fn collection_push_call_is_not_wrapped_with_result_propagate() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(&mut string_table, "main", vec![block], function, &[]);
@@ -445,7 +444,6 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -520,7 +518,6 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -646,7 +643,6 @@ fn cast_float_to_int_uses_i32_range_helper() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -1132,7 +1128,6 @@ fn lower_minimal_module_with_float_helper(
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(

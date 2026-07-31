@@ -868,7 +868,7 @@ fn function_value_return_is_preserved_as_return_syntax_shell() {
     assert!(matches!(
         signature.returns.as_slice(),
         [ReturnSlotSyntax {
-            value: FunctionReturnSyntax::Value {
+            value: FunctionReturnSyntax {
                 type_annotation: ParsedTypeRef::BuiltinInt { .. },
                 ..
             },
@@ -886,31 +886,13 @@ fn function_named_return_is_preserved_for_ast_resolution() {
     assert!(matches!(
         signature.returns.as_slice(),
         [ReturnSlotSyntax {
-            value: FunctionReturnSyntax::Value {
+            value: FunctionReturnSyntax {
                 type_annotation: ParsedTypeRef::Named { .. },
                 ..
             },
             channel: ReturnChannelSyntax::Success,
             ..
         }]
-    ));
-}
-
-#[test]
-fn function_alias_return_is_preserved_as_parameter_reference_shell() {
-    let headers = parse_single_file_headers("f|x Int| -> x:\n;\n");
-    let signature = first_function_signature(&headers);
-
-    assert!(matches!(
-        signature.returns.as_slice(),
-        [ReturnSlotSyntax {
-            value: FunctionReturnSyntax::AliasCandidates {
-                parameter_indices,
-                ..
-            },
-            channel: ReturnChannelSyntax::Success,
-            ..
-        }] if parameter_indices == &vec![0]
     ));
 }
 
@@ -1005,7 +987,7 @@ fn function_signature_preserves_unknown_symbolic_return_for_ast_resolution() {
     assert!(matches!(
         signature.returns.as_slice(),
         [ReturnSlotSyntax {
-            value: FunctionReturnSyntax::Value {
+            value: FunctionReturnSyntax {
                 type_annotation: ParsedTypeRef::Named { .. },
                 ..
             },
@@ -1053,7 +1035,7 @@ fn trait_declaration_headers_parse_requirement_shells() {
     ));
     assert!(matches!(
         copy_requirement.signature.returns[0].value,
-        FunctionReturnSyntax::Value {
+        FunctionReturnSyntax {
             type_annotation: ParsedTypeRef::This { .. },
             ..
         }

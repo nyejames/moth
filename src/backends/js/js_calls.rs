@@ -140,70 +140,12 @@ impl<'hir> JsEmitter<'hir> {
 
         if let Some(result_local) = result {
             let result_name = self.local_name(*result_local)?;
-            if self.call_returns_alias_reference(target) {
-                self.emit_line(&format!("__moth_assign_borrow({result_name}, {call});"));
-            } else {
-                self.emit_line(&format!("__moth_assign_value({result_name}, {call});"));
-            }
+            self.emit_line(&format!("__moth_assign_value({result_name}, {call});"));
         } else {
             self.emit_line(&format!("{call};"));
         }
 
         Ok(())
-    }
-
-    /// Whether a call target returns an alias reference that should use borrow assignment.
-    fn call_returns_alias_reference(&self, target: &CallTarget) -> bool {
-        match target {
-            CallTarget::Local(function_id) => self
-                .hir
-                .functions
-                .iter()
-                .find(|function| function.id == *function_id)
-                .is_some_and(|function| {
-                // Fallible calls return a fresh backend carrier. Any aliasing belongs to the
-                // success payload inside that carrier, not to the carrier local itself.
-                if self
-                    .type_environment
-                    .fallible_carrier_slots(function.return_type)
-                    .is_some()
-                {
-                    return false;
-                }
-                    function.return_aliases.len() == 1 && function.return_aliases[0].is_some()
-                }),
-            CallTarget::CrossModule(origin) => self
-                .hir
-                .imported_call_summaries
-                .get(origin)
-                .is_some_and(|summary| {
-                    matches!(
-                        summary.return_alias,
-                        crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary::AliasParams(_)
-                    )
-                }),
-            CallTarget::ModulePrivate(identity) => self
-                .hir
-                .module_private_call_summaries
-                .get(identity)
-                .is_some_and(|summary| {
-                    matches!(
-                        summary.return_alias,
-                        crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary::AliasParams(_)
-                    )
-                }),
-            CallTarget::Generated(identity) => self
-                .hir
-                .generated_call_summaries
-                .get(identity)
-                .is_some_and(|summary| {
-                    matches!(
-                        summary.return_alias,
-                        crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary::AliasParams(_)
-                    )
-                }),
-            CallTarget::External(_) => false,
-        }
     }
 }
 

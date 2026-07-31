@@ -39,7 +39,6 @@ fn choice_variant_construction_emits_integer_literal() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -172,7 +171,6 @@ fn choice_match_lowers_to_structured_if_with_literal_equals() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -290,7 +288,6 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -441,7 +438,6 @@ fn relational_match_patterns_emit_correct_js_operators() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(

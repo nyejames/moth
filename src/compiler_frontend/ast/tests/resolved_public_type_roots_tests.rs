@@ -17,9 +17,7 @@ use super::scope_context::{ReceiverMethodCatalog, ReceiverMethodEntry};
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAnnotation,
 };
@@ -122,7 +120,7 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
             ValueMode::default(),
         ),
     };
-    let mut return_slot = ReturnSlot::success(FunctionReturn::Value(DataType::Int));
+    let mut return_slot = ReturnSlot::success(DataType::Int);
     return_slot.type_id = Some(int_type_id);
     ResolvedFunctionSignature {
         receiver: None,

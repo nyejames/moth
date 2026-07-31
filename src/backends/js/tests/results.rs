@@ -78,7 +78,6 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         entry: BlockId(0),
         params: vec![],
         return_type: result_type,
-        return_aliases: vec![],
     };
 
     // Function B (id 1): calls C and propagates through explicit carrier edges.
@@ -121,7 +120,6 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         entry: BlockId(1),
         params: vec![],
         return_type: result_type,
-        return_aliases: vec![],
     };
 
     // Function A (id 2): calls B and uses the same explicit branch shape.
@@ -164,7 +162,6 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         entry: BlockId(4),
         params: vec![],
         return_type: result_type,
-        return_aliases: vec![],
     };
 
     let mut module = HirModule::new();
@@ -269,7 +266,6 @@ fn explicit_error_return_terminator_emits_err_carrier() {
         entry: BlockId(0),
         params: vec![],
         return_type: result_type,
-        return_aliases: vec![],
     };
 
     let mut module = HirModule::new();
@@ -327,7 +323,6 @@ fn explicit_success_return_terminator_emits_ok_carrier() {
         entry: BlockId(0),
         params: vec![],
         return_type: result_type,
-        return_aliases: vec![],
     };
 
     let mut module = HirModule::new();
@@ -409,7 +404,6 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let mut module = HirModule::new();
@@ -474,7 +468,6 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: result_type,
-        return_aliases: vec![Some(vec![0])],
     };
 
     let call_aliasing_fallible = statement(
@@ -507,7 +500,6 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
         entry: BlockId(1),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let mut module = HirModule::new();

@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ReactiveSource, ReactiveSourceKind, ReactiveTemplateMetadata,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::templates::template::ReactiveSubscription;
 use crate::compiler_frontend::compiler_messages::InvalidMutableAccessReason;
@@ -126,7 +126,7 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
         FunctionSignature {
             parameters: vec![parameter],
             returns: vec![ReturnSlot {
-                value: FunctionReturn::Value(DataType::StringSlice),
+                value: DataType::StringSlice,
                 type_id: Some(builtin_type_ids::STRING),
                 reactive_template: None,
                 channel: ReturnChannel::Success,

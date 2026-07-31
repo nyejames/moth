@@ -11,7 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, FallibleExpressionHandling, HandledFallibleHostFunctionCallInput,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
@@ -757,7 +757,7 @@ sentinel = 0"#;
 
 #[test]
 fn retained_alias_result_borrows_named_final_use_argument() {
-    let source = r#"alias |input String| -> input:
+    let source = r#"alias |input String| -> String:
     return input
 ;
 value ~= "hello"
@@ -822,7 +822,7 @@ fn transparent_fallible_success_projection_preserves_retained_alias_root() {
     score Int,
 |
 
-identity |value User| -> value:
+identity |value User| -> User:
     return value
 ;
 
@@ -977,19 +977,19 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             )],
             returns: vec![
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::StringSlice),
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::StringSlice),
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::StringSlice),
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Error,
@@ -1008,19 +1008,19 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::StringSlice),
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::StringSlice),
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::StringSlice),
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Error,

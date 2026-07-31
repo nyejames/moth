@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::compiler_messages::{
@@ -777,10 +777,7 @@ fn user_function_returning_param_aliases_caller_root() {
                 test_location(1),
             )],
             returns: vec![ReturnSlot {
-                value: FunctionReturn::AliasCandidates {
-                    parameter_indices: vec![0],
-                    data_type: DataType::Int,
-                },
+                value: DataType::Int,
                 type_id: Some(builtin_type_ids::INT),
                 reactive_template: None,
                 channel: ReturnChannel::Success,
@@ -892,16 +889,13 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             ],
             returns: vec![
                 ReturnSlot {
-                    value: FunctionReturn::AliasCandidates {
-                        parameter_indices: vec![1],
-                        data_type: DataType::StringSlice,
-                    },
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::StringSlice),
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Error,
@@ -962,16 +956,13 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             )],
             returns: vec![
                 ReturnSlot {
-                    value: FunctionReturn::AliasCandidates {
-                        parameter_indices: vec![0],
-                        data_type: DataType::StringSlice,
-                    },
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::StringSlice),
+                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     reactive_template: None,
                     channel: ReturnChannel::Error,
@@ -1178,19 +1169,19 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::Int),
+                    value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::Int),
+                    value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::Int),
+                    value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
                     reactive_template: None,
                     channel: ReturnChannel::Error,
@@ -1219,19 +1210,19 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::Int),
+                    value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::Int),
+                    value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
                     reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: FunctionReturn::Value(DataType::Int),
+                    value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
                     reactive_template: None,
                     channel: ReturnChannel::Error,
@@ -1354,7 +1345,7 @@ remove_value |scores ~{String = String}| -> String, Error!:
 }
 
 #[test]
-fn default_user_returning_param_is_fresh_by_default() {
+fn inferred_alias_return_from_parameter_reference_conflicts_with_mutation() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
@@ -1449,8 +1440,9 @@ fn default_user_returning_param_is_fresh_by_default() {
         build_ast(vec![callee, caller], entry_path),
         &mut string_table,
     );
-    run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect("default user returns should be fresh unless explicitly declared as aliasing");
+    run_borrow_checker(&hir, &external_package_registry, &string_table).expect_err(
+        "inferred alias return from parameter reference should conflict with later mutation",
+    );
 }
 
 #[test]

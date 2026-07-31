@@ -74,7 +74,6 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -177,7 +176,6 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let mut module = build_module(
@@ -266,7 +264,6 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(2)],
         return_type: types.int,
-        return_aliases: vec![None],
     };
 
     let call_stmt = statement(
@@ -310,7 +307,6 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         entry: BlockId(1),
         params: vec![],
         return_type: types.int,
-        return_aliases: vec![],
     };
 
     let mut module = HirModule::new();
@@ -426,7 +422,6 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
-        return_aliases: vec![],
     };
 
     let module = build_module(
@@ -468,7 +463,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
 
 /// Verifies that returning a Load from an alias-returning function passes the raw place.
 #[test]
-fn load_in_return_value_passes_place_ref() {
+fn load_in_return_value_clones_for_fresh_return() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
@@ -492,7 +487,6 @@ fn load_in_return_value_passes_place_ref() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: types.int,
-        return_aliases: vec![Some(vec![0])],
     };
 
     let mut module = HirModule::new();
@@ -524,14 +518,10 @@ fn load_in_return_value_passes_place_ref() {
     let param_name = expected_dev_local_name("value", 0);
 
     assert!(
-        output.source.contains(&format!("return {param_name};")),
-        "Load in return value of alias-returning function must pass the raw place ref"
-    );
-    assert!(
-        !output
-            .source
-            .contains(&format!("return __moth_read({param_name});")),
-        "Load in return value must not read through __moth_read"
+        output.source.contains(&format!(
+            "return __moth_clone_value(__moth_read({param_name}));"
+        )),
+        "Load in return value must clone the read value for a fresh return"
     );
 }
 
@@ -561,7 +551,6 @@ fn copy_in_return_value_emits_clone_value() {
         entry: BlockId(0),
         params: vec![LocalId(0)],
         return_type: types.int,
-        return_aliases: vec![Some(vec![0])],
     };
 
     let mut module = HirModule::new();
@@ -645,7 +634,6 @@ fn tuple_return_preserves_return_value_handling_per_element() {
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
         return_type: types.int,
-        return_aliases: vec![Some(vec![0])],
     };
 
     let mut module = HirModule::new();
@@ -683,8 +671,8 @@ fn tuple_return_preserves_return_value_handling_per_element() {
 
     assert!(
         output.source.contains(&format!(
-            "return [{first_name}, __moth_clone_value(__moth_read({second_name}))];"
+            "return [__moth_clone_value(__moth_read({first_name})), __moth_clone_value(__moth_read({second_name}))];"
         )),
-        "tuple return must preserve per-element return-value handling: Load as place ref, Copy as clone"
+        "tuple return must clone both Load and Copy elements for a fresh return"
     );
 }

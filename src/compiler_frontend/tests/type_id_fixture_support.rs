@@ -19,9 +19,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionReturn, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{ReturnChannel, ReturnSlot};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -55,7 +53,7 @@ pub(crate) use crate::compiler_frontend::tests::ast_fixture_support::fresh_succe
 
 pub(crate) fn success_return_slot(type_id: TypeId) -> ReturnSlot {
     ReturnSlot {
-        value: FunctionReturn::Value(DataType::Inferred),
+        value: DataType::Inferred,
         type_id: Some(type_id),
         reactive_template: None,
         channel: ReturnChannel::Success,
@@ -64,7 +62,7 @@ pub(crate) fn success_return_slot(type_id: TypeId) -> ReturnSlot {
 
 pub(crate) fn error_return_slot(type_id: TypeId) -> ReturnSlot {
     ReturnSlot {
-        value: FunctionReturn::Value(DataType::Inferred),
+        value: DataType::Inferred,
         type_id: Some(type_id),
         reactive_template: None,
         channel: ReturnChannel::Error,
@@ -399,21 +397,6 @@ pub(crate) fn handled_result_expr(
         FallibleHandling::Handler { .. } => {
             wrap_catch_expression(handled_expression, handling, result_type_ids)
         }
-    }
-}
-
-pub(crate) fn alias_candidates_return_slot(
-    parameter_indices: Vec<usize>,
-    type_id: TypeId,
-) -> ReturnSlot {
-    ReturnSlot {
-        value: FunctionReturn::AliasCandidates {
-            parameter_indices,
-            data_type: DataType::Inferred,
-        },
-        type_id: Some(type_id),
-        reactive_template: None,
-        channel: ReturnChannel::Success,
     }
 }
 
