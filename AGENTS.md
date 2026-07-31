@@ -62,6 +62,7 @@ The progress matrix answers what works today. It does not override accepted arch
 - Be strict about design drift, duplicated implementation paths, weak diagnostics, oversized modules, stale helpers, and stage-boundary leaks.
 - Do not move shared logic into a broad utility module unless the behavior is genuinely shared and the owner remains clear.
 - Do not claim work was validated by commands that were not run.
+- Prefer data-oriented design over OOP patterns, especially when optimising code.
 
 When creating temporary files for testing snippets of code or creating temporary artifacts that will be cleaned up before a commit, use the `/tmp` folder.
 
