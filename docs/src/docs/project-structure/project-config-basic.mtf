@@ -1,3 +1,5 @@
+**Accepted deferred design.** This page teaches the final grouped config shape. The current compiler still uses a transitional flat config format. See @../progress (Progress) for current support.
+
 `config.moth` at the project root controls build settings. It is one self-contained compile-time source file with no source imports.
 
 ### A minimal config

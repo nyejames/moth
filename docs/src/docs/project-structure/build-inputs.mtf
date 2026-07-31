@@ -75,4 +75,4 @@ The resolved value enters module AST as an ordinary folded constant. It creates 
 
 - For the config file see @#project-config (Project config).
 - For `@project` see @#entry-config (Entry config).
-- For the full build-input contract see @https://github.com/sjmorig/moth/blob/main/docs/build-system-design.md (Build system design).
+- For the full build-input contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).

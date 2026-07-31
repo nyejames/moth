@@ -29,7 +29,7 @@ A Moth project is a directory tree with one strict config file, a source entry r
 
 Project-local source-backed packages are structural `+*.moth` support packages. A `+*.moth` file in a source directory marks that directory as a scoped support package root named by its containing directory.
 
-In the example above, `shared/+package.moth` creates the scoped `@shared` support package. Support-package visibility follows structural module scope: it is visible within its nearest ancestor normal module's subtree.
+In the example above, `shared/+package.moth` creates the scoped `@shared` support package. It is visible to its owner normal module, normal sibling modules and their descendants. It is not imported from its own private implementation subtree or from another support package in the same scope.
 
 No folder gains package meaning without a `+*.moth` root. Ordinary directories do not automatically become packages.
 

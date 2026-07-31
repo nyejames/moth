@@ -69,4 +69,4 @@ Only active artefact-builder settings contribute entry activity.
 
 - For build inputs see @#build-inputs (Build inputs).
 - For module root rules see @#module-roots (Module roots).
-- For the full entry config contract see @https://github.com/sjmorig/moth/blob/main/docs/build-system-design.md (Build system design).
+- For the full entry config contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).
