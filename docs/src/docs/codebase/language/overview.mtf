@@ -153,6 +153,9 @@ slice.
 - `docs/src/docs/project-structure/public-api.mtf`
 - `docs/src/docs/project-structure/entry-runtime-and-fragments.mtf`
 - `docs/src/docs/project-structure/html-routing-and-artifacts.mtf`
+- `docs/src/docs/project-structure/build-inputs.mtf`
+- `docs/src/docs/project-structure/entry-config.mtf`
+- `docs/src/docs/project-structure/project-package-facade.mtf`
 
 ### Packages and imports
 
@@ -193,9 +196,13 @@ topic navigation.
 
 ## Design scope
 
-`docs/src/docs/codebase/design-scope/overview.mtf` owns the exact
-deferred-versus-outside-scope distinction, every excluded language family, the
-rationale for each family and the constrained mechanisms used instead.
+The public Design Scope route owns the source-facing exclusion inventory:
+
+- `docs/src/docs/design-scope/design-principles.mtf`
+- `docs/src/docs/design-scope/deferred-and-outside-scope.mtf`
+- `docs/src/docs/design-scope/excluded-language-families.mtf`
+
+The codebase summary at `docs/src/docs/codebase/design-scope/overview.mtf` links to the public route without competing with it.
 
 ## Memory and lifetimes
 
@@ -213,6 +220,18 @@ The public Memory route covers source-facing memory behaviour:
 The formal memory model, borrow validation, lifetime-region analysis and
 backend lowering live under
 `docs/src/docs/codebase/memory-management/**`.
+
+## Core packages
+
+Each Core package has a paired Advanced and Basic page:
+
+- `docs/src/docs/packages/core/io/io.mtf` / `io-basic.mtf`
+- `docs/src/docs/packages/core/math/math.mtf` / `math-basic.mtf`
+- `docs/src/docs/packages/core/text/text.mtf` / `text-basic.mtf`
+- `docs/src/docs/packages/core/random/random.mtf` / `random-basic.mtf`
+- `docs/src/docs/packages/core/time/time.mtf` / `time-basic.mtf`
+- `docs/src/docs/packages/core/collections/collections.mtf` / `collections-basic.mtf`
+- `docs/src/docs/packages/core/prelude/prelude.mtf` / `prelude-basic.mtf`
 
 ## Compiler ownership
 
