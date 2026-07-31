@@ -29,9 +29,3 @@ When a type would need nested `of` applications, name an intermediate alias.
     StringIntPair as Pair of String, Int
     value Box of StringIntPair = Box(Pair("count", 3))
 ]
-
-### Remember
-
-- `of` goes in type position, not in ordinary expressions.
-- The number of arguments must match the declaration.
-- Different concrete arguments make different types.

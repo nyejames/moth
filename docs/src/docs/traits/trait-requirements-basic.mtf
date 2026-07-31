@@ -29,9 +29,3 @@ Trait requirements describe the methods a conforming type must have. The receive
 ]
 
 When `This` is not the receiver, it must have a parameter name like `other This`.
-
-### Remember
-
-- Use `This` for the receiver in trait requirements.
-- Use lowercase `this` only in concrete method implementations.
-- Requirements have no body. They only declare the method shape.

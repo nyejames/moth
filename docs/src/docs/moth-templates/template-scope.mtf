@@ -1,4 +1,4 @@
-A `.mtf` file sees a deliberately small compile-time scope. The implicit template body can access constants from its module root and builder-provided helpers.
+A `.mtf` file sees a small compile-time scope. The implicit template body can access constants from its module root and builder-provided helpers.
 
 ### Same-directory module root constants
 
@@ -101,7 +101,7 @@ To output literal template delimiters, use string insertion:
 
 ### Content helpers
 
-Content helpers such as `codeblock` are available only where genuinely provided by the builder environment. Do not assume arbitrary normal source imports are available inside `.mtf`.
+Content helpers such as `codeblock` work only where the builder environment provides them. Do not assume arbitrary normal source imports are available inside `.mtf`.
 
 ### Related concepts
 

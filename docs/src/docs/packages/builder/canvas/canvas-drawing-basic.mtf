@@ -48,17 +48,6 @@ use shared access. The `~` goes before the value you're mutating.
     -- querying: shared access, no ~
     width = canvas_width(canvas)
 ]
-
-### Remember
-
-- `@web/canvas` needs an explicit import. It is not in the prelude.
-- All arguments are positional. Named arguments are not supported.
-- Opaque types can't be constructed or inspected. Use the free functions.
-- Functions that mutate need `~`. Functions that query don't.
-- The Wasm backend rejects reachable canvas calls. Canvas needs a browser JS
   environment.
-
-### Read next
-
 For the full function surface, opaque type rules, pixel access and deferred
 surfaces, see @#canvas-drawing (@web/canvas advanced).

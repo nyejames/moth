@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Project structure | Moth</title>
-    <meta name="description" content="How Moth projects are structured, how modules are discovered, and how the HTML builder emits pages.">
+    <meta name="description" content="How Moth projects are structured, how modules are discovered and how the HTML builder emits pages.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Project structure</p><h1>Project structure</h1><p>A Moth project is a set of modules, one strict project config and a builder that decides what those modules produce.</p><p>The root filename begins with <code>#</code>, but the name after it is deliberately unimportant. The source tells the compiler what is public. The builder decides whether the module becomes an artifact.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Project structure</p><h1>Project structure</h1><p>A Moth project consists of a set of modules, one strict project config and a builder that decides what those modules produce.</p><p>The root filename begins with <code>#</code>, but the name after it carries no importance. The source tells the compiler what counts as public. The builder decides whether the module becomes an artefact.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Project layout
@@ -721,11 +721,11 @@ body {
 
 
 
-            <p>A Moth project has one config file, one source root, and generated output folders.</p><h3>Where things live</h3><ul><li><code>config.moth</code> at the project root controls build settings.</li><li><code>src/</code> (or whatever <code>entry_root</code> says) holds your source files.</li><li><code>lib/</code> holds project-local source-backed packages by default. Each direct child becomes a package prefix.</li><li><code>dev/</code> and <code>release/</code> are generated output. Do not edit them.</li></ul><h3>One root file per module directory</h3><p>Each source directory can have one <code>@*.moth</code> file that marks it as a module. The <code>@</code> filename is just a convention. <code>@page.moth</code>, <code>@api.moth</code> and <code>@mod.moth</code> all mean the same thing to the compiler.</p><h3>Outputs are generated</h3><p>The build command creates output folders. They are not source. The builder cleans up stale artifacts automatically.</p><h3>Remember</h3><ul><li><code>config.moth</code> is the only config file.</li><li><code>@*.moth</code> files are module roots.</li><li><code>dev/</code> and <code>release/</code> are generated.</li></ul>
+            <p>A Moth project has one config file, one source root and generated output folders.</p><h3>Where things live</h3><ul><li><code>config.moth</code> at the project root controls build settings.</li><li><code>src/</code> (or whatever <code>entry_root</code> says) holds your source files.</li><li><code>lib/</code> holds project-local source-backed packages by default. Each direct child becomes a package prefix.</li><li><code>dev/</code> and <code>release/</code> are generated output. Do not edit them.</li></ul><h3>One root file per module directory</h3><p>Each source directory can have one <code>@*.moth</code> file that marks it as a module. The <code>@</code> filename is a convention. <code>@page.moth</code>, <code>@api.moth</code> and <code>@mod.moth</code> all mean the same thing to the compiler.</p><h3>Outputs are generated</h3><p>The build command creates output folders. They are not source. The builder cleans up stale artifacts automatically.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A Moth project is a directory tree with one strict config file, a source entry root, and generated output folders.</p><h3>Project root contents</h3><pre style=""><code class='codeblock'>
+        <p>A Moth project is a directory tree with one strict config file, a source entry root and generated output folders.</p><h3>Project root contents</h3><pre style=""><code class='codeblock'>
         project-root/
         ├── config.moth
         ├── src/
@@ -798,7 +798,7 @@ body {
         dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
         release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
     <span class='moth-code-operator'>|</span>
-    </code></pre><h3>Structure</h3><ul><li>One required <code>project</code> record provides project identity and settings.</li><li><code>project.name</code> is required for stable identity.</li><li>Builder sections like <code>html</code> hold builder-specific settings.</li><li>The command selects the builder before config validation. <code>config.moth</code> does not select the builder.</li><li>Only active sections are schema-validated.</li></ul><h3>Remember</h3><ul><li>Only <code>config.moth</code> has config semantics.</li><li>Values must be compile-time constants.</li><li>Output settings are builder-owned, not global project fields.</li></ul>
+    </code></pre><h3>Structure</h3><ul><li>One required <code>project</code> record provides project identity and settings.</li><li><code>project.name</code> is required for stable identity.</li><li>Builder sections like <code>html</code> hold builder-specific settings.</li><li>The command selects the builder before config validation. <code>config.moth</code> does not select the builder.</li><li>Only active sections are schema-validated.</li></ul>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -870,7 +870,7 @@ body {
 
 
 
-            <p>Each source directory can have one <code>@*.moth</code> file that marks it as a module.</p><h3>One root per folder</h3><p>The filename after <code>@</code> does not matter. <code>@page.moth</code>, <code>@mod.moth</code> and <code>@api.moth</code> all mean the same thing. Two <code>@*.moth</code> files in one folder are rejected.</p><h3>Import the module, not the root file</h3><p>You cannot import <code>@api.moth</code> directly. Import the module through its directory path to access its public surface.</p><h3>Two roles</h3><p>When a module root is the active module being compiled, its top-level runtime code runs. When it is imported by another module, only its exported declarations are available. Its runtime code does not run.</p><h3>Remember</h3><ul><li>One <code>@*.moth</code> file per directory.</li><li>The <code>@</code> name is cosmetic.</li><li><code>config.moth</code> is not a module root.</li></ul>
+            <p>Each source directory can have one <code>@*.moth</code> file that marks it as a module.</p><h3>One root per folder</h3><p>The filename after <code>@</code> does not matter. <code>@page.moth</code>, <code>@mod.moth</code> and <code>@api.moth</code> all mean the same thing. Two <code>@*.moth</code> files in one folder are rejected.</p><h3>Import the module, not the root file</h3><p>You cannot import <code>@api.moth</code> directly. Import the module through its directory path to access its public surface.</p><h3>Two roles</h3><p>When a module root is the active module being compiled, its top-level runtime code runs. When it is imported by another module, only its exported declarations are available. Its runtime code does not run.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -943,7 +943,7 @@ body {
             <span class='moth-code-keyword'>return</span> private_helper<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
         ;
     ;
-    </code></pre><h3>Private by default</h3><p>Files in the same module can see each other&#39;s declarations. Other modules can only see what the <code>export:</code> block makes public.</p><h3>Remember</h3><ul><li><code>export:</code> is only valid in the module root file.</li><li>One <code>export:</code> block per root.</li><li><code>#</code> means compile-time constant, not public.</li></ul>
+    </code></pre><h3>Private by default</h3><p>Files in the same module can see each other&#39;s declarations. Other modules can only see what the <code>export:</code> block makes public.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -1023,7 +1023,7 @@ body {
 
 
 
-            <p>The module root file runs your page. Helper files provide declarations.</p><h3>Root execution</h3><p>Top-level runtime code in the module root runs as the page&#39;s implicit start function. Helper files do not run their own top-level code.</p><h3>Page fragments</h3><p>Direct top-level templates in the root become page fragments:</p><ul><li>A const fragment (the <code>#</code> prefix form) folds at compile time and becomes static HTML.</li><li>A runtime fragment (the plain bracket form) runs at runtime and fills a slot in the page.</li></ul><h3>Helpers</h3><p>Helper files define functions, types and constants. They do not own an export block. The root imports them and chooses what becomes public. Do not put page fragments in helper files.</p><h3>Remember</h3><ul><li>Only the active root runs top-level code.</li><li>Direct top-level templates become fragments.</li><li>Imported roots do not replay their runtime.</li></ul>
+            <p>The module root file runs your page. Helper files provide declarations.</p><h3>Root execution</h3><p>Top-level runtime code in the module root runs as the page&#39;s implicit start function. Helper files do not run their own top-level code.</p><h3>Page fragments</h3><p>Direct top-level templates in the root become page fragments:</p><ul><li>A const fragment (the <code>#</code> prefix form) folds at compile time and becomes static HTML.</li><li>A runtime fragment (the plain bracket form) runs at runtime and fills a slot in the page.</li></ul><h3>Helpers</h3><p>Helper files define functions, types and constants. They do not own an export block. The root imports them and chooses what becomes public. Do not put page fragments in helper files.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -1082,7 +1082,7 @@ body {
             <p>HTML routes come from directory position, not from the <code>@</code> filename.</p><h3>Directory routes</h3><pre style=""><code class='codeblock'>
         src/@page.moth  -> index.html
         src/about/@page.moth  -> about/index.html
-    </code></pre><p>The root module is the home page. Each nested directory gets its own route.</p><h3>API-only modules</h3><p>A module with only exports and no page activity produces no HTML. Not every <code>@*.moth</code> file becomes a page.</p><h3>Remember</h3><ul><li>Routes come from directories.</li><li>The <code>@</code> filename does not choose the route.</li><li>API-only modules produce no HTML artifact.</li></ul>
+    </code></pre><p>The root module is the home page. Each nested directory gets its own route.</p><h3>API-only modules</h3><p>A module with only exports and no page activity produces no HTML. Not every <code>@*.moth</code> file becomes a page.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">

@@ -68,7 +68,7 @@ page_head #= language_theme_head
     Reactivity lets a template observe a stable source without turning Moth
     into a callback language.
 
-    Sources are explicit. Subscriptions are explicit. Mutation still follows the
+    Sources and subscriptions stay explicit. Mutation follows the
     ordinary type and access rules.
 ]
 

@@ -38,16 +38,6 @@ Future Wasm component imports will use a value-only WIT profile. WIT
 resources, callbacks, async and streams are deferred. See
 @#external-binding-contracts (External binding contracts advanced) for the
 full deferred surface.
-
-### Remember
-
-- Annotated `.js` files need `@moth.opaque` and `@moth.sig` annotations.
-- JavaScript names are runtime details. Moth names come from annotations.
-- Values cross by value. No references into Moth storage.
-- WIT value-only imports are deferred.
-
-### Read next
-
 For the full binding contract, rejected JS features and deferred WIT
 surfaces, see @#external-binding-contracts (External binding contracts
 advanced).

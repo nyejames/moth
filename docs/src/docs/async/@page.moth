@@ -2,7 +2,7 @@ import @html {center}
 import @styles {navbar, title, section, styled_table, header, data, codeblock, theme_head}
 
 page_title #= "Coroutines and Async in Moth"
-page_description #= "Design draft for structured async, coroutines, channels, and explicit suspension in Moth."
+page_description #= "Design draft for structured async, coroutines, channels and explicit suspension in Moth."
 page_head #= theme_head
 
 #[navbar]
@@ -10,12 +10,12 @@ page_head #= theme_head
 
 #[section, $md:
     **Design draft:** This page is a future-facing design document for language and compiler planning.
-    It is not final user-facing documentation, and the syntax, semantics, and implementation details may change before this feature is implemented.
+    It is not final user-facing documentation, and the syntax, semantics and implementation details may change before this feature is implemented.
 
     Moth approaches async and concurrency by making **control flow explicit** and **communication safe by default**.
 
     Instead of hiding async behind keywords like `async` / `await` or complex runtime abstractions,
-    Moth uses a small set of primitives that make data flow, suspension, and concurrency visible in the syntax.
+    Moth uses a small set of primitives that make data flow, suspension and concurrency visible in the syntax.
 
     At a high level:
 
@@ -23,9 +23,9 @@ page_head #= theme_head
     - Coroutines communicate using typed channels
     - Concurrency is structured and scoped
     - Suspension points are visible in code
-    - The compiler can enforce safety rules around shared data, references, and task lifetimes
+    - The compiler can enforce safety rules around shared data, references and task lifetimes
 
-    The goal is async code that remains readable, predictable, and analyzable.
+    The goal is async code that remains readable, predictable and analysable.
 ]
 
 #[section, $md:
@@ -269,7 +269,7 @@ page_head #= theme_head
     - hidden mutable sharing between coroutines
     - unbounded background work by default
 
-    Channels are the main communication primitive because they give the compiler a clear place to reason about ownership, borrowing, and transfer.
+    Channels are the main communication primitive because they give the compiler a clear place to reason about ownership, borrowing and transfer.
 
     Mutable shared state may be possible later through specific safe abstractions, but it should not be the default async model.
 ]
@@ -304,7 +304,7 @@ page_head #= theme_head
         ;
     ]
 
-    This example has three visible forms of async behavior:
+    This example has three visible forms of async behaviour:
 
     - `spawn` starts concurrent work
     - `>>` and `<<` communicate through the channel
@@ -360,7 +360,7 @@ page_head #= theme_head
 
     - cancellation semantics
     - channel buffering
-    - channel close behavior
+    - channel close behaviour
     - task failure propagation
     - timeout syntax
     - select-style waiting on multiple channels
@@ -389,27 +389,3 @@ page_head #= theme_head
     The important part is to keep the source model explicit and structured.
 ]
 
-#[section, $md:
-    # Summary
-
-    Async in Moth is intended to be:
-
-    - explicit: suspension is visible
-    - structured: spawned work is scoped
-    - safe: communication goes through typed channels
-    - analyzable: control flow and data flow are compiler-visible
-    - backend-flexible: JS, Wasm, and host runtimes can lower the same semantics differently
-
-    The core primitives are:
-
-    - `Channel(T)` creates typed channel endpoints
-    - `>>` sends values
-    - `<<` receives values
-    - `yield` suspends the current coroutine
-    - `spawn` starts a coroutine inside an async scope
-    - `async:` defines the structured concurrency boundary
-
-    The core rule is:
-
-    > Async work must be visible, scoped, and safe by construction.
-]

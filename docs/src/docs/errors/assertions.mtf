@@ -1,4 +1,4 @@
-`assert` is an always-checked statement intrinsic for invariants.
+`assert` provides an always-checked statement intrinsic for invariants.
 
 [codeblock, $code("moth"):
     assert(index < items.length())

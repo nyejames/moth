@@ -1,4 +1,4 @@
-A runtime template containing a subscription still has language type `String`. The compiler preserves dependency metadata so a supported backend can keep the output live.
+A runtime template containing a subscription keeps language type `String`. The compiler preserves dependency metadata so a supported backend can keep the output live.
 
 ### Metadata propagation
 

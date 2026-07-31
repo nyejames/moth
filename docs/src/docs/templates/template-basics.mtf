@@ -63,7 +63,7 @@ A template may:
 - fully fold to a compile-time string
 - remain as runtime string construction
 
-The source-level result is still an owned `String`.
+The source-level result stays an owned `String`.
 
 Templates do not become source-visible function values.
 

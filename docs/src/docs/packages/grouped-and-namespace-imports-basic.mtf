@@ -18,9 +18,3 @@ Two modules both export `render`. Aliases keep them apart.
 ]
 
 `math` gives you field access to the whole math package.
-
-### Remember
-
-- Use `as` to rename individual symbols.
-- Namespace imports are field-access-only, not first-class values.
-- An import alias must not hide an existing name.

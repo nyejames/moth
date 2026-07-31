@@ -1,4 +1,4 @@
-A struct is a nominal runtime type with named fields.
+A struct declares a nominal runtime type with named fields.
 
 [codeblock, $code("moth"):
     Vector2 = |

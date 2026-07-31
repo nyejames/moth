@@ -33,14 +33,4 @@ Collection methods use receiver syntax. `push`, `get`, `set` and `remove` take t
 ]
 
 `push` appends after the last element. `get` reads at an index. `set` replaces an element. `remove` takes an element out and shifts later elements down. `length` returns the logical length, not the fixed capacity.
-
-### Remember
-
-- Use `{T}` for growable collections and `{N T}` for fixed collections.
-- `push`, `get`, `set` and `remove` take the fallible path. Handle them with `!` or `catch`.
-- `length` stays infallible.
-- `set`, `push` and `remove` need `~` on the receiver.
-
-### Read next
-
 For the full language rules around collection literals, mutability and fixed capacity, see @../../../../collections (Collections). For the binding-backed contract behind these methods, see @collections (Core collections advanced).

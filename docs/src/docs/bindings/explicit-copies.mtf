@@ -17,7 +17,7 @@ The operand must be a place with stable storage:
 
 - a visible value binding
 - a field projection such as `copy config.title`
-- a parenthesized place such as `copy (items)`
+- a parenthesised place such as `copy (items)`
 
 Literals, templates, constructor calls, function calls and computed
 expressions are not copy targets.

@@ -11,4 +11,4 @@ Two choice values are equal when they use the same variant and their payload
 values are equal.
 
 A choice with a collection, struct or another unsupported payload cannot use
-structural equality. Pattern matching still works.
+structural equality. Pattern matching works.

@@ -1,4 +1,4 @@
-A source function is a named top-level declaration.
+A source function forms a named top-level declaration.
 
 [codeblock, $code("moth"):
     greet |name String|:

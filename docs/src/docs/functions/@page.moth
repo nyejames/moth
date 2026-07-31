@@ -49,9 +49,9 @@ page_head #= language_theme_head
 
     # Functions
 
-    Functions are named, statically checked and deliberately ordinary. Their signatures show the values they need, the access they request and every value they can return.
+    Functions stay named, statically checked and ordinary. Their signatures show the values they need, the access they request and every value they can return.
 
-    There are no hidden closure captures or distant conversion rules. The call stays readable from the source.
+    No hidden closure captures or distant conversion rules exist. The call stays readable from the source.
 ]
 
 #[section:

@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Memory and lifetimes</p><h1>Memory and lifetimes</h1><p>Moth is reference-semantic by default, copy-explicit and move-inferred. Existing values use shared read-only access. Mutation requires explicit exclusive access. Copies are explicit and moves are inferred by the compiler.</p><p>These pages cover source-facing memory behaviour. For the formal memory model, borrow validation and backend lowering, see <a href="../../codebase/memory-management">Memory management</a>.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Memory and lifetimes</p><h1>Memory and lifetimes</h1><p>Moth defaults to reference semantics, explicit copies and inferred moves. Existing values use shared read-only access. Mutation requires explicit exclusive access. The compiler infers moves while keeping copies explicit.</p><p>These pages cover source-facing memory behaviour. For the formal memory model, borrow validation and backend lowering, see <a href="../../codebase/memory-management">Memory management</a>.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Reference semantics
@@ -721,7 +721,7 @@ body {
 
 
 
-            <p>Existing values are shared by default. Here is what that means in practice.</p><p>When you assign one variable to another, both read the same data:</p><pre style=""><code class='codeblock'>
+            <p>Moth shares existing values by default. Here&#39;s what that means in practice.</p><p>When you assign one variable to another, both read the same data:</p><pre style=""><code class='codeblock'>
     original <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;hello&quot;</span>
     view <span class='moth-code-operator'>=</span> original
     </code></pre><p>No copy happens here. <code>view</code> reads the same value as <code>original</code>.</p><h3>When shared access blocks mutation</h3><p>A shared alias prevents mutation of the same data while it is still in use. Once the alias is no longer needed, mutation becomes valid again.</p><pre style=""><code class='codeblock'>
@@ -736,7 +736,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Moth is reference-semantic by default. Reading, binding, passing, returning or storing an existing value uses shared reference semantics unless exclusive access or explicit copy applies.</p><h3>Shared access by default</h3><p>Existing values use shared, read-only access. Multiple shared aliases may coexist. A shared alias doesn&#39;t imply ownership or implicit copy.</p><pre style=""><code class='codeblock'>
+        <p>Moth defaults to reference semantics. Reading, binding, passing, returning or storing an existing value uses shared reference semantics unless exclusive access or explicit copy applies.</p><h3>Shared access by default</h3><p>Existing values use shared, read-only access. Multiple shared aliases may coexist. A shared alias doesn&#39;t imply ownership or implicit copy.</p><pre style=""><code class='codeblock'>
     original <span class='moth-code-operator'>=</span> load_items<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     view <span class='moth-code-operator'>=</span> original
 
@@ -834,7 +834,7 @@ body {
     <span class='moth-code-operator'>~</span>values.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>4</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
         assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;unexpected push failure&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
-    </code></pre><p><code>~</code> isn&#39;t a move marker or a type constructor. It applies to an existing mutable place and requests exclusive access for one operation.</p><h3>Mutable aliases versus fresh mutable slots</h3><p><code>alias ~= source</code> creates an exclusive write-through mutable alias to an existing place. Assignment through a mutable alias writes through to the referent.</p><p>A mutable declaration initialized from a fresh value creates an independent mutable slot.</p><pre style=""><code class='codeblock'>
+    </code></pre><p><code>~</code> isn&#39;t a move marker or a type constructor. It applies to an existing mutable place and requests exclusive access for one operation.</p><h3>Mutable aliases versus fresh mutable slots</h3><p><code>alias ~= source</code> creates an exclusive write-through mutable alias to an existing place. Assignment through a mutable alias writes through to the referent.</p><p>A mutable declaration initialised from a fresh value creates an independent mutable slot.</p><pre style=""><code class='codeblock'>
     original <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>
     alias <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> original  <span class='moth-code-comment'>-- mutable alias</span>
     alias <span class='moth-code-operator'>=</span> <span class='moth-code-number'>20</span>         <span class='moth-code-comment'>-- writes through to original</span>
@@ -978,7 +978,7 @@ body {
 
 
 
-            <p>Moth has an accepted but not yet implemented feature called declared memory groups. This page explains what they are so you know the concept exists.</p><h3>What groups do</h3><p>A <code>group</code> lets you control where values are allocated and how long they live. When you put a value into a group, that value cannot outlive the group.</p><h3>Current status</h3><p>Group syntax is <strong>accepted but deferred</strong>. Current programs don&#39;t use it. The compiler doesn&#39;t parse or validate group declarations yet.</p><p>You don&#39;t need groups to write Moth programs today. The compiler handles memory safety through shared access, explicit <code>copy</code> and <code>~</code> exclusive access.</p><h3>Read next</h3><ul><li><a href="#reference-semantics">Reference semantics</a></li><li><a href="#copy-and-exclusive-access">Copy and exclusive access</a></li></ul>
+            <p>Moth has an accepted but not yet implemented feature called declared memory groups. This page explains what they are so you know the concept exists.</p><h3>What groups do</h3><p>A <code>group</code> lets you control where values are allocated and how long they live. When you put a value into a group, that value cannot outlive the group.</p><h3>Current status</h3><p>Group syntax is <strong>accepted but deferred</strong>. Current programs don&#39;t use it. The compiler doesn&#39;t parse or validate group declarations yet.</p><p>You don&#39;t need groups to write Moth programs today. The compiler handles memory safety through shared access, explicit <code>copy</code> and <code>~</code> exclusive access.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">

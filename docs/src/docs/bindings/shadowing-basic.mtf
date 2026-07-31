@@ -1,4 +1,4 @@
-A visible name cannot be declared again.
+A visible name can't be declared again.
 
 [codeblock, $code("moth"):
     score = 10

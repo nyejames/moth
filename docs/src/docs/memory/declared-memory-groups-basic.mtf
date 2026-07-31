@@ -13,8 +13,3 @@ compiler doesn't parse or validate group declarations yet.
 
 You don't need groups to write Moth programs today. The compiler handles
 memory safety through shared access, explicit `copy` and `~` exclusive access.
-
-### Read next
-
-- @#reference-semantics (Reference semantics)
-- @#copy-and-exclusive-access (Copy and exclusive access)

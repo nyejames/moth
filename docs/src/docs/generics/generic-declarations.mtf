@@ -1,4 +1,4 @@
-Generics are declaration-site type abstractions for top-level structs, choices and free functions. A generic parameter is a compile-time placeholder that stands for a concrete type selected later.
+Generics form declaration-site type abstractions for top-level structs, choices and free functions. A generic parameter acts as a compile-time placeholder that stands for a concrete type selected later.
 
 ### Syntax
 

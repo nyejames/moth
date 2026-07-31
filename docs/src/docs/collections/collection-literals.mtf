@@ -1,4 +1,4 @@
-Collections are ordered, zero-indexed, homogeneous groups.
+Collections form ordered, zero-indexed, homogeneous groups.
 
 Collection types and literals use braces.
 

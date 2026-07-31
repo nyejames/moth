@@ -41,7 +41,7 @@ page_head #= language_theme_head
 
     # Design scope
 
-    Moth keeps the source language deliberately small. This page explains what belongs in the language, what is deferred and what is intentionally excluded.
+    Moth keeps the source language small. This page explains what belongs in the language, what defers and what the language intentionally excludes.
 ]
 
 #[section:

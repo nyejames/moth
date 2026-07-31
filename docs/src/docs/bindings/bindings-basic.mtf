@@ -1,4 +1,4 @@
-A binding is a name for a value.
+A binding names a value.
 
 [codeblock, $code("moth"):
     score = 10
@@ -15,5 +15,5 @@ context:
     player_name String = "Priya"
 ]
 
-Bindings are immutable unless you mark them as mutable. An immutable binding
-cannot be assigned a different value later.
+Bindings stay immutable unless you mark them as mutable. An immutable binding
+can't take a different value later.

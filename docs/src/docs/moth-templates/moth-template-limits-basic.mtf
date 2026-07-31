@@ -11,9 +11,3 @@ Moth template files are the wrong tool when the job stops being content-shaped.
 - You need plain Markdown with no Moth syntax.
 - You need fenced code blocks or pipe tables.
 - You need raw HTML preserved.
-
-### Remember
-
-- `.mtf` is const-required. Everything must fold at compile time.
-- `.mtf` has no fenced code, no pipe tables, no raw HTML.
-- `.mtf` sees only compile-time constants from its module root and `@html`.

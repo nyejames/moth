@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with moth</h1><p><code>moth</code> is the Moth compiler and project tool. You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.</p><p>It has a bunch of other tooling that is under rapid developemnt.</p><p>If you are running the compiler from the repository instead of an installed <code>moth</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
+    <section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with moth</h1><p><code>moth</code> compiles and tools Moth projects. You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.</p><p>Other tooling continues rapid development.</p><p>If you are running the compiler from the repository instead of an installed <code>moth</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -708,18 +708,18 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>new html</code></p></td>
      <td style="padding: 0.1em 0.5em; "> Creates a complete HTML project scaffold.</td>
-     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice, and creates the full default scaffold including <code>src/@page.moth</code>, <code>lib/</code>, output manifests, and an optional .gitignore.</p></td>
+     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the full default scaffold including <code>src/@page.moth</code>, <code>lib/</code>, output manifests and an optional .gitignore.</p></td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>check .</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> Runs project discovery, frontend compilation, type checking, HIR lowering, and borrow validation without writing build artifacts.</td>
+     <td style="padding: 0.1em 0.5em; "> Runs project discovery, frontend compilation, type checking, HIR lowering and borrow validation without writing build artifacts.</td>
      <td style="padding: 0.1em 0.5em; "><p> Add <code>--terse</code> for compact one-line diagnostics.</p></td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>dev .</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> Builds the project, starts a local dev server, watches files, and reloads the browser when sources change.</td>
+     <td style="padding: 0.1em 0.5em; "> Builds the project, starts a local dev server, watches files and reloads the browser when sources change.</td>
      <td style="padding: 0.1em 0.5em; "> This is the main day-to-day command for working on HTML projects.</td>
             </tr>
 
@@ -757,13 +757,13 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>--html-wasm</code></p></td>
      <td style="padding: 0.1em 0.5em; "> HTML builds</td>
-     <td style="padding: 0.1em 0.5em; "> Uses the experimental HTML-Wasm backend path. The JavaScript HTML backend is the current Alpha target.</td>
+     <td style="padding: 0.1em 0.5em; "> Uses the experimental HTML-Wasm backend path. The JavaScript HTML backend currently targets Alpha.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>--terse</code></p></td>
      <td style="padding: 0.1em 0.5em; "><p><code>check</code> only</p></td>
-     <td style="padding: 0.1em 0.5em; "> Prints compact diagnostics for tools, logs, and LLM workflows.</td>
+     <td style="padding: 0.1em 0.5em; "> Prints compact diagnostics for tools, logs and LLM workflows.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -775,12 +775,12 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>--host</code>, <code>--port</code>, <code>--poll-interval-ms</code></p></td>
      <td style="padding: 0.1em 0.5em; "><p><code>dev</code> only</p></td>
-     <td style="padding: 0.1em 0.5em; "> Configures the local dev server. Defaults are `127.0.0.1`, `6342`, and `300`.</td>
+     <td style="padding: 0.1em 0.5em; "> Configures the local dev server. Defaults are `127.0.0.1`, `6342` and `300`.</td>
             </tr>
                 
 
     </table></section>
-    <section class="container"><h2>Create a new HTML project</h2><p>The scaffold creates a complete default project including config, a starter page, package folder, output folders with build manifests, and an optional .gitignore. The HTML project builder itself has more rules than this page needs to cover; see <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments, and generated output details.</p><p>Start a new project:</p><pre style="
+    <section class="container"><h2>Create a new HTML project</h2><p>The scaffold creates a complete default project including config, a starter page, package folder, output folders with build manifests and an optional .gitignore. The HTML project builder itself has more rules than this page needs to cover. See <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments and generated output details.</p><p>Start a new project:</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -878,7 +878,7 @@ body {
     moth check .
     moth dev .
     </code></pre></section>
-    <section class="container"><h2>Run the dev server</h2><p><code>dev</code> is currently the most useful command for normal Moth project work. It builds the project, serves the generated files locally, watches for source changes, and sends reload events to the browser.</p><pre style="
+    <section class="container"><h2>Run the dev server</h2><p><code>dev</code> handles normal day-to-day Moth project work. It builds the project, serves the generated files locally, watches for source changes and sends reload events to the browser.</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -922,7 +922,7 @@ body {
     "><code class='codeblock'>
     moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release
     </code></pre><p>For HTML projects, generated files are written under the configured output folder. The default scaffold currently uses <code>dev</code> for development output and <code>release</code> for release output.</p></section>
-    <section class="container"><h2>Check without building</h2><p><code>check</code> is the fastest correctness command for editor loops and CI-style validation. It does not write output artifacts, but it still runs the shared frontend diagnostics used by all backends.</p><pre style="
+    <section class="container"><h2>Check without building</h2><p><code>check</code> gives the fastest correctness signal for editor loops and CI-style validation. It doesn&#39;t write output artifacts, but it runs the shared frontend diagnostics that all backends use.</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -948,7 +948,7 @@ body {
             E|type|src/@page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
             W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch
         </code></pre></section>
-    <section class="container"><h2>Reading compiler errors</h2><p>Moth uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors, and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
+    <section class="container"><h2>Reading compiler errors</h2><p>Moth uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -978,42 +978,42 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> Syntax Error</td>
      <td style="padding: 0.1em 0.5em; "> The source text could not be parsed as Moth syntax.</td>
-     <td style="padding: 0.1em 0.5em; "> Check punctuation, block delimiters, template brackets, imports, and declaration shape.</td>
+     <td style="padding: 0.1em 0.5em; "> Check punctuation, block delimiters, template brackets, imports and declaration shape.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> Type Error</td>
      <td style="padding: 0.1em 0.5em; "> The expression type does not match the expected type.</td>
-     <td style="padding: 0.1em 0.5em; "> Check annotations, return types, function arguments, collection element types, and contextual casts.</td>
+     <td style="padding: 0.1em 0.5em; "> Check annotations, return types, function arguments, collection element types and contextual casts.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> Language Rule Error</td>
      <td style="padding: 0.1em 0.5em; "> The syntax is valid, but it violates a language rule.</td>
-     <td style="padding: 0.1em 0.5em; "> Check things like mutability, import visibility, unsupported feature surfaces, duplicate names, or invalid top-level code.</td>
+     <td style="padding: 0.1em 0.5em; "> Check things like mutability, import visibility, unsupported feature surfaces, duplicate names or invalid top-level code.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> Missing File or Directory</td>
-     <td style="padding: 0.1em 0.5em; "> The project references a file, directory, import path, or output path that cannot be resolved.</td>
+     <td style="padding: 0.1em 0.5em; "> The project references a file, directory, import path or output path that cannot be resolved.</td>
      <td style="padding: 0.1em 0.5em; "> Check spelling, relative paths, `entry_root` and project config.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> Malformed Config</td>
-     <td style="padding: 0.1em 0.5em; "> The project config exists but contains unsupported, missing, or invalid settings.</td>
+     <td style="padding: 0.1em 0.5em; "> The project config exists but contains unsupported, missing or invalid settings.</td>
      <td style="padding: 0.1em 0.5em; "> Check `config.moth` and backend-specific config rules.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> Borrow Checker Violation</td>
      <td style="padding: 0.1em 0.5em; "> The program violates Moth's access and ownership rules.</td>
-     <td style="padding: 0.1em 0.5em; "> Check mutable/exclusive access, later uses after possible moves, and overlapping borrows.</td>
+     <td style="padding: 0.1em 0.5em; "> Check mutable/exclusive access, later uses after possible moves and overlapping borrows.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> Dev Server Issue</td>
-     <td style="padding: 0.1em 0.5em; "> The local server could not start, watch, build, or serve the project correctly.</td>
+     <td style="padding: 0.1em 0.5em; "> The local server could not start, watch, build or serve the project correctly.</td>
      <td style="padding: 0.1em 0.5em; "> Check port conflicts, host binding, project path, and file permissions.</td>
             </tr>
 
@@ -1025,7 +1025,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h2>Warnings and future suggestions</h2><p>Warnings are for code that can still compile but deserves attention. Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues, and import alias case mismatches.</p><p>Moth deliberately separates correctness from style pressure. The future <code>suggest</code> command is planned to become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code. That is where noisy suggestions such as unused variables, unused imports, unused declarations, and more specific style improvements should live.</p><p>The intended workflow will be:</p><pre style="
+    <section class="container"><h2>Warnings and future suggestions</h2><p>Warnings are for code that can still compile but deserves attention. Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues and import alias case mismatches.</p><p>Moth separates correctness from style pressure. The future <code>suggest</code> command will become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code. Noisy suggestions such as unused variables, unused imports, unused declarations and more specific style improvements belong there.</p><p>The intended workflow will be:</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -1036,7 +1036,7 @@ body {
     moth suggest .
     moth fmt .
     </code></pre><p>For now, use <code>check</code> and the compiler&#39;s normal warnings as the practical baseline.</p></section>
-    <section class="container"><h2>Planned moth extensions</h2><p><code>moth</code> is expected to become the main Moth project tool, not just a thin compiler launcher. Planned additions include:</p><ul><li>a package manager for Moth packages and project dependencies</li><li>a formatter for stable project-wide formatting</li><li><code>suggest</code>, a pedantic style and cleanup command to use alongside <code>check</code></li><li>richer <code>new</code> project options, including more complete config templates</li><li>stronger project maintenance commands as the build system matures</li></ul><p>The short-term rule is simple: <code>dev</code> for fast browser feedback, <code>check</code> for correctness, and <code>build</code> when you want output files.</p></section>
+    <section class="container"><h2>Planned moth extensions</h2><p><code>moth</code> will become the main Moth project tool, not a thin compiler launcher. Planned additions include:</p><ul><li>a package manager for Moth packages and project dependencies</li><li>a formatter for stable project-wide formatting</li><li><code>suggest</code>, a pedantic style and cleanup command to use alongside <code>check</code></li><li>richer <code>new</code> project options, including more complete config templates</li><li>stronger project maintenance commands as the build system matures</li></ul><p>The short-term rule is simple: <code>dev</code> for fast browser feedback, <code>check</code> for correctness and <code>build</code> when you want output files.</p></section>
     <section class="container"><nav class="doc-pager doc-pager--single" aria-label="Language documentation">
         <a
             class="doc-pager__link doc-pager__link--next"

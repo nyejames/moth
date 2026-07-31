@@ -44,14 +44,5 @@ directly.
     ~canvas.set_fill_style("red")
     ~canvas.fill_rect(10.0, 10.0, 50.0, 50.0)
 ]
-
-### Remember
-
-- `@html` helpers are compile-time constants. They fold into HTML at build time.
-- `.mtf` files get them automatically. `.moth` files need an import.
-- The package ships as a skeleton. It will grow as the standard library matures.
-
-### Read next
-
 For the full export surface, canvas wrapper contract and deferred surfaces,
 see @#html-helpers (@html advanced).

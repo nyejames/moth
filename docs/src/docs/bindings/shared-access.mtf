@@ -1,6 +1,6 @@
 Existing values use shared read-only access by default.
 
-Binding an existing value to another name does not silently copy it.
+Binding an existing value to another name doesn't silently copy it.
 
 [codeblock, $code("moth"):
     items ~= {"a", "b"}
@@ -11,10 +11,10 @@ Binding an existing value to another name does not silently copy it.
 
 - Any number of shared accesses may coexist.
 - Shared access is read-only.
-- Shared access does not imply ownership transfer.
+- Shared access doesn't imply ownership transfer.
 - The rule applies uniformly to stack and heap values.
-- Moth has no source `&` or `&mut` operators.
-- A backend may optimize representation, but observable source semantics must stay the same.
+- Moth offers no source `&` or `&mut` operators.
+- A backend may optimise representation, but observable source semantics must stay the same.
 
 Binding mutability is separate from access. A mutable binding can still be
 shared read-only. An exclusive operation must satisfy the borrow rules before

@@ -19,9 +19,3 @@ Declarations are private to their module by default. The `export:` block marks w
 ### Private by default
 
 Files in the same module can see each other's declarations. Other modules can only see what the `export:` block makes public.
-
-### Remember
-
-- `export:` is only valid in the module root file.
-- One `export:` block per root.
-- `#` means compile-time constant, not public.

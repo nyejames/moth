@@ -60,7 +60,7 @@ Markdown pipe-table syntax is not part of Moth Markdown.
 
 Inside `.mtf` content, use a structured list.
 
-When a website page genuinely needs a visual table, build it in the owning
+When a website page needs a visual table, build it in the owning
 `.moth` page with Moth table helpers.
 
 Do not rely on pipe-table text rendering as a table.

@@ -1,4 +1,4 @@
-A template with a subscription is still a `String`, but a supported backend can keep it live.
+A template with a subscription stays a `String`, but a supported backend can keep it live.
 
 ### Still a String
 
@@ -7,7 +7,7 @@ A template with a subscription is still a `String`, but a supported backend can 
     view = [: Count: [$(count)]]
 ]
 
-`view` has type `String`. The compiler just keeps extra metadata about the subscription.
+`view` has type `String`. The compiler keeps extra metadata about the subscription.
 
 ### HTML-JS live fragment
 
@@ -22,9 +22,3 @@ In an HTML-JS project, a top-level runtime template with a subscription can rere
 ### Not every sink is live
 
 `io.line` and `assert` do not accept reactive templates. HTML-Wasm rejects reactive runtime features for now.
-
-### Remember
-
-- Subscription-bearing templates are ordinary `String` values.
-- HTML-JS can mount them as live fragments.
-- Other targets reject or snapshot them according to their own rules.

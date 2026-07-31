@@ -49,7 +49,7 @@ page_head #= language_theme_head
 
     # Casts
 
-    Casts are explicit and target-driven. The receiving type says where the value is going. `cast`, `cast!` or `catch` says how conversion failure is handled.
+    Casts stay explicit and target-driven. The receiving type says where the value goes. `cast`, `cast!` or `catch` says how the program handles conversion failure.
 
     This keeps conversion local. You can see the source, target and failure path without asking the compiler to guess from distant code.
 ]

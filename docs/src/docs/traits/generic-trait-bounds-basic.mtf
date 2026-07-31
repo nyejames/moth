@@ -27,10 +27,3 @@ Inside `render`, `Item` is known to have a `display` method.
 ]
 
 `and` adds another bound to the same parameter.
-
-### Remember
-
-- Bounds use `is`, not `must`.
-- `and` combines bounds on one parameter.
-- Commas still separate different parameters.
-- The concrete type must have visible evidence for every bound.

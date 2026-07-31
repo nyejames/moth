@@ -95,7 +95,7 @@ A concrete callee error type does not specialise an otherwise unsolved generic e
     ;
 ]
 
-A generic error parameter must be solved by immediate call-site evidence, just like any other generic parameter.
+A generic error parameter must be solved by immediate call-site evidence, like any other generic parameter.
 
 ### Explicit call-site syntax is rejected
 

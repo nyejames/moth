@@ -20,9 +20,3 @@ Other modules can now import `Card` and `render_card` through the module's publi
 ]
 
 `LocalCard` is file-local. It is not public. Only imports inside the `export:` block become public re-exports.
-
-### Remember
-
-- Re-exports go inside the `export:` block.
-- The `as` alias defines the public API name.
-- Legacy inline `export` syntax is rejected.

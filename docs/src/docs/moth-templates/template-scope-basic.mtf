@@ -23,9 +23,3 @@ The compile-time constant is inserted into the Markdown at that position.
 ]
 
 Nested templates default to `$md`, but an explicit directive overrides that.
-
-### Remember
-
-- Only compile-time constants are visible.
-- Runtime values are not visible.
-- Nested templates default to `$md`.

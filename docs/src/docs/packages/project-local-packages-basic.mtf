@@ -19,10 +19,3 @@ Scoped support packages are `+*.moth` roots in the project source tree. The cont
 ]
 
 `@blog` resolves to the `blog` directory's support root. The package's public surface comes from its `export:` block.
-
-### Remember
-
-- `+package.moth` in a directory creates a scoped support package.
-- The package is visible to its nearest ancestor normal module and siblings.
-- Internal files are hidden unless re-exported.
-- Imported package roots do not become HTML routes.

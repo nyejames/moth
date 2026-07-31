@@ -79,7 +79,7 @@ import @styles {
 }
 
 page_title #= "Project structure"
-page_description #= "How Moth projects are structured, how modules are discovered, and how the HTML builder emits pages."
+page_description #= "How Moth projects are structured, how modules are discovered and how the HTML builder emits pages."
 page_head #= language_theme_head
 
 #[navbar]
@@ -89,12 +89,12 @@ page_head #= language_theme_head
 
     # Project structure
 
-    A Moth project is a set of modules, one strict project config and a builder
+    A Moth project consists of a set of modules, one strict project config and a builder
     that decides what those modules produce.
 
-    The root filename begins with `#`, but the name after it is deliberately
-    unimportant. The source tells the compiler what is public. The builder decides
-    whether the module becomes an artifact.
+    The root filename begins with `#`, but the name after it carries no
+    importance. The source tells the compiler what counts as public. The builder decides
+    whether the module becomes an artefact.
 ]
 
 #[section:

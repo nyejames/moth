@@ -95,6 +95,6 @@ recovery happens before optional wrapping.
 - `String -> Int` and `String -> Float` consume the whole string.
 - Numeric text rejects surrounding whitespace, uppercase exponent markers, unary plus, malformed separators, malformed exponents, `NaN` and infinity spellings.
 - `String -> Float` additionally rejects a grammar-valid non-finite result.
-- `String -> Int` and `Float -> Int` must materialize inside `-2147483648` through `2147483647`.
+- `String -> Int` and `Float -> Int` must materialise inside `-2147483648` through `2147483647`.
 - `Float -> String` normalizes `-0.0` to `0` and uses lowercase exponent formatting when exponential notation is required.
 - Contextual `Int -> Float` promotion remains separate from explicit casting, though explicit `cast` is valid from a naturally `Int` source to a `Float` target.

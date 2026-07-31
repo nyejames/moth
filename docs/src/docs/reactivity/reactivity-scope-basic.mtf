@@ -1,4 +1,4 @@
-Reactivity in Moth is deliberately small. It covers UI state, not general callbacks.
+Reactivity in Moth stays small. It covers UI state, not general callbacks.
 
 ### Constrained purpose
 
@@ -13,9 +13,3 @@ You can declare a source, subscribe to it in a template and let the backend rere
 ### Not closures
 
 Moth does not have anonymous function values, generic function values or general closures. Reactivity is the UI-oriented alternative.
-
-### Remember
-
-- Reactivity is for explicit sources and template subscriptions.
-- It does not replace callbacks or higher-order functions.
-- Field subscriptions, derived values and finer DOM updates are deferred.

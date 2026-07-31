@@ -12,7 +12,7 @@ Use a type alias when a type annotation would be repetitive or when a name carri
 
 ### Aliases are transparent
 
-An alias is just another spelling of the same type.
+An alias is another spelling of the same type.
 
 [codeblock, $code("moth"):
     UserId as Int
@@ -46,9 +46,3 @@ An alias can name a collection type.
 
     names Names = {"Priya", "Grace"}
 ]
-
-### Remember
-
-- A type alias is for naming, not for creating a new type.
-- Aliases work in parameters, fields, returns and local annotations.
-- Aliases are not values. You cannot pass `UserId` to a function or call it as a constructor. Even when an alias targets a struct or choice, only the target's canonical name constructs.

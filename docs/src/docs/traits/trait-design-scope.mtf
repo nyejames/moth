@@ -1,4 +1,4 @@
-Moth traits are deliberately static. They name behaviour before runtime begins and stay out of the type system as runtime values.
+Moth traits stay static. They name behaviour before runtime begins and stay out of the type system as runtime values.
 
 ### Static model
 

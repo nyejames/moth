@@ -73,9 +73,9 @@ page_head #= language_theme_head
 
     # Traits
 
-    Traits name behavior a type promises to provide.
+    Traits name behaviour a type promises to provide.
 
-    The promise is explicit. Method shapes do not count until the source declares
+    The promise stays explicit. Method shapes don't count until the source declares
     conformance, and every reusable bound stays static before runtime begins.
 ]
 

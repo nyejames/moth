@@ -12,5 +12,5 @@ Small inline code spans use one backtick on each side.
 
 Use `$code("moth")` or another language name for a full highlighted code block.
 
-Moth Markdown is deliberately small. It does not support fenced code
+Moth Markdown stays small. It does not support fenced code
 blocks or pipe tables.

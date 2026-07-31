@@ -24,9 +24,3 @@ A subscription must name exactly one reactive source identifier.
 ### Not an expression
 
 You cannot subscribe to a field path, a function call, an arithmetic expression or mutable access. Those forms are deferred.
-
-### Remember
-
-- Use dollar-paren syntax for live subscriptions.
-- Use plain capture for one-time snapshot reads.
-- Subscriptions work only in template positions.

@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Structs</p><h1>Structs</h1><p>Structs give data a name, a shape and a clear owner. Matching fields are not enough to make two types interchangeable.</p><p>Methods stay just as explicit. They are top-level functions tied to the type they belong to, with shared or mutable access visible in the receiver.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Structs</p><h1>Structs</h1><p>Structs give data a name, a shape and a clear owner. Matching fields don&#39;t make two types interchangeable.</p><p>Methods stay explicit. They bind to their type as top-level functions, with shared or mutable access visible in the receiver.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Struct declarations
@@ -735,7 +735,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A struct is a nominal runtime type with named fields.</p><pre style=""><code class='codeblock'>
+        <p>A struct declares a nominal runtime type with named fields.</p><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>Vector</span><span class='moth-code-number'>2</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
         x <span class='moth-code-struct'>Float,</span>
         y <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.0</span>,

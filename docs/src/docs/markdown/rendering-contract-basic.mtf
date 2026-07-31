@@ -10,10 +10,4 @@ Plain Markdown supports common formatting through a CommonMark-compatible render
 
 ### One clear limitation
 
-Moth template syntax is not interpreted. Dollar-prefixed directives are just text. Bracket-delimited template bodies are just text. Use moth template files if you need Moth-aware content.
-
-### Remember
-
-- The renderer is CommonMark-compatible with GFM extensions.
-- It is not the same as a moth template's md renderer.
-- Smart punctuation is disabled.
+Moth template syntax is not interpreted. Dollar-prefixed directives are plain text. Bracket-delimited template bodies are plain text. Use moth template files if you need Moth-aware content.

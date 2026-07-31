@@ -1,6 +1,6 @@
-`Error` is Moth's builtin structured error type.
+`Error` carries Moth's builtin structured error type.
 
-Its public fields are:
+Its public fields:
 
 - `message String`
 - `code Int = 0`

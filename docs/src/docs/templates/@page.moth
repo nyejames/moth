@@ -65,9 +65,9 @@ page_head #= language_theme_head
 
     # Templates
 
-    Templates are Moth's superpowered strings. They can stay tiny, or grow into a compile-time HTML and Markdown engine with slots, wrappers and control flow.
+    Templates form Moth's string-building engine. They can stay tiny, or grow into a compile-time HTML and Markdown engine with slots, wrappers and control flow.
 
-    Square brackets look unusual for about five minutes. Then ordinary string formatting starts to feel underdressed.
+    Square brackets take a moment to click. Then ordinary string formatting starts to feel limiting.
 ]
 
 #[section:

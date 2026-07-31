@@ -14,8 +14,3 @@ Moth template files use a small Markdown subset, not full CommonMark.
 - Fenced code blocks (triple backticks). Use `codeblock` helpers instead.
 - Pipe tables. Use structured lists instead.
 - Raw HTML is escaped. Use `$raw` or `$html` directives for raw output.
-
-### Remember
-
-- `--` is content text, not a comment.
-- Backticks are inline-code delimiters, not raw strings.

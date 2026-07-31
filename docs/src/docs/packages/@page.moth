@@ -76,7 +76,7 @@ page_head #= language_theme_head
     Imports make names visible. Module roots decide what crosses a module boundary.
     Project-local packages give reusable modules stable prefixes.
 
-    Those are separate jobs. Keeping them separate is what stops a filesystem from
+    Those jobs stay separate. Keeping them separate stops a filesystem from
     quietly becoming an API.
 ]
 

@@ -25,10 +25,3 @@ A reactive parameter lets a function receive a live source instead of a snapshot
 ]
 
 An ordinary `Int` parameter reads the current value once.
-
-### Remember
-
-- Reactive parameters keep source identity.
-- They do not grant mutation permission.
-- A plain value cannot be passed where a reactive source is required.
-- Reactive parameters cannot have defaults.

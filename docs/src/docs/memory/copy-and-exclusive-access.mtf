@@ -43,7 +43,7 @@ A copy result may be allocated directly into an inferred or declared destination
 
 `alias ~= source` creates an exclusive write-through mutable alias to an existing place. Assignment through a mutable alias writes through to the referent.
 
-A mutable declaration initialized from a fresh value creates an independent mutable slot.
+A mutable declaration initialised from a fresh value creates an independent mutable slot.
 
 [codeblock, $code("moth"):
     original ~= 10

@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Values and bindings</p><h1>Values and bindings</h1><p>Names are cheap. Copies aren&#39;t automatic. Existing values are shared by default, mutability is explicit and <code>copy</code> is the line between another view and an independent value.</p><p>These rules apply to every type. The memory-management pages explain how the compiler validates and lowers them.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Values and bindings</p><h1>Values and bindings</h1><p>Names cost little. Copies aren&#39;t automatic. Existing values share by default, mutability stays explicit and <code>copy</code> draws the line between another view and an independent value.</p><p>These rules apply to every type. The memory-management pages explain how the compiler validates and lowers them.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Bindings
@@ -721,13 +721,13 @@ body {
 
 
 
-            <p>A binding is a name for a value.</p><pre style=""><code class='codeblock'>
+            <p>A binding names a value.</p><pre style=""><code class='codeblock'>
     score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>
     player_name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
     </code></pre><p>Moth usually infers the type from the value.</p><p>Write the type when it makes the code clearer or gives the compiler needed context:</p><pre style=""><code class='codeblock'>
     score <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>
     player_name <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
-    </code></pre><p>Bindings are immutable unless you mark them as mutable. An immutable binding cannot be assigned a different value later.</p>
+    </code></pre><p>Bindings stay immutable unless you mark them as mutable. An immutable binding can&#39;t take a different value later.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -868,17 +868,17 @@ body {
 
 
 
-            <p>A new name for an existing value does not automatically copy that value.</p><pre style=""><code class='codeblock'>
+            <p>A new name for an existing value doesn&#39;t automatically copy that value.</p><pre style=""><code class='codeblock'>
     names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
     same_names <span class='moth-code-operator'>=</span> names
-    </code></pre><p><code>same_names</code> is another read-only view of the existing value.</p><p>This keeps ordinary code cheap. You can pass values around without copying them first.</p><p>Shared access cannot be used to change the value. Mutation needs a mutable binding and an explicit exclusive operation.</p>
+    </code></pre><p><code>same_names</code> is another read-only view of the existing value.</p><p>This keeps ordinary code cheap. You can pass values around without copying them first.</p><p>You can&#39;t use shared access to change the value. Mutation needs a mutable binding and an explicit exclusive operation.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Existing values use shared read-only access by default.</p><p>Binding an existing value to another name does not silently copy it.</p><pre style=""><code class='codeblock'>
+        <p>Existing values use shared read-only access by default.</p><p>Binding an existing value to another name doesn&#39;t silently copy it.</p><pre style=""><code class='codeblock'>
     items <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;a&quot;</span>, <span class='moth-code-string'>&quot;b&quot;</span><span class='moth-code-parenthesis'>}</span>
     shared_items <span class='moth-code-operator'>=</span> items
-    </code></pre><h3>Contract</h3><ul><li>Any number of shared accesses may coexist.</li><li>Shared access is read-only.</li><li>Shared access does not imply ownership transfer.</li><li>The rule applies uniformly to stack and heap values.</li><li>Moth has no source <code>&amp;</code> or <code>&amp;mut</code> operators.</li><li>A backend may optimize representation, but observable source semantics must stay the same.</li></ul><p>Binding mutability is separate from access. A mutable binding can still be shared read-only. An exclusive operation must satisfy the borrow rules before it can proceed.</p><h3>Alias conflicts</h3><p>A later use of a shared alias can prevent overlapping mutation:</p><pre style=""><code class='codeblock'>
+    </code></pre><h3>Contract</h3><ul><li>Any number of shared accesses may coexist.</li><li>Shared access is read-only.</li><li>Shared access doesn&#39;t imply ownership transfer.</li><li>The rule applies uniformly to stack and heap values.</li><li>Moth offers no source <code>&amp;</code> or <code>&amp;mut</code> operators.</li><li>A backend may optimise representation, but observable source semantics must stay the same.</li></ul><p>Binding mutability is separate from access. A mutable binding can still be shared read-only. An exclusive operation must satisfy the borrow rules before it can proceed.</p><h3>Alias conflicts</h3><p>A later use of a shared alias can prevent overlapping mutation:</p><pre style=""><code class='codeblock'>
     items <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;a&quot;</span>, <span class='moth-code-string'>&quot;b&quot;</span><span class='moth-code-parenthesis'>}</span>
     shared_items <span class='moth-code-operator'>=</span> items
 
@@ -962,7 +962,7 @@ body {
 
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> original length<span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> copied length<span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>independent_items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>Copy targets</h3><p>The operand must be a place with stable storage:</p><ul><li>a visible value binding</li><li>a field projection such as <code>copy config.title</code></li><li>a parenthesized place such as <code>copy (items)</code></li></ul><p>Literals, templates, constructor calls, function calls and computed expressions are not copy targets.</p><pre style=""><code class='codeblock'>
+    </code></pre><h3>Copy targets</h3><p>The operand must be a place with stable storage:</p><ul><li>a visible value binding</li><li>a field projection such as <code>copy config.title</code></li><li>a parenthesised place such as <code>copy (items)</code></li></ul><p>Literals, templates, constructor calls, function calls and computed expressions are not copy targets.</p><pre style=""><code class='codeblock'>
     copied_title <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> config.title
     copied_items <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> <span class='moth-code-parenthesis'>(</span>items<span class='moth-code-parenthesis'>)</span>
     </code></pre><p>These forms are invalid:</p><pre style=""><code class='codeblock'>
@@ -1024,7 +1024,7 @@ body {
 
 
 
-            <p>A visible name cannot be declared again.</p><pre style=""><code class='codeblock'>
+            <p>A visible name can&#39;t be declared again.</p><pre style=""><code class='codeblock'>
     score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>
 
     <span class='moth-code-keyword'>if</span> score <span class='moth-code-operator'>&gt;</span> <span class='moth-code-number'>0</span><span class='moth-code-operator'>:</span>
@@ -1041,7 +1041,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Moth does not allow a visible name to be redeclared.</p><pre style=""><code class='codeblock'>
+        <p>Moth doesn&#39;t allow a visible name to be redeclared.</p><pre style=""><code class='codeblock'>
     ready <span class='moth-code-operator'>=</span> true
     label <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;outer&quot;</span>
 
@@ -1049,7 +1049,7 @@ body {
         <span class='moth-code-comment'>-- Invalid: label is already visible.</span>
         label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;inner&quot;</span>
     ;
-    </code></pre><h3>Contract</h3><ul><li>A declaration cannot reuse a value name that is still visible.</li><li>A declaration cannot collide with a visible type, alias, import, builtin or reserved name.</li><li>Function parameters and loop bindings follow the same rule.</li><li>A nested child scope cannot shadow a name from its parent scope.</li><li>Assignment to an existing mutable binding is not a redeclaration.</li><li>Separate scopes may reuse a name when neither declaration is visible from the other.</li></ul><pre style=""><code class='codeblock'>
+    </code></pre><h3>Contract</h3><ul><li>A declaration can&#39;t reuse a value name that stays visible.</li><li>A declaration can&#39;t collide with a visible type, alias, import, builtin or reserved name.</li><li>Function parameters and loop bindings follow the same rule.</li><li>A nested child scope can&#39;t shadow a name from its parent scope.</li><li>Assignment to an existing mutable binding is not a redeclaration.</li><li>Separate scopes may reuse a name when neither declaration is visible from the other.</li></ul><pre style=""><code class='codeblock'>
     first <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
         value <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
         <span class='moth-code-keyword'>return</span> value

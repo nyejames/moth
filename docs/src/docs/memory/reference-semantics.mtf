@@ -1,4 +1,4 @@
-Moth is reference-semantic by default. Reading, binding, passing, returning or storing an existing value uses shared reference semantics unless exclusive access or explicit copy applies.
+Moth defaults to reference semantics. Reading, binding, passing, returning or storing an existing value uses shared reference semantics unless exclusive access or explicit copy applies.
 
 ### Shared access by default
 

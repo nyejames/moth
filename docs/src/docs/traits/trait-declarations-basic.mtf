@@ -18,9 +18,3 @@ This says: any type that claims to be `DISPLAY_TEXT` must provide a `display` me
 ]
 
 A marker trait has no methods. It is still a real contract that a type can explicitly adopt.
-
-### Remember
-
-- Trait names are all caps.
-- A trait lists method signatures, not bodies.
-- A trait is a static contract, not a runtime value or type.

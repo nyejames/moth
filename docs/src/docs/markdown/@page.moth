@@ -49,7 +49,7 @@ page_head #= language_theme_head
 
     # Plain Markdown
 
-    Plain Markdown is the least magical content format in a Moth project.
+    Plain Markdown earns its place as the least magical content format in a Moth project.
 
     The compiler can import it, render it and hand the result to the HTML builder.
     It never pretends the file contains Moth code.

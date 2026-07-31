@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Plain Markdown</p><h1>Plain Markdown</h1><p>Plain Markdown is the least magical content format in a Moth project.</p><p>The compiler can import it, render it and hand the result to the HTML builder. It never pretends the file contains Moth code.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Plain Markdown</p><h1>Plain Markdown</h1><p>Plain Markdown earns its place as the least magical content format in a Moth project.</p><p>The compiler can import it, render it and hand the result to the HTML builder. It never pretends the file contains Moth code.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Markdown files
@@ -725,7 +725,7 @@ body {
         # Welcome
 
         This is **plain Markdown**.
-    </code></pre><h3>Why it is portable</h3><p>No Moth syntax is interpreted. The file is pure Markdown. You can use it with any Markdown tool.</p><h3>Remember</h3><ul><li><code>.md</code> uses a separate renderer, not a moth template&#39;s <code>$md</code>.</li><li>No Moth captures, directives or templates.</li><li>The result is a <code>content #String</code> constant.</li></ul>
+    </code></pre><h3>Why it is portable</h3><p>No Moth syntax is interpreted. The file is pure Markdown. You can use it with any Markdown tool.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -787,7 +787,7 @@ body {
     import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro <span class='moth-code-parenthesis'>{</span>content <span class='moth-code-keyword'>as</span> intro_html<span class='moth-code-parenthesis'>}</span>
 
     <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro_html<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span>
-    </code></pre><p>The <code>content</code> constant is the rendered HTML string.</p><h3>Do not include the extension</h3><p><code>import @docs/intro.md</code> is rejected. Use <code>import @docs/intro</code>.</p><h3>Remember</h3><ul><li><code>content</code> is the only exported name.</li><li>The result is compile-time HTML, not a runtime value.</li><li>Links and images are literal, not tracked assets.</li></ul>
+    </code></pre><p>The <code>content</code> constant is the rendered HTML string.</p><h3>Do not include the extension</h3><p><code>import @docs/intro.md</code> is rejected. Use <code>import @docs/intro</code>.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -853,7 +853,7 @@ body {
 
 
 
-            <p>Plain Markdown supports common formatting through a CommonMark-compatible renderer.</p><h3>Supported forms</h3><ul><li>Headings, paragraphs, emphasis, bold</li><li>Links, ordered and unordered lists, nested lists</li><li>Inline code and fenced code blocks</li><li>Tables, task lists, strikethrough, footnotes</li><li>Raw HTML is preserved</li></ul><h3>One clear limitation</h3><p>Moth template syntax is not interpreted. Dollar-prefixed directives are just text. Bracket-delimited template bodies are just text. Use moth template files if you need Moth-aware content.</p><h3>Remember</h3><ul><li>The renderer is CommonMark-compatible with GFM extensions.</li><li>It is not the same as a moth template&#39;s md renderer.</li><li>Smart punctuation is disabled.</li></ul>
+            <p>Plain Markdown supports common formatting through a CommonMark-compatible renderer.</p><h3>Supported forms</h3><ul><li>Headings, paragraphs, emphasis, bold</li><li>Links, ordered and unordered lists, nested lists</li><li>Inline code and fenced code blocks</li><li>Tables, task lists, strikethrough, footnotes</li><li>Raw HTML is preserved</li></ul><h3>One clear limitation</h3><p>Moth template syntax is not interpreted. Dollar-prefixed directives are plain text. Bracket-delimited template bodies are plain text. Use moth template files if you need Moth-aware content.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -909,7 +909,7 @@ body {
 
 
 
-            <p>Three formats, one choice.</p><h3><code>.md</code> for plain Markdown</h3><p>Use when the content is ordinary Markdown with no Moth syntax needed.</p><h3><code>.mtf</code> for Moth-aware Markdown</h3><p>Use when the content needs compile-time constants, nested templates or builder helpers.</p><h3><code>.moth</code> for full Moth</h3><p>Use when runtime values, control flow, imports or page fragments are needed.</p><h3>Remember</h3><ul><li><code>.md</code> is portable. <code>.mtf</code> is Moth-aware. <code>.moth</code> is full power.</li><li>Start with <code>.md</code> or <code>.mtf</code> for content. Reach for <code>.moth</code> when content becomes logic.</li></ul>
+            <p>Three formats, one choice.</p><h3><code>.md</code> for plain Markdown</h3><p>Use when the content is ordinary Markdown with no Moth syntax needed.</p><h3><code>.mtf</code> for Moth-aware Markdown</h3><p>Use when the content needs compile-time constants, nested templates or builder helpers.</p><h3><code>.moth</code> for full Moth</h3><p>Use when runtime values, control flow, imports or page fragments are needed.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">

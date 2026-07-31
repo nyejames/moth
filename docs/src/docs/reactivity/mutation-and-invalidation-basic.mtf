@@ -19,11 +19,4 @@ Assigning to `count` updates the source. Anything subscribed to `count` will kno
     ;
 ]
 
-You still need `~` to mutate the collection. Reactivity does not relax the access rules. Fallible operations like `push` must be handled with `catch` or propagated inside a compatible `Error!` function.
-
-### Remember
-
-- Assignment invalidates subscribers.
-- V1 invalidates the whole source.
-- Field, item or path-level invalidation is deferred.
-- Subscriptions are not active borrows. They do not block mutation.
+You need `~` to mutate the collection. Reactivity does not relax the access rules. Fallible operations like `push` must be handled with `catch` or propagated inside a compatible `Error!` function.

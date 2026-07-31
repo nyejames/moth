@@ -49,10 +49,10 @@ page_head #= language_theme_head
 
     # Language basics
 
-    Moth is a language with a small semantic surface. 
-    Each bit of puncuation or keyword represents a single concept. 
+    Moth keeps a small semantic surface.
+    Each bit of punctuation or keyword represents a single concept.
 
-    This page is all about the syntax you will see all over Moth codebases.
+    This page covers the syntax you will see across Moth codebases.
 ]
 
 #[section:

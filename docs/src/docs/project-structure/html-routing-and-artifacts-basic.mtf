@@ -12,9 +12,3 @@ The root module is the home page. Each nested directory gets its own route.
 ### API-only modules
 
 A module with only exports and no page activity produces no HTML. Not every `@*.moth` file becomes a page.
-
-### Remember
-
-- Routes come from directories.
-- The `@` filename does not choose the route.
-- API-only modules produce no HTML artifact.

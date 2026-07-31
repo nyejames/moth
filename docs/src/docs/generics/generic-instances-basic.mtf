@@ -25,9 +25,3 @@ When you apply concrete types to a generic declaration, you get a concrete insta
 ]
 
 `Maybe of String` stores a `String` payload. `Maybe of Int` would store an `Int`.
-
-### Remember
-
-- Concrete arguments replace the generic parameter everywhere in the declaration.
-- Same arguments mean the same type.
-- Different arguments mean incompatible types.

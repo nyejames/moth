@@ -14,9 +14,3 @@ Direct top-level templates in the root become page fragments:
 ### Helpers
 
 Helper files define functions, types and constants. They do not own an export block. The root imports them and chooses what becomes public. Do not put page fragments in helper files.
-
-### Remember
-
-- Only the active root runs top-level code.
-- Direct top-level templates become fragments.
-- Imported roots do not replay their runtime.

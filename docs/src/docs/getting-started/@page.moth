@@ -20,10 +20,10 @@ page_head #= language_theme_head
 
     # Getting Started with moth
 
-    `moth` is the Moth compiler and project tool.
+    `moth` compiles and tools Moth projects.
     You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.
 
-    It has a bunch of other tooling that is under rapid developemnt.
+    Other tooling continues rapid development.
 
     If you are running the compiler from the repository instead of an installed `moth` binary, use `cargo run --` before the same commands:
 
@@ -55,18 +55,18 @@ page_head #= language_theme_head
         [data:
             [$md:`new html`]
             [: Creates a complete HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice, and creates the full default scaffold including `src/@page.moth`, `lib/`, output manifests, and an optional .gitignore.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the full default scaffold including `src/@page.moth`, `lib/`, output manifests and an optional .gitignore.]
         ]
 
         [data:
             [$md:`check .`]
-            [: Runs project discovery, frontend compilation, type checking, HIR lowering, and borrow validation without writing build artifacts.]
+            [: Runs project discovery, frontend compilation, type checking, HIR lowering and borrow validation without writing build artifacts.]
             [$md: Add `--terse` for compact one-line diagnostics.]
         ]
 
         [data:
             [$md:`dev .`]
-            [: Builds the project, starts a local dev server, watches files, and reloads the browser when sources change.]
+            [: Builds the project, starts a local dev server, watches files and reloads the browser when sources change.]
             [: This is the main day-to-day command for working on HTML projects.]
         ]
 
@@ -99,13 +99,13 @@ page_head #= language_theme_head
         [data:
             [$md:`--html-wasm`]
             [: HTML builds]
-            [: Uses the experimental HTML-Wasm backend path. The JavaScript HTML backend is the current Alpha target.]
+            [: Uses the experimental HTML-Wasm backend path. The JavaScript HTML backend currently targets Alpha.]
         ]
 
         [data:
             [$md:`--terse`]
             [$md:`check` only]
-            [: Prints compact diagnostics for tools, logs, and LLM workflows.]
+            [: Prints compact diagnostics for tools, logs and LLM workflows.]
         ]
 
         [data:
@@ -117,7 +117,7 @@ page_head #= language_theme_head
         [data:
             [$md:`--host`, `--port`, `--poll-interval-ms`]
             [$md:`dev` only]
-            [: Configures the local dev server. Defaults are [$html:`127.0.0.1`], [$html:`6342`], and [$html:`300`].]
+            [: Configures the local dev server. Defaults are [$html:`127.0.0.1`], [$html:`6342`] and [$html:`300`].]
         ]
     ]
 ]
@@ -125,8 +125,8 @@ page_head #= language_theme_head
 #[section, $md:
     ## Create a new HTML project
 
-    The scaffold creates a complete default project including config, a starter page, package folder, output folders with build manifests, and an optional .gitignore.
-    The HTML project builder itself has more rules than this page needs to cover; see @../project-structure (the project structure guide) for page layout, routing, assets, fragments, and generated output details.
+    The scaffold creates a complete default project including config, a starter page, package folder, output folders with build manifests and an optional .gitignore.
+    The HTML project builder itself has more rules than this page needs to cover. See @../project-structure (the project structure guide) for page layout, routing, assets, fragments and generated output details.
 
     Start a new project:
 
@@ -224,8 +224,8 @@ page_head #= language_theme_head
 #[section, $md:
     ## Run the dev server
 
-    `dev` is currently the most useful command for normal Moth project work.
-    It builds the project, serves the generated files locally, watches for source changes, and sends reload events to the browser.
+    `dev` handles normal day-to-day Moth project work.
+    It builds the project, serves the generated files locally, watches for source changes and sends reload events to the browser.
 
     [codeblock, $code("bash"):
         moth dev .
@@ -271,8 +271,8 @@ page_head #= language_theme_head
 #[section, $md:
     ## Check without building
 
-    `check` is the fastest correctness command for editor loops and CI-style validation.
-    It does not write output artifacts, but it still runs the shared frontend diagnostics used by all backends.
+    `check` gives the fastest correctness signal for editor loops and CI-style validation.
+    It doesn't write output artifacts, but it runs the shared frontend diagnostics that all backends use.
 
     [codeblock, $code("bash"):
         moth check .
@@ -296,7 +296,7 @@ page_head #= language_theme_head
     ## Reading compiler errors
 
     Moth uses the same formatted diagnostic system across the compiler front end and backend builders.
-    That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors, and backend errors use the same basic shape.
+    That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors and backend errors use the same basic shape.
 
     A normal diagnostic contains:
 
@@ -338,42 +338,42 @@ page_head #= language_theme_head
         [data:
             [: Syntax Error]
             [: The source text could not be parsed as Moth syntax.]
-            [: Check punctuation, block delimiters, template brackets, imports, and declaration shape.]
+            [: Check punctuation, block delimiters, template brackets, imports and declaration shape.]
         ]
 
         [data:
             [: Type Error]
             [: The expression type does not match the expected type.]
-            [: Check annotations, return types, function arguments, collection element types, and contextual casts.]
+            [: Check annotations, return types, function arguments, collection element types and contextual casts.]
         ]
 
         [data:
             [: Language Rule Error]
             [: The syntax is valid, but it violates a language rule.]
-            [: Check things like mutability, import visibility, unsupported feature surfaces, duplicate names, or invalid top-level code.]
+            [: Check things like mutability, import visibility, unsupported feature surfaces, duplicate names or invalid top-level code.]
         ]
 
         [data:
             [: Missing File or Directory]
-            [: The project references a file, directory, import path, or output path that cannot be resolved.]
+            [: The project references a file, directory, import path or output path that cannot be resolved.]
             [: Check spelling, relative paths, [$html:`entry_root`] and project config.]
         ]
 
         [data:
             [: Malformed Config]
-            [: The project config exists but contains unsupported, missing, or invalid settings.]
+            [: The project config exists but contains unsupported, missing or invalid settings.]
             [: Check [$html:`config.moth`] and backend-specific config rules.]
         ]
 
         [data:
             [: Borrow Checker Violation]
             [: The program violates Moth's access and ownership rules.]
-            [: Check mutable/exclusive access, later uses after possible moves, and overlapping borrows.]
+            [: Check mutable/exclusive access, later uses after possible moves and overlapping borrows.]
         ]
 
         [data:
             [: Dev Server Issue]
-            [: The local server could not start, watch, build, or serve the project correctly.]
+            [: The local server could not start, watch, build or serve the project correctly.]
             [: Check port conflicts, host binding, project path, and file permissions.]
         ]
 
@@ -389,11 +389,11 @@ page_head #= language_theme_head
     ## Warnings and future suggestions
 
     Warnings are for code that can still compile but deserves attention.
-    Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues, and import alias case mismatches.
+    Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues and import alias case mismatches.
 
-    Moth deliberately separates correctness from style pressure.
-    The future `suggest` command is planned to become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code.
-    That is where noisy suggestions such as unused variables, unused imports, unused declarations, and more specific style improvements should live.
+    Moth separates correctness from style pressure.
+    The future `suggest` command will become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code.
+    Noisy suggestions such as unused variables, unused imports, unused declarations and more specific style improvements belong there.
 
     The intended workflow will be:
 
@@ -409,7 +409,7 @@ page_head #= language_theme_head
 #[section, $md:
     ## Planned moth extensions
 
-    `moth` is expected to become the main Moth project tool, not just a thin compiler launcher.
+    `moth` will become the main Moth project tool, not a thin compiler launcher.
     Planned additions include:
 
     - a package manager for Moth packages and project dependencies
@@ -418,7 +418,7 @@ page_head #= language_theme_head
     - richer `new` project options, including more complete config templates
     - stronger project maintenance commands as the build system matures
 
-    The short-term rule is simple: `dev` for fast browser feedback, `check` for correctness, and `build` when you want output files.
+    The short-term rule is simple: `dev` for fast browser feedback, `check` for correctness and `build` when you want output files.
 ]
 
 #[section:

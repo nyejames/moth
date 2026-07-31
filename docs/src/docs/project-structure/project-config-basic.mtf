@@ -21,9 +21,3 @@
 - Builder sections like `html` hold builder-specific settings.
 - The command selects the builder before config validation. `config.moth` does not select the builder.
 - Only active sections are schema-validated.
-
-### Remember
-
-- Only `config.moth` has config semantics.
-- Values must be compile-time constants.
-- Output settings are builder-owned, not global project fields.

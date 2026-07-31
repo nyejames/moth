@@ -729,11 +729,11 @@ body {
     identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span> value
     ;
-    </code></pre><p><code>identity</code> returns whatever type it receives.</p><h3>The placeholder is scoped</h3><p>The parameter name is meaningful only inside that declaration. You cannot use <code>A</code> as a value or refer to it from another declaration.</p><h3>Remember</h3><ul><li><code>type A</code> introduces the parameter after the declaration name.</li><li>Parameters use type-name casing.</li><li>Every parameter must be used somewhere in the declaration&#39;s public shape.</li></ul>
+    </code></pre><p><code>identity</code> returns whatever type it receives.</p><h3>The placeholder is scoped</h3><p>The parameter name is meaningful only inside that declaration. You cannot use <code>A</code> as a value or refer to it from another declaration.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Generics are declaration-site type abstractions for top-level structs, choices and free functions. A generic parameter is a compile-time placeholder that stands for a concrete type selected later.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
+        <p>Generics form declaration-site type abstractions for top-level structs, choices and free functions. A generic parameter acts as a compile-time placeholder that stands for a concrete type selected later.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
     identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span> value
     ;
@@ -829,7 +829,7 @@ body {
     </code></pre><h3>Concrete aliases</h3><p>When a type would need nested <code>of</code> applications, name an intermediate alias.</p><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span>
     value <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>Remember</h3><ul><li><code>of</code> goes in type position, not in ordinary expressions.</li><li>The number of arguments must match the declaration.</li><li>Different concrete arguments make different types.</li></ul>
+    </code></pre>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -918,7 +918,7 @@ body {
     ;
 
     items <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>The left-hand side says the result is <code>{Int}</code>, so <code>A</code> becomes <code>Int</code>.</p><h3>Remember</h3><ul><li>Inference is local. It looks at the call and its immediate receiving type.</li><li>It does not use later assignments, distant returns or whole-program analysis.</li><li>There is no explicit <code>of</code> syntax at the call site.</li></ul>
+    </code></pre><p>The left-hand side says the result is <code>{Int}</code>, so <code>A</code> becomes <code>Int</code>.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -968,7 +968,7 @@ body {
     generic_fail type <span class='moth-code-struct'>E</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>E</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;bad&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
-    </code></pre><p>A generic error parameter must be solved by immediate call-site evidence, just like any other generic parameter.</p><h3>Explicit call-site syntax is rejected</h3><p>All of these are rejected:</p><pre style=""><code class='codeblock'>
+    </code></pre><p>A generic error parameter must be solved by immediate call-site evidence, like any other generic parameter.</p><h3>Explicit call-site syntax is rejected</h3><p>All of these are rejected:</p><pre style=""><code class='codeblock'>
     identity of <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
     identity<span class='moth-code-operator'>&lt;</span><span class='moth-code-type'>Int</span><span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
     identity<span class='moth-code-parenthesis'>[</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
@@ -1039,7 +1039,7 @@ body {
     ;
 
     name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p><code>Maybe of String</code> stores a <code>String</code> payload. <code>Maybe of Int</code> would store an <code>Int</code>.</p><h3>Remember</h3><ul><li>Concrete arguments replace the generic parameter everywhere in the declaration.</li><li>Same arguments mean the same type.</li><li>Different arguments mean incompatible types.</li></ul>
+    </code></pre><p><code>Maybe of String</code> stores a <code>String</code> payload. <code>Maybe of Int</code> would store an <code>Int</code>.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -1143,7 +1143,7 @@ body {
     identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span> value
     ;
-    </code></pre><p><code>identity</code> does not need to know anything about <code>A</code>. It just returns what it got.</p><h3>Needing a bound</h3><pre style=""><code class='codeblock'>
+    </code></pre><p><code>identity</code> does not need to know anything about <code>A</code>. It returns what it got.</p><h3>Needing a bound</h3><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
         display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
@@ -1151,7 +1151,7 @@ body {
     render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     ;
-    </code></pre><p><code>render</code> can call <code>.display()</code> because the bound promises that <code>Item</code> provides it.</p><h3>Remember</h3><ul><li>Generic code can store, return and forward values of an unknown type.</li><li>It cannot do arithmetic, compare, or call arbitrary methods without a bound.</li><li>Use a trait bound when the type must provide specific behaviour.</li></ul>
+    </code></pre><p><code>render</code> can call <code>.display()</code> because the bound promises that <code>Item</code> provides it.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">

@@ -15,7 +15,7 @@ import @styles {
 }
 
 page_title #= "Core time"
-page_description #= "Duration, TimeMark, and Timestamp helpers in @core/time."
+page_description #= "Duration, TimeMark and Timestamp helpers in @core/time."
 page_head #= language_theme_head
 
 #[navbar]

@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Functions</p><h1>Functions</h1><p>Functions are named, statically checked and deliberately ordinary. Their signatures show the values they need, the access they request and every value they can return.</p><p>There are no hidden closure captures or distant conversion rules. The call stays readable from the source.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Functions</p><h1>Functions</h1><p>Functions stay named, statically checked and ordinary. Their signatures show the values they need, the access they request and every value they can return.</p><p>No hidden closure captures or distant conversion rules exist. The call stays readable from the source.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Function declarations
@@ -737,7 +737,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A source function is a named top-level declaration.</p><pre style=""><code class='codeblock'>
+        <p>A source function forms a named top-level declaration.</p><pre style=""><code class='codeblock'>
     greet <span class='moth-code-operator'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
         io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;

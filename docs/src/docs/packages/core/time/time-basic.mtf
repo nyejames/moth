@@ -55,14 +55,4 @@ Use `Timestamp` for real-world UTC instants that may be logged, stored or exchan
 ]
 
 `timestamp_from_iso_string` takes the fallible path because invalid strings can fail. Handle it with `!` or `catch`.
-
-### Remember
-
-- `@core/time` needs an explicit import. It is not in the prelude.
-- `Duration`, `TimeMark` and `Timestamp` stay opaque. Do not construct them with struct syntax.
-- `timestamp_from_iso_string` stands as the only fallible function. Every other function stays infallible.
-- Arguments are positional. Named arguments are not supported.
-
-### Read next
-
 For the full function list, backend behaviour and deferred surfaces, see @time (Core time advanced).

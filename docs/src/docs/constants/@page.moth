@@ -49,9 +49,9 @@ page_head #= language_theme_head
 
     # Constants and compile-time behaviour
 
-    Constants move work out of runtime and into the compiler. They are strict on purpose: the value must be known, stable and finished before the program starts.
+    Constants move work out of runtime and into the compiler. They stay strict on purpose: the value must be known, stable and finished before the program starts.
 
-    Templates can join in too. A const page fragment is just a template with nowhere left to hide.
+    Templates can join in too. A const page fragment forms a template with nowhere left to hide.
 ]
 
 #[section:

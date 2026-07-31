@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Choices</p><h1>Choices</h1><p>Choices make alternatives explicit. A value is one named variant, optionally carrying a small record payload.</p><p>Pattern matching opens the payload safely. Structural equality is available only when every possible payload can support it.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Choices</p><h1>Choices</h1><p>Choices make alternatives explicit. A value carries one named variant, optionally with a small record payload.</p><p>Pattern matching opens the payload safely. Structural equality works only when every possible payload can support it.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Choice declarations
@@ -731,7 +731,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A choice is a nominal tagged union.</p><p>Each value contains one declared variant.</p><pre style=""><code class='codeblock'>
+        <p>A choice forms a nominal tagged union.</p><p>Each value contains one declared variant.</p><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>Status</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-struct'>Ready,</span>
         <span class='moth-code-struct'>Waiting,</span>
@@ -808,7 +808,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Choice values are constructed through the choice name and variant name.</p><h3>Unit variants</h3><p>A unit variant is a value without a constructor call.</p><pre style=""><code class='codeblock'>
+        <p>Construct choice values through the choice name and variant name.</p><h3>Unit variants</h3><p>A unit variant is a value without a constructor call.</p><pre style=""><code class='codeblock'>
     current <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Status</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Ready</span>
     </code></pre><p>This form is invalid:</p><pre style=""><code class='codeblock'>
     <span class='moth-code-comment'>-- INVALID: unit variants are not constructor calls</span>
@@ -879,7 +879,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Choice payloads are inspected through pattern matching.</p><pre style=""><code class='codeblock'>
+        <p>Pattern matching inspects choice payloads.</p><pre style=""><code class='codeblock'>
     <span class='moth-code-keyword'>if</span> status is<span class='moth-code-operator'>:</span>
         <span class='moth-code-struct'>Ready</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;ready&quot;</span><span class='moth-code-parenthesis'>)</span>
         <span class='moth-code-struct'>Waiting</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;waiting&quot;</span><span class='moth-code-parenthesis'>)</span>
@@ -960,7 +960,7 @@ body {
     second <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Status</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Ready</span>
 
     same <span class='moth-code-operator'>=</span> first is second
-    </code></pre><p>Two choice values are equal when they use the same variant and their payload values are equal.</p><p>A choice with a collection, struct or another unsupported payload cannot use structural equality. Pattern matching still works.</p>
+    </code></pre><p>Two choice values are equal when they use the same variant and their payload values are equal.</p><p>A choice with a collection, struct or another unsupported payload cannot use structural equality. Pattern matching works.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">

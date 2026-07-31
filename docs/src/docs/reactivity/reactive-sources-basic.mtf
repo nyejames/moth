@@ -24,9 +24,3 @@ A reactive source is a value that templates can watch for changes.
 ]
 
 Reading `count` normally gives the current value. It is a snapshot, not a live view.
-
-### Remember
-
-- `$Type` and `$=` declare reactive sources.
-- The source still has the underlying type, such as `Int` or `String`.
-- Reactive syntax is not valid in fields, return types or aliases.

@@ -49,9 +49,9 @@ page_head #= language_theme_head
 
     # Choices
 
-    Choices make alternatives explicit. A value is one named variant, optionally carrying a small record payload.
+    Choices make alternatives explicit. A value carries one named variant, optionally with a small record payload.
 
-    Pattern matching opens the payload safely. Structural equality is available only when every possible payload can support it.
+    Pattern matching opens the payload safely. Structural equality works only when every possible payload can support it.
 ]
 
 #[section:

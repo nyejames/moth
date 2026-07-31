@@ -23,9 +23,3 @@ Because `42` is an `Int`, `A` becomes `Int` for this call.
 ]
 
 The left-hand side says the result is `{Int}`, so `A` becomes `Int`.
-
-### Remember
-
-- Inference is local. It looks at the call and its immediate receiving type.
-- It does not use later assignments, distant returns or whole-program analysis.
-- There is no explicit `of` syntax at the call site.

@@ -1,4 +1,4 @@
-Moth does not allow a visible name to be redeclared.
+Moth doesn't allow a visible name to be redeclared.
 
 [codeblock, $code("moth"):
     ready = true
@@ -12,10 +12,10 @@ Moth does not allow a visible name to be redeclared.
 
 ### Contract
 
-- A declaration cannot reuse a value name that is still visible.
-- A declaration cannot collide with a visible type, alias, import, builtin or reserved name.
+- A declaration can't reuse a value name that stays visible.
+- A declaration can't collide with a visible type, alias, import, builtin or reserved name.
 - Function parameters and loop bindings follow the same rule.
-- A nested child scope cannot shadow a name from its parent scope.
+- A nested child scope can't shadow a name from its parent scope.
 - Assignment to an existing mutable binding is not a redeclaration.
 - Separate scopes may reuse a name when neither declaration is visible from the other.
 

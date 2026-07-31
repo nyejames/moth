@@ -1,4 +1,4 @@
-A trait is an explicit nominal method contract. A type satisfies a trait only when source declares conformance.
+A trait forms an explicit nominal method contract. A type satisfies a trait only when source declares conformance.
 
 ### Syntax
 

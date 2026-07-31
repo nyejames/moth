@@ -1,4 +1,4 @@
-A Moth project is a directory tree with one strict config file, a source entry root, and generated output folders.
+A Moth project is a directory tree with one strict config file, a source entry root and generated output folders.
 
 ### Project root contents
 

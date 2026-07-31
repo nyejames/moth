@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Aliases</p><h1>Aliases</h1><p>Aliases give an existing thing a better name. They do not create a second value, a hidden conversion or a new nominal type.</p><p>Moth keeps <code>as</code> narrow: type names, imported names and arm-local payload captures.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Aliases</p><h1>Aliases</h1><p>Aliases give an existing thing a better name. They don&#39;t create a second value, a hidden conversion or a new nominal type.</p><p>Moth keeps <code>as</code> narrow: type names, imported names and arm-local payload captures.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Type aliases
@@ -725,7 +725,7 @@ body {
     <span class='moth-code-struct'>UserId</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-type'>Int</span>
     <span class='moth-code-struct'>HtmlFragment</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-type'>String</span>
     <span class='moth-code-struct'>RouteParts</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><h3>Aliases are transparent</h3><p>An alias is just another spelling of the same type.</p><pre style=""><code class='codeblock'>
+    </code></pre><h3>Aliases are transparent</h3><p>An alias is another spelling of the same type.</p><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>UserId</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-type'>Int</span>
 
     id <span class='moth-code-struct'>UserId</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
@@ -740,7 +740,7 @@ body {
     <span class='moth-code-struct'>Names</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span>
 
     names <span class='moth-code-struct'>Names</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><h3>Remember</h3><ul><li>A type alias is for naming, not for creating a new type.</li><li>Aliases work in parameters, fields, returns and local annotations.</li><li>Aliases are not values. You cannot pass <code>UserId</code> to a function or call it as a constructor. Even when an alias targets a struct or choice, only the target&#39;s canonical name constructs.</li></ul>
+    </code></pre>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -857,7 +857,7 @@ body {
     import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-keyword'>as</span> math
 
     value <span class='moth-code-operator'>=</span> math.sin<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1.0</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>File-local scope</h3><p>An import alias is visible only in the file where it is written. It does not change the exported name in the source file, and it is not automatically re-exported.</p><h3>No shadowing</h3><p>An alias cannot hide an existing name. If <code>render</code> is already declared in the file, <code>import @other { render }</code> is an error. Pick a different local name instead.</p><h3>Remember</h3><ul><li>Import aliases fix local name collisions.</li><li>They are private to the importing file.</li><li>Grouped imports rename entries one at a time.</li></ul>
+    </code></pre><h3>File-local scope</h3><p>An import alias is visible only in the file where it is written. It does not change the exported name in the source file, and it is not automatically re-exported.</p><h3>No shadowing</h3><p>An alias cannot hide an existing name. If <code>render</code> is already declared in the file, <code>import @other { render }</code> is an error. Pick a different local name instead.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -963,7 +963,7 @@ body {
 
 
 
-            <p>When you match a choice with a payload, the field name becomes the local variable inside that arm. Sometimes that name collides with another variable or just feels wrong in context.</p><h3>Rename one payload field</h3><pre style=""><code class='codeblock'>
+            <p>When you match a choice with a payload, the field name becomes the local variable inside that arm. Sometimes that name collides with another variable or feels wrong in context.</p><h3>Rename one payload field</h3><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>Response</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-struct'>Err</span> <span class='moth-code-operator'>|</span> message <span class='moth-code-type'>String</span> <span class='moth-code-operator'>|</span>,
         <span class='moth-code-struct'>Success</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-type'>String</span> <span class='moth-code-operator'>|</span>,
@@ -982,7 +982,7 @@ body {
         <span class='moth-code-struct'>Err</span><span class='moth-code-parenthesis'>(</span>message <span class='moth-code-keyword'>as</span> failure_message<span class='moth-code-parenthesis'>)</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> io.line<span class='moth-code-parenthesis'>(</span>failure_message<span class='moth-code-parenthesis'>)</span>
         <span class='moth-code-keyword'>else</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> io.line<span class='moth-code-parenthesis'>(</span>message<span class='moth-code-parenthesis'>)</span>
     ;
-    </code></pre><p>Without the alias, the capture would collide with the visible outer <code>message</code> and be rejected. The alias keeps both names distinct.</p><h3>Remember</h3><ul><li>The name before <code>as</code> must match the field name.</li><li>The new name is visible only inside that arm.</li><li>It does not rename the field on the choice.</li></ul>
+    </code></pre><p>Without the alias, the capture would collide with the visible outer <code>message</code> and be rejected. The alias keeps both names distinct.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">

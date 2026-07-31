@@ -1,4 +1,4 @@
-A new name for an existing value does not automatically copy that value.
+A new name for an existing value doesn't automatically copy that value.
 
 [codeblock, $code("moth"):
     names = {"Priya", "Grace"}
@@ -10,5 +10,5 @@ A new name for an existing value does not automatically copy that value.
 This keeps ordinary code cheap. You can pass values around without copying
 them first.
 
-Shared access cannot be used to change the value. Mutation needs a mutable
+You can't use shared access to change the value. Mutation needs a mutable
 binding and an explicit exclusive operation.

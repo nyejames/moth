@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Core time | Moth</title>
-    <meta name="description" content="Duration, TimeMark, and Timestamp helpers in @core/time.">
+    <meta name="description" content="Duration, TimeMark and Timestamp helpers in @core/time.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -753,7 +753,7 @@ body {
     ;
 
     io.line<span class='moth-code-parenthesis'>(</span>to_iso_string<span class='moth-code-parenthesis'>(</span>created<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p><code>timestamp_from_iso_string</code> takes the fallible path because invalid strings can fail. Handle it with <code>!</code> or <code>catch</code>.</p><h3>Remember</h3><ul><li><code>@core/time</code> needs an explicit import. It is not in the prelude.</li><li><code>Duration</code>, <code>TimeMark</code> and <code>Timestamp</code> stay opaque. Do not construct them with struct syntax.</li><li><code>timestamp_from_iso_string</code> stands as the only fallible function. Every other function stays infallible.</li><li>Arguments are positional. Named arguments are not supported.</li></ul><h3>Read next</h3><p>For the full function list, backend behaviour and deferred surfaces, see @time (Core time advanced).</p>
+    </code></pre><p><code>timestamp_from_iso_string</code> takes the fallible path because invalid strings can fail. Handle it with <code>!</code> or <code>catch</code>. For the full function list, backend behaviour and deferred surfaces, see @time (Core time advanced).</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">

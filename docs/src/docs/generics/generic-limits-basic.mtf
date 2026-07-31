@@ -8,7 +8,7 @@ Generic code can move an unknown type around, but it needs a bound before callin
     ;
 ]
 
-`identity` does not need to know anything about `A`. It just returns what it got.
+`identity` does not need to know anything about `A`. It returns what it got.
 
 ### Needing a bound
 
@@ -23,9 +23,3 @@ Generic code can move an unknown type around, but it needs a bound before callin
 ]
 
 `render` can call `.display()` because the bound promises that `Item` provides it.
-
-### Remember
-
-- Generic code can store, return and forward values of an unknown type.
-- It cannot do arithmetic, compare, or call arbitrary methods without a bound.
-- Use a trait bound when the type must provide specific behaviour.

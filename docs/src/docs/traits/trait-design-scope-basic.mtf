@@ -22,10 +22,3 @@ When you need different types at runtime, use a choice instead.
 ]
 
 A choice is a tagged union. The variant tag decides which code to run.
-
-### Remember
-
-- Traits are static contracts, not runtime values.
-- A trait name cannot be used as a type annotation for a variable, parameter or field.
-- Use a bound for compile-time reuse.
-- Use a choice for runtime alternatives.

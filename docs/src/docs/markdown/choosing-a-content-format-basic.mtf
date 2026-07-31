@@ -11,8 +11,3 @@ Use when the content needs compile-time constants, nested templates or builder h
 ### `.moth` for full Moth
 
 Use when runtime values, control flow, imports or page fragments are needed.
-
-### Remember
-
-- `.md` is portable. `.mtf` is Moth-aware. `.moth` is full power.
-- Start with `.md` or `.mtf` for content. Reach for `.moth` when content becomes logic.

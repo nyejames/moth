@@ -49,7 +49,7 @@ page_head #= language_theme_head
 
     # Numbers
 
-    Moth has two numeric types. That sounds small because it is. The rules around literals, spacing and failure are strict so a number behaves consistently across compiler stages and backends.
+    Moth ships two numeric types. Strict rules around literals, spacing and failure keep a number consistent across compiler stages and backends.
 ]
 
 #[section:

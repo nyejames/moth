@@ -10,7 +10,7 @@ A `.mtf` file is Markdown that lives inside Moth's template world.
     [p: This paragraph is styled by the @html builder helper.]
 ]
 
-No imports, no declarations, no frontmatter. Just content.
+No imports, no declarations, no frontmatter. Content only.
 
 ### Import the result
 
@@ -21,9 +21,3 @@ No imports, no declarations, no frontmatter. Just content.
 ]
 
 The `content` constant is the only thing a `.mtf` file exports.
-
-### Remember
-
-- `.mtf` is an implicit compile-time Markdown template.
-- The result is a `#String` constant called `content`.
-- No imports or declarations inside the file.

@@ -1,4 +1,4 @@
-A choice is a nominal tagged union.
+A choice forms a nominal tagged union.
 
 Each value contains one declared variant.
 

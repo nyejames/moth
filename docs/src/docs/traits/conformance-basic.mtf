@@ -1,4 +1,4 @@
-A type does not satisfy a trait just because it happens to have the right methods. It must say so explicitly.
+A type does not satisfy a trait because it happens to have the right methods. It must say so explicitly.
 
 ### Method plus conformance
 
@@ -27,9 +27,3 @@ The method must have the same receiver mutability, parameter types, return type 
 ### Only same-file nominal types
 
 You can conform structs, choices and aligned generic constructors declared in the same file. You cannot conform builtins, imported types or types from another file.
-
-### Remember
-
-- Conformance is explicit.
-- It has no body and no semicolon.
-- Multiple traits can be listed with commas.

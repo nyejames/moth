@@ -1,4 +1,4 @@
-Choice payloads are inspected through pattern matching.
+Pattern matching inspects choice payloads.
 
 [codeblock, $code("moth"):
     if status is:

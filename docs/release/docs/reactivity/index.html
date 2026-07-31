@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Reactivity</p><h1>Reactivity</h1><p>Reactivity lets a template observe a stable source without turning Moth into a callback language.</p><p>Sources are explicit. Subscriptions are explicit. Mutation still follows the ordinary type and access rules.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Reactivity</p><h1>Reactivity</h1><p>Reactivity lets a template observe a stable source without turning Moth into a callback language.</p><p>Sources and subscriptions stay explicit. Mutation follows the ordinary type and access rules.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Reactive sources
@@ -728,7 +728,7 @@ body {
     </code></pre><p><code>$=</code> lets the compiler infer the underlying type from the initializer.</p><h3>Snapshot read</h3><pre style=""><code class='codeblock'>
     count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
     current <span class='moth-code-operator'>=</span> count
-    </code></pre><p>Reading <code>count</code> normally gives the current value. It is a snapshot, not a live view.</p><h3>Remember</h3><ul><li><code>$Type</code> and <code>$=</code> declare reactive sources.</li><li>The source still has the underlying type, such as <code>Int</code> or <code>String</code>.</li><li>Reactive syntax is not valid in fields, return types or aliases.</li></ul>
+    </code></pre><p>Reading <code>count</code> normally gives the current value. It is a snapshot, not a live view.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -740,7 +740,7 @@ body {
     </code></pre><h3>Exact contract</h3><ul><li><code>$Type</code> declares a reactive source with an explicit underlying type.</li><li><code>$=</code> infers the underlying type from the initializer.</li><li>Reactive syntax is access and storage metadata, not a first-class wrapper type.</li><li>Semantic type identity remains the underlying ordinary type.</li><li>The declaration owns stable mutation-capable storage in its runtime scope.</li><li>Source identity belongs to the binding.</li><li>Ordinary reads snapshot the current value.</li><li>A reactive declaration is runtime storage, not a compile-time constant.</li><li>Normal no-shadowing and type compatibility rules apply.</li><li>Collection and map source values retain their ordinary collection and map semantics.</li></ul><h3>Explicit and inferred types</h3><pre style=""><code class='codeblock'>
     count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
     enabled <span class='moth-code-operator'>$</span><span class='moth-code-operator'>=</span> true
-    </code></pre><p>Both forms create the same kind of source. <code>$=</code> is convenient when the initializer makes the type obvious.</p><h3>Snapshot reads</h3><pre style=""><code class='codeblock'>
+    </code></pre><p>Both forms create the same kind of source. <code>$=</code> suits cases where the initialiser makes the type obvious.</p><h3>Snapshot reads</h3><pre style=""><code class='codeblock'>
     count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
     snapshot <span class='moth-code-operator'>=</span> count
     </code></pre><p>A plain read of a reactive source evaluates to its current value. It is a snapshot, not a live dependency.</p><h3>Reactive values are not a second type system</h3><p>A <code>$Int</code> source stores an <code>Int</code>. You can pass its current value anywhere an <code>Int</code> is expected. The <code>$</code> only marks the binding as reactive storage.</p><h3>Invalid positions</h3><p>Reactive syntax is not valid in struct fields, choice payloads, return slots or type aliases unless another accepted surface explicitly defines it. Function parameters are the only other accepted position. See <a href="#reactive-parameters">Reactive parameters</a>.</p><h3>Related concepts</h3><ul><li>For live template subscriptions see <a href="#subscriptions">Subscriptions</a>.</li><li>For function boundaries see <a href="#reactive-parameters">Reactive parameters</a>.</li></ul>
@@ -804,7 +804,7 @@ body {
     count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
     view <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
-    </code></pre><h3>Not an expression</h3><p>You cannot subscribe to a field path, a function call, an arithmetic expression or mutable access. Those forms are deferred.</p><h3>Remember</h3><ul><li>Use dollar-paren syntax for live subscriptions.</li><li>Use plain capture for one-time snapshot reads.</li><li>Subscriptions work only in template positions.</li></ul>
+    </code></pre><h3>Not an expression</h3><p>You cannot subscribe to a field path, a function call, an arithmetic expression or mutable access. Those forms are deferred.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -883,7 +883,7 @@ body {
 
     count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
     view <span class='moth-code-operator'>=</span> show<span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>An ordinary <code>Int</code> parameter reads the current value once.</p><h3>Remember</h3><ul><li>Reactive parameters keep source identity.</li><li>They do not grant mutation permission.</li><li>A plain value cannot be passed where a reactive source is required.</li><li>Reactive parameters cannot have defaults.</li></ul>
+    </code></pre><p>An ordinary <code>Int</code> parameter reads the current value once.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -974,7 +974,7 @@ body {
     <span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
         io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
-    </code></pre><p>You still need <code>~</code> to mutate the collection. Reactivity does not relax the access rules. Fallible operations like <code>push</code> must be handled with <code>catch</code> or propagated inside a compatible <code>Error!</code> function.</p><h3>Remember</h3><ul><li>Assignment invalidates subscribers.</li><li>V1 invalidates the whole source.</li><li>Field, item or path-level invalidation is deferred.</li><li>Subscriptions are not active borrows. They do not block mutation.</li></ul>
+    </code></pre><p>You need <code>~</code> to mutate the collection. Reactivity does not relax the access rules. Fallible operations like <code>push</code> must be handled with <code>catch</code> or propagated inside a compatible <code>Error!</code> function.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -1039,18 +1039,18 @@ body {
 
 
 
-            <p>A template with a subscription is still a <code>String</code>, but a supported backend can keep it live.</p><h3>Still a String</h3><pre style=""><code class='codeblock'>
+            <p>A template with a subscription stays a <code>String</code>, but a supported backend can keep it live.</p><h3>Still a String</h3><pre style=""><code class='codeblock'>
     count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
     view <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Count</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
-    </code></pre><p><code>view</code> has type <code>String</code>. The compiler just keeps extra metadata about the subscription.</p><h3>HTML-JS live fragment</h3><p>In an HTML-JS project, a top-level runtime template with a subscription can rerender when the source changes.</p><pre style=""><code class='codeblock'>
+    </code></pre><p><code>view</code> has type <code>String</code>. The compiler keeps extra metadata about the subscription.</p><h3>HTML-JS live fragment</h3><p>In an HTML-JS project, a top-level runtime template with a subscription can rerender when the source changes.</p><pre style=""><code class='codeblock'>
     count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
     <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
-    </code></pre><h3>Not every sink is live</h3><p><code>io.line</code> and <code>assert</code> do not accept reactive templates. HTML-Wasm rejects reactive runtime features for now.</p><h3>Remember</h3><ul><li>Subscription-bearing templates are ordinary <code>String</code> values.</li><li>HTML-JS can mount them as live fragments.</li><li>Other targets reject or snapshot them according to their own rules.</li></ul>
+    </code></pre><h3>Not every sink is live</h3><p><code>io.line</code> and <code>assert</code> do not accept reactive templates. HTML-Wasm rejects reactive runtime features for now.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A runtime template containing a subscription still has language type <code>String</code>. The compiler preserves dependency metadata so a supported backend can keep the output live.</p><h3>Metadata propagation</h3><p>The compiler preserves direct template dependency metadata. Metadata may flow through:</p><ul><li>template composition</li><li>assignment</li><li>return</li><li>direct argument passing</li><li>ordinary <code>String</code> parameters inserted into templates</li></ul><p>Ordinary string operations do not automatically preserve reactive metadata.</p><h3>Supported live sink</h3><p>The first live V1 sink is a top-level runtime HTML fragment in the HTML-JS builder. HTML-JS mounts the reactive template and rerenders the whole mount slot when a dependency invalidates.</p><p>Plain string fragments keep ordinary insertion behaviour.</p><h3>Target gates</h3><ul><li>HTML-JS supports the accepted V1 reactive source and template feature set when it reaches the supported top-level runtime HTML-fragment sink.</li><li>HTML-Wasm rejects reachable reactive runtime features until it has equivalent support.</li><li>Unsupported sinks must not silently become live.</li></ul><h3>Rejected sinks</h3><ul><li><code>io.line(...)</code> with direct subscription-bearing reactive templates is rejected until the IO and side-effect model is designed.</li><li><code>assert(...)</code> messages are string literals only, so reactive or runtime template messages are rejected.</li></ul><h3>Keep backend helpers out of the language contract</h3><p>The language contract is the source syntax, the metadata and the supported sink gating. Specific backend helper names and internal render plans are backend artifacts, not user-visible language semantics.</p><h3>Related concepts</h3><ul><li>For subscriptions see <a href="#subscriptions">Subscriptions</a>.</li><li>For project structure and HTML output see <a href="../project-structure">Project Structure</a>.</li></ul>
+        <p>A runtime template containing a subscription keeps language type <code>String</code>. The compiler preserves dependency metadata so a supported backend can keep the output live.</p><h3>Metadata propagation</h3><p>The compiler preserves direct template dependency metadata. Metadata may flow through:</p><ul><li>template composition</li><li>assignment</li><li>return</li><li>direct argument passing</li><li>ordinary <code>String</code> parameters inserted into templates</li></ul><p>Ordinary string operations do not automatically preserve reactive metadata.</p><h3>Supported live sink</h3><p>The first live V1 sink is a top-level runtime HTML fragment in the HTML-JS builder. HTML-JS mounts the reactive template and rerenders the whole mount slot when a dependency invalidates.</p><p>Plain string fragments keep ordinary insertion behaviour.</p><h3>Target gates</h3><ul><li>HTML-JS supports the accepted V1 reactive source and template feature set when it reaches the supported top-level runtime HTML-fragment sink.</li><li>HTML-Wasm rejects reachable reactive runtime features until it has equivalent support.</li><li>Unsupported sinks must not silently become live.</li></ul><h3>Rejected sinks</h3><ul><li><code>io.line(...)</code> with direct subscription-bearing reactive templates is rejected until the IO and side-effect model is designed.</li><li><code>assert(...)</code> messages are string literals only, so reactive or runtime template messages are rejected.</li></ul><h3>Keep backend helpers out of the language contract</h3><p>The language contract is the source syntax, the metadata and the supported sink gating. Specific backend helper names and internal render plans are backend artifacts, not user-visible language semantics.</p><h3>Related concepts</h3><ul><li>For subscriptions see <a href="#subscriptions">Subscriptions</a>.</li><li>For project structure and HTML output see <a href="../project-structure">Project Structure</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -1102,11 +1102,11 @@ body {
 
 
 
-            <p>Reactivity in Moth is deliberately small. It covers UI state, not general callbacks.</p><h3>Constrained purpose</h3><pre style=""><code class='codeblock'>
+            <p>Reactivity in Moth stays small. It covers UI state, not general callbacks.</p><h3>Constrained purpose</h3><pre style=""><code class='codeblock'>
     count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 
     <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>(</span>count<span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
-    </code></pre><p>You can declare a source, subscribe to it in a template and let the backend rerender when it changes.</p><h3>Not closures</h3><p>Moth does not have anonymous function values, generic function values or general closures. Reactivity is the UI-oriented alternative.</p><h3>Remember</h3><ul><li>Reactivity is for explicit sources and template subscriptions.</li><li>It does not replace callbacks or higher-order functions.</li><li>Field subscriptions, derived values and finer DOM updates are deferred.</li></ul>
+    </code></pre><p>You can declare a source, subscribe to it in a template and let the backend rerender when it changes.</p><h3>Not closures</h3><p>Moth does not have anonymous function values, generic function values or general closures. Reactivity is the UI-oriented alternative.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">

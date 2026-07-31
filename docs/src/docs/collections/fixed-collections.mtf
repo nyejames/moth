@@ -68,7 +68,7 @@ type:
 
 ### Empty fixed values
 
-An immutable binding cannot be initialized with an empty fixed literal because
+An immutable binding cannot be initialised with an empty fixed literal because
 there is no later mutable owner path to fill it.
 
 These are valid:

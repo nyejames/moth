@@ -1,4 +1,4 @@
-Hash maps are insertion-ordered key/value groups.
+Hash maps form insertion-ordered key/value groups.
 
 ### Types and literals
 

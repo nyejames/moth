@@ -19,8 +19,3 @@ Some trait contracts are mutually exclusive. A type cannot claim both.
 ### Symmetric
 
 The relation goes both ways. Saying `A must not B` also means `B must not A` in effect.
-
-### Remember
-
-- Incompatibility only affects conformance validation.
-- It does not create inheritance, composition or runtime dispatch.

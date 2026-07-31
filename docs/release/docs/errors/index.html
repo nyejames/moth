@@ -728,7 +728,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p><code>Error</code> is Moth&#39;s builtin structured error type.</p><p>Its public fields are:</p><ul><li><code>message String</code></li><li><code>code Int = 0</code></li></ul><pre style=""><code class='codeblock'>
+        <p><code>Error</code> carries Moth&#39;s builtin structured error type.</p><p>Its public fields:</p><ul><li><code>message String</code></li><li><code>code Int = 0</code></li></ul><pre style=""><code class='codeblock'>
     missing <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing value&quot;</span><span class='moth-code-parenthesis'>)</span>
     coded <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span>message <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Missing value&quot;</span>, code <span class='moth-code-operator'>=</span> <span class='moth-code-number'>200</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><h3>Contract</h3><ul><li><code>message</code> carries the human-readable explanation.</li><li><code>code</code> carries a stable integer code and defaults to <code>0</code>.</li><li>Positional construction follows field order.</li><li>Named construction follows normal constructor argument rules.</li><li><code>Error</code> is reserved by the language.</li><li><code>ErrorKind</code>, <code>ErrorLocation</code> and <code>StackFrame</code> remain ordinary user-available names.</li></ul><p><code>Error!</code> in a function signature marks an error return channel. It does not create a panic path and it is not a separate ordinary value type.</p><p>Custom structs and other compatible types may also be used as explicit error slot types. The builtin <code>Error</code> type is the common language-owned surface and the only automatic target for checked numeric recovery.</p><p>Casts between <code>String</code> and <code>Error</code> are documented by <a href="../casts">Casts</a>.</p>
@@ -809,7 +809,7 @@ body {
             <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;not ready&quot;</span><span class='moth-code-parenthesis'>)</span>
         ;
     ;
-    </code></pre><ul><li>The arrow is required: <code>-&gt; Error!</code>.</li><li>No success return value is required.</li><li>Normal fallthrough is valid when no error is returned.</li><li>In the current compiler <code>return!</code> inside a nested block of an error-only function is not yet supported; use a direct top-level <code>return!</code> or a function that also returns a success value.</li></ul><pre style=""><code class='codeblock'>
+    </code></pre><ul><li>The arrow is required: <code>-&gt; Error!</code>.</li><li>No success return value is required.</li><li>Normal fallthrough is valid when no error is returned.</li><li>In the current compiler <code>return!</code> inside a nested block of an error-only function is not yet supported. Use a direct top-level <code>return!</code> or a function that also returns a success value.</li></ul><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>Failure</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
         message <span class='moth-code-struct'>String,</span>
     <span class='moth-code-operator'>|</span>
@@ -1134,7 +1134,7 @@ body {
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p><code>assert</code> is an always-checked statement intrinsic for invariants.</p><pre style=""><code class='codeblock'>
+        <p><code>assert</code> provides an always-checked statement intrinsic for invariants.</p><pre style=""><code class='codeblock'>
     assert<span class='moth-code-parenthesis'>(</span>index <span class='moth-code-operator'>&lt;</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
     assert<span class='moth-code-parenthesis'>(</span>index <span class='moth-code-operator'>&lt;</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>, <span class='moth-code-string'>&quot;index must be in bounds&quot;</span><span class='moth-code-parenthesis'>)</span>
     assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;unimplemented backend path&quot;</span><span class='moth-code-parenthesis'>)</span>

@@ -1,4 +1,4 @@
-When you match a choice with a payload, the field name becomes the local variable inside that arm. Sometimes that name collides with another variable or just feels wrong in context.
+When you match a choice with a payload, the field name becomes the local variable inside that arm. Sometimes that name collides with another variable or feels wrong in context.
 
 ### Rename one payload field
 
@@ -30,9 +30,3 @@ When you match a choice with a payload, the field name becomes the local variabl
 ]
 
 Without the alias, the capture would collide with the visible outer `message` and be rejected. The alias keeps both names distinct.
-
-### Remember
-
-- The name before `as` must match the field name.
-- The new name is visible only inside that arm.
-- It does not rename the field on the choice.

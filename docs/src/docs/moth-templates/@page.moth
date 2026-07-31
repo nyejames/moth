@@ -57,7 +57,7 @@ page_head #= language_theme_head
 
     # moth-template-files
 
-    moth-template-files is Markdown that already lives inside Moth's template world.
+    moth-template-files brings Markdown that already lives inside Moth's template world.
 
     Write the content directly. Import the folded result as `content`. Reach for a
     normal `.moth` file when the job stops being content-shaped.

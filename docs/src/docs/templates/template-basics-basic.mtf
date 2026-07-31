@@ -1,4 +1,4 @@
-Templates are Moth's powerful string-building form.
+Templates form Moth's string-building engine.
 
 [codeblock, $code("moth"):
     name = "Priya"

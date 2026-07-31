@@ -18,13 +18,4 @@ Most Core packages require explicit imports:
     import @core/math {sin}
     import @core/time {mark_now}
 ]
-
-### Remember
-
-- The prelude forms visibility policy, not a package. No `@core/prelude` exists to import.
-- `io` stands as the only namespace alias the prelude registers.
-- `Error` works as a compiler-owned builtin, not a prelude symbol.
-
-### Read next
-
 For the full prelude contract, collision rules and builder ownership, see @prelude (Prelude policy advanced).

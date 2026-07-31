@@ -57,7 +57,7 @@ page_head #= language_theme_head
 
     # Values and bindings
 
-    Names are cheap. Copies aren't automatic. Existing values are shared by default, mutability is explicit and `copy` is the line between another view and an independent value.
+    Names cost little. Copies aren't automatic. Existing values share by default, mutability stays explicit and `copy` draws the line between another view and an independent value.
 
     These rules apply to every type. The memory-management pages explain how the compiler validates and lowers them.
 ]

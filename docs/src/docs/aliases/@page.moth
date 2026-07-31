@@ -41,7 +41,7 @@ page_head #= language_theme_head
 
     # Aliases
 
-    Aliases give an existing thing a better name. They do not create a second value,
+    Aliases give an existing thing a better name. They don't create a second value,
     a hidden conversion or a new nominal type.
 
     Moth keeps `as` narrow: type names, imported names and arm-local payload

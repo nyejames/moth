@@ -671,7 +671,7 @@ body {
             </a>
         </div>
     </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Traits</p><h1>Traits</h1><p>Traits name behavior a type promises to provide.</p><p>The promise is explicit. Method shapes do not count until the source declares conformance, and every reusable bound stays static before runtime begins.</p></section>
+    <section class="container"><p><a href="../">Documentation</a> / Traits</p><h1>Traits</h1><p>Traits name behaviour a type promises to provide.</p><p>The promise stays explicit. Method shapes don&#39;t count until the source declares conformance, and every reusable bound stays static before runtime begins.</p></section>
     <section class="container"><fieldset class="doc-level">
         <legend class="visually-hidden">
             Choose the explanation level: Trait declarations
@@ -728,11 +728,11 @@ body {
     </code></pre><p>This says: any type that claims to be <code>DISPLAY_TEXT</code> must provide a <code>display</code> method that returns a <code>String</code>.</p><h3>A marker trait</h3><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>SERIALIZABLE</span> must<span class='moth-code-operator'>:</span>
     ;
-    </code></pre><p>A marker trait has no methods. It is still a real contract that a type can explicitly adopt.</p><h3>Remember</h3><ul><li>Trait names are all caps.</li><li>A trait lists method signatures, not bodies.</li><li>A trait is a static contract, not a runtime value or type.</li></ul>
+    </code></pre><p>A marker trait has no methods. It is still a real contract that a type can explicitly adopt.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A trait is an explicit nominal method contract. A type satisfies a trait only when source declares conformance.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
+        <p>A trait forms an explicit nominal method contract. A type satisfies a trait only when source declares conformance.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
         display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
@@ -803,7 +803,7 @@ body {
     <span class='moth-code-struct'>SAME</span> must<span class='moth-code-operator'>:</span>
         equals <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This,</span> other <span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Bool</span>
     ;
-    </code></pre><p>When <code>This</code> is not the receiver, it must have a parameter name like <code>other This</code>.</p><h3>Remember</h3><ul><li>Use <code>This</code> for the receiver in trait requirements.</li><li>Use lowercase <code>this</code> only in concrete method implementations.</li><li>Requirements have no body. They only declare the method shape.</li></ul>
+    </code></pre><p>When <code>This</code> is not the receiver, it must have a parameter name like <code>other This</code>.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -877,7 +877,7 @@ body {
 
 
 
-            <p>A type does not satisfy a trait just because it happens to have the right methods. It must say so explicitly.</p><h3>Method plus conformance</h3><pre style=""><code class='codeblock'>
+            <p>A type does not satisfy a trait because it happens to have the right methods. It must say so explicitly.</p><h3>Method plus conformance</h3><pre style=""><code class='codeblock'>
     <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
         display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
     ;
@@ -891,7 +891,7 @@ body {
     ;
 
     <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span>
-    </code></pre><p><code>Label must DISPLAY_TEXT</code> is the explicit promise. Without it, the compiler does not treat <code>Label</code> as <code>DISPLAY_TEXT</code>.</p><h3>Shape must match exactly</h3><p>The method must have the same receiver mutability, parameter types, return type and return channel. Parameter names do not matter.</p><h3>Only same-file nominal types</h3><p>You can conform structs, choices and aligned generic constructors declared in the same file. You cannot conform builtins, imported types or types from another file.</p><h3>Remember</h3><ul><li>Conformance is explicit.</li><li>It has no body and no semicolon.</li><li>Multiple traits can be listed with commas.</li></ul>
+    </code></pre><p><code>Label must DISPLAY_TEXT</code> is the explicit promise. Without it, the compiler does not treat <code>Label</code> as <code>DISPLAY_TEXT</code>.</p><h3>Shape must match exactly</h3><p>The method must have the same receiver mutability, parameter types, return type and return channel. Parameter names do not matter.</p><h3>Only same-file nominal types</h3><p>You can conform structs, choices and aligned generic constructors declared in the same file. You cannot conform builtins, imported types or types from another file.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -992,7 +992,7 @@ body {
     render_named type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> and <span class='moth-code-struct'>NAMED</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     ;
-    </code></pre><p><code>and</code> adds another bound to the same parameter.</p><h3>Remember</h3><ul><li>Bounds use <code>is</code>, not <code>must</code>.</li><li><code>and</code> combines bounds on one parameter.</li><li>Commas still separate different parameters.</li><li>The concrete type must have visible evidence for every bound.</li></ul>
+    </code></pre><p><code>and</code> adds another bound to the same parameter.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -1090,7 +1090,7 @@ body {
     ;
 
     <span class='moth-code-struct'>TEXT</span> must not <span class='moth-code-struct'>FALLIBLE_TEXT</span>
-    </code></pre><p><code>TEXT</code> promises a <code>String</code> directly. <code>FALLIBLE_TEXT</code> promises a <code>String</code> or an error. A type cannot be both at once.</p><h3>Symmetric</h3><p>The relation goes both ways. Saying <code>A must not B</code> also means <code>B must not A</code> in effect.</p><h3>Remember</h3><ul><li>Incompatibility only affects conformance validation.</li><li>It does not create inheritance, composition or runtime dispatch.</li></ul>
+    </code></pre><p><code>TEXT</code> promises a <code>String</code> directly. <code>FALLIBLE_TEXT</code> promises a <code>String</code> or an error. A type cannot be both at once.</p><h3>Symmetric</h3><p>The relation goes both ways. Saying <code>A must not B</code> also means <code>B must not A</code> in effect.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -1104,7 +1104,7 @@ body {
     ;
 
     <span class='moth-code-struct'>TEXT</span> must not <span class='moth-code-struct'>FALLIBLE_TEXT</span>
-    </code></pre><h3>Exact contract</h3><ul><li>Incompatibility is trait metadata.</li><li>It is symmetric.</li><li>A concrete type cannot explicitly conform to both sides.</li><li>Several incompatible traits may be listed.</li><li>It affects conformance validation only.</li><li>It does not:<ul><li>add requirements</li><li>imply negative conformance</li><li>create trait composition</li><li>create inheritance</li><li>affect runtime dispatch</li></ul></li></ul><h3>Compiler-owned pairs</h3><p>The compiler uses <code>must not</code> for incompatible core cast trait pairs. For example, <code>CASTABLE_TO_STRING</code> and <code>TRY_CASTABLE_TO_STRING</code> cannot both be claimed for the same source type. The conforming type is the cast source type; the trait name identifies the cast target.</p><h3>Related concepts</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For core cast traits see <a href="#core-cast-traits">Core cast traits</a>.</li></ul>
+    </code></pre><h3>Exact contract</h3><ul><li>Incompatibility is trait metadata.</li><li>It is symmetric.</li><li>A concrete type cannot explicitly conform to both sides.</li><li>Several incompatible traits may be listed.</li><li>It affects conformance validation only.</li><li>It does not:<ul><li>add requirements</li><li>imply negative conformance</li><li>create trait composition</li><li>create inheritance</li><li>affect runtime dispatch</li></ul></li></ul><h3>Compiler-owned pairs</h3><p>The compiler uses <code>must not</code> for incompatible core cast trait pairs. For example, <code>CASTABLE_TO_STRING</code> and <code>TRY_CASTABLE_TO_STRING</code> cannot both be claimed for the same source type. The conforming type is the cast source type. The trait name identifies the cast target.</p><h3>Related concepts</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For core cast traits see <a href="#core-cast-traits">Core cast traits</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -1182,7 +1182,7 @@ body {
     number <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;42&quot;</span><span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
         then <span class='moth-code-number'>0</span>
     ;
-    </code></pre><p><code>TRY_CASTABLE_TO_INT</code> means: this type may become an <code>Int</code>, but it can also fail. The method signals failure with <code>return!</code> and the caller recovers with <code>cast ... catch</code>.</p><h3>Remember</h3><ul><li>Core cast trait names are owned by the compiler.</li><li>You cannot redefine, import, export or alias them.</li><li>You declare conformance the same way as for user traits.</li></ul>
+    </code></pre><p><code>TRY_CASTABLE_TO_INT</code> means: this type may become an <code>Int</code>, but it can also fail. The method signals failure with <code>return!</code> and the caller recovers with <code>cast ... catch</code>.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
@@ -1286,11 +1286,11 @@ body {
         <span class='moth-code-struct'>LabelItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>|</span>,
         <span class='moth-code-struct'>ButtonItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Button</span> <span class='moth-code-operator'>|</span>,
     ;
-    </code></pre><p>A choice is a tagged union. The variant tag decides which code to run.</p><h3>Remember</h3><ul><li>Traits are static contracts, not runtime values.</li><li>A trait name cannot be used as a type annotation for a variable, parameter or field.</li><li>Use a bound for compile-time reuse.</li><li>Use a choice for runtime alternatives.</li></ul>
+    </code></pre><p>A choice is a tagged union. The variant tag decides which code to run.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Moth traits are deliberately static. They name behaviour before runtime begins and stay out of the type system as runtime values.</p><h3>Static model</h3><p>Trait names are valid in:</p><ul><li>trait declarations</li><li>conformance declarations</li><li>generic bounds</li></ul><p>Trait names are invalid as ordinary:</p><ul><li>variables</li><li>parameters</li><li>fields</li><li>returns</li><li>collection elements</li><li>map types</li><li>choice payloads</li><li>alias targets</li></ul><p>Use a generic bound for static reuse. Use a choice for runtime heterogeneity.</p><pre style=""><code class='codeblock'>
+        <p>Moth traits stay static. They name behaviour before runtime begins and stay out of the type system as runtime values.</p><h3>Static model</h3><p>Trait names are valid in:</p><ul><li>trait declarations</li><li>conformance declarations</li><li>generic bounds</li></ul><p>Trait names are invalid as ordinary:</p><ul><li>variables</li><li>parameters</li><li>fields</li><li>returns</li><li>collection elements</li><li>map types</li><li>choice payloads</li><li>alias targets</li></ul><p>Use a generic bound for static reuse. Use a choice for runtime heterogeneity.</p><pre style=""><code class='codeblock'>
     <span class='moth-code-comment'>-- Static reuse</span>
     render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
 

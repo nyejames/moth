@@ -35,13 +35,4 @@ You can also import the whole namespace and access members through field access.
 - `min(a, b)`, `max(a, b)`, `clamp(x, min, max)` for comparisons
 
 All functions take `Float` values and return `Float`.
-
-### Remember
-
-- `@core/math` needs an explicit import. It is not in the prelude.
-- All parameters use `Float`. All return values use `Float`.
-- Arguments are positional. Named arguments are not supported.
-
-### Read next
-
 For the full function list, backend behaviour and deferred surfaces, see @math (Core math advanced).

@@ -32,9 +32,9 @@ Use `@/docs/packages (Packages)` for internal routes or `@https://example.com (E
 
 Because the file body is a template body, `--` is body text, not a Moth comment. It renders as literal `--` in the output.
 
-### Backslashes follow body behavior
+### Backslashes follow body behaviour
 
-Backslashes in the template body follow formatter behavior. They are not escape characters in the same sense as normal Moth source.
+Backslashes in the template body follow formatter behaviour. They are not escape characters in the same sense as normal Moth source.
 
 ### Code examples
 

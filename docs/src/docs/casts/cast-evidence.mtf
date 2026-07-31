@@ -1,4 +1,4 @@
-Cast availability is proven by compiler-owned static traits.
+Compiler-owned static traits prove cast availability.
 
 Every builtin target has one infallible trait and one fallible trait.
 

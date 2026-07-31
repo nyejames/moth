@@ -28,9 +28,3 @@ Same-module imports see everything. No export block needed.
 ]
 
 Now the project module can import `internal_value` through the `@components` public surface.
-
-### Remember
-
-- Same module: all declarations are visible.
-- Cross module: only exported declarations are visible.
-- Runtime bindings are never importable.

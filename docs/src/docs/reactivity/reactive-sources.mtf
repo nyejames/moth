@@ -29,7 +29,7 @@ A reactive source is stable mutation-capable runtime storage declared with `$Typ
     enabled $= true
 ]
 
-Both forms create the same kind of source. `$=` is convenient when the initializer makes the type obvious.
+Both forms create the same kind of source. `$=` suits cases where the initialiser makes the type obvious.
 
 ### Snapshot reads
 

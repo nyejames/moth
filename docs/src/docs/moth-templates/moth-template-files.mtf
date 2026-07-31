@@ -22,7 +22,7 @@ A `.mtf` file is not a normal declaration file. It does not contain authored imp
 
 ### Comments and punctuation
 
-Because the file body is a template body, `--` is content text, not a Moth comment. Backslashes follow template-body formatter behavior. Backticks are Markdown inline-code delimiters, not raw string syntax.
+Because the file body is a template body, `--` is content text, not a Moth comment. Backslashes follow template-body formatter behaviour. Backticks are Markdown inline-code delimiters, not raw string syntax.
 
 ### Source file path and module ownership
 

@@ -1,4 +1,4 @@
-Moth keeps the source language deliberately small. Compiler complexity is acceptable when it makes the programmer-facing model simpler, safer and more predictable.
+Moth keeps the source language small. Compiler complexity is acceptable when it makes the programmer-facing model simpler, safer and more predictable.
 
 ### Central bias
 

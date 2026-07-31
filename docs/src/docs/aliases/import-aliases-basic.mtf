@@ -29,9 +29,3 @@ An import alias is visible only in the file where it is written. It does not cha
 ### No shadowing
 
 An alias cannot hide an existing name. If `render` is already declared in the file, `import @other { render }` is an error. Pick a different local name instead.
-
-### Remember
-
-- Import aliases fix local name collisions.
-- They are private to the importing file.
-- Grouped imports rename entries one at a time.

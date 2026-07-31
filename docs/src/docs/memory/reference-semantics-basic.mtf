@@ -1,4 +1,4 @@
-Existing values are shared by default. Here is what that means in practice.
+Moth shares existing values by default. Here's what that means in practice.
 
 When you assign one variable to another, both read the same data:
 
