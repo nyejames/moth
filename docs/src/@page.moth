@@ -17,7 +17,7 @@ page_head #= theme_head
     The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs/src (Github).
 
     ## Documentation
-    The @docs (Alpha language docs) explains everything about the language, compiler and making Moth projects.
+    The @./docs (Alpha language docs) explains everything about the language, compiler and making Moth projects.
 
     This compiler is in early alpha and is undergoing rapid development, so not everything is exactly up to date with the current compiler.
     [highlight, $md: *You can already use Moth for web projects, but be aware of the early alpha status*]

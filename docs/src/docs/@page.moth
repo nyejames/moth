@@ -15,43 +15,43 @@ page_head #= theme_head
 
     ## Start here
 
-    1. @getting-started (Getting Started)
-    2. @language-overview (Language basics)
-    3. @bindings (Values and bindings)
-    4. @numbers (Numbers)
-    5. @casts (Casts)
-    6. @functions (Functions)
-    7. @branching (Branching)
-    8. @loops (Loops)
-    9. @structs (Structs)
-    10. @choices (Choices)
-    11. @errors (Errors, options and assertions)
-    12. @collections (Collections and maps)
-    13. @templates (Templates)
-    14. @constants (Constants and compile-time behaviour)
-    15. @aliases (Aliases)
-    16. @generics (Generics)
-    17. @traits (Traits)
-    18. @reactivity (Reactivity)
-    19. @memory (Memory and lifetimes)
+    1. @./getting-started (Getting Started)
+    2. @./language-overview (Language basics)
+    3. @./bindings (Values and bindings)
+    4. @./numbers (Numbers)
+    5. @./casts (Casts)
+    6. @./functions (Functions)
+    7. @./branching (Branching)
+    8. @./loops (Loops)
+    9. @./structs (Structs)
+    10. @./choices (Choices)
+    11. @./errors (Errors, options and assertions)
+    12. @./collections (Collections and maps)
+    13. @./templates (Templates)
+    14. @./constants (Constants and compile-time behaviour)
+    15. @./aliases (Aliases)
+    16. @./generics (Generics)
+    17. @./traits (Traits)
+    18. @./reactivity (Reactivity)
+    19. @./memory (Memory and lifetimes)
 
     ## Projects and content
 
-    - @project-structure (Project structure)
-    - @packages (Packages and imports)
-    - @packages/core (Core packages)
-    - @moth-templates (Moth template files)
-    - @markdown (Plain Markdown)
-    - @design-scope (Design scope)
+    - @./project-structure (Project structure)
+    - @./packages (Packages and imports)
+    - @./packages/core (Core packages)
+    - @./moth-templates (Moth template files)
+    - @./markdown (Plain Markdown)
+    - @./design-scope (Design scope)
 
     ## Compiler and codebase internals
 
-    - @codebase (Codebase overview)
-    - @codebase/memory-management (Memory management)
-    - @codebase/design-scope (Design scope)
-    - @codebase/style-guide (Development standards)
+    - @./codebase (Codebase overview)
+    - @./codebase/memory-management (Memory management)
+    - @./codebase/design-scope (Design scope)
+    - @./codebase/style-guide (Development standards)
 
     ## Future design drafts
 
-    - @async (Async)
+    - @./async (Async)
 ]
