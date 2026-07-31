@@ -25,13 +25,13 @@ page_head #= language_theme_head
 
     ## Package pages
 
-    - @prelude (Prelude policy)
-    - @io (Core IO)
-    - @collections (Core collections)
-    - @math (Core math)
-    - @text (Core text)
-    - @random (Core random)
-    - @time (Core time)
+    - @./prelude (Prelude policy)
+    - @./io (Core IO)
+    - @./collections (Core collections)
+    - @./math (Core math)
+    - @./text (Core text)
+    - @./random (Core random)
+    - @./time (Core time)
 ]
 
 #[section:

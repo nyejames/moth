@@ -6,7 +6,7 @@ It is intentionally not a full CommonMark implementation.
     content = [$md:
         # Title
 
-        Use **clear names** and @other-page (helpful links).
+        Use **clear names** and @./other-page (helpful links).
     ]
 ]
 
@@ -16,7 +16,7 @@ It is intentionally not a full CommonMark implementation.
 - paragraphs separated by blank lines
 - unordered lists: `-` items
 - ordered lists: `1.` items
-- links: `@path (link text)`
+- links: `@./relative-path (link text)` or `@https://... (link text)`
 - emphasis: `**bold**` and `*italic*`
 
 ### Inline code

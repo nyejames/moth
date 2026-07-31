@@ -21,8 +21,8 @@ page_head #= language_theme_head
 
     ## Package pages
 
-    - @html/ (@html)
-    - @canvas/ (@web/canvas)
+    - @./html/ (@html)
+    - @./canvas/ (@web/canvas)
 ]
 
 #[section:

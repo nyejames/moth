@@ -11,7 +11,7 @@ page_head #= theme_head
 
     Welcome to Moth. Start with the project tool, learn the core language in order and drop into the focused pages when you need a precise rule.
 
-    The @progress (progress matrix) tracks current implementation and backend coverage.
+    The @./progress (progress matrix) tracks current implementation and backend coverage.
 
     ## Start here
 

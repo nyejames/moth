@@ -69,7 +69,7 @@ page_head #= theme_head
 
     The compiler rejects illegal sibling sharing and cross-region cycles even under GC. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.
 
-    Declared `group` / `into` syntax is accepted end-state design with implementation deferred. See @declared-memory-groups (Declared memory groups) for the source contract and @lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
+    Declared `group` / `into` syntax is accepted end-state design with implementation deferred. See @./declared-memory-groups (Declared memory groups) for the source contract and @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
 ]
 
 #[section, $md:

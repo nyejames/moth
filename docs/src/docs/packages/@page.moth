@@ -153,8 +153,8 @@ page_head #= language_theme_head
 #[section, $md:
     ## Package reference pages
 
-    - @core (Core packages)
-    - @builder (Builder packages)
+    - @./core (Core packages)
+    - @./builder (Builder packages)
 ]
 
 #[section:
