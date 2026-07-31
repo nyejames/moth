@@ -465,7 +465,9 @@ body {
     <span class='moth-code-comment'>-- copy payload   -- invalid when payload contains a non-copyable resource</span>
     </code></pre><h2>Exclusive access with ~</h2><pre style=""><code class='codeblock'>
     update<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>items<span class='moth-code-parenthesis'>)</span>
-    <span class='moth-code-operator'>~</span>items.push<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span>
+    <span class='moth-code-operator'>~</span>items.push<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+        assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;unexpected push failure&quot;</span><span class='moth-code-parenthesis'>)</span>
+    ;
     </code></pre><p>The source form is <code>~place</code>. The place must already exist, and the underlying binding must permit mutation. Exactly one exclusive access may be active at a time. Shared access conflicts with active exclusive mutation where their roots overlap. <code>~</code> isn&#39;t an explicit move. The compiler may later realise an eligible operation as ownership transfer.</p><h2>Fresh values and hidden locals</h2><pre style=""><code class='codeblock'>
     update<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;fresh&quot;</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-parenthesis'>)</span>
     update<span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Vector</span><span class='moth-code-number'>2</span><span class='moth-code-parenthesis'>(</span>x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1.0</span>, y <span class='moth-code-operator'>=</span> <span class='moth-code-number'>2.0</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>

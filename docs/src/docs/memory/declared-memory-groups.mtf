@@ -15,7 +15,7 @@ A declaration can target a group with the `into` keyword:
     ;
 ]
 
-[codeblock, $code("moth"):
+[codeblock, $code("text"):
     name [access/type] into group_name = expression
 ]
 

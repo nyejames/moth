@@ -31,6 +31,7 @@ target and evidence rules remain owned by @../casts (Casts).
 Old inline fallback and bang-handler spellings are invalid.
 
 [codeblock, $code("moth"):
+    -- INVALID: old inline fallback and bang-handler spellings
     value = parse_number(text)!0
     value = parse_number(text) err!
 ]

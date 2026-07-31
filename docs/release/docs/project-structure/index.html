@@ -1226,7 +1226,7 @@ body {
     </code></pre><p><code>@project</code> is never implicitly injected. Import it explicitly when you need it.</p><h3>Entry-local <code>config:</code> blocks</h3><p>A normal module root may contain one optional <code>config:</code> block with builder metadata for that entry:</p><pre style=""><code class='codeblock'>
     config<span class='moth-code-operator'>:</span>
         html <span class='moth-code-operator'>|</span>
-            title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;About&quot;</span>,
+            title <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;About&quot;</span>,
         <span class='moth-code-operator'>|</span>
     ;
     </code></pre><p>The block lives at the top level of the root file, outside <code>export:</code> and outside executable bodies. It creates no module symbols or runtime values.</p><h3>Related concepts</h3><ul><li>For build inputs see <a href="#build-inputs">Build inputs</a>.</li></ul>

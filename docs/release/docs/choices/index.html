@@ -811,6 +811,7 @@ body {
         <p>Choice values are constructed through the choice name and variant name.</p><h3>Unit variants</h3><p>A unit variant is a value without a constructor call.</p><pre style=""><code class='codeblock'>
     current <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Status</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Ready</span>
     </code></pre><p>This form is invalid:</p><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- INVALID: unit variants are not constructor calls</span>
     current <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Status</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Ready</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><h3>Payload variants</h3><p>A payload variant requires constructor parentheses.</p><pre style=""><code class='codeblock'>
     failed <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Status</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Failed</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;network&quot;</span><span class='moth-code-parenthesis'>)</span>

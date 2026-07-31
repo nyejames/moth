@@ -22,7 +22,7 @@ metadata for that entry:
 [codeblock, $code("moth"):
     config:
         html |
-            title = "About",
+            title #= "About",
         |
     ;
 ]

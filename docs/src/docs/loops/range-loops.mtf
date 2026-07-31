@@ -8,26 +8,21 @@ A range loop generates numeric values directly from its loop header.
 
 ### Forms
 
-[codeblock, $code("moth"):
+[codeblock, $code("text"):
     loop start to end:
         ...
-    ;
 
     loop start to & end |value|:
         ...
-    ;
 
     loop start to end by step |value, index|:
         ...
-    ;
 
     loop to end |value|:
         ...
-    ;
 
     loop to & end |value|:
         ...
-    ;
 ]
 
 ### Bounds

@@ -129,7 +129,7 @@ Every allocation has exactly one semantic lifetime owner. An object may retain a
 
 Formal rule:
 
-[codeblock, $code("moth"):
+[codeblock, $code("text"):
     R_value >= R_container
 ]
 

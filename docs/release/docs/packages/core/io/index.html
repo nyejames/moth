@@ -734,7 +734,9 @@ body {
     count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> count <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>count<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><h3>Reading input</h3><p>Input polling lives under <code>io.input.*</code>. Create an input handle, poll it each frame, then close it when done.</p><pre style=""><code class='codeblock'>
-    input <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> io.input.new<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span>
+    input <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> io.input.new<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+        assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;input backend unavailable&quot;</span><span class='moth-code-parenthesis'>)</span>
+    ;
 
     io.input.update<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>input<span class='moth-code-parenthesis'>)</span>
 
@@ -767,7 +769,9 @@ body {
     count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> count <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>count<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     </code></pre><p>Passing a non-string value directly to a console helper fails at the output boundary. Interpolate the value into a template first.</p><h3>Input polling</h3><p>Input polling lives under <code>io.input.*</code>. The handle type <code>io.input.Input</code> stays opaque. Pass it to the input functions. Do not construct it with struct syntax or inspect its fields.</p><p><code>io.input.new()</code> returns <code>Input, Error!</code> because backend input support can be unavailable. <code>update</code> and <code>close</code> require mutable access through <code>~</code>. Polling reads use shared access.</p><pre style=""><code class='codeblock'>
-    input <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> io.input.new<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span>
+    input <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> io.input.new<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+        assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;input backend unavailable&quot;</span><span class='moth-code-parenthesis'>)</span>
+    ;
 
     io.input.update<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>input<span class='moth-code-parenthesis'>)</span>
 

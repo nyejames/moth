@@ -31,7 +31,9 @@ Console helpers accept strings only. Use a template to interpolate values into t
 Input polling lives under `io.input.*`. Create an input handle, poll it each frame, then close it when done.
 
 [codeblock, $code("moth"):
-    input ~= io.input.new()!
+    input ~= io.input.new() catch:
+        assert(false, "input backend unavailable")
+    ;
 
     io.input.update(~input)
 

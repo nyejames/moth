@@ -16,9 +16,9 @@ Analysis reasons about **places** (locations), **storage roots** and **alias roo
 
 Side example, then back to greetings:
 
-[codeblock, $code("moth"):
-// conceptual: two shared readers of message
-// then an exclusive write through ~message while a reader still needs the old value
+[codeblock, $code("text"):
+    -- conceptual: two shared readers of message
+    -- then an exclusive write through ~message while a reader still needs the old value
 ]
 
 The pattern is the lesson. The greeting project itself may stay simple. The rule still guards every module.

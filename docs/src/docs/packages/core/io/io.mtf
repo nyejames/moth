@@ -39,7 +39,9 @@ Input polling lives under `io.input.*`. The handle type `io.input.Input` stays o
 `io.input.new()` returns `Input, Error!` because backend input support can be unavailable. `update` and `close` require mutable access through `~`. Polling reads use shared access.
 
 [codeblock, $code("moth"):
-    input ~= io.input.new()!
+    input ~= io.input.new() catch:
+        assert(false, "input backend unavailable")
+    ;
 
     io.input.update(~input)
 

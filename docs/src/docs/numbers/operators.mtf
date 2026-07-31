@@ -62,6 +62,7 @@ the same outer-spacing rule, but it is not a binary operator.
 These forms are invalid:
 
 [codeblock, $code("moth"):
+    -- INVALID: missing required spacing
     total=left+right
     count=1
 ]

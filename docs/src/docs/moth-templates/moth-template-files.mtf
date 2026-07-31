@@ -4,7 +4,7 @@ A `.mtf` file is a Moth template file. The compiler prepares it as an implicit c
 
 The compiler builds each `.mtf` file as if its whole body were the body of an implicit compile-time Markdown template:
 
-[codeblock, $code("moth"):
+[codeblock, $code("text"):
     content #String = [$md:
         ...entire .mtf file body...
     ]

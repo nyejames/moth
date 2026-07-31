@@ -12,7 +12,7 @@ Every runtime allocation has exactly one semantic lifetime owner. Multiple bindi
 
 An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.
 
-[codeblock, $code("moth"):
+[codeblock, $code("text"):
     R_value >= R_container
 ]
 
@@ -58,7 +58,9 @@ An alias result reuses an existing root or projection. Shared bindings, field ac
 [codeblock, $code("moth"):
     original = load_items()
     view = original                   -- alias result
-    first = original.get(0)           -- alias result (shared access)
+    first = original.get(0) catch:    -- alias result (shared access)
+        assert(false, "known valid index")
+    ;
 ]
 
 ### Projection roots

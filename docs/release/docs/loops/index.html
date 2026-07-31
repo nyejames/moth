@@ -935,25 +935,20 @@ body {
         io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>index<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>value<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
     ;
     </code></pre><h3>Forms</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-keyword'>loop</span> start <span class='moth-code-keyword'>to</span> end<span class='moth-code-operator'>:</span>
-        ...
-    ;
+        loop start to end:
+            ...
 
-    <span class='moth-code-keyword'>loop</span> start <span class='moth-code-keyword'>to</span> <span class='moth-code-operator'>&amp;</span> end <span class='moth-code-operator'>|</span>value<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-        ...
-    ;
+        loop start to & end |value|:
+            ...
 
-    <span class='moth-code-keyword'>loop</span> start <span class='moth-code-keyword'>to</span> end <span class='moth-code-keyword'>by</span> step <span class='moth-code-operator'>|</span>value, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-        ...
-    ;
+        loop start to end by step |value, index|:
+            ...
 
-    <span class='moth-code-keyword'>loop</span> <span class='moth-code-keyword'>to</span> end <span class='moth-code-operator'>|</span>value<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-        ...
-    ;
+        loop to end |value|:
+            ...
 
-    <span class='moth-code-keyword'>loop</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-operator'>&amp;</span> end <span class='moth-code-operator'>|</span>value<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-        ...
-    ;
+        loop to & end |value|:
+            ...
     </code></pre><h3>Bounds</h3><ul><li><code>to</code> uses an exclusive end bound.</li><li><code>to &amp;</code> uses an inclusive end bound.</li><li><code>loop to end</code> starts at <code>0</code>.</li><li><code>loop to &amp; end</code> starts at <code>0</code> and includes the end value.</li><li>Ascending bounds count upward.</li><li>Descending bounds count downward.</li><li>There is no <code>reverse</code> keyword.</li><li>When start and end are equal, an exclusive range has no iterations and an inclusive range has one.</li></ul><h3>Step</h3><ul><li>Without <code>by</code>, integer ranges use a step magnitude of <code>1</code>.</li><li><code>by</code> supplies a magnitude. The compiler applies the direction implied by the bounds.</li><li>A literal zero step is rejected during compilation.</li><li>A non-literal step is checked before the first iteration. A value of zero fails at runtime.</li><li>Any range using <code>Float</code> requires an explicit <code>by</code> step.</li><li>Start, end and step expressions must have numeric types.</li></ul><pre style=""><code class='codeblock'>
     <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0.0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>1.0</span> <span class='moth-code-keyword'>by</span> <span class='moth-code-number'>0.1</span> <span class='moth-code-operator'>|</span>amount<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
         io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>amount<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>

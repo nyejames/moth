@@ -60,6 +60,7 @@ These positions do not supply cast targets:
 - untyped declarations
 
 [codeblock, $code("moth"):
+    -- INVALID: these positions do not supply cast targets
     value = cast source
 
     if cast value:

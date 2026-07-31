@@ -746,13 +746,13 @@ body {
         <span class='moth-code-keyword'>return</span> value <span class='moth-code-operator'>*</span> <span class='moth-code-number'>2</span>
     ;
     </code></pre><h3>Declaration shape</h3><pre style=""><code class='codeblock'>
-    name <span class='moth-code-operator'>|</span>parameters<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-        body
-    ;
+        name |parameters|:
+            body
+        ;
 
-    name <span class='moth-code-operator'>|</span>parameters<span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>ReturnType</span><span class='moth-code-operator'>:</span>
-        body
-    ;
+        name |parameters| -> ReturnType:
+            body
+        ;
     </code></pre><ul><li>The function name comes first.</li><li>Parameters are enclosed by <code>|...|</code>.</li><li><code>||</code> declares a function with no parameters.</li><li><code>-&gt;</code> introduces one or more return slots.</li><li>Omit the arrow only when the function has no return slots at all.</li><li>A function with only an error slot still writes <code>-&gt; Error!</code>.</li><li><code>Void</code> is not written as a return type.</li><li><code>:</code> opens the body and <code>;</code> closes it.</li><li>Function names use <code>regular_snake_case</code>.</li></ul><p>Functions with required success values must return or otherwise terminate on every reachable path. Terminality is validated before HIR lowering.</p><h3>Generic functions</h3><p>Declaration-site generic parameters appear after the function name.</p><pre style=""><code class='codeblock'>
     identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span> value

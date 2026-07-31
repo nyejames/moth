@@ -52,9 +52,9 @@ That property underwrites Moth's semantic promise: correctness does not depend o
 
 GC does **not** make this safe:
 
-[codeblock, $code("moth"):
-// conceptual: shared reader plus overlapping exclusive mutation
-// both aliases can be live under GC and still conflict
+[codeblock, $code("text"):
+    -- conceptual: shared reader plus overlapping exclusive mutation
+    -- both aliases can be live under GC and still conflict
 ]
 
 Live memory can still host a logic hazard. Access rules still matter.

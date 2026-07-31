@@ -70,7 +70,7 @@ The one semantic region responsible for keeping an allocation alive and eventual
     ;
 ]
 
-[codeblock, $code("moth"):
+[codeblock, $code("text"):
     name [access/type] into group_name = expression
 ]
 
@@ -101,13 +101,18 @@ V1 has no expression-site placement. Prefer:
 
 [codeblock, $code("moth"):
     row Row into scratch = parse_row(raw)
-    ~rows.push(row)!
+    ~rows.push(row) catch:
+        assert(false, "unexpected push failure")
+    ;
 ]
 
 Do not initially add:
 
 [codeblock, $code("moth"):
-    ~rows.push(parse_row(raw) into scratch)!
+    -- INVALID: expression-site placement is not supported in V1
+    ~rows.push(parse_row(raw) into scratch) catch:
+        assert(false, "unexpected push failure")
+    ;
 ]
 
 Placement stays attached to closed receiving boundaries.

@@ -18,10 +18,10 @@ return greet(visitor)
 
 with ordered runtime work in HIR spirit:
 
-[codeblock, $code("moth"):
-tmp0 = load visitor
-tmp1 = call greet(tmp0)
-return tmp1
+[codeblock, $code("text"):
+    tmp0 = load visitor
+    tmp1 = call greet(tmp0)
+    return tmp1
 ]
 
 The second form makes evaluation order and temporary storage obvious. Backends and analyses stop arguing about tree walk conventions.

@@ -11,6 +11,7 @@ A unit variant is a value without a constructor call.
 This form is invalid:
 
 [codeblock, $code("moth"):
+    -- INVALID: unit variants are not constructor calls
     current = Status::Ready()
 ]
 
