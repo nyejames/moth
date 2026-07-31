@@ -29,7 +29,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Core idea
+    ## Core idea
 
     Async in Moth is built around three concepts:
 
@@ -79,7 +79,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Channels
+    ## Channels
 
     Coroutines should not share mutable state by default.
 
@@ -101,7 +101,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Sending values
+    ## Sending values
 
     Values are sent into a channel with `>>`.
 
@@ -117,7 +117,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Receiving values
+    ## Receiving values
 
     Values are received from a channel with `<<`.
 
@@ -133,7 +133,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Coroutines
+    ## Coroutines
 
     A coroutine is a function that can suspend and resume execution.
 
@@ -166,7 +166,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Yield
+    ## Yield
 
     `yield` explicitly suspends the current coroutine and allows other coroutines to run.
 
@@ -198,7 +198,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Structured async scopes
+    ## Structured async scopes
 
     Coroutines run inside an `async` scope.
 
@@ -237,7 +237,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Why not viral async types?
+    ## Why not viral async types?
 
     Moth should avoid making async infect every function type by default.
 
@@ -257,7 +257,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Safety model
+    ## Safety model
 
     The async model should preserve Moth's normal safety rules.
 
@@ -275,7 +275,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Full example
+    ## Full example
 
     [codeblock, $code("moth"):
         producer |writer ~Channel(Int)|:
@@ -312,7 +312,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Compiler lowering
+    ## Compiler lowering
 
     The exact lowering strategy is not final.
 
@@ -337,7 +337,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Backend considerations
+    ## Backend considerations
 
     This design depends on backend capabilities.
 
@@ -354,7 +354,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Deferred design questions
+    ## Deferred design questions
 
     Several details should be deliberately deferred until the basic model is proven:
 
@@ -372,7 +372,7 @@ page_head #= theme_head
 ]
 
 #[section, $md:
-    # Current status
+    ## Current status
 
     This design is not implemented yet.
 
