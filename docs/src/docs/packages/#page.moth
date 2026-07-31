@@ -132,6 +132,13 @@ page_head #= language_theme_head
     ]
 ]
 
+#[section, $md:
+    ## Package reference pages
+
+    - @core (Core packages)
+    - @builder (Builder packages)
+]
+
 #[section:
     [doc_pager:
         [$insert("previous_path"):../project-structure/]

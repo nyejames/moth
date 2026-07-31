@@ -233,6 +233,13 @@ Each Core package has a paired Advanced and Basic page:
 - `docs/src/docs/packages/core/collections/collections.mtf` / `collections-basic.mtf`
 - `docs/src/docs/packages/core/prelude/prelude.mtf` / `prelude-basic.mtf`
 
+## Builder packages
+
+Builder packages have paired Advanced and Basic pages:
+
+- `docs/src/docs/packages/builder/html/html-helpers.mtf` / `html-helpers-basic.mtf`
+- `docs/src/docs/packages/builder/canvas/canvas-drawing.mtf` / `canvas-drawing-basic.mtf`
+
 ## Compiler ownership
 
 `docs/compiler-design-overview.md` defines the compiler stages, semantic owners and cross-stage handoff for the language surface.

@@ -1,0 +1,56 @@
+`@html` gives you compile-time HTML helpers. The constants fold into HTML
+strings during compilation and produce no runtime code.
+
+### Using helpers in `.mtf` files
+
+`.mtf` files see `@html` constants without an import. You can use them
+directly.
+
+[codeblock, $code("text"):
+    -- docs/intro.mtf
+    [p: A paragraph.]
+
+    [codeblock, $code("moth"): value = 42]
+]
+
+### Importing helpers in `.moth` files
+
+`.moth` files need an explicit import to use `@html` symbols.
+
+[codeblock, $code("moth"):
+    import @html {table, th, td}
+]
+
+### Available helpers
+
+- `p`, `h1` through `h6`, `small`, `large`, `div`, `span` for structure
+- `bold`, `italic`, `underline`, `strikethrough` for formatting
+- `codeblock`, `table`, `th`, `td` for code and tables
+- `img` for images with `src`, `alt` and `style` slots
+- `center`, `right`, `left`, `smaller`, `medium`, `larger` for style inserts
+
+### Canvas
+
+`@html` wraps `@web/canvas` drawing into a `Canvas` struct with methods.
+
+[codeblock, $code("moth"):
+    import @html {get_canvas}
+
+    canvas = get_canvas("my-canvas") catch:
+        assert(false, "canvas not found")
+    ;
+
+    ~canvas.set_fill_style("red")
+    ~canvas.fill_rect(10.0, 10.0, 50.0, 50.0)
+]
+
+### Remember
+
+- `@html` helpers are compile-time constants. They fold into HTML at build time.
+- `.mtf` files get them automatically. `.moth` files need an import.
+- The package ships as a skeleton. It will grow as the standard library matures.
+
+### Read next
+
+For the full export surface, canvas wrapper contract and deferred surfaces,
+see @#html-helpers (@html advanced).

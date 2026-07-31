@@ -1,0 +1,35 @@
+import @styles {navbar, section, language_theme_head, doc_pager}
+
+page_title #= "Builder packages"
+page_description #= "HTML builder helpers and canvas drawing packages provided by the HTML builder."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../../ (Documentation) / @../ (Packages and imports) / Builder packages
+
+    # Builder packages
+
+    Builder packages are selected by the project builder. The HTML builder
+    provides `@html` as a source-backed compile-time helper package and
+    `@web/canvas` as a binding-backed runtime drawing package.
+
+    Both ship as early skeletons and will grow as the language stabilises and
+    the standard library expands. The @../../progress (progress matrix) owns
+    current support status.
+
+    ## Package pages
+
+    - @html/ (@html)
+    - @canvas/ (@web/canvas)
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../core/]
+        [$insert("previous_title"):Core packages]
+        [$insert("next_path"):../../memory/]
+        [$insert("next_title"):Memory and lifetimes]
+    ]
+]

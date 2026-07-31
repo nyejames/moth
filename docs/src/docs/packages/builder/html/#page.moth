@@ -1,0 +1,49 @@
+import @html-helpers {
+    content as html_advanced,
+}
+
+import @html-helpers-basic {
+    content as html_basic,
+}
+
+import @styles {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "@html"
+page_description #= "Compile-time HTML helpers and canvas wrapper from the HTML builder."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../../../ (Documentation) / @../ (Builder packages) / @html
+
+    # @html
+
+    `@html` provides compile-time HTML helpers as a builder source-backed
+    package. The constants fold into HTML strings during compilation.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):html-helpers]
+        [$insert("title"):HTML helpers]
+        [$insert("advanced"):[html_advanced]]
+
+        [html_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../]
+        [$insert("previous_title"):Builder packages]
+        [$insert("next_path"):../canvas/]
+        [$insert("next_title"):@web/canvas]
+    ]
+]

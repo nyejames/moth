@@ -1,0 +1,64 @@
+`@web/canvas` gives you 2D canvas drawing. Import it when you need to draw
+shapes, text, images or pixels onto a `<canvas>` element.
+
+The package ships as a skeleton. It will grow as the language and standard
+library mature.
+
+### Importing
+
+Bring in the functions you need with a grouped import.
+
+[codeblock, $code("moth"):
+    import @web/canvas {get_canvas, context_2d, set_fill_style, fill_rect}
+
+    canvas = get_canvas("my-canvas") catch:
+        assert(false, "canvas not found")
+    ;
+
+    ctx = context_2d(canvas) catch:
+        assert(false, "no 2D context")
+    ;
+
+    ~set_fill_style(~ctx, "red")
+    ~fill_rect(~ctx, 10.0, 10.0, 50.0, 50.0)
+]
+
+### Opaque types
+
+The package exposes opaque handle types. You can't construct or inspect them.
+You obtain them through functions.
+
+- `CanvasElement` from `get_canvas` or `create_canvas`
+- `Canvas2d` from `context_2d`
+- `CanvasGradient` from gradient creation functions
+- `CanvasImage` from `get_image` or `create_image`
+- `CanvasImageData` from `get_image_data` or `create_image_data`
+- `CanvasPattern` from `create_pattern`
+- `CanvasTextMetrics` from `measure_text`
+
+### Mutable access
+
+Functions that change the canvas need mutable access with `~`. Query functions
+use shared access. The `~` goes before the value you're mutating.
+
+[codeblock, $code("moth"):
+    -- mutating: needs ~
+    ~fill_rect(~ctx, 0.0, 0.0, 100.0, 100.0)
+
+    -- querying: shared access, no ~
+    width = canvas_width(canvas)
+]
+
+### Remember
+
+- `@web/canvas` needs an explicit import. It is not in the prelude.
+- All arguments are positional. Named arguments are not supported.
+- Opaque types can't be constructed or inspected. Use the free functions.
+- Functions that mutate need `~`. Functions that query don't.
+- The Wasm backend rejects reachable canvas calls. Canvas needs a browser JS
+  environment.
+
+### Read next
+
+For the full function surface, opaque type rules, pixel access and deferred
+surfaces, see @#canvas-drawing (@web/canvas advanced).

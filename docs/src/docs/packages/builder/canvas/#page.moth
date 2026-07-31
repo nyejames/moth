@@ -1,0 +1,50 @@
+import @canvas-drawing {
+    content as canvas_advanced,
+}
+
+import @canvas-drawing-basic {
+    content as canvas_basic,
+}
+
+import @styles {
+    navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+}
+
+page_title #= "@web/canvas"
+page_description #= "2D canvas drawing as a builder binding-backed runtime package."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../../../ (Documentation) / @../ (Builder packages) / @web/canvas
+
+    # @web/canvas
+
+    `@web/canvas` provides 2D canvas drawing as a binding-backed runtime
+    package. It exposes opaque handle types and free functions for drawing
+    shapes, text, images and pixels.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):canvas-drawing]
+        [$insert("title"):Canvas drawing]
+        [$insert("advanced"):[canvas_advanced]]
+
+        [canvas_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../html/]
+        [$insert("previous_title"):@html]
+        [$insert("next_path"):../../../memory/]
+        [$insert("next_title"):Memory and lifetimes]
+    ]
+]
