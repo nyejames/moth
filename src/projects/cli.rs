@@ -157,10 +157,8 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
     let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
         Ok(build_result) => {
             let (output_root, project_entry_dir) = if build_result.config.entry_dir.is_dir() {
-                (
-                    build::resolve_project_output_root(&build_result.config, flags),
-                    Some(build_result.config.entry_dir.clone()),
-                )
+                let plan = build::resolve_directory_output_plan(&build_result.config, flags);
+                (plan.output_root, plan.project_entry_dir)
             } else {
                 let output_root = match env::current_dir() {
                     Ok(path) => path,

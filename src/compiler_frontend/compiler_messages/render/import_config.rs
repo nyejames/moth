@@ -228,6 +228,24 @@ pub(crate) fn invalid_config_message(
                 replacement,
             )
         }
+        InvalidConfigReason::InvalidOutputFolder { folder, reason } => {
+            invalid_output_folder_message(key_label, *folder, *reason, string_table)
+        }
+        InvalidConfigReason::OutputFolderInsideEntryRoot {
+            folder,
+            entry_root,
+        } => format!(
+            "Output folder '{}' must be outside the source entry root '{}'. Configure a distinct project-relative output folder in config.moth.",
+            string_table.resolve(*folder),
+            string_table.resolve(*entry_root),
+        ),
+        InvalidConfigReason::OutputFoldersNotDistinct {
+            dev_folder,
+            release_folder: _,
+        } => format!(
+            "Development and release output folders must be distinct. Both resolve to '{}'.",
+            string_table.resolve(*dev_folder),
+        ),
     }
 }
 
@@ -258,6 +276,42 @@ fn invalid_package_folder_message(
             let folder_name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
             format!(
                 "Invalid 'package_folders' entry '{folder_name}'. Package folders must be a single top-level folder name such as \"lib\"."
+            )
+        }
+    }
+}
+
+fn invalid_output_folder_message(
+    key_label: &str,
+    folder: Option<StringId>,
+    reason: InvalidOutputFolderReason,
+    string_table: &StringTable,
+) -> String {
+    let folder_name = folder.map(|folder| string_table.resolve(folder).to_owned());
+
+    match reason {
+        InvalidOutputFolderReason::Empty => {
+            format!(
+                "'{key_label}' cannot be empty. Configure a project-relative output folder in config.moth."
+            )
+        }
+        InvalidOutputFolderReason::AbsolutePath => {
+            let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
+            format!("'{key_label}' '{name}' must be relative to the project root, not absolute.")
+        }
+        InvalidOutputFolderReason::ParentDirectorySegment => {
+            let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
+            format!("'{key_label}' '{name}' must not contain parent-directory segments ('..').")
+        }
+        InvalidOutputFolderReason::CurrentDirectory => {
+            format!(
+                "'{key_label}' must not be '.'. Configure a named project-relative output folder."
+            )
+        }
+        InvalidOutputFolderReason::EqualsProjectRoot => {
+            let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
+            format!(
+                "'{key_label}' '{name}' must not equal the project root. Configure a distinct output folder."
             )
         }
     }

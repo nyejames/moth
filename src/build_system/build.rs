@@ -837,6 +837,28 @@ pub enum WriteMode {
     SkipUnchanged,
 }
 
+/// Resolved output plan for a directory project build.
+///
+/// WHAT: carries the output root and project entry directory so CLI and dev share one
+/// output-ownership resolution path.
+/// WHY: output ownership must not be reconstructed independently by different callers.
+pub struct OutputPlan {
+    pub output_root: PathBuf,
+    pub project_entry_dir: Option<PathBuf>,
+}
+
+/// Resolve the output plan for a directory project from config and flags.
+///
+/// WHAT: computes the output root, project entry directory and build profile in one helper.
+/// WHY: CLI `build` and `dev` must share one output-ownership resolution so manifest identity
+/// does not drift between command paths.
+pub fn resolve_directory_output_plan(config: &Config, flags: &[Flag]) -> OutputPlan {
+    OutputPlan {
+        output_root: resolve_project_output_root(config, flags),
+        project_entry_dir: Some(config.entry_dir.clone()),
+    }
+}
+
 /// Options for writing a compiled project to disk.
 pub struct WriteOptions {
     pub output_root: PathBuf,
@@ -853,8 +875,9 @@ pub struct WriteOptions {
 
 /// Resolve the output root for a directory project based on the build profile.
 ///
-/// The config owns the default folder names. If a config explicitly clears a folder path, outputs
-/// fall back to the project root.
+/// WHAT: joins the configured dev or release folder to the project entry directory.
+/// WHY: config validation rejects empty, absolute or unsafe folders before this runs, so the
+/// folder is always a valid project-relative path.
 pub fn resolve_project_output_root(config: &Config, flags: &[Flag]) -> PathBuf {
     let release_build = flags.contains(&Flag::Release);
     let configured_folder = if release_build {
@@ -865,10 +888,6 @@ pub fn resolve_project_output_root(config: &Config, flags: &[Flag]) -> PathBuf {
 
     if configured_folder.is_absolute() {
         return configured_folder.clone();
-    }
-
-    if configured_folder.as_os_str().is_empty() {
-        return config.entry_dir.clone();
     }
 
     config.entry_dir.join(configured_folder)
@@ -1113,6 +1132,19 @@ fn write_project_outputs_inner(
     string_table: &StringTable,
 ) -> Result<(), CompilerMessages> {
     // ---------------------------------------
+    //  Preflight the complete output batch
+    // ---------------------------------------
+    // WHAT: validate every non-NotBuilt output path, reject duplicate destinations, compute the
+    // complete managed-path set, and load manifest ownership before any filesystem mutation.
+    // WHY: a late invalid or duplicate path must not leave earlier files already written.
+    let prepared_write = {
+        let preflight_start = crate::timing::start_pipeline_timing();
+        let result = preflight_output_write(project, string_table);
+        log_stage_timing("output.preflight", preflight_start);
+        result?
+    };
+
+    // ---------------------------------------
     //  Prepare cleanup and create output root
     // ---------------------------------------
 
@@ -1144,20 +1176,13 @@ fn write_project_outputs_inner(
         result?;
     }
 
-    let mut current_managed_artifact_paths: HashSet<PathBuf> = HashSet::new();
-
     // ---------------------------------------
     //  Emit individual output files
     // ---------------------------------------
 
     {
         let emit_files_start = crate::timing::start_pipeline_timing();
-        let result = emit_project_output_files(
-            project,
-            options,
-            string_table,
-            &mut current_managed_artifact_paths,
-        );
+        let result = emit_project_output_files(project, options, string_table);
         log_stage_timing("output.emit_files_total", emit_files_start);
         result?;
     }
@@ -1172,7 +1197,7 @@ fn write_project_outputs_inner(
         let result = finalize_output_cleanup(
             &cleanup_state,
             &options.output_root,
-            &current_managed_artifact_paths,
+            &prepared_write.managed_artifact_paths,
             &project.cleanup_policy,
             options.write_mode,
             string_table,
@@ -1184,11 +1209,60 @@ fn write_project_outputs_inner(
     Ok(())
 }
 
+/// Validated output batch computed before any filesystem mutation.
+///
+/// WHAT: carries the complete managed-path set after every path has been validated and duplicate
+/// destinations rejected.
+/// WHY: the generic preflight is the final filesystem contract before emission starts. It must
+/// not reconstruct HTML route meaning or builder-specific semantics.
+struct PreparedOutputWrite {
+    managed_artifact_paths: HashSet<PathBuf>,
+}
+
+fn preflight_output_write(
+    project: &Project,
+    string_table: &StringTable,
+) -> Result<PreparedOutputWrite, CompilerMessages> {
+    let mut managed_artifact_paths: HashSet<PathBuf> = HashSet::new();
+    let mut seen_destinations: HashSet<PathBuf> = HashSet::new();
+
+    for output_file in &project.output_files {
+        if matches!(output_file.file_kind(), FileKind::NotBuilt) {
+            continue;
+        }
+
+        let relative_output_path = output_file.relative_output_path();
+
+        validate_relative_output_path(relative_output_path, string_table)?;
+
+        if !seen_destinations.insert(relative_output_path.to_path_buf()) {
+            return Err(file_error_messages(
+                relative_output_path,
+                format!(
+                    "Duplicate output destination '{}'. Each output path must be unique.",
+                    relative_output_path.display()
+                ),
+                string_table,
+            ));
+        }
+
+        if !matches!(output_file.file_kind(), FileKind::Directory)
+            && (project.cleanup_policy.manages_path(relative_output_path)
+                || matches!(output_file.file_kind(), FileKind::Bytes(_)))
+        {
+            managed_artifact_paths.insert(relative_output_path.to_path_buf());
+        }
+    }
+
+    Ok(PreparedOutputWrite {
+        managed_artifact_paths,
+    })
+}
+
 fn emit_project_output_files(
     project: &Project,
     options: &WriteOptions,
     string_table: &StringTable,
-    current_managed_artifact_paths: &mut HashSet<PathBuf>,
 ) -> Result<(), CompilerMessages> {
     for output_file in &project.output_files {
         if matches!(output_file.file_kind(), FileKind::NotBuilt) {
@@ -1196,16 +1270,6 @@ fn emit_project_output_files(
         }
 
         let relative_output_path = output_file.relative_output_path();
-        validate_relative_output_path(relative_output_path, string_table)?;
-
-        // Track managed paths for the cleanup manifest.
-        if !matches!(output_file.file_kind(), FileKind::Directory)
-            && (project.cleanup_policy.manages_path(relative_output_path)
-                || matches!(output_file.file_kind(), FileKind::Bytes(_)))
-        {
-            current_managed_artifact_paths.insert(relative_output_path.to_path_buf());
-        }
-
         let destination = options.output_root.join(relative_output_path);
 
         let emit_file_start = crate::timing::start_pipeline_timing();

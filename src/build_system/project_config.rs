@@ -107,7 +107,14 @@ pub(crate) fn parse_project_config_file(
         errors.append(&mut validation_errors);
     }
 
-    // 3. Aggregate all errors into one CompilerMessages payload.
+    // 3. Validate directory output settings after all config values are applied.
+    if let Err(mut output_errors) =
+        validation::validate_directory_output_settings(config, string_table)
+    {
+        errors.append(&mut output_errors);
+    }
+
+    // 4. Aggregate all errors into one CompilerMessages payload.
     if errors.is_empty() {
         Ok(())
     } else {

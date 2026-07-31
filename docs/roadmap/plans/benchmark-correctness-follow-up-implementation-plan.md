@@ -12,13 +12,12 @@ Phases 1 through 6 are complete. Their implementation detail belongs in Git hist
 WORK_ID: benchmark-build-closeout
 WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
 AUDIT_BASE_REVISION: c54eafa116e9cba46e01bf65d3d3e6bd7a1bde69
-STATUS: active - final closeout
-CURRENT_SLICE: Phase 7A - migrate the two stale benchmark fixtures
-COMPLETED: benchmark output isolation, repository mutation detection, explicit fingerprint boundaries, split source and measurement identity, identity-safe normal/profile history, checked timing protocol, bounded bench-ci and benchmark documentation
-BLOCKERS: module_root_role_mix_frontend and few_modules_many_files_each_frontend still use removed @./ source-import syntax
-BUILD_AUDIT: output-root ownership is not yet keyed by build profile, conflicting manifests fail open and directory output settings still accept unsafe empty or absolute roots
-NEXT_ACTION: complete Phases 7A through 7F in order, then mark the plan complete and move its roadmap entry out of active work
-LATEST_REPORTED_VALIDATION: Clippy, workspace tests, 1812 integration executions and docs checks pass. bench-ci reaches only the two stale benchmark fixtures
+STATUS: complete
+CURRENT_SLICE: complete
+COMPLETED: Phases 1-7F all complete. 8 fixture imports migrated. Output manifest v4 with builder identity + build profile. Directory output settings validated. Output batch preflight before writing. CLI and dev share one output plan. index.md corrected. Clean baselines recorded. just validate passes. Final audit passed with corrections applied.
+BLOCKERS: none
+NEXT_ACTION: none
+LATEST_REPORTED_VALIDATION: just validate passes (Clippy, 3855 workspace tests, 1812 integration executions, docs check, bench-ci)
 ```
 
 Keep this block concise. Update it after each accepted slice. Git history is the implementation record.

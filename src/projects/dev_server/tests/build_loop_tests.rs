@@ -9,6 +9,7 @@ use crate::build_system::build::{
     ProjectBuilder, WriteMode, WriteOptions,
 };
 use crate::builder_surface::BuilderSurface;
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, ErrorType, SourceLocation,
 };
@@ -43,7 +44,7 @@ fn html_build_result() -> BuildResult {
                 FileKind::Html(String::from("<html><body>Hello</body></html>")),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
+            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
             warnings: vec![],
         },
         config: Config::new(PathBuf::from("main.moth")),
@@ -77,7 +78,7 @@ fn multi_page_html_build_result() -> BuildResult {
                 ),
             ],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
+            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
             warnings: vec![],
         },
         config: Config::new(PathBuf::from("project")),
@@ -94,7 +95,7 @@ fn html_build_result_without_entry_page() -> BuildResult {
                 FileKind::Html(String::from("<html><body>Hello</body></html>")),
             )],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::html(),
+            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
             warnings: vec![],
         },
         config: Config::new(PathBuf::from("main.moth")),
@@ -117,7 +118,7 @@ fn html_build_result_with_warning() -> BuildResult {
                 FileKind::Html(String::from("<html><body>Hello</body></html>")),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
+            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
             warnings: vec![],
         },
         config: Config::new(PathBuf::from("main.moth")),
@@ -205,7 +206,7 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
                 FileKind::Js(String::from("console.log('broken');")),
             )],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic([".js"]),
+            cleanup_policy: CleanupPolicy::generic([".js"], FrontendBuildProfile::Dev),
             warnings: vec![unused_variable_warning(
                 string_table.get_or_intern("x".to_string()),
                 SourceLocation::from_path(&config.entry_dir, string_table),

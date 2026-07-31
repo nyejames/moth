@@ -15,6 +15,7 @@ use crate::build_system::build::{
 };
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -110,6 +111,11 @@ impl BackendBuilder for HtmlProjectBuilder {
         }
 
         let release_build = flags.contains(&Flag::Release);
+        let build_profile = if release_build {
+            FrontendBuildProfile::Release
+        } else {
+            FrontendBuildProfile::Dev
+        };
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
         let entry_paths = {
             let _entry_path_guard =
@@ -263,7 +269,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         Ok(Project {
             output_files,
             entry_page_rel,
-            cleanup_policy: CleanupPolicy::html(),
+            cleanup_policy: CleanupPolicy::html(build_profile),
             warnings,
         })
     }
@@ -278,7 +284,6 @@ impl BackendBuilder for HtmlProjectBuilder {
         parse_html_site_config(config, string_table)?;
         parse_html_document_config(config, string_table)?;
 
-        // Empty dev/release folders are allowed and resolved by core build output logic.
         Ok(())
     }
 

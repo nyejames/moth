@@ -7,6 +7,7 @@ use crate::build_system::build::{
     FileKind, OutputFile, Project, ProjectBuilder, build_project, resolve_project_output_root,
 };
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, resolve_source_file_path, terse,
@@ -494,20 +495,6 @@ fn resolve_project_output_root_respects_configured_dev_and_release_folders() {
 }
 
 #[test]
-fn resolve_project_output_root_uses_project_root_when_folder_is_explicitly_empty() {
-    let root = temp_dir("output_root_fallback");
-    let mut config = Config::new(root.clone());
-    config.dev_folder = PathBuf::new();
-    config.release_folder = PathBuf::new();
-
-    assert_eq!(resolve_project_output_root(&config, &[]), root);
-    assert_eq!(
-        resolve_project_output_root(&config, &[Flag::Release]),
-        config.entry_dir
-    );
-}
-
-#[test]
 fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
     let root = temp_dir("missing_homepage");
     let src = root.join("src");
@@ -563,6 +550,272 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
     };
     assert_has_config_error(&messages);
     assert_invalid_project_setting(&messages, "page_url_style", "slashy");
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+// -------------------------
+//  Phase 7B: Output setting validation and preflight tests
+// -------------------------
+
+#[test]
+fn duplicate_output_destination_causes_zero_files_written() {
+    let root = temp_dir("duplicate_dest");
+    fs::create_dir_all(&root).expect("should create temp root");
+
+    let project = Project {
+        output_files: vec![
+            OutputFile::new(
+                PathBuf::from("index.html"),
+                FileKind::Html(String::from("<html>A</html>")),
+            ),
+            OutputFile::new(
+                PathBuf::from("index.html"),
+                FileKind::Html(String::from("<html>B</html>")),
+            ),
+        ],
+        entry_page_rel: None,
+        cleanup_policy: generic_cleanup_policy(),
+        warnings: vec![],
+    };
+
+    let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+    assert!(result.is_err(), "duplicate output path should be rejected");
+
+    assert!(
+        !root.join("index.html").exists(),
+        "no files should be written when a duplicate destination is detected"
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn invalid_later_output_path_causes_zero_files_written() {
+    let root = temp_dir("invalid_later_path");
+    fs::create_dir_all(&root).expect("should create temp root");
+
+    let project = Project {
+        output_files: vec![
+            OutputFile::new(
+                PathBuf::from("index.html"),
+                FileKind::Html(String::from("<html>Home</html>")),
+            ),
+            OutputFile::new(
+                PathBuf::from("../escape.js"),
+                FileKind::Js(String::from("x")),
+            ),
+        ],
+        entry_page_rel: None,
+        cleanup_policy: generic_cleanup_policy(),
+        warnings: vec![],
+    };
+
+    let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+    assert!(result.is_err(), "invalid later path should be rejected");
+
+    assert!(
+        !root.join("index.html").exists(),
+        "preflight must reject the batch before any file is written"
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn empty_directory_output_setting_is_rejected() {
+    let root = temp_dir("empty_output_setting");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source folder");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\ndev_folder #= \"\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    );
+
+    let Err(messages) = result else {
+        panic!("empty dev_folder should fail build");
+    };
+    assert_has_config_error(&messages);
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn absolute_output_setting_is_rejected() {
+    let root = temp_dir("absolute_output_setting");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source folder");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\ndev_folder #= \"/absolute/path\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    );
+
+    let Err(messages) = result else {
+        panic!("absolute dev_folder should fail build");
+    };
+    assert_has_config_error(&messages);
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn output_folder_inside_entry_root_is_rejected() {
+    let root = temp_dir("output_inside_entry_root");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source folder");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\ndev_folder #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    );
+
+    let Err(messages) = result else {
+        panic!("output folder inside entry_root should fail build");
+    };
+    assert_has_config_error(&messages);
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn identical_dev_and_release_folders_are_rejected() {
+    let root = temp_dir("identical_dev_release");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source folder");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\ndev_folder #= \"output\"\noutput_folder #= \"output\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    );
+
+    let Err(messages) = result else {
+        panic!("identical dev and release folders should fail build");
+    };
+    assert_has_config_error(&messages);
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn valid_distinct_output_folders_resolve_unchanged() {
+    let root = temp_dir("valid_output_folders");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source folder");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\ndev_folder #= \"dev\"\noutput_folder #= \"release\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let build_result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    )
+    .expect("valid distinct folders should build");
+
+    assert_eq!(
+        resolve_project_output_root(&build_result.config, &[]),
+        root.join("dev")
+    );
+    assert_eq!(
+        resolve_project_output_root(&build_result.config, &[Flag::Release]),
+        root.join("release")
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn cli_and_dev_produce_same_owner_identity_for_same_profile() {
+    use crate::build_system::build::resolve_directory_output_plan;
+    use crate::compiler_frontend::Flag;
+
+    fn resolve_build_profile(flags: &[Flag]) -> FrontendBuildProfile {
+        if flags.contains(&Flag::Release) {
+            FrontendBuildProfile::Release
+        } else {
+            FrontendBuildProfile::Dev
+        }
+    }
+
+    let root = temp_dir("owner_identity");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source folder");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\ndev_folder #= \"dev\"\noutput_folder #= \"release\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let build_result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    )
+    .expect("build should succeed");
+
+    let cli_plan = resolve_directory_output_plan(&build_result.config, &[]);
+    let dev_plan = resolve_directory_output_plan(&build_result.config, &[]);
+
+    assert_eq!(
+        cli_plan.output_root, dev_plan.output_root,
+        "CLI and dev must resolve the same output root for the same flags"
+    );
+    assert_eq!(
+        resolve_build_profile(&[]),
+        FrontendBuildProfile::Dev,
+        "dev flags must produce dev profile"
+    );
+
+    let release_plan = resolve_directory_output_plan(&build_result.config, &[Flag::Release]);
+    assert_eq!(
+        resolve_build_profile(&[Flag::Release]),
+        FrontendBuildProfile::Release,
+        "release flags must produce release profile"
+    );
+    assert_ne!(
+        cli_plan.output_root, release_plan.output_root,
+        "dev and release output roots must differ"
+    );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }

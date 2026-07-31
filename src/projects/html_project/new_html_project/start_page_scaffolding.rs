@@ -55,7 +55,7 @@ page_head #= [$html:
 
 /// Return the empty HTML build manifest content.
 pub fn manifest_template() -> &'static str {
-    "# moth-manifest v3\n# builder: html\n# managed_extensions: .html,.js,.wasm\n"
+    "# moth-manifest v4\n# builder: html\n# profile: dev\n# managed_extensions: .html,.js,.wasm\n"
 }
 
 /// Return the default `.gitignore` content for a new HTML project.

@@ -13,6 +13,7 @@ use super::super::{
     BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, SummaryCounts, TestCaseSpec,
 };
 use crate::build_system::build::{BuildResult, CleanupPolicy, FileKind, OutputFile, Project};
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
@@ -148,7 +149,7 @@ fn build_result_with_warning(
                 FileKind::Html(String::from("<html></html>")),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
+            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
             warnings: Vec::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),

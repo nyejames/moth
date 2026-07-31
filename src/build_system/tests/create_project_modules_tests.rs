@@ -2072,26 +2072,18 @@ fn accepts_config_local_reference_to_earlier_private_const() {
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
-    fs::write(
-        &config_path,
-        "output_folder #= \"release\"\ndev_folder #= output_folder\n",
-    )
-    .expect("should write config");
+    fs::write(&config_path, "version #= \"0.2.0\"\nauthor #= version\n")
+        .expect("should write config");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
     parse_project_config_for_test(&mut config, &config_path, &style_directives)
         .expect("config with private const reference should succeed");
 
+    assert_eq!(config.version, "0.2.0", "version should be set");
     assert_eq!(
-        config.release_folder,
-        PathBuf::from("release"),
-        "output_folder should be set"
-    );
-    assert_eq!(
-        config.dev_folder,
-        PathBuf::from("release"),
-        "dev_folder should resolve through private const reference"
+        config.author, "0.2.0",
+        "author should resolve through private const reference"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -2387,7 +2379,7 @@ fn accepts_config_local_reference_after_shape_enforcement() {
 
     fs::write(
         &config_path,
-        "entry_root #= \"src\"\ndev_folder #= entry_root\n",
+        "version #= \"0.2.0\"\nentry_root #= version\ndev_folder #= \"dev\"\n",
     )
     .expect("should write config");
 
@@ -2398,13 +2390,13 @@ fn accepts_config_local_reference_after_shape_enforcement() {
 
     assert_eq!(
         config.entry_root,
-        PathBuf::from("src"),
-        "entry_root should be set"
+        PathBuf::from("0.2.0"),
+        "entry_root should be set through const reference"
     );
     assert_eq!(
         config.dev_folder,
-        PathBuf::from("src"),
-        "dev_folder should resolve through private const reference"
+        PathBuf::from("dev"),
+        "dev_folder should keep its explicit value"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");

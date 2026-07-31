@@ -7,6 +7,7 @@
 
 use crate::build_system::build::WriteMode;
 use crate::build_system::utils::{file_error_messages, should_skip_unchanged_write};
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -19,9 +20,11 @@ use std::path::{Component, Path, PathBuf};
 
 /// Manifest file written to the output root to track which managed build artifacts exist.
 pub(crate) const BUILD_MANIFEST_FILENAME: &str = ".moth_manifest";
+const BUILD_MANIFEST_HEADER_V4: &str = "# moth-manifest v4";
 const BUILD_MANIFEST_HEADER_V3: &str = "# moth-manifest v3";
 const BUILD_MANIFEST_HEADER_PREFIX: &str = "# moth-manifest ";
 const BUILD_MANIFEST_BUILDER_PREFIX: &str = "# builder: ";
+const BUILD_MANIFEST_PROFILE_PREFIX: &str = "# profile: ";
 const BUILD_MANIFEST_MANAGED_EXTENSIONS_PREFIX: &str = "# managed_extensions: ";
 
 // -------------------------
@@ -52,11 +55,57 @@ impl BuilderKind {
     }
 }
 
+/// Build profile stored in a v4 manifest to distinguish development and release ownership.
+fn build_profile_manifest_name(profile: FrontendBuildProfile) -> &'static str {
+    match profile {
+        FrontendBuildProfile::Dev => "dev",
+        FrontendBuildProfile::Release => "release",
+    }
+}
+
+fn build_profile_from_manifest_name(raw_value: &str) -> Option<FrontendBuildProfile> {
+    match raw_value.trim() {
+        "dev" => Some(FrontendBuildProfile::Dev),
+        "release" => Some(FrontendBuildProfile::Release),
+        _ => None,
+    }
+}
+
+/// Typed output owner carrying builder identity and the selected build profile.
+///
+/// WHAT: identifies who owns a manifest entry so a mismatched builder or profile fails before
+/// any output mutation.
+/// WHY: development and release builds must not overwrite each other's output roots, and another
+/// builder must not silently claim a manifest it does not own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputOwner {
+    pub builder_kind: BuilderKind,
+    pub build_profile: FrontendBuildProfile,
+}
+
+impl OutputOwner {
+    pub fn html(build_profile: FrontendBuildProfile) -> Self {
+        Self {
+            builder_kind: BuilderKind::Html,
+            build_profile,
+        }
+    }
+
+    pub fn generic(build_profile: FrontendBuildProfile) -> Self {
+        Self {
+            builder_kind: BuilderKind::Generic,
+            build_profile,
+        }
+    }
+}
+
 /// Builder-owned cleanup contract describing which file types may be deleted automatically.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CleanupPolicy {
     /// Distinguishes generic manifest cleanup from builder-specific ownership policies.
     pub builder_kind: BuilderKind,
+    /// Build profile this policy was constructed for.
+    pub build_profile: FrontendBuildProfile,
     /// Extensions this builder is allowed to delete through manifest-backed cleanup.
     pub managed_extensions: BTreeSet<String>,
 }
@@ -66,29 +115,42 @@ impl CleanupPolicy {
     ///
     /// WHAT: stores the managed file extensions the builder owns.
     /// WHY: cleanup must be explicit about ownership instead of inferring it from the filesystem.
-    pub fn generic<I, S>(managed_extensions: I) -> Self
+    pub fn generic<I, S>(managed_extensions: I, build_profile: FrontendBuildProfile) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        Self::new(BuilderKind::Generic, managed_extensions)
+        Self::new(BuilderKind::Generic, managed_extensions, build_profile)
     }
 
     /// Constructs the cleanup policy for HTML builds.
     ///
     /// WHAT: HTML builds manage HTML, JS, and Wasm artifacts.
     /// WHY: stale cleanup should be limited to builder-owned route artifacts in this pass.
-    pub fn html() -> Self {
-        Self::new(BuilderKind::Html, [".html", ".js", ".wasm"])
+    pub fn html(build_profile: FrontendBuildProfile) -> Self {
+        Self::new(BuilderKind::Html, [".html", ".js", ".wasm"], build_profile)
     }
 
-    fn new<I, S>(builder_kind: BuilderKind, managed_extensions: I) -> Self
+    /// Returns the typed output owner for this cleanup policy.
+    pub fn output_owner(&self) -> OutputOwner {
+        OutputOwner {
+            builder_kind: self.builder_kind.clone(),
+            build_profile: self.build_profile,
+        }
+    }
+
+    fn new<I, S>(
+        builder_kind: BuilderKind,
+        managed_extensions: I,
+        build_profile: FrontendBuildProfile,
+    ) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
         Self {
             builder_kind,
+            build_profile,
             managed_extensions: collect_managed_extensions(managed_extensions),
         }
     }
@@ -117,6 +179,7 @@ pub(crate) enum ManifestLoadResult {
     Valid {
         paths: Vec<PathBuf>,
         builder_kind: BuilderKind,
+        build_profile: FrontendBuildProfile,
     },
     LimitedSafeMode {
         reason: ManifestLimitedSafeModeReason,
@@ -132,6 +195,10 @@ pub(crate) enum ManifestLimitedSafeModeReason {
     BuilderMismatch {
         manifest_builder_kind: BuilderKind,
         active_builder_kind: BuilderKind,
+    },
+    ProfileMismatch {
+        manifest_profile: FrontendBuildProfile,
+        active_profile: FrontendBuildProfile,
     },
     ManagedExtensionsMismatch {
         manifest_extensions: BTreeSet<String>,
@@ -154,6 +221,15 @@ impl ManifestLimitedSafeModeReason {
                 "build manifest builder '{}' does not match active builder '{}'",
                 manifest_builder_kind.manifest_name(),
                 active_builder_kind.manifest_name()
+            ),
+
+            Self::ProfileMismatch {
+                manifest_profile,
+                active_profile,
+            } => format!(
+                "build manifest profile '{}' does not match active profile '{}'",
+                build_profile_manifest_name(*manifest_profile),
+                build_profile_manifest_name(*active_profile)
             ),
 
             Self::ManagedExtensionsMismatch {
@@ -345,6 +421,9 @@ pub(crate) fn validate_output_root_is_safe(
 ///
 /// Missing, unreadable, or metadata-invalid manifests fall back to limited safe mode. Path lines
 /// are still revalidated individually so corrupt entries are skipped without broadening cleanup.
+///
+/// v4 manifests carry builder identity, profile and managed extensions. v3 manifests lack profile
+/// identity, so they enter limited safe mode and the v4 format is written after a successful build.
 pub(crate) fn read_build_manifest(
     output_root: &Path,
     active_policy: &CleanupPolicy,
@@ -381,22 +460,30 @@ pub(crate) fn read_build_manifest(
         };
     }
 
-    if first_line != BUILD_MANIFEST_HEADER_V3 {
-        let reason = if first_line.starts_with(BUILD_MANIFEST_HEADER_PREFIX) {
-            ManifestLimitedSafeModeReason::UnsupportedVersion
-        } else {
-            ManifestLimitedSafeModeReason::InvalidMetadata
-        };
-        return ManifestLoadResult::LimitedSafeMode { reason };
+    if first_line == BUILD_MANIFEST_HEADER_V4 {
+        return read_v4_build_manifest(non_empty_lines, active_policy);
     }
 
-    read_v3_build_manifest(non_empty_lines, active_policy)
+    if first_line == BUILD_MANIFEST_HEADER_V3 {
+        // v3 manifests lack profile identity, so they enter limited safe mode. The v4 format is
+        // written after a successful build upgrades the manifest.
+        return ManifestLoadResult::LimitedSafeMode {
+            reason: ManifestLimitedSafeModeReason::UnsupportedVersion,
+        };
+    }
+
+    let reason = if first_line.starts_with(BUILD_MANIFEST_HEADER_PREFIX) {
+        ManifestLimitedSafeModeReason::UnsupportedVersion
+    } else {
+        ManifestLimitedSafeModeReason::InvalidMetadata
+    };
+    ManifestLoadResult::LimitedSafeMode { reason }
 }
 
 /// Write the build manifest listing all current managed artifact paths.
 ///
-/// The manifest records only managed file artifacts, with builder metadata kept in lightweight
-/// headers so future cleanup can reject mismatched or unsupported manifests safely.
+/// The v4 manifest records builder identity, build profile and managed extensions so future
+/// cleanup can reject mismatched builder, profile or extension ownership safely.
 pub(crate) fn write_build_manifest(
     output_root: &Path,
     current_paths: &HashSet<PathBuf>,
@@ -413,10 +500,14 @@ pub(crate) fn write_build_manifest(
     sorted_paths.sort();
 
     let mut manifest_lines = vec![
-        String::from(BUILD_MANIFEST_HEADER_V3),
+        String::from(BUILD_MANIFEST_HEADER_V4),
         format!(
             "{BUILD_MANIFEST_BUILDER_PREFIX}{}",
             cleanup_policy.builder_kind.manifest_name()
+        ),
+        format!(
+            "{BUILD_MANIFEST_PROFILE_PREFIX}{}",
+            build_profile_manifest_name(cleanup_policy.build_profile)
         ),
         format!(
             "{BUILD_MANIFEST_MANAGED_EXTENSIONS_PREFIX}{}",
@@ -449,7 +540,7 @@ pub(crate) fn write_build_manifest(
 /// Remove stale managed files tracked by the previous manifest.
 ///
 /// WHAT: deletes stale manifest-tracked files after revalidating each relative path for safety.
-/// WHY: v3 manifests are the supported ownership contract, so stale removal trusts the manifest's
+/// WHY: v4 manifests are the supported ownership contract, so stale removal trusts the manifest's
 /// emitted-path list instead of trying to infer ownership from extensions or route shapes.
 pub(crate) fn remove_manifest_tracked_stale_artifacts(
     output_root: &Path,
@@ -515,14 +606,14 @@ where
     paths
 }
 
-fn read_v3_build_manifest<'a, I>(
+fn read_v4_build_manifest<'a, I>(
     mut manifest_lines: I,
     active_policy: &CleanupPolicy,
 ) -> ManifestLoadResult
 where
     I: Iterator<Item = &'a str>,
 {
-    // 1. Parse builder kind
+    // 1. Parse builder kind.
     let Some(builder_line) = manifest_lines.next() else {
         return invalid_manifest_metadata();
     };
@@ -533,7 +624,18 @@ where
         return invalid_manifest_metadata();
     };
 
-    // 2. Parse managed extensions (normalized so order, leading dot and ASCII case do not matter).
+    // 2. Parse build profile.
+    let Some(profile_line) = manifest_lines.next() else {
+        return invalid_manifest_metadata();
+    };
+    let Some(raw_profile) = profile_line.strip_prefix(BUILD_MANIFEST_PROFILE_PREFIX) else {
+        return invalid_manifest_metadata();
+    };
+    let Some(manifest_profile) = build_profile_from_manifest_name(raw_profile) else {
+        return invalid_manifest_metadata();
+    };
+
+    // 3. Parse managed extensions (normalized so order, leading dot and ASCII case do not matter).
     let Some(managed_extensions_line) = manifest_lines.next() else {
         return invalid_manifest_metadata();
     };
@@ -548,7 +650,7 @@ where
         return invalid_manifest_metadata();
     };
 
-    // 3. Verify builder ownership before extension ownership.
+    // 4. Verify builder ownership before profile or extension ownership.
     if manifest_builder_kind != active_policy.builder_kind {
         return ManifestLoadResult::LimitedSafeMode {
             reason: ManifestLimitedSafeModeReason::BuilderMismatch {
@@ -558,7 +660,18 @@ where
         };
     }
 
-    // 4. Require exact managed-extension ownership. Any set difference enters limited safe mode
+    // 5. Verify build profile ownership. Development and release builds cannot overwrite each
+    //    other's output roots.
+    if manifest_profile != active_policy.build_profile {
+        return ManifestLoadResult::LimitedSafeMode {
+            reason: ManifestLimitedSafeModeReason::ProfileMismatch {
+                manifest_profile,
+                active_profile: active_policy.build_profile,
+            },
+        };
+    }
+
+    // 6. Require exact managed-extension ownership. Any set difference enters limited safe mode
     //    so stale files are preserved instead of being deleted under a mismatched ownership set.
     if manifest_managed_extensions != active_policy.managed_extensions {
         return ManifestLoadResult::LimitedSafeMode {
@@ -572,6 +685,7 @@ where
     ManifestLoadResult::Valid {
         paths: parse_manifest_paths(manifest_lines),
         builder_kind: manifest_builder_kind,
+        build_profile: manifest_profile,
     }
 }
 

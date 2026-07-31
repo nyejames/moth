@@ -8,6 +8,7 @@ use crate::build_system::build::{
 };
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
@@ -53,11 +54,11 @@ fn current_dir_test_lock() -> &'static Mutex<()> {
 }
 
 fn html_cleanup_policy() -> CleanupPolicy {
-    CleanupPolicy::html()
+    CleanupPolicy::html(FrontendBuildProfile::Dev)
 }
 
 fn generic_cleanup_policy() -> CleanupPolicy {
-    CleanupPolicy::generic([".html", ".js", ".wasm"])
+    CleanupPolicy::generic([".html", ".js", ".wasm"], FrontendBuildProfile::Dev)
 }
 
 #[test]
@@ -158,7 +159,7 @@ impl BackendBuilder for WarningBuilder {
                 FileKind::Js(String::from("console.log('ok');")),
             )],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic([".js"]),
+            cleanup_policy: CleanupPolicy::generic([".js"], FrontendBuildProfile::Dev),
             warnings: vec![unused_variable_warning(
                 StringTable::new().get_or_intern("x".to_string()),
                 SourceLocation::default(),
@@ -213,7 +214,7 @@ impl BackendBuilder for EntryTrackingBuilder {
         Ok(Project {
             output_files: vec![],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
+            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new(), FrontendBuildProfile::Dev),
             warnings: vec![],
         })
     }
@@ -247,7 +248,7 @@ impl BackendBuilder for ValidationTrackingBuilder {
         Ok(Project {
             output_files: vec![],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
+            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new(), FrontendBuildProfile::Dev),
             warnings: vec![],
         })
     }
@@ -322,7 +323,7 @@ impl BackendBuilder for NoDirectiveBuilder {
                 FileKind::Html(String::new()),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::generic([".html"]),
+            cleanup_policy: CleanupPolicy::generic([".html"], FrontendBuildProfile::Dev),
             warnings: vec![],
         })
     }

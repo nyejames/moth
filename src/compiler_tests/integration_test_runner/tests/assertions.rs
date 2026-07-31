@@ -18,6 +18,7 @@ use super::super::{
     SuccessExpectation, TestCaseSpec, WarningExpectation,
 };
 use crate::build_system::build::{BuildResult, CleanupPolicy, FileKind, OutputFile, Project};
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
@@ -865,7 +866,7 @@ fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) -> BuildResul
         project: Project {
             output_files,
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
+            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
             warnings: Vec::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
@@ -1390,7 +1391,7 @@ fn nested_golden_validation_compares_relative_paths() {
                 FileKind::Html("<p>nested</p>\n".to_owned()),
             )],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::html(),
+            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
             warnings: Vec::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),

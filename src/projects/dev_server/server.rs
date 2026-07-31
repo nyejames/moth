@@ -4,7 +4,7 @@
 //! and serves HTTP/SSE traffic for hot reload.
 
 use crate::build_system::build::{
-    ProjectBuilder, bootstrap_project_build, resolve_project_output_root,
+    ProjectBuilder, bootstrap_project_build, resolve_directory_output_plan,
 };
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::Flag;
@@ -150,8 +150,8 @@ pub(crate) fn resolve_dev_runtime_paths(
     }
 
     let bootstrap = bootstrap_project_build(builder, entry_target.to_path_buf())?;
-    let resolved = resolve_project_output_root(&bootstrap.config, flags);
-    let output_dir = resolved.canonicalize().unwrap_or(resolved);
+    let plan = resolve_directory_output_plan(&bootstrap.config, flags);
+    let output_dir = plan.output_root.canonicalize().unwrap_or(plan.output_root);
     Ok(DevRuntimePaths {
         watch_scope: watch::WatchScope::derive(entry_target, Some(&bootstrap.config), &output_dir),
         output_dir,

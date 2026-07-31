@@ -10,7 +10,7 @@ macro_rules! define_stable_reason_keys {
     (
         $(
             $reason_type:ident => {
-                $(@delegate($delegate_pattern:pat => $delegate_expression:expr);)?
+                $(@delegate($delegate_pattern:pat => $delegate_expression:expr);)*
                 $($pattern:pat => $key:literal),+ $(,)?
             }
         ),+ $(,)?
@@ -19,7 +19,7 @@ macro_rules! define_stable_reason_keys {
             impl $reason_type {
                 pub(super) fn stable_reason_key(&self) -> &'static str {
                     match self {
-                        $($delegate_pattern => $delegate_expression,)?
+                        $($delegate_pattern => $delegate_expression,)*
                         $($pattern => $key,)+
                     }
                 }
@@ -42,6 +42,7 @@ macro_rules! define_stable_reason_keys {
 define_stable_reason_keys! {
     InvalidConfigReason => {
         @delegate(&InvalidConfigReason::InvalidPackageFolder { reason, .. } => reason.stable_reason_key());
+        @delegate(&InvalidConfigReason::InvalidOutputFolder { reason, .. } => reason.stable_reason_key());
         &InvalidConfigReason::MissingKey => "invalid_config.missing_key",
         &InvalidConfigReason::DuplicateKey => "invalid_config.duplicate_key",
         &InvalidConfigReason::FunctionUnsupported => "invalid_config.function_unsupported",
@@ -79,6 +80,16 @@ define_stable_reason_keys! {
         &InvalidConfigReason::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
         &InvalidConfigReason::SourceFileFolderCollision { .. } => "invalid_config.source_file_folder_collision",
         &InvalidConfigReason::LegacyModuleRootFileName { .. } => "invalid_config.legacy_module_root_file_name",
+        &InvalidConfigReason::OutputFolderInsideEntryRoot { .. } => "invalid_config.output_folder_inside_entry_root",
+        &InvalidConfigReason::OutputFoldersNotDistinct { .. } => "invalid_config.output_folders_not_distinct",
+    },
+
+    InvalidOutputFolderReason => {
+    &InvalidOutputFolderReason::Empty => "invalid_config.invalid_output_folder.empty",
+    &InvalidOutputFolderReason::AbsolutePath => "invalid_config.invalid_output_folder.absolute_path",
+    &InvalidOutputFolderReason::ParentDirectorySegment => "invalid_config.invalid_output_folder.parent_directory_segment",
+    &InvalidOutputFolderReason::CurrentDirectory => "invalid_config.invalid_output_folder.current_directory",
+    &InvalidOutputFolderReason::EqualsProjectRoot => "invalid_config.invalid_output_folder.equals_project_root",
     },
 
     InvalidPackageFolderReason => {

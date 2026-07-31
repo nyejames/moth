@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::const_values::facts::{AstConstFacts, ConstFac
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidConfigReason, InvalidPackageFolderReason,
+    CompilerDiagnostic, InvalidConfigReason, InvalidOutputFolderReason, InvalidPackageFolderReason,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -26,7 +26,7 @@ use crate::projects::settings::{
 };
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // -------------------------
 //  Validation Entry Point
@@ -719,4 +719,176 @@ fn key_identity_location<'a>(
     authored_key_name_locations
         .get(&declaration.id)
         .unwrap_or(&declaration.value.location)
+}
+
+// -------------------------
+//  Directory Output Setting Validation
+// -------------------------
+
+/// Validate directory output settings after config values are applied.
+///
+/// WHAT: rejects development and release output folders that are empty, absolute,
+/// parent-traversing, current-directory, equal to the project root, inside `entry_root`,
+/// or equal to each other.
+/// WHY: directory output roots must be safe and distinct before any output writing or
+/// cleanup runs. Single-file output stays separate because it writes to the command
+/// working directory.
+pub(crate) fn validate_directory_output_settings(
+    config: &Config,
+    string_table: &mut StringTable,
+) -> Result<(), Vec<CompilerDiagnostic>> {
+    let mut errors = Vec::new();
+
+    validate_one_output_folder(
+        "dev_folder",
+        &config.dev_folder,
+        config,
+        string_table,
+        &mut errors,
+    );
+    validate_one_output_folder(
+        "output_folder",
+        &config.release_folder,
+        config,
+        string_table,
+        &mut errors,
+    );
+
+    // Only check distinctness when both folders individually passed validation.
+    if errors.is_empty() {
+        validate_output_folders_distinct(config, string_table, &mut errors);
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+fn validate_one_output_folder(
+    key: &str,
+    folder: &PathBuf,
+    config: &Config,
+    string_table: &mut StringTable,
+    errors: &mut Vec<CompilerDiagnostic>,
+) {
+    let location = config.setting_location_or_config_file(key, string_table);
+    let folder_str = folder.to_string_lossy().to_string();
+    let folder_id = string_table.intern(&folder_str);
+
+    if folder.as_os_str().is_empty() {
+        errors.push(output_folder_diagnostic(
+            key,
+            None,
+            InvalidOutputFolderReason::Empty,
+            location,
+            string_table,
+        ));
+        return;
+    }
+
+    if folder.is_absolute() || folder_str.starts_with('/') {
+        errors.push(output_folder_diagnostic(
+            key,
+            Some(folder_id),
+            InvalidOutputFolderReason::AbsolutePath,
+            location,
+            string_table,
+        ));
+        return;
+    }
+
+    if folder
+        .components()
+        .any(|component| component == std::path::Component::ParentDir)
+    {
+        errors.push(output_folder_diagnostic(
+            key,
+            Some(folder_id),
+            InvalidOutputFolderReason::ParentDirectorySegment,
+            location,
+            string_table,
+        ));
+        return;
+    }
+
+    if folder
+        .components()
+        .any(|component| component == std::path::Component::CurDir)
+    {
+        errors.push(output_folder_diagnostic(
+            key,
+            Some(folder_id),
+            InvalidOutputFolderReason::CurrentDirectory,
+            location,
+            string_table,
+        ));
+        return;
+    }
+
+    // Only check entry-root containment when entry_root is a strict subdirectory. When
+    // entry_root is "." or empty, the entry root covers the entire project root and the output
+    // folder being inside it is the normal case.
+    if !config.entry_root.as_os_str().is_empty() && config.entry_root != Path::new(".") {
+        let resolved_entry_root = config.entry_dir.join(&config.entry_root);
+        let resolved_folder = config.entry_dir.join(folder);
+
+        if resolved_folder == resolved_entry_root {
+            errors.push(output_folder_diagnostic(
+                key,
+                Some(folder_id),
+                InvalidOutputFolderReason::EqualsProjectRoot,
+                location,
+                string_table,
+            ));
+            return;
+        }
+
+        if resolved_folder.starts_with(&resolved_entry_root) {
+            errors.push(CompilerDiagnostic::invalid_config_reason(
+                Some(string_table.intern(key)),
+                InvalidConfigReason::OutputFolderInsideEntryRoot {
+                    folder: folder_id,
+                    entry_root: string_table.intern(&config.entry_root.to_string_lossy()),
+                },
+                location,
+            ));
+        }
+    }
+}
+
+fn validate_output_folders_distinct(
+    config: &Config,
+    string_table: &mut StringTable,
+    errors: &mut Vec<CompilerDiagnostic>,
+) {
+    let dev_resolved = config.entry_dir.join(&config.dev_folder);
+    let release_resolved = config.entry_dir.join(&config.release_folder);
+
+    if dev_resolved == release_resolved {
+        let location = config.setting_location_or_config_file("dev_folder", string_table);
+        errors.push(CompilerDiagnostic::invalid_config_reason(
+            Some(string_table.intern("dev_folder")),
+            InvalidConfigReason::OutputFoldersNotDistinct {
+                dev_folder: string_table.intern(&config.dev_folder.to_string_lossy()),
+                release_folder: string_table.intern(&config.release_folder.to_string_lossy()),
+            },
+            location,
+        ));
+    }
+}
+
+fn output_folder_diagnostic(
+    key: &str,
+    folder: Option<StringId>,
+    reason: InvalidOutputFolderReason,
+    location: SourceLocation,
+    string_table: &mut StringTable,
+) -> CompilerDiagnostic {
+    CompilerDiagnostic::invalid_config_reason(
+        Some(string_table.intern(key)),
+        InvalidConfigReason::InvalidOutputFolder { folder, reason },
+        location,
+    )
 }

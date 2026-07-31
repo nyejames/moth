@@ -1,2 +1,2 @@
 entry_root #= "src"
-dev_folder #= "src/scratch"
+dev_folder #= "dev"

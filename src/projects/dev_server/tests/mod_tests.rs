@@ -147,18 +147,17 @@ fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() 
 }
 
 #[test]
-fn resolve_dev_runtime_paths_fall_back_to_project_root_for_empty_dev_folder() {
+fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
     let root = temp_dir("empty_dev_folder");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join(CONFIG_FILE_NAME), "dev_folder #= \"\"\n").expect("should write config");
 
     let builder = ProjectBuilder::new(Box::new(NoopBuilder));
-    let resolved = resolve_dev_runtime_paths(&builder, &root, &[])
-        .expect("directory output dir should resolve");
+    let result = resolve_dev_runtime_paths(&builder, &root, &[]);
 
-    assert_eq!(
-        resolved.output_dir,
-        root.canonicalize().expect("temp dir should canonicalize")
+    assert!(
+        result.is_err(),
+        "empty dev folder should be rejected at config validation"
     );
     fs::remove_dir_all(&root).expect("should clean up temp dir");
 }

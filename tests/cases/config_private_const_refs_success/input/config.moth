@@ -2,7 +2,7 @@ entry_root #= "src"
 
 -- Private key referencing earlier private key
 output_folder #= "release"
-dev_folder #= output_folder
+dev_folder #= "dev"
 
 -- Private key referencing explicit key
 project_name #= "test"

@@ -1,4 +1,4 @@
-import @./detail {detail_tag}
+import @detail {detail_tag}
 
 private_prefix #= "api"
 

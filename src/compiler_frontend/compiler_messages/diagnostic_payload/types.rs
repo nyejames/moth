@@ -226,6 +226,27 @@ pub enum InvalidConfigReason {
         file_name: StringId,
         directory: StringId,
     },
+    InvalidOutputFolder {
+        folder: Option<StringId>,
+        reason: InvalidOutputFolderReason,
+    },
+    OutputFolderInsideEntryRoot {
+        folder: StringId,
+        entry_root: StringId,
+    },
+    OutputFoldersNotDistinct {
+        dev_folder: StringId,
+        release_folder: StringId,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidOutputFolderReason {
+    Empty,
+    AbsolutePath,
+    ParentDirectorySegment,
+    CurrentDirectory,
+    EqualsProjectRoot,
 }
 
 impl InvalidConfigReason {
@@ -357,6 +378,25 @@ impl InvalidConfigReason {
             } => {
                 *file_name = remap.get(*file_name);
                 *directory = remap.get(*directory);
+            }
+
+            Self::InvalidOutputFolder { folder, .. } => {
+                if let Some(folder) = folder {
+                    *folder = remap.get(*folder);
+                }
+            }
+
+            Self::OutputFolderInsideEntryRoot { folder, entry_root } => {
+                *folder = remap.get(*folder);
+                *entry_root = remap.get(*entry_root);
+            }
+
+            Self::OutputFoldersNotDistinct {
+                dev_folder,
+                release_folder,
+            } => {
+                *dev_folder = remap.get(*dev_folder);
+                *release_folder = remap.get(*release_folder);
             }
 
             Self::UnknownKey { key } => {

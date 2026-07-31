@@ -11,7 +11,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Benchmark system follow up corrections - phase 7 onwards left](./plans/benchmark-correctness-follow-up-implementation-plan.md)
 - [Final language docs migration work](./plans/docs-language-migration.md)
 - [Canonical module compilation and scoped packages](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
 
@@ -38,6 +37,7 @@ Do not mark a plan active unless its current-state capsule says it is active.
 
 ## Completed
 
+- [Benchmark and build-system closeout](./plans/benchmark-correctness-follow-up-implementation-plan.md)
 - Module root marker migration from `#` to `@`
 
 ---
