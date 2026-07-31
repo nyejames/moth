@@ -4,37 +4,17 @@
 
 ```text
 STATUS: active
-CURRENT_STAGE: Stage W writing-style pass
-STAGE_A: technical corrections pending final example, link and validation closeout
-NEXT_ACTION: continue Stage W while completing the bounded Stage A corrections
-STAGE_B: blocked until Stage A and Stage W are both reviewed and accepted
-STAGE_C: blocked until compiler semantic realignment is complete
+CURRENT_STAGE: Stage B compiler semantic realignment
+STAGE_A: complete and accepted
+STAGE_W: complete and accepted
+VALIDATION: full gate green at 780215f05
+NEXT_ACTION: B1 remove source-authored return aliases
+STAGE_C: blocked until Stage B completes
 ```
 
-Commit `604eb03c3b9b0ece7189990742109aec83934ec0` completed most of the bulk documentation migration. It added the missing Advanced memory detail, Project Structure concept pairs, Core package Basic and Advanced pages, Design Scope coverage and progress-matrix drift notes.
+## Completion record
 
-The remaining work is a closeout, not another bulk migration. It must correct the docs source graph, remove the remaining semantic contradictions, repair invalid examples, finish exact package and scope contracts, build the site and prove parity.
-
-Historical migration phases remain in Git history. Do not append implementation diaries or repeat completed work in this plan.
-
-## Required order
-
-Work proceeds in this order:
-
-1. **Stage A: technical documentation closeout**
-2. **Stage A review and acceptance**
-3. **Stage W: focused writing-style pass**
-4. **Stage W review and acceptance**
-5. **Stage B: compiler semantic realignment**
-6. **Stage C: final parity review and authority switch**
-
-Do not start Stage W while technical correctness remains open.
-
-Do not start Stage B until the user has accepted both Stage A and Stage W.
-
-Do not update `AGENTS.md` or declare the focused references authoritative before Stage C receives explicit approval.
-
----
+Stage A (technical documentation closeout) and Stage W (writing-style pass) are complete and accepted. The bulk migration, focused-page corrections, semantic consistency cleanup, example repairs, status notes, link audits, parity ledger and style pass all landed. Git history and the parity ledger are the detailed evidence.
 
 ## Authority during this plan
 
@@ -119,454 +99,17 @@ Source imports resolve from the owning module root.
 
 Normal sibling modules cannot import each other directly. Shared sibling APIs use scoped `+*.moth` support packages.
 
----
+### Core Text length contract
 
-# Stage A: technical documentation closeout
+`@core/text.length` counts Unicode scalar values. The current JS lowering uses UTF-16 code units and does not yet match. Stage B6 closes this gap.
 
-Stage A is documentation-only. It may change files under `docs/**`, generated docs and documentation indexes. It must not change Rust, tests, fixtures, manifests, scripts or compiler behaviour.
+### Core Math checked Float boundary
 
-Avoid broad stylistic rewriting during Stage A. Change prose only where correctness, completeness or immediate clarity requires it. The dedicated writing pass comes later.
+Every `@core/math` Float result must be finite before ordinary Moth code observes it. The current JS lowering does not enforce this. Stage B6 closes this gap.
 
-## A1. Repair the docs source module graph
+### Implicit `.mtf` scope providers
 
-This is the first task because it blocks every docs check and release build.
-
-### Convert the styles directory to a support package
-
-Do not convert `docs/src/styles/docs.moth` into a normal `@docs.moth` module. That would make `styles` a sibling normal module and preserve the invalid sibling-import topology.
-
-Replace it with a scoped support package:
-
-```text
-docs/src/styles/+package.moth
-```
-
-Required shape:
-
-- keep private imports outside `export:`
-- retain private helper declarations outside `export:` when consumers do not need them
-- place the actual shared style API inside one strict `export:` block
-- export only declarations used by documentation consumers or intentionally re-exported by `docs/src/@page.moth`
-- preserve `Palette`, shared themes, layout components, documentation-level controls and pagers where they remain public API
-- remove unused imports and declarations discovered by the move
-- do not add a compatibility module or forwarding file
-
-Update imports across `docs/src/**`:
-
-```moth
-import @styles { ... }
-```
-
-Remove all `@styles/docs` imports.
-
-Update the grouped re-export in `docs/src/@page.moth` to use `@styles`.
-
-Update `index.md` for the moved source owner.
-
-### Canonicalise docs source imports
-
-Audit every Moth import under `docs/src/**`.
-
-Replace route-local forms such as:
-
-```moth
-import @./io
-import @./build-inputs
-```
-
-with the correct owning-module-root-relative import identity.
-
-Required outcomes:
-
-- zero supported docs imports use `@./...`
-- no import uses parent traversal
-- child module and support package boundaries are not bypassed
-- route-local `.mtf` sources resolve through their owning root
-- source imports are extensionless
-- generated public routes continue to import only exported provider surfaces
-
-### Unblock and iterate the compiler check
-
-After the graph conversion, run:
-
-```sh
-cargo run --quiet -- check docs --terse
-```
-
-Fix every newly exposed docs graph, import, visibility, API-only root or semantic error before moving on.
-
-Do not describe `styles/docs.moth` as the sole blocker until the check reaches completion.
-
-## A2. Complete semantic consistency
-
-### Uniform `String` cleanup
-
-Review at least:
-
-```text
-docs/language-overview.md
-docs/compiler-design-overview.md
-docs/src/docs/language-overview/**
-docs/src/docs/numbers/**
-docs/src/docs/functions/**
-docs/src/docs/choices/**
-docs/src/docs/errors/**
-docs/src/docs/collections/**
-docs/src/docs/templates/**
-docs/src/docs/generics/**
-docs/src/docs/traits/**
-docs/src/docs/packages/core/**
-```
-
-Required outcomes:
-
-- no page permits source string `+`
-- no example joins strings with `+`
-- no page lists templates as an unsupported equality payload
-- no page lists templates as a distinct invalid map-key type
-- all runtime `String` values share equality and map-key semantics
-- no page permits string ordering or relational string patterns
-- internal template append remains clearly separate from source binary operators
-- current compiler drift remains recorded in the progress matrix until Stage B lands
-
-Delete the remaining monolith and focused-reference contradictions rather than qualifying them.
-
-### Return contract cleanup
-
-Delete every remaining reference to an authored alias-candidate return slot.
-
-The Functions and Errors references must agree that:
-
-- success return slots contain types
-- one final fallible slot may carry a channel
-- source signatures have no alias candidate category
-- freshness and aliasing are inferred compiler facts
-
-Do not leave obsolete syntax as an edge case or legacy diagnostic note.
-
-### Pattern and Moth Template consistency
-
-Confirm across the monolith, focused pages and progress matrix that:
-
-- `else =>` is the only catch-all
-- bare general capture is removed from accepted design
-- relational patterns support only `Int`, `Float` and `Char`
-- Moth Template implicit names collide rather than shadow
-- each accepted-but-not-yet-implemented rule has one concise implementation-gap note
-
-Rewrite the Moth Template collision example as an explicit invalid example followed by a corrected renamed export.
-
-## A3. Repair examples and code profiles
-
-Every non-trivial example must be valid current Moth unless it is clearly labelled invalid or accepted deferred syntax.
-
-Correct the known defects:
-
-- mutable reassignment starts with `~=`
-- values used through mutable receivers are held in mutable bindings
-- `push`, `get`, `set` and `remove` use postfix `!`, meaningful `catch` or an allowed invariant assertion
-- postfix `!` appears only inside a compatible fallible function
-- Core IO construction does not use top-level `io.input.new()!`
-- project examples declare every referenced name
-- entry `config:` section records use `#=`
-- explanatory region notation uses a plain text code profile rather than Moth source highlighting
-- invalid examples are visibly labelled
-- shared aliases are not named as copies
-
-Use concise invariant handlers where appropriate:
-
-```moth
-independent ~= copy original
-
-~independent.push(4) catch:
-    assert(false, "unexpected push failure")
-;
-```
-
-```moth
-first = original.get(0) catch:
-    assert(false, "known valid index")
-;
-```
-
-For each new or corrected non-trivial example, provide one of:
-
-- an existing compiler fixture that proves the form
-- a temporary focused probe run during the patch
-- an explicit `INVALID` or `ACCEPTED DEFERRED` label
-
-Delete temporary probes before completion.
-
-## A4. Correct Project Structure status and examples
-
-The new Build Inputs, Entry Config and Project Package Facade pairs exist. Finish their contracts.
-
-Required corrections:
-
-- fix undeclared names in `entry-config.mtf`
-- use valid `html #= |...|` syntax inside entry config examples
-- keep `@project` explicit rather than implicitly injected
-- keep facade restrictions and project-context provenance precise
-- state that support roots and project facades reject top-level runtime work and fragments
-- preserve module-root-relative imports and support-package visibility
-
-Build inputs, `@project` and entry-local `config:` remain queued implementation work.
-
-Their Basic pages must not teach them as available current syntax. Either:
-
-- remove the deferred surface from the beginner path for now, or
-- lead with an unmistakable accepted-deferred warning and use future-tense explanation
-
-Advanced pages may own the accepted end-state contract but must link to the progress matrix for current support.
-
-## A5. Correct Core, Builder and external package contracts
-
-Cross-check each Advanced package page against compiler package registration, the language monolith and the progress matrix.
-
-### Core IO
-
-Document the exact registered input surface:
-
-```text
-new
-update
-close
-key_down
-key_pressed
-key_released
-last_key_pressed
-last_key_released
-pointer_down
-pointer_pressed
-pointer_released
-pointer_x
-pointer_y
-last_pointer_pressed
-last_pointer_released
-```
-
-Remove invented or stale names such as `key_held`, `pointer_up` and `pointer_held` unless the compiler actually registers them at the reviewed checkpoint.
-
-Wrap fallible handle creation in a compatible function or local `catch` example.
-
-### Core Math
-
-Remove backend-defined Float semantics.
-
-Moth-level non-finite results follow the checked numeric contract. If the current external lowering does not enforce that contract, document the implementation gap in the progress matrix and assign its correction to Stage B or a dedicated numeric plan.
-
-### Prelude
-
-Do not describe a different alias name as shadowing `io`.
-
-A separate alias introduces another local namespace. A same-name collision follows the ordinary no-shadowing model.
-
-### Core Text
-
-Define one backend-neutral unit for `text.length`.
-
-Audit the runtime helper, `Char` semantics and existing language design first. Do not canonise JavaScript UTF-16 length merely because it is the current lowering.
-
-If no accepted rule exists, stop this item and present the user with an explicit design decision. Do not mark Stage A complete while the public Advanced contract remains backend-dependent.
-
-Once decided:
-
-- document the exact unit in Basic and Advanced
-- record current implementation support in the progress matrix
-- assign any compiler or runtime correction to Stage B or a dedicated plan
-
-### Remaining package surfaces
-
-Audit and complete source-facing ownership for:
-
-```text
-@core/collections
-@core/random
-@core/time
-@html
-@web/canvas
-annotated project-local JavaScript bindings
-future value-only WIT imports
-```
-
-Advanced package pages must state stable names, parameter access, return and error contracts, opaque resource rules, teardown requirements, unsupported source forms and deferred surfaces.
-
-The progress matrix owns backend availability. Package pages must not turn current JavaScript implementation details into backend-dependent language semantics.
-
-## A6. Complete the public Design Scope route
-
-The public route under `docs/src/docs/design-scope/**` must become the complete source-facing owner.
-
-Do not rely on the codebase summary alone.
-
-Required outcomes:
-
-- `excluded-language-families.mtf` contains every outside-scope family and rationale
-- source-visible lifetime, reference-category and ownership annotations are included
-- backend-dependent observable semantics are included
-- first-class results, expected errors and invariant assertions remain distinguished
-- `deferred-and-outside-scope.mtf` preserves the distinct deferred-feature and outside-design-scope diagnostic lanes
-- the public Advanced pages stop sending readers back to the monolith for the missing exact list
-- the codebase summary links to the public owner without competing with it
-
-Basic pages should explain the language's bias without presenting the full exclusion inventory.
-
-## A7. Complete index, parity and link ownership
-
-### Focused language index
-
-Update:
-
-```text
-docs/src/docs/codebase/language/overview.mtf
-```
-
-It must list:
-
-- the public Memory and Lifetimes owners
-- the public Design Scope owners
-- Build Inputs, Entry Config and Project Package Facade pairs
-- Core package Basic and Advanced owners
-- every other focused owner completed during closeout
-
-Do not claim every listed file is in final shape until Stage A and Stage W are accepted.
-
-### Parity ledger
-
-Create a compact companion ledger:
-
-```text
-docs/roadmap/plans/docs-language-migration-parity-ledger.md
-```
-
-Record one row per monolith section or delegated formal authority with:
-
-- source heading or authority
-- Advanced owner
-- Basic owner
-- public route
-- related formal owner
-- examples preserved
-- current implementation status
-- remaining discrepancy
-- completion state
-
-The ledger is audit evidence, not a prose diary. Keep entries terse.
-
-### Links and route ownership
-
-Audit source links and generated hrefs for every changed route.
-
-Required outcomes:
-
-- progress links resolve to `/docs/progress/`, not a codebase path
-- public codebase links stay under `/docs/codebase/`
-- no public link targets a repository Markdown file through an invalid site-relative URL
-- `Read next` links and anchors resolve
-- Previous and Next links work in both directions
-- Basic pages link to the Advanced panel or route correctly
-- no route-local import or public link relies on `@./...`
-
-## A8. Complete Stage A validation
-
-After all corrections:
-
-```sh
-cargo run --quiet -- check docs --terse
-cargo run --quiet -- build docs --release
-```
-
-The release build is the required final gate. The check command is the fast preflight.
-
-Then inspect:
-
-- every changed route
-- generated `docs/release/**` diffs
-- Basic as the default selection
-- independent selector behaviour
-- one H1 per page
-- heading and anchor stability
-- code highlighting
-- tables
-- links and pagers
-- narrow layout
-- dark mode
-- generated output provenance
-
-At minimum inspect the changed routes for:
-
-- Memory and Lifetimes
-- Design Scope
-- Project Structure
-- Packages and Imports
-- every Core package page
-- Numbers
-- Functions
-- Branching
-- Choices
-- Collections and Maps
-- Moth Templates
-
-Do not edit generated HTML manually.
-
-## Stage A acceptance gate
-
-Stage A is ready for user review only when:
-
-- docs source checking passes
-- the release build passes
-- the styles support package is canonical
-- no supported import uses `@./...`
-- no focused or monolith reference contradicts a locked semantic decision
-- examples are valid or clearly labelled
-- Core package contracts match registered APIs
-- no package page leaks backend-defined semantics into the language contract
-- the public Design Scope route is complete
-- the focused index is current
-- the parity ledger is complete
-- every changed route has been inspected
-- the report states exact commands and remaining uncertainty
-
-Stage A completion requires explicit user acceptance after review.
-
----
-
-# Stage W: writing-style pass
-
-Stage W begins only after Stage A technical correctness is complete, validated and accepted.
-
-This is a separate documentation-only phase. Do not mix it into the technical closeout.
-
-## Goals
-
-Review the complete focused language documentation for:
-
-- clear beginner progression in Basic files
-- complete direct-reading contracts in Advanced files
-- concise wording without semantic compression
-- consistent terminology
-- natural paragraph and sentence rhythm
-- precise headings and transitions
-- removal of accidental repetition
-- examples introduced before edge cases
-- clear separation of current, deferred, rejected and outside-scope behaviour
-- consistent British English and repository style-guide rules
-
-## Constraints
-
-- do not remove a normative rule to shorten a page
-- do not merge distinct edge cases into vague summary prose
-- do not move formal compiler, build-system or memory architecture into public language pages
-- do not turn Basic pages into status dashboards
-- do not change accepted semantics silently
-- flag any newly discovered design ambiguity before rewriting around it
-- keep the parity ledger updated when ownership moves
-
-## Validation
-
-Run the documentation release build again and inspect every route changed by the style pass.
-
-Stage W completion requires a separate user review and acceptance.
+The compiler hard-codes `IMPLICIT_TEMPLATE_SCOPE_PREFIXES` and broadly supplies source providers before `.mtf` use is known. Stage B7 moves this to builder capability metadata.
 
 ---
 
@@ -636,7 +179,71 @@ Add focused unit, HIR and integration coverage as appropriate.
 
 Any accepted semantic correction discovered during Stage A, including a Core Text length contract or checked external Float boundary, must be assigned here or to an explicitly approved dedicated plan before Stage C.
 
-### Implicit template-scope provider follow-up
+## B6. Align Core binding results with Moth semantics
+
+The documentation migration established backend-neutral contracts for Core Text and Core Math. Their current JavaScript lowering disagrees.
+
+### Core Text
+
+Implement the accepted contract:
+
+```text
+@core/text.length counts Unicode scalar values
+```
+
+Required work:
+
+- replace JavaScript UTF-16 code-unit counting
+- use a correct scalar-value counting implementation
+- cover empty strings
+- cover ASCII
+- cover BMP non-ASCII
+- cover non-BMP scalar values such as emoji
+- cover mixed strings
+- cover direct and namespace imports
+- keep the return type `Int`
+- preserve infallible package semantics
+
+Expected examples:
+
+```text
+length("") == 0
+length("abc") == 3
+length("é") == 1
+length("🦋") == 1
+length("a🦋b") == 3
+```
+
+### Core Math
+
+Implement the accepted checked Float boundary:
+
+- every `@core/math` Float result must be finite before ordinary Moth code observes it
+- reject `NaN`
+- reject positive infinity
+- reject negative infinity
+- use the existing external Float result-validation owner
+- do not add ad hoc checks independently to every helper when one shared package-return boundary can own validation
+- test direct imports
+- test namespace imports
+- test aliases
+- test representative invalid results such as `sqrt(-1.0)` and overflow from `exp`
+- preserve finite valid results
+
+### Documentation and status
+
+For each correction:
+
+- remove its temporary Advanced implementation-gap note
+- update `docs/language-overview.md`
+- update the progress matrix
+- update the parity ledger
+- rebuild docs
+- add focused integration coverage
+
+These corrections belong in Stage B because their contracts were finalised by the language migration.
+
+## B7. Move implicit `.mtf` scope providers to builder capability metadata
 
 The current implicit `@html` provider fix uses a hard-coded prefix list:
 
@@ -644,14 +251,29 @@ The current implicit `@html` provider fix uses a hard-coded prefix list:
 const IMPLICIT_TEMPLATE_SCOPE_PREFIXES: &[&str] = &["html"];
 ```
 
-It also injects the provider into consumer modules more broadly than the semantic requirement. Stage B must:
+It also injects the provider into consumer modules more broadly than the semantic requirement.
 
-- move implicit template-scope capability into builder or package capability metadata
-- keep one semantic owner for which packages enter `.mtf` implicit scope
-- inject the provider only for modules whose semantic source set includes `.mtf` files
-- preserve explicit imports
-- ensure unrelated source packages are never implicitly visible
-- add focused regression coverage
+Required direction:
+
+- the active builder or package capability surface declares which source-backed packages enter `.mtf` implicit scope
+- remove `IMPLICIT_TEMPLATE_SCOPE_PREFIXES` from generic build orchestration
+- only modules whose semantic source set contains `.mtf` sources receive those implicit provider interfaces
+- normal `.moth` consumers do not receive implicit providers merely because the builder registered them
+- explicit imports remain unchanged
+- unrelated source packages never become implicitly visible
+- `.mtf` still receives the accepted `@html` compile-time constant surface
+- same-directory root constants and builder constants continue into the later collision-validation slice
+
+Required tests:
+
+- `.mtf` receives `@html`
+- ordinary `.moth` without import does not receive `@html`
+- an unrelated source-backed package is not implicitly visible
+- explicit imports continue to work
+- modules without `.mtf` do not receive the implicit provider
+- production provider-interface path remains covered
+
+This task may land before or after B1, but it must remain a named Stage B item.
 
 ## Stage B validation
 

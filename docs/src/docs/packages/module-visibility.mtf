@@ -4,20 +4,42 @@ Module visibility controls which declarations cross a module boundary. Normal de
 
 Files within the same module can import each other's declarations directly. A module is defined by its root directory. All `.moth` files in that directory (and its subdirectories that do not have their own root) belong to the same module.
 
+Given this topology:
+
+[codeblock, $code("text"):
+    src/
+    ├── @site.moth
+    └── components/
+        ├── @api.moth
+        └── utils.moth
+]
+
+`utils.moth` and `@api.moth` belong to the same `components` child module. Same-module imports can see private declarations.
+
+Internal helper:
+
 [codeblock, $code("moth"):
-    -- lib/components/utils.moth
+    -- src/components/utils.moth
     internal_value #= 42
+
     internal_fn || -> String:
         return "internal"
     ;
 ]
 
+Child root:
+
 [codeblock, $code("moth"):
-    -- lib/components/@api.moth (same module)
-    import @utils {internal_value, internal_fn}
+    -- src/components/@api.moth
+    import @utils {
+        internal_value,
+        internal_fn,
+    }
 
     export:
-        import @utils {internal_value}
+        import @utils {
+            internal_value,
+        }
     ;
 ]
 
@@ -28,11 +50,19 @@ Same-module imports bypass the public-surface boundary. The importing file sees 
 A different module can only access declarations marked public by the module root's `export:` block. Cross-module imports cannot bypass the public API.
 
 [codeblock, $code("moth"):
-    -- src/@site.moth (project module)
-    import @components {internal_value}
+    -- src/@site.moth
+    import @components {
+        internal_value,
+    }
 ]
 
-The project module can import `internal_value` through the package root's public surface. It cannot bypass that boundary with `import @components/utils {internal_value}`. Without the root export block, the public import is rejected with `MOTH-IMPORT-0011`.
+The parent module sees only the `components` child module's `export:` surface. It cannot bypass that boundary with `import @components/utils {internal_value}`. The `@components/utils` path cannot bypass the child facade.
+
+Without the root export block, the public import is rejected with `MOTH-IMPORT-0011`.
+
+### Normal modules are not source packages
+
+An `@*.moth` normal module is not a source package. Use `+package.moth` when the example intends to teach a scoped package. See @#project-local-packages (Project-local packages) for the support-package contract.
 
 ### Root-private declarations
 

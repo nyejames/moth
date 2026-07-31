@@ -292,7 +292,7 @@ and after `=`. Write `count ~= 1`, not `count~= 1`, `count ~=1` or `count ~ = 1`
 Runtime numeric operations are checked. Integer overflow, divide/modulo by zero, invalid integer
 exponents, and non-finite Float results are failures. When the enclosing function has builtin
 `Error!` as its error return slot, numeric failures recover through that builtin `Error` channel.
-Custom fallible channels, non-fallible functions, and active-root top-level runtime code use trap
+Custom fallible channels, non-fallible functions, and entry-selected root top-level runtime code use trap
 mode. Statically known numeric failures are compile-time diagnostics, even inside builtin
 `Error!` functions.
 
@@ -724,8 +724,8 @@ Core rules:
 - Template bodies capture variables from the surrounding scope.
 - Backticks and backslashes inside template bodies are ordinary body text and are preserved for formatters such as `$md`. Regular quoted string literals decode only `\\`, `\"`, `\n`, `\r` and `\t`.
 - Literal template delimiters in output use ordinary string insertion, such as `[: ["[literal]"]]`.
-- Only direct top-level template expressions in an active HTML module root contribute page fragments.
-- Top-level runtime templates run in active-root `start()` order.
+- Only direct top-level template expressions in an entry-selected HTML module root contribute page fragments.
+- Top-level runtime templates run in entry-activated `start()` order.
 - Top-level const templates fold at compile time and are merged separately.
 - Templates assigned to variables or returned from functions do not contribute page fragments by themselves.
 - Runtime Float interpolation and `Float -> String` casts use the same Moth formatter as
@@ -1504,9 +1504,9 @@ export:
 | one `@*.moth` file per normal module directory | Normal module root with a cosmetic filename |
 | one `+*.moth` file per support directory | API-only scoped package root named by its directory |
 | optional project-root `+*.moth` beside `config.moth` | API-only external package facade named by project config |
-| entry-selected normal module | Owns active top-level runtime/start code and direct page fragments |
-| imported normal module | Provides only its `export:` public surface and never executes root runtime |
-| implicit `start` | Contains active-root top-level runtime code; build-system-only; not importable |
+| entry-selected normal module | Owns dormant compiler-synthesised `start` and direct page fragments; entry assembly activates `start` exactly once |
+| imported normal module | Provides only its `export:` public surface and never activates its root work |
+| implicit `start` | Contains dormant top-level runtime code; build-system-only; not importable; activated by entry assembly |
 | normal `.moth` files | Declarations only; no top-level executable statements |
 | `config.moth` | Not a module and cannot be imported directly; Stage 0 derives the synthetic `@project` interface from its folded `project` record |
 
@@ -1515,7 +1515,7 @@ Execution and visibility:
 - Other files contribute declarations that must be imported explicitly.
 - An imported normal module never replays its top-level runtime code or page fragments in the importer.
 - Support modules and the project package facade have no implicit `start`, top-level runtime work, page fragments, routes or builder artifacts.
-- A normal module root may contain private imports, private declarations, one strict `export:` block, runtime start code and direct page fragments.
+- A normal module root may contain private imports, private declarations, one strict `export:` block, dormant start code and direct page fragments.
 - A support root may contain private imports, private declarations and one strict `export:` block. Runtime work and fragments are rejected.
 - Declarations outside `export:` stay private to the module. A root with no `export:` exports nothing.
 - Grouped imports inside `export:` re-export symbols, and grouped aliases define the public API name.
@@ -1628,7 +1628,7 @@ Rules:
 - Top-level functions, structs, choices, type aliases, and `#` constants in ordinary files are importable inside the same module by default.
 - Cross-module visibility is controlled by the nearest module root's `export:` block.
 - Runtime top-level bindings and expressions are start-body code, not importable declarations.
-- `#[...]` is active-module-root-only top-level const-template syntax. It must fully fold and may contribute compile-time page fragments.
+- `#[...]` is entry-selected-module-root-only top-level const-template syntax. It must fully fold and may contribute compile-time page fragments.
 
 Top-level dependency ordering includes constants, type aliases, structs, choices, function signatures, and type annotations. Executable body statements do not affect top-level declaration order.
 

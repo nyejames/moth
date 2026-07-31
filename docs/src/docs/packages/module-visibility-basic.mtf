@@ -3,14 +3,14 @@ Declarations are private to their module. The export block makes them public.
 ### An internal helper file
 
 [codeblock, $code("moth"):
-    -- lib/components/utils.moth
+    -- src/components/utils.moth
     internal_value #= 42
 ]
 
-### The root module uses it directly
+### The child root uses it directly
 
 [codeblock, $code("moth"):
-    -- lib/components/@api.moth
+    -- src/components/@api.moth
     import @utils {internal_value}
 
     export:
@@ -27,4 +27,4 @@ Same-module imports see everything. No export block needed.
     import @components {internal_value}
 ]
 
-Now the project module can import `internal_value` through the `@components` public surface.
+Now the parent module can import `internal_value` through the `@components` public surface. It cannot bypass that surface with `@components/utils`.

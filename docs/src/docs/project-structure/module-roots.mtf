@@ -58,9 +58,9 @@ Files without `@` in the same directory as a root file are normal source files w
 
 ### Active versus imported module roots
 
-A module root can serve two roles depending on context:
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. When the builder selects that module as an entry, entry assembly activates `start` exactly once. Importing the module exposes only its public interface and never activates its root work.
 
-- **Active root**: the module being compiled. Its top-level runtime code becomes implicit module start work. Its direct top-level templates become page fragments.
+- **Entry-selected root**: the builder selects this module as an entry. Entry assembly activates its dormant `start` and its direct top-level templates become page fragments.
 - **Imported root**: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by `export:` are visible through the module boundary.
 
 ### API-only roots

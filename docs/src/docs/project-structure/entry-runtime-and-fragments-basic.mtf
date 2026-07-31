@@ -1,15 +1,15 @@
-The module root file runs your page. Helper files provide declarations.
+The module root file owns your page's runtime work. Helper files provide declarations.
 
-### Root execution
+### Root activation
 
-Top-level runtime code in the module root runs as the page's implicit start function. Helper files do not run their own top-level code.
+Top-level runtime code in the module root becomes a dormant `start`. It runs only when the builder selects that module as an entry. Helper files never run their own top-level code.
 
 ### Page fragments
 
 Direct top-level templates in the root become page fragments:
 
 - A const fragment (the `#` prefix form) folds at compile time and becomes static HTML.
-- A runtime fragment (the plain bracket form) runs at runtime and fills a slot in the page.
+- A runtime fragment (the plain bracket form) runs when the module is activated as an entry and fills a slot in the page.
 
 ### Helpers
 

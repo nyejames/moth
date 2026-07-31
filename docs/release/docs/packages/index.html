@@ -867,10 +867,10 @@ body {
 
 
             <p>Declarations are private to their module. The export block makes them public.</p><h3>An internal helper file</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- lib/components/utils.moth</span>
+    <span class='moth-code-comment'>-- src/components/utils.moth</span>
     internal_value <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
-    </code></pre><h3>The root module uses it directly</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- lib/components/@api.moth</span>
+    </code></pre><h3>The child root uses it directly</h3><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- src/components/@api.moth</span>
     import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
 
     export<span class='moth-code-operator'>:</span>
@@ -879,27 +879,41 @@ body {
     </code></pre><p>Same-module imports see everything. No export block needed.</p><h3>Other modules need the export block</h3><pre style=""><code class='codeblock'>
     <span class='moth-code-comment'>-- src/@site.moth</span>
     import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>Now the project module can import <code>internal_value</code> through the <code>@components</code> public surface.</p>
+    </code></pre><p>Now the parent module can import <code>internal_value</code> through the <code>@components</code> public surface. It cannot bypass that surface with <code>@components/utils</code>.</p>
     </div>
 
     <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Module visibility controls which declarations cross a module boundary. Normal declarations are private to their module. The <code>export:</code> block marks what other modules can see.</p><h3>Same-module internal visibility</h3><p>Files within the same module can import each other&#39;s declarations directly. A module is defined by its root directory. All <code>.moth</code> files in that directory (and its subdirectories that do not have their own root) belong to the same module.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- lib/components/utils.moth</span>
+        <p>Module visibility controls which declarations cross a module boundary. Normal declarations are private to their module. The <code>export:</code> block marks what other modules can see.</p><h3>Same-module internal visibility</h3><p>Files within the same module can import each other&#39;s declarations directly. A module is defined by its root directory. All <code>.moth</code> files in that directory (and its subdirectories that do not have their own root) belong to the same module.</p><p>Given this topology:</p><pre style=""><code class='codeblock'>
+        src/
+        ├── @site.moth
+        └── components/
+            ├── @api.moth
+            └── utils.moth
+    </code></pre><p><code>utils.moth</code> and <code>@api.moth</code> belong to the same <code>components</code> child module. Same-module imports can see private declarations.</p><p>Internal helper:</p><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- src/components/utils.moth</span>
     internal_value <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+
     internal_fn <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;internal&quot;</span>
     ;
-    </code></pre><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- lib/components/@api.moth (same module)</span>
-    import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value, internal_fn<span class='moth-code-parenthesis'>}</span>
+    </code></pre><p>Child root:</p><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- src/components/@api.moth</span>
+    import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>
+        internal_value,
+        internal_fn,
+    <span class='moth-code-parenthesis'>}</span>
 
     export<span class='moth-code-operator'>:</span>
-        import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
+        import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>
+            internal_value,
+        <span class='moth-code-parenthesis'>}</span>
     ;
     </code></pre><p>Same-module imports bypass the public-surface boundary. The importing file sees all declarations in the target file.</p><h3>Cross-module public boundary</h3><p>A different module can only access declarations marked public by the module root&#39;s <code>export:</code> block. Cross-module imports cannot bypass the public API.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- src/@site.moth (project module)</span>
-    import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>The project module can import <code>internal_value</code> through the package root&#39;s public surface. It cannot bypass that boundary with <code>import @components/utils {internal_value}</code>. Without the root export block, the public import is rejected with <code>MOTH-IMPORT-0011</code>.</p><h3>Root-private declarations</h3><p>Declarations in the module root file outside the <code>export:</code> block are private to the root. They are not available to other modules even through the public surface.</p><h3>Direct root import rejection</h3><p>Direct imports of normal module-root files are rejected. Import the module through its directory path, not through the root filename.</p><h3>Runtime top-level bindings not importable</h3><p>Runtime top-level bindings are start-body code. They are not importable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are importable.</p><h3>Receiver method visibility</h3><p>Receiver methods are visible through a module&#39;s public surface when the module exports the receiver type&#39;s source surface. A type alias in the export block does not automatically re-export private implementation methods. Export the receiver type&#39;s source surface or a wrapper explicitly.</p><h3>Import cycles</h3><p>Circular imports between files in the same module are accepted when the declarations resolve in dependency order. Circular constant dependencies are rejected with <code>MOTH-RULE-0033</code>.</p><h3>No public access through filesystem tricks</h3><p>There is no way to bypass the module public-surface boundary by choosing a different import path. All cross-module imports go through the same resolution and visibility check.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For re-export syntax see <a href="#public-reexports">Public re-exports</a>.</li></ul>
+    <span class='moth-code-comment'>-- src/@site.moth</span>
+    import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>
+        internal_value,
+    <span class='moth-code-parenthesis'>}</span>
+    </code></pre><p>The parent module sees only the <code>components</code> child module&#39;s <code>export:</code> surface. It cannot bypass that boundary with <code>import @components/utils {internal_value}</code>. The <code>@components/utils</code> path cannot bypass the child facade.</p><p>Without the root export block, the public import is rejected with <code>MOTH-IMPORT-0011</code>.</p><h3>Normal modules are not source packages</h3><p>An <code>@*.moth</code> normal module is not a source package. Use <code>+package.moth</code> when the example intends to teach a scoped package. See <a href="#project-local-packages">Project-local packages</a> for the support-package contract.</p><h3>Root-private declarations</h3><p>Declarations in the module root file outside the <code>export:</code> block are private to the root. They are not available to other modules even through the public surface.</p><h3>Direct root import rejection</h3><p>Direct imports of normal module-root files are rejected. Import the module through its directory path, not through the root filename.</p><h3>Runtime top-level bindings not importable</h3><p>Runtime top-level bindings are start-body code. They are not importable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are importable.</p><h3>Receiver method visibility</h3><p>Receiver methods are visible through a module&#39;s public surface when the module exports the receiver type&#39;s source surface. A type alias in the export block does not automatically re-export private implementation methods. Export the receiver type&#39;s source surface or a wrapper explicitly.</p><h3>Import cycles</h3><p>Circular imports between files in the same module are accepted when the declarations resolve in dependency order. Circular constant dependencies are rejected with <code>MOTH-RULE-0033</code>.</p><h3>No public access through filesystem tricks</h3><p>There is no way to bypass the module public-surface boundary by choosing a different import path. All cross-module imports go through the same resolution and visibility check.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For re-export syntax see <a href="#public-reexports">Public re-exports</a>.</li></ul>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">

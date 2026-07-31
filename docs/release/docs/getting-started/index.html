@@ -708,7 +708,7 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>new html</code></p></td>
      <td style="padding: 0.1em 0.5em; "> Creates a complete HTML project scaffold.</td>
-     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the full default scaffold including <code>src/@page.moth</code>, <code>lib/</code>, output manifests and an optional .gitignore.</p></td>
+     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there.         It then asks for a project name, a .gitignore choice and creates the full default scaffold including <code>src/@page.moth</code>, output manifests and an optional .gitignore. The scaffold may also create an empty <code>lib/</code> folder as a temporary placeholder. It has no special meaning in the accepted package design. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</p></td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -853,13 +853,12 @@ body {
             ├── config.moth
             ├── src/
             │   └── @page.moth
-            ├── lib/
             ├── dev/
-        │   └── .moth_manifest
-        ├── release/
-        │   └── .moth_manifest
-        └── .gitignore
-    </code></pre><ul><li><code>lib/</code> is created empty by default for project-local source-backed packages.</li><li><code>dev/</code> and <code>release/</code> are output folders.</li><li>.moth_manifest files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
+            │   └── .moth_manifest
+            ├── release/
+            │   └── .moth_manifest
+            └── .gitignore
+        </code></pre><ul><li><code>dev/</code> and <code>release/</code> are output folders.</li><li>.moth_manifest files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li><li>The scaffold may create an empty <code>lib/</code> folder as a temporary placeholder. It has no special meaning. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;

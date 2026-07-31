@@ -1,21 +1,21 @@
-Only the active module root owns top-level runtime and page-fragment activity. Imported module roots do not replay their root body when used for API access.
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. The builder selects which modules become entries. Entry assembly activates `start` exactly once. Imported modules expose only their public interface and never activate their root work.
 
-### Active root runtime
+### Entry-activated root runtime
 
-The active module root's top-level runtime code becomes an implicit `start` function for that module. This includes top-level bindings, function calls and other runtime statements.
+The entry-selected module root's top-level runtime code becomes a dormant compiler-synthesised `start` function for that module. Entry assembly activates it exactly once. This includes top-level bindings, function calls and other runtime statements.
 
 ### Normal files
 
-Normal helper files define reusable declarations. They do not own an export block and cannot contain top-level runtime statements. The active module root imports those declarations and decides which names become public.
+Normal helper files define reusable declarations. They do not own an export block and cannot contain top-level runtime statements. The module root imports those declarations and decides which names become public.
 
 ### Page fragments
 
 Two forms of direct top-level template in a module root become page fragments:
 
 - A const fragment uses the `#` prefix before the opening bracket. It must fold at compile time and is emitted as static HTML.
-- A runtime fragment uses the plain bracket form without `#`. It is evaluated by the module's implicit start function and inserted into the page at runtime.
+- A runtime fragment uses the plain bracket form without `#`. It is evaluated by the module's `start` function when entry assembly activates it, and inserted into the page at runtime.
 
-Assigned or returned templates are not page fragments by themselves. Only direct top-level templates in the active module root become fragments.
+Assigned or returned templates are not page fragments by themselves. Only direct top-level templates in the entry-selected module root become fragments.
 
 ### Source order
 
@@ -23,11 +23,11 @@ The HTML builder preserves source order between static and runtime fragments. St
 
 ### Imported roots
 
-Imported module roots do not replay their root runtime activity. When a module root is imported for its public API, its top-level runtime code, start body and page fragments are not executed. Only its exported declarations remain available.
+Imported module roots never activate their root runtime. When a module root is imported for its public API, its top-level runtime code, start body and page fragments remain dormant. Only its exported declarations remain available.
 
 ### Do not put page fragments in helper files
 
-Helper files should define reusable declarations. The module root should import and use them. Page-producing top-level templates belong in the active module root only.
+Helper files should define reusable declarations. The module root should import and use them. Page-producing top-level templates belong in the entry-selected module root only.
 
 ### Related concepts
 

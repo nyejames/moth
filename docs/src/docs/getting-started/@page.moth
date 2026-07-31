@@ -55,7 +55,7 @@ page_head #= language_theme_head
         [data:
             [$md:`new html`]
             [: Creates a complete HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the full default scaffold including `src/@page.moth`, `lib/`, output manifests and an optional .gitignore.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there.         It then asks for a project name, a .gitignore choice and creates the full default scaffold including `src/@page.moth`, output manifests and an optional .gitignore. The scaffold may also create an empty `lib/` folder as a temporary placeholder. It has no special meaning in the accepted package design. Use structural `+*.moth` packages under the source tree for project-local packages.]
         ]
 
         [data:
@@ -189,18 +189,17 @@ page_head #= language_theme_head
         ├── config.moth
         ├── src/
         │   └── @page.moth
-        ├── lib/
         ├── dev/
-    │   └── .moth_manifest
-    ├── release/
-    │   └── .moth_manifest
-    └── .gitignore
-]
+        │   └── .moth_manifest
+        ├── release/
+        │   └── .moth_manifest
+        └── .gitignore
+    ]
 
-    - `lib/` is created empty by default for project-local source-backed packages.
     - `dev/` and `release/` are output folders.
     - .moth_manifest files are build-system metadata for safe stale-output cleanup.
     - `src/@page.moth` is the conventional module root with a starter page. The filename is cosmetic.
+    - The scaffold may create an empty `lib/` folder as a temporary placeholder. It has no special meaning. Use structural `+*.moth` packages under the source tree for project-local packages.
 
     ### Using --force
 

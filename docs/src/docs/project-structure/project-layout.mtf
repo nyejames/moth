@@ -6,8 +6,11 @@ A Moth project is a directory tree with one strict config file, a source entry r
     project-root/
     ├── config.moth
     ├── src/
-    │   └── @page.moth
-    ├── lib/
+    │   ├── @site.moth
+    │   ├── shared/
+    │   │   └── +package.moth
+    │   └── pages/
+    │       └── @pages.moth
     ├── dev/
     │   └── .moth_manifest
     ├── release/
@@ -19,15 +22,30 @@ A Moth project is a directory tree with one strict config file, a source entry r
 
 - `config.moth` is the only project config file. It lives at the project root and is not module source.
 - The configured `entry_root` (usually `src`) is the source folder the compiler searches for module roots.
-- `lib/` is the conventional default folder for project-local source-backed packages. Each direct child becomes a package prefix.
 - `dev/` and `release/` are builder output folders, not source folders. They are generated and managed by the build system.
 - `.moth_manifest` files are build-system metadata used for safe stale-output cleanup. They are not source.
+
+### Structural packages
+
+Project-local source-backed packages are structural `+*.moth` support packages. A `+*.moth` file in a source directory marks that directory as a scoped support package root named by its containing directory.
+
+In the example above, `shared/+package.moth` creates the scoped `@shared` support package. Support-package visibility follows structural module scope: it is visible within its nearest ancestor normal module's subtree.
+
+No folder gains package meaning without a `+*.moth` root. Ordinary directories do not automatically become packages.
+
+The optional project-root `+*.moth` facade beside `config.moth` is a separate mechanism for assembling public descendant surfaces for external consumers. It is not a scoped support package.
+
+For the full package contract see @../packages/#project-local-packages (Project-local packages).
 
 ### Normal module-root files inside source directories
 
 A non-config file whose name starts with `@` and ends with `.moth` is a module root. The filename after `@` has no language-level semantic role. `@page.moth`, `@mod.moth`, `@api.moth` and `@anything.moth` are all equivalent root filenames.
 
 The `moth new html` scaffold generates `src/@page.moth` as a conventional default. That convention does not make `@page.moth` a special compiler role. Any `@*.moth` filename in a source directory marks that directory as a module root.
+
+### Implementation note
+
+The current scaffold still creates an empty `lib/` folder and the compiler retains legacy `package_folders` support. These are implementation drift and are not part of the accepted project/package model. See @../progress/ (the progress matrix) for current status.
 
 ### Source versus output
 

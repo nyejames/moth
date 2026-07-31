@@ -4,12 +4,17 @@ A Moth project has one config file, one source root and generated output folders
 
 - `config.moth` at the project root controls build settings.
 - `src/` (or whatever `entry_root` says) holds your source files.
-- `lib/` holds project-local source-backed packages by default. Each direct child becomes a package prefix.
 - `dev/` and `release/` are generated output. Do not edit them.
 
 ### One root file per module directory
 
 Each source directory can have one `@*.moth` file that marks it as a module. The `@` filename is a convention. `@page.moth`, `@api.moth` and `@mod.moth` all mean the same thing to the compiler.
+
+### Shared scoped packages
+
+A `+*.moth` file in a source directory marks it as a scoped support package. For example, `shared/+package.moth` creates the `@shared` package, visible within its nearest ancestor module's subtree.
+
+Current scaffolds may create an empty `lib/` folder. It has no special meaning in the accepted package design.
 
 ### Outputs are generated
 

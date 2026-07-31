@@ -60,7 +60,7 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Hash maps | collections/hash-maps.mtf | hash-maps-basic.mtf | /docs/collections/ | compiler-design-overview.md | Yes | Partial | Construction-origin-dependent string behaviour, Stage B removes | Complete |
 | Template basics | templates/template-basics.mtf | template-basics-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Template directives | templates/template-directives.mtf | template-directives-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Template slots | templates/template-slots.mtf | template-slots-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
+| Template slots | templates/template-slots.mtf | template-slots-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Partial | Stored named inserts are accepted design but not implemented. Stage B closes this gap | Complete |
 | Child wrappers | templates/child-wrappers.mtf | child-wrappers-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Template control flow | templates/template-control-flow.mtf | template-control-flow-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Markdown formatting | templates/markdown-formatting.mtf | markdown-formatting-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
@@ -93,7 +93,7 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Copy and exclusive access | memory/copy-and-exclusive-access.mtf | copy-and-exclusive-access-basic.mtf | /docs/memory/ | memory-management/overview.mtf | Yes | Supported | None | Complete |
 | Lifetimes and result shapes | memory/lifetimes-and-result-shapes.mtf | lifetimes-and-result-shapes-basic.mtf | /docs/memory/ | memory-management/overview.mtf | Yes | Partial | Mandatory lifetime-region and escape validation deferred | Complete |
 | Declared memory groups | memory/declared-memory-groups.mtf | declared-memory-groups-basic.mtf | /docs/memory/ | memory-management/overview.mtf | Yes | Deferred | Accepted deferred syntax, not implemented | Complete |
-| Project layout | project-structure/project-layout.mtf | project-layout-basic.mtf | /docs/project-structure/ | build-system-design.md | Yes | Supported | None | Complete |
+| Project layout | project-structure/project-layout.mtf | project-layout-basic.mtf | /docs/project-structure/ | build-system-design.md | Yes | Partial | Current scaffold and compiler retain legacy lib/package_folders support, owned by queued config/package work | Complete |
 | Project config | project-structure/project-config.mtf | project-config-basic.mtf | /docs/project-structure/ | build-system-design.md | Yes | Supported | None | Complete |
 | Module roots | project-structure/module-roots.mtf | module-roots-basic.mtf | /docs/project-structure/ | build-system-design.md | Yes | Supported | None | Complete |
 | Public API | project-structure/public-api.mtf | public-api-basic.mtf | /docs/project-structure/ | build-system-design.md | Yes | Supported | None | Complete |
@@ -107,6 +107,7 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Module visibility | packages/module-visibility.mtf | module-visibility-basic.mtf | /docs/packages/ | build-system-design.md | Yes | Supported | None | Complete |
 | Public re-exports | packages/public-reexports.mtf | public-reexports-basic.mtf | /docs/packages/ | build-system-design.md | Yes | Supported | None | Complete |
 | Project-local packages | packages/project-local-packages.mtf | project-local-packages-basic.mtf | /docs/packages/ | build-system-design.md | Yes | Partial | Partial discovery, full facade partial | Complete |
+| Legacy package_folders and scaffold lib directory | project-structure/project-layout.mtf and packages/project-local-packages.mtf | project-layout-basic.mtf | /docs/project-structure/ and /docs/packages/ | build-system-design.md | Yes | Compiler drift | Current compiler/scaffold retain package_folders and empty lib directory. Accepted design uses structural +*.moth packages | Complete |
 | Package origins and backing | packages/package-origins-and-backing.mtf | package-origins-and-backing-basic.mtf | /docs/packages/ | build-system-design.md | Yes | Supported | None | Complete |
 | External binding contracts | packages/external-binding-contracts.mtf | external-binding-contracts-basic.mtf | /docs/packages/ | build-system-design.md | Yes | Partial | Annotated JS supported, WIT value-only deferred | Complete |
 | Moth template files | moth-templates/moth-template-files.mtf | moth-template-files-basic.mtf | /docs/moth-templates/ | build-system-design.md | Yes | Supported | None | Complete |

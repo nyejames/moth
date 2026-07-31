@@ -24,7 +24,7 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: parent Phase 5 architecture, quality and performance review
 BASE_REVISION: 9af62e5a9475d529c6d1012d73b977d5cc0fe42c
-STATUS: active — Phase 5 is functionally coherent but requires closeout corrections before acceptance
+STATUS: queued — Phase 5 closeout deferred while language migration Stage B is active. Resume at R5C1.
 CURRENT_SLICE: R5C1 — retain canonical artefacts and graph outcomes through the frontend handoff
 LAST_ACCEPTED_COMMIT: 9af62e5a9475d529c6d1012d73b977d5cc0fe42c is the pushed Phase 5 review checkpoint, not the final Phase 5 acceptance boundary
 WORKTREE: implementation must branch from the review checkpoint; this plan replacement is on plan/canonical-module-phase5-closeout
