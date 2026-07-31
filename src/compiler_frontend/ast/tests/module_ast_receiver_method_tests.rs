@@ -68,7 +68,7 @@ fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
     let method_name = string_table.intern("reset");
     let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int);
     let key = (receiver.to_owned(), method_name);
-    let local_source = interned_path(&["src", "#page.moth"], &mut string_table);
+    let local_source = interned_path(&["src", "@page.moth"], &mut string_table);
     let package_source = interned_path(&["lib", "shared.moth"], &mut string_table);
 
     let local_entry = empty_receiver_entry(
@@ -102,7 +102,7 @@ fn visible_method_lookup_prefers_same_file_before_catalog_fallback() {
     let mut string_table = StringTable::new();
     let method_name = string_table.intern("render");
 
-    let local_source = interned_path(&["src", "#page.moth"], &mut string_table);
+    let local_source = interned_path(&["src", "@page.moth"], &mut string_table);
     let exported_source = interned_path(&["lib", "shared.moth"], &mut string_table);
 
     let local_entry = empty_receiver_entry(
@@ -135,7 +135,7 @@ fn visible_method_lookup_prefers_same_file_before_catalog_fallback() {
 fn visible_method_lookup_uses_stable_catalog_fallback_order() {
     let mut string_table = StringTable::new();
     let method_name = string_table.intern("render");
-    let context_source = interned_path(&["src", "#page.moth"], &mut string_table);
+    let context_source = interned_path(&["src", "@page.moth"], &mut string_table);
 
     let first_entry = empty_receiver_entry(
         interned_path(&["lib", "a_render"], &mut string_table),

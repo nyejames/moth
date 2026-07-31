@@ -35,7 +35,7 @@ It does not override:
 - `docs/build-system-design.md` for Stage 0, graph scheduling, project tooling and host orchestration
 - `docs/language-overview.md` for source-language behaviour
 - the memory-management authorities for Moth program semantics
-- `docs/src/docs/progress/#page.moth` for current implementation status
+- `docs/src/docs/progress/@page.moth` for current implementation status
 - `docs/roadmap/roadmap.md` and the owning implementation plan for sequencing
 
 Where an implementation slice changes a boundary shared with one of those authorities, both
@@ -1613,7 +1613,7 @@ Implementation of this design requires synchronized changes to:
   boxing as the normal `result_large_err` answer
 - `docs/src/docs/codebase/style-guide/testing.mtf` — layout/property/failure-lane ownership
 - `docs/src/docs/codebase/style-guide/validation.mtf` — updated manual architecture audit
-- `docs/src/docs/progress/#page.moth` — current implementation status during and after migration
+- `docs/src/docs/progress/@page.moth` — current implementation status during and after migration
 - `docs/roadmap/roadmap.md` — sequencing and measured deferrals
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md` — dependency and post-layout resume
   capsule

@@ -1,12 +1,12 @@
-Each source directory can have one `#*.moth` file that marks it as a module.
+Each source directory can have one `@*.moth` file that marks it as a module.
 
 ### One root per folder
 
-The filename after `#` does not matter. `#page.moth`, `#mod.moth` and `#api.moth` all mean the same thing. Two `#*.moth` files in one folder are rejected.
+The filename after `@` does not matter. `@page.moth`, `@mod.moth` and `@api.moth` all mean the same thing. Two `@*.moth` files in one folder are rejected.
 
 ### Import the module, not the root file
 
-You cannot import `#api.moth` directly. Import the module through its directory path to access its public surface.
+You cannot import `@api.moth` directly. Import the module through its directory path to access its public surface.
 
 ### Two roles
 
@@ -14,6 +14,6 @@ When a module root is the active module being compiled, its top-level runtime co
 
 ### Remember
 
-- One `#*.moth` file per directory.
-- The `#` name is cosmetic.
+- One `@*.moth` file per directory.
+- The `@` name is cosmetic.
 - `config.moth` is not a module root.

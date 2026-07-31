@@ -32,7 +32,7 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 - `docs/build-system-design.md` for entry-local `config:` block placement rules, section schemas and entry assembly
 - `docs/language-overview.md` for source syntax
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
-- `docs/src/docs/progress/#page.moth` for current support
+- `docs/src/docs/progress/@page.moth` for current support
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for the module graph
 - `docs/roadmap/plans/import_values_anonymous_records_plan.md` for config schemas and `@project`
 

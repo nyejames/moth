@@ -9704,8 +9704,8 @@ contract = "language.imports.direct_special_file_import_rejected"
 role = "primary"
 
 [[case]]
-id = "direct_hash_root_import_rejected"
-path = "direct_hash_root_import_rejected"
+id = "direct_normal_module_root_import_rejected"
+path = "direct_normal_module_root_import_rejected"
 tags = ["integration", "imports", "diagnostics", "special-files"]
 contract = "language.imports.direct_special_file_import_rejected"
 role = "boundary"
@@ -11587,10 +11587,10 @@ contract = "language.imports.moth_template_same_directory_root_constant_acceptan
 role = "primary"
 
 [[case]]
-id = "hash_root_config_namesake_is_module_root"
-path = "hash_root_config_namesake_is_module_root"
+id = "normal_module_root_config_namesake_is_module_root"
+path = "normal_module_root_config_namesake_is_module_root"
 tags = ["integration", "config", "html", "module-roots"]
-contract = "language.modules.hash_root_config_namesake_is_module_root_acceptance"
+contract = "language.modules.normal_module_root_config_namesake_is_module_root_acceptance"
 role = "primary"
 
 [[case]]

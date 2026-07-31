@@ -1,18 +1,18 @@
-The HTML builder derives routes from directory position under the configured `entry_root`. The hash-root filename does not choose the route name.
+The HTML builder derives routes from directory position under the configured `entry_root`. The normal module-root filename does not choose the route name.
 
 ### Directory-based routes
 
 The module root's directory determines the HTML output path:
 
 [codeblock, $code("text"):
-    src/#page.moth              -> index.html
-    src/docs/#page.moth         -> docs/index.html
-    src/docs/basics/#page.moth  -> docs/basics/index.html
-    src/#home.moth              -> index.html
-    src/#api.moth               -> index.html
+    src/@page.moth              -> index.html
+    src/docs/@page.moth         -> docs/index.html
+    src/docs/basics/@page.moth  -> docs/basics/index.html
+    src/@home.moth              -> index.html
+    src/@api.moth               -> index.html
 ]
 
-The root module maps to the project index. A nested directory maps to a nested index route. The hash-root filename (`#page.moth`, `#home.moth`, `#api.moth`) has no effect on the route name.
+The root module maps to the project index. A nested directory maps to a nested index route. The normal module-root filename (`@page.moth`, `@home.moth`, `@api.moth`) has no effect on the route name.
 
 ### API-only modules
 

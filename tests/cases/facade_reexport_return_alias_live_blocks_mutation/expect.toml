@@ -8,13 +8,13 @@ diagnostic_codes = ["MOTH-BORROW-0007"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-BORROW-0007"
 reason = "invalid_mutable_access.aliased_value_requires_exclusive_access"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 5
 count = 1
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 4
 
 [backends.html_wasm]
@@ -25,11 +25,11 @@ diagnostic_codes = ["MOTH-BORROW-0007"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-BORROW-0007"
 reason = "invalid_mutable_access.aliased_value_requires_exclusive_access"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 5
 count = 1
 
 [[backends.html_wasm.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 4

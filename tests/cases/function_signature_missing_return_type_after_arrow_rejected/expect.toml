@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0062"]
-message_contains = ["#page.moth", "3:9", "Function signature is missing a return type after '->'."]
+message_contains = ["@page.moth", "3:9", "Function signature is missing a return type after '->'."]

@@ -57,7 +57,7 @@ fn relative_url_path_shared_prefix() {
 #[test]
 fn generate_module_glue_returns_empty_when_no_external_exports() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     let referenced = HashSet::new();
     let registry = ExternalPackageRegistry::new();
 
@@ -79,7 +79,7 @@ fn generate_module_glue_returns_empty_when_no_external_exports() {
 #[test]
 fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -117,7 +117,7 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
 #[test]
 fn generate_module_glue_emits_glue_file_for_referenced_export() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -173,7 +173,7 @@ fn generate_module_glue_emits_glue_file_for_referenced_export() {
 #[test]
 fn generate_module_glue_nested_html_output_path() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -212,7 +212,7 @@ fn generate_module_glue_nested_html_output_path() {
 #[test]
 fn generate_module_glue_asset_import_relative_to_glue_module() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -254,7 +254,7 @@ fn generate_module_glue_asset_import_relative_to_glue_module() {
 #[test]
 fn generate_module_glue_fallible_wrapper_validates_result_shape() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -425,7 +425,7 @@ fn build_import_map_html_deduplicates_by_specifier() {
 
 fn create_module_with_runtime_requirement() -> Module {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("#page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::build_system::build::ModuleExternalImport {
             package_id: ExternalPackageId(0),

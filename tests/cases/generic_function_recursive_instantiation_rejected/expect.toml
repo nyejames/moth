@@ -6,7 +6,7 @@ diagnostic_codes = ["MOTH-RULE-0057"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0057"
 reason = "invalid_generic_instantiation.recursive_function_instantiation"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 3
 count = 1
 

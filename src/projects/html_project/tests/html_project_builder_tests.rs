@@ -144,7 +144,7 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
 #[test]
 fn build_backend_emits_single_html_output_file() {
     let builder = HtmlProjectBuilder::new();
-    let entry_path = PathBuf::from("#page.moth");
+    let entry_path = PathBuf::from("@page.moth");
     let config = Config::new(entry_path.clone());
 
     let project = build_with_test_modules(&builder, vec![entry_path], &config, &[])
@@ -163,9 +163,9 @@ fn build_backend_emits_single_html_output_file() {
 }
 
 #[test]
-fn hash_prefixed_route_name_strips_hash_from_output() {
+fn at_prefixed_route_name_strips_at_from_output() {
     let builder = HtmlProjectBuilder::new();
-    let entry_path = PathBuf::from("#404.moth");
+    let entry_path = PathBuf::from("@404.moth");
     let config = Config::new(entry_path.clone());
 
     let project = build_with_test_modules(&builder, vec![entry_path], &config, &[])
@@ -184,7 +184,7 @@ fn build_backend_emits_html_for_multiple_modules() {
 
     let project = build_with_test_modules(
         &builder,
-        vec![PathBuf::from("#page.moth"), PathBuf::from("#404.moth")],
+        vec![PathBuf::from("@page.moth"), PathBuf::from("@404.moth")],
         &config,
         &[],
     )
@@ -204,7 +204,7 @@ fn duplicate_output_paths_are_rejected() {
 
     let result = build_with_test_modules(
         &builder,
-        vec![PathBuf::from("#page.moth"), PathBuf::from("index.moth")],
+        vec![PathBuf::from("@page.moth"), PathBuf::from("index.moth")],
         &config,
         &[],
     );
@@ -226,7 +226,7 @@ fn emits_const_fragment_and_calls_start() {
     // WHY: root activity metadata supplies the slot count; the test module has no runtime slots,
     //      so only the const fragment and start() invocation are asserted here.
     let builder = HtmlProjectBuilder::new();
-    let entry_path = PathBuf::from("#page.moth");
+    let entry_path = PathBuf::from("@page.moth");
     let mut string_table = StringTable::new();
     let mut module = create_test_module(entry_path.clone(), &mut string_table);
     module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
@@ -268,10 +268,10 @@ fn directory_build_maps_routes_relative_to_entry_root() {
     let project = build_with_test_modules(
         &builder,
         vec![
-            entry_root.join("#home.moth"),
-            entry_root.join("about").join("#anything.moth"),
-            entry_root.join("docs").join("basics").join("#page.moth"),
-            entry_root.join("blog").join("#404.moth"),
+            entry_root.join("@home.moth"),
+            entry_root.join("about").join("@anything.moth"),
+            entry_root.join("docs").join("basics").join("@page.moth"),
+            entry_root.join("blog").join("@404.moth"),
         ],
         &config,
         &[],
@@ -299,7 +299,7 @@ fn js_runtime_asset_emitted_verbatim() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut module = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
+    let mut module = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module,
         ModuleExternalImport {
@@ -349,7 +349,7 @@ fn js_runtime_asset_deduped_across_modules() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut module_a = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
+    let mut module_a = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module_a,
         ModuleExternalImport {
@@ -363,7 +363,7 @@ fn js_runtime_asset_deduped_across_modules() {
     );
 
     let mut module_b =
-        create_test_module(canonical_root.join("docs/#page.moth"), &mut string_table);
+        create_test_module(canonical_root.join("docs/@page.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module_b,
         ModuleExternalImport {
@@ -410,7 +410,7 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut module = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
+    let mut module = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module,
         ModuleExternalImport {
@@ -468,7 +468,7 @@ fn non_js_runtime_asset_is_ignored() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut module = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
+    let mut module = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module,
         ModuleExternalImport {
@@ -514,8 +514,8 @@ fn directory_build_supports_custom_entry_root_names() {
     let project = build_with_test_modules(
         &builder,
         vec![
-            entry_root.join("#page.moth"),
-            entry_root.join("docs").join("#page.moth"),
+            entry_root.join("@page.moth"),
+            entry_root.join("docs").join("@page.moth"),
         ],
         &config,
         &[],
@@ -542,7 +542,7 @@ fn directory_build_requires_homepage_at_entry_root() {
 
     let result = build_with_test_modules(
         &builder,
-        vec![entry_root.join("about").join("#page.moth")],
+        vec![entry_root.join("about").join("@page.moth")],
         &config,
         &[],
     );
@@ -577,8 +577,8 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
     config.entry_root = PathBuf::from("src");
     let mut string_table = StringTable::new();
 
-    let homepage = create_test_module(entry_root.join("#home.moth"), &mut string_table);
-    let mut api_only = create_test_module(entry_root.join("api/#api.moth"), &mut string_table);
+    let homepage = create_test_module(entry_root.join("@home.moth"), &mut string_table);
+    let mut api_only = create_test_module(entry_root.join("api/@api.moth"), &mut string_table);
     api_only.metadata.root_activity = ModuleRootActivity::default();
     api_only.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
@@ -599,7 +599,7 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
                 filesystem_path: entry_root.join("missing-asset.png"),
                 base: CompileTimePathBase::EntryRoot,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["api", "#api.moth"],
+                source_file_scope_components: &["api", "@api.moth"],
                 line_number: 1,
             },
         ));
@@ -644,7 +644,7 @@ fn single_file_api_only_build_can_emit_no_artifacts() {
 #[test]
 fn wasm_flag_emits_html_js_and_wasm_artifacts() {
     let builder = HtmlProjectBuilder::new();
-    let entry_path = PathBuf::from("#page.moth");
+    let entry_path = PathBuf::from("@page.moth");
 
     let project = build_with_test_modules(
         &builder,
@@ -675,7 +675,7 @@ fn wasm_mode_uses_per_page_folder_layout() {
 
     let project = build_with_test_modules(
         &builder,
-        vec![PathBuf::from("#page.moth"), PathBuf::from("#404.moth")],
+        vec![PathBuf::from("@page.moth"), PathBuf::from("@404.moth")],
         &config,
         &[Flag::HtmlWasm],
     )
@@ -704,9 +704,9 @@ fn wasm_directory_build_preserves_nested_routes() {
     let project = build_with_test_modules(
         &builder,
         vec![
-            entry_root.join("#page.moth"),
-            entry_root.join("docs").join("#page.moth"),
-            entry_root.join("blog").join("#404.moth"),
+            entry_root.join("@page.moth"),
+            entry_root.join("docs").join("@page.moth"),
+            entry_root.join("blog").join("@404.moth"),
         ],
         &config,
         &[Flag::HtmlWasm],
@@ -736,7 +736,7 @@ fn builder_rejects_invalid_origin_config() {
         .settings
         .insert(String::from("origin"), String::from("not-a-slash"));
 
-    let result = build_with_test_modules(&builder, vec![PathBuf::from("#page.moth")], &config, &[]);
+    let result = build_with_test_modules(&builder, vec![PathBuf::from("@page.moth")], &config, &[]);
     let messages = match result {
         Err(messages) => messages,
         Ok(_) => panic!("invalid origin should fail"),
@@ -771,7 +771,7 @@ fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut homepage = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
+    let mut homepage = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
     homepage
         .metadata
         .rendered_path_usages
@@ -783,13 +783,13 @@ fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
                 filesystem_path: canonical_root.join("assets/logo.png"),
                 base: CompileTimePathBase::EntryRoot,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["#page.moth"],
+                source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },
         ));
 
     let mut docs_page =
-        create_test_module(canonical_root.join("docs/#page.moth"), &mut string_table);
+        create_test_module(canonical_root.join("docs/@page.moth"), &mut string_table);
     docs_page
         .metadata
         .rendered_path_usages
@@ -801,7 +801,7 @@ fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
                 filesystem_path: canonical_root.join("assets/logo.png"),
                 base: CompileTimePathBase::EntryRoot,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["docs", "#page.moth"],
+                source_file_scope_components: &["docs", "@page.moth"],
                 line_number: 1,
             },
         ));
@@ -846,7 +846,7 @@ fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut homepage = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
+    let mut homepage = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
     homepage
         .metadata
         .rendered_path_usages
@@ -858,13 +858,13 @@ fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
                 filesystem_path: canonical_root.join("shared/logo.png"),
                 base: CompileTimePathBase::RelativeToFile,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["#page.moth"],
+                source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },
         ));
 
     let mut blog_page = create_test_module(
-        canonical_root.join("blog/post/#page.moth"),
+        canonical_root.join("blog/post/@page.moth"),
         &mut string_table,
     );
     blog_page
@@ -878,7 +878,7 @@ fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
                 filesystem_path: canonical_root.join("shared/logo.png"),
                 base: CompileTimePathBase::RelativeToFile,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["blog", "post", "#page.moth"],
+                source_file_scope_components: &["blog", "post", "@page.moth"],
                 line_number: 1,
             },
         ));
@@ -917,7 +917,7 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut homepage = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
+    let mut homepage = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
     homepage
         .metadata
         .rendered_path_usages
@@ -929,13 +929,13 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
                 filesystem_path: canonical_root.join("assets/logo-a.png"),
                 base: CompileTimePathBase::EntryRoot,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["#page.moth"],
+                source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },
         ));
 
     let mut docs_page =
-        create_test_module(canonical_root.join("docs/#page.moth"), &mut string_table);
+        create_test_module(canonical_root.join("docs/@page.moth"), &mut string_table);
     docs_page
         .metadata
         .rendered_path_usages
@@ -947,7 +947,7 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
                 filesystem_path: canonical_root.join("assets/logo-b.png"),
                 base: CompileTimePathBase::EntryRoot,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["docs", "#page.moth"],
+                source_file_scope_components: &["docs", "@page.moth"],
                 line_number: 1,
             },
         ));
@@ -982,7 +982,7 @@ fn build_backend_rejects_tracked_asset_output_that_matches_generated_html() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut homepage = create_test_module(canonical_root.join("#page.moth"), &mut string_table);
+    let mut homepage = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
     homepage
         .metadata
         .rendered_path_usages
@@ -994,7 +994,7 @@ fn build_backend_rejects_tracked_asset_output_that_matches_generated_html() {
                 filesystem_path: canonical_root.join("assets/copied.html"),
                 base: CompileTimePathBase::EntryRoot,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["#page.moth"],
+                source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },
         ));

@@ -6,5 +6,5 @@ diagnostic_codes = ["MOTH-BORROW-0007"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-BORROW-0007"
 reason = "invalid_mutable_access.aliased_value_requires_exclusive_access"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 6

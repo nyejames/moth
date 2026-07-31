@@ -78,6 +78,7 @@ define_stable_reason_keys! {
         &InvalidConfigReason::MultipleModuleRootFiles { .. } => "invalid_config.multiple_module_root_files",
         &InvalidConfigReason::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
         &InvalidConfigReason::SourceFileFolderCollision { .. } => "invalid_config.source_file_folder_collision",
+        &InvalidConfigReason::LegacyModuleRootFileName { .. } => "invalid_config.legacy_module_root_file_name",
     },
 
     InvalidPackageFolderReason => {

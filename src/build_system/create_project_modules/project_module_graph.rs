@@ -104,7 +104,7 @@ impl ProjectModuleGraphNode {
         &self.root_directory
     }
 
-    /// The canonical root file (`#*.moth` or `+*.moth`) that roots this module.
+    /// The canonical root file (`@*.moth` or `+*.moth`) that roots this module.
     pub(crate) fn root_file(&self) -> &Path {
         &self.root_file
     }

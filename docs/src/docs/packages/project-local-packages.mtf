@@ -6,19 +6,19 @@ Project-local source-backed packages are scoped `+*.moth` support packages disco
     project-root/
     ├── config.moth
     ├── src/
-    │   ├── #site.moth
+    │   ├── @site.moth
     │   ├── markdown/
     │   │   ├── +package.moth
     │   │   ├── parser/
-    │   │   │   └── #parser.moth
+    │   │   │   └── @parser.moth
     │   │   └── rendering/
-    │   │       └── #rendering.moth
+    │   │       └── @rendering.moth
     │   └── pages/
-    │       └── #pages.moth
+    │       └── @pages.moth
     └── +package.moth
 ]
 
-The `markdown` directory contains a `+package.moth` root, making `@markdown` a scoped support package visible to `#site`, `#pages` and their descendants.
+The `markdown` directory contains a `+package.moth` root, making `@markdown` a scoped support package visible to `@site`, `@pages` and their descendants.
 
 ### Scoped visibility
 

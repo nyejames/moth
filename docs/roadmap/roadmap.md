@@ -3,7 +3,7 @@ This is the main todo list and future design / implementation roadmap for Moth.
 
 The next major plans are kept inside [plans](docs/roadmap/plans) and linked here in top to bottom order under the `Plans` heading.
 
-Use the [Progress Matrix](docs/src/docs/progress/#page.moth) as a reference for what is currently implemented, partially complete or deferred.
+Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for what is currently implemented, partially complete or deferred.
 
 ---
 
@@ -11,7 +11,6 @@ Use the [Progress Matrix](docs/src/docs/progress/#page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Migrating from # to @ for module root file prefix](./plans/module-root-at-marker-migration-plan.md)
 - [Canonical module compilation and scoped packages](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
 - [Benchmark system follow up corrections - phase 7 onwards left](./plans/benchmark-correctness-follow-up-implementation-plan.md)
 
@@ -29,6 +28,10 @@ Use the [Progress Matrix](docs/src/docs/progress/#page.moth) as a reference for 
 Diagnostics may continue independently. The queued implementation chain remains ordered by hard dependency.
 
 Do not mark a plan active unless its current-state capsule says it is active.
+
+## Completed
+
+- [Migrating from # to @ for module root file prefix](./plans/module-root-at-marker-migration-plan.md)
 
 ---
 

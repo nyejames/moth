@@ -35,7 +35,7 @@ use crate::compiler_frontend::paths::path_normalization::{
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source_packages::root_file::{
-    import_path_references_config_file, import_path_references_hash_root_file,
+    import_path_references_config_file, import_path_references_module_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -690,7 +690,7 @@ fn build_package_namespaces(
 /// Add same-module source entries for one module from its owned source IDs.
 ///
 /// Each owned source's extensionless module-relative logical path becomes a namespace key.
-/// Root files (names starting with `#` or `+`) are excluded because direct root imports are
+/// Root files (names starting with `@` or `+`) are excluded because direct root imports are
 /// rejected.
 fn populate_same_module_entries(
     namespace: &mut ModuleNamespace,
@@ -708,7 +708,7 @@ fn populate_same_module_entries(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if file_name.starts_with('#') || file_name.starts_with('+') {
+        if file_name.starts_with('@') || file_name.starts_with('+') {
             continue;
         }
 
@@ -929,7 +929,7 @@ fn reject_direct_special_file_import(
     provider: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
     string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    if import_path_references_hash_root_file(&provider.path, provider.from_grouped, string_table)
+    if import_path_references_module_root_file(&provider.path, provider.from_grouped, string_table)
         || import_path_references_config_file(&provider.path, provider.from_grouped, string_table)
     {
         return Err(CompilerDiagnostic::direct_special_file_import(

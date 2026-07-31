@@ -11,7 +11,7 @@ use crate::projects::html_project::new_html_project::{
 };
 use crate::projects::settings::CONFIG_FILE_NAME;
 
-const PAGE_FILE: &str = "src/#page.moth";
+const PAGE_FILE: &str = "src/@page.moth";
 const DEV_MANIFEST: &str = "dev/.moth_manifest";
 const RELEASE_MANIFEST: &str = "release/.moth_manifest";
 const GITIGNORE_FILE: &str = ".gitignore";

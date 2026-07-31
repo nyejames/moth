@@ -23,5 +23,5 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.reactive_template_runtime"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 3

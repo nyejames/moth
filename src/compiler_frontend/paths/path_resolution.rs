@@ -151,7 +151,7 @@ impl ProjectPathResolver {
         nearest_package
     }
 
-    /// Returns each source-backed package's unique hash-root file as its public surface.
+    /// Returns each source-backed package's unique normal-root file as its public surface.
     pub(crate) fn source_package_public_surface_files(
         &self,
     ) -> impl Iterator<Item = (&String, &PathBuf)> {

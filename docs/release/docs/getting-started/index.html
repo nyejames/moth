@@ -708,7 +708,7 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>new html</code></p></td>
      <td style="padding: 0.1em 0.5em; "> Creates a complete HTML project scaffold.</td>
-     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice, and creates the full default scaffold including <code>src/#page.moth</code>, <code>lib/</code>, output manifests, and an optional .gitignore.</p></td>
+     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice, and creates the full default scaffold including <code>src/@page.moth</code>, <code>lib/</code>, output manifests, and an optional .gitignore.</p></td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -852,14 +852,14 @@ body {
             project-root/
             ├── config.moth
             ├── src/
-            │   └── #page.moth
+            │   └── @page.moth
             ├── lib/
             ├── dev/
         │   └── .moth_manifest
         ├── release/
         │   └── .moth_manifest
         └── .gitignore
-    </code></pre><ul><li><code>lib/</code> is created empty by default for project-local source-backed packages.</li><li><code>dev/</code> and <code>release/</code> are output folders.</li><li>.moth_manifest files are build-system metadata for safe stale-output cleanup.</li><li><code>src/#page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
+    </code></pre><ul><li><code>lib/</code> is created empty by default for project-local source-backed packages.</li><li><code>dev/</code> and <code>release/</code> are output folders.</li><li>.moth_manifest files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -945,7 +945,7 @@ body {
         white-space: pre;
         overflow-x: auto;
     "><code class='codeblock'>
-            E|type|src/#page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
+            E|type|src/@page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
             W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch
         </code></pre></section>
     <section class="container"><h2>Reading compiler errors</h2><p>Moth uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors, and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
@@ -958,7 +958,7 @@ body {
             Type Error (ಠ_ಠ) 🔥
             Declaration 'count' has incompatible initializer type. Expected 'Int', but found 'String'.
 
-              --> src/#page.moth:6:17
+              --> src/@page.moth:6:17
                 |
               6 | count Int = "wrong"
                 |             ^^^^^^^

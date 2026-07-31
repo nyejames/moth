@@ -124,4 +124,4 @@ Audit evidence, not a prose diary. One row per monolith section or delegated for
 | @html package | packages/builder/html/html-helpers.mtf | html-helpers-basic.mtf | /docs/packages/builder/html/ | build-system-design.md | Yes | Partial | Skeleton surface, will grow as standard library matures | Complete |
 | @web/canvas package | packages/builder/canvas/canvas-drawing.mtf | canvas-drawing-basic.mtf | /docs/packages/builder/canvas/ | build-system-design.md | Yes | Partial | Skeleton surface, JS-only, deferred surfaces documented | Complete |
 | WIT value-only imports | N/A | N/A | N/A | memory-management/overview.mtf | N/A | Deferred | Accepted design, no implementation | Incomplete (deferred) |
-| Progress matrix | progress/#page.moth | N/A | /docs/progress/ | N/A | N/A | N/A | Updated for all Stage A changes | Complete |
+| Progress matrix | progress/@page.moth | N/A | /docs/progress/ | N/A | N/A | N/A | Updated for all Stage A changes | Complete |

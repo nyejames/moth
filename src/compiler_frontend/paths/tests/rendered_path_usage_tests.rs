@@ -32,7 +32,7 @@ impl TestHarness {
         fs::write(entry_root.join("assets/images/logo.png"), b"asset").expect("write asset");
         fs::write(entry_root.join("images/entry.png"), b"entry").expect("write entry asset");
         fs::write(entry_root.join("docs/local.png"), b"local").expect("write local asset");
-        fs::write(entry_root.join("#page.moth"), b"").expect("write page");
+        fs::write(entry_root.join("@page.moth"), b"").expect("write page");
 
         let resolver = ProjectPathResolver::new(
             project_root.clone(),
@@ -60,11 +60,11 @@ impl TestHarness {
     }
 
     fn source_scope(&mut self) -> InternedPath {
-        self.path(&["src", "#page.moth"])
+        self.path(&["src", "@page.moth"])
     }
 
     fn importer_file(&self) -> PathBuf {
-        self.project_root.join("src/#page.moth")
+        self.project_root.join("src/@page.moth")
     }
 
     fn render_location(&mut self) -> SourceLocation {

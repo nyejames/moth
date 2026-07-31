@@ -13,7 +13,7 @@ Files within the same module can import each other's declarations directly. A mo
 ]
 
 [codeblock, $code("moth"):
-    -- lib/components/#api.moth (same module)
+    -- lib/components/@api.moth (same module)
     import @utils {internal_value, internal_fn}
 
     export:
@@ -28,7 +28,7 @@ Same-module imports bypass the public-surface boundary. The importing file sees 
 A different module can only access declarations marked public by the module root's `export:` block. Cross-module imports cannot bypass the public API.
 
 [codeblock, $code("moth"):
-    -- src/#site.moth (project module)
+    -- src/@site.moth (project module)
     import @components {internal_value}
 ]
 
@@ -40,7 +40,7 @@ Declarations in the module root file outside the `export:` block are private to 
 
 ### Direct root import rejection
 
-Direct imports of hash-root files are rejected. Import the module through its directory path, not through the root filename.
+Direct imports of normal module-root files are rejected. Import the module through its directory path, not through the root filename.
 
 ### Runtime top-level bindings not importable
 

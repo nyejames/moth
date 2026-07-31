@@ -6,7 +6,7 @@ A Moth project is a directory tree with one strict config file, a source entry r
     project-root/
     ├── config.moth
     ├── src/
-    │   └── #page.moth
+    │   └── @page.moth
     ├── lib/
     ├── dev/
     │   └── .moth_manifest
@@ -23,11 +23,11 @@ A Moth project is a directory tree with one strict config file, a source entry r
 - `dev/` and `release/` are builder output folders, not source folders. They are generated and managed by the build system.
 - `.moth_manifest` files are build-system metadata used for safe stale-output cleanup. They are not source.
 
-### Hash-root files inside source directories
+### Normal module-root files inside source directories
 
-A non-config file whose name starts with `#` and ends with `.moth` is a module root. The filename after `#` has no language-level semantic role. `#page.moth`, `#mod.moth`, `#api.moth` and `#anything.moth` are all equivalent root filenames.
+A non-config file whose name starts with `@` and ends with `.moth` is a module root. The filename after `@` has no language-level semantic role. `@page.moth`, `@mod.moth`, `@api.moth` and `@anything.moth` are all equivalent root filenames.
 
-The `moth new html` scaffold generates `src/#page.moth` as a conventional default. That convention does not make `#page.moth` a special compiler role. Any `#*.moth` filename in a source directory marks that directory as a module root.
+The `moth new html` scaffold generates `src/@page.moth` as a conventional default. That convention does not make `@page.moth` a special compiler role. Any `@*.moth` filename in a source directory marks that directory as a module root.
 
 ### Source versus output
 
@@ -41,7 +41,7 @@ This separation means the same frontend can later feed other builders. The front
 
 ### Only config.moth has config semantics
 
-No other filename has config meaning. `#config.moth` is a module root, not a config file. Alternate config filenames, compatibility handling and config-specific diagnostics for other names are not supported.
+No other filename has config meaning. `@config.moth` is a module root, not a config file. Alternate config filenames, compatibility handling and config-specific diagnostics for other names are not supported.
 
 ### Related concepts
 

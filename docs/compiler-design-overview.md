@@ -15,14 +15,14 @@ Companion authorities:
 - `docs/src/docs/codebase/design-scope/overview.mtf` for design bias and scope boundaries
 - `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
 - `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards
-- `docs/src/docs/progress/#page.moth` for current support and backend coverage
+- `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
 
 User-facing pages under `docs/src/docs/**` teach the language. They do not replace this architecture reference.
 
 ## Architectural invariants
 
-- One directory-scoped `#*.moth` or `+*.moth` module is the canonical semantic compilation unit.
+- One directory-scoped `@*.moth` or `+*.moth` module is the canonical semantic compilation unit.
 - A physical module is compiled once per project or package compilation boundary and owns local type, HIR, borrow and lifetime-analysis identity/facts.
 - Every normal module included in a command's semantic graph has its dormant root work parsed, type-checked, lowered, borrow-validated and lifetime-analysed before any entry can activate it.
 - Tokenization and declaration-shell parsing happen once. Later phases bind and consume retained syntax rather than reparsing source.

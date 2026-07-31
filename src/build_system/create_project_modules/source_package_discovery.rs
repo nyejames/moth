@@ -63,7 +63,7 @@ impl SourcePackageBoundaryIndexes {
 
     /// Derive the resolver's narrow package-root view from indexed facts.
     ///
-    /// WHAT: projects each boundary index to its canonical root directory and unique hash-root
+    /// WHAT: projects each boundary index to its canonical root directory and unique normal-root
     /// file, producing the immutable [`PreparedSourcePackageRoots`] contract that path
     /// resolution consumes. No `read_dir`, canonicalize or root-file discovery pass runs here;
     /// missing and multiple roots were already rejected as structured diagnostics during index

@@ -45,7 +45,7 @@ fn user_rule_diagnostic(name_path: InternedPath, name: StringId) -> CompilerDiag
 /// Build one infrastructure `CompilerError` with metadata, mirroring how deeper semantic stages
 /// route internal failures through `CompilerMessages::from_error`.
 fn infrastructure_compiler_error(string_table: &mut StringTable) -> CompilerError {
-    let path = InternedPath::from_single_str("module/#page.moth", string_table);
+    let path = InternedPath::from_single_str("module/@page.moth", string_table);
     let location = SourceLocation::new(
         path,
         CharPosition {
@@ -287,7 +287,7 @@ fn infrastructure_error_preserves_module_local_path_through_aggregation() {
 
     // 2. Module-local fork; intern the infrastructure path only in the local delta.
     let (mut local_table, base_len) = fork_source.fork_for_module().into_parts();
-    let path = InternedPath::from_single_str("module/#page.moth", &mut local_table);
+    let path = InternedPath::from_single_str("module/@page.moth", &mut local_table);
     let location = SourceLocation::new(
         path,
         CharPosition {
@@ -332,7 +332,7 @@ fn infrastructure_error_preserves_module_local_path_through_aggregation() {
         .to_path_buf(&packaged.string_table);
     assert_eq!(
         resolved_path,
-        std::path::PathBuf::from("module/#page.moth"),
+        std::path::PathBuf::from("module/@page.moth"),
         "the infrastructure path must resolve exactly in the aggregated table"
     );
 }
@@ -357,7 +357,7 @@ fn warning_plus_infrastructure_error_recovers_original_and_preserves_path() {
 
     // 2. Module-local fork; intern the infrastructure path only in the local delta.
     let (mut local_table, base_len) = fork_source.fork_for_module().into_parts();
-    let path = InternedPath::from_single_str("module/#page.moth", &mut local_table);
+    let path = InternedPath::from_single_str("module/@page.moth", &mut local_table);
     let location = SourceLocation::new(
         path,
         CharPosition {
@@ -446,7 +446,7 @@ fn warning_plus_infrastructure_error_recovers_original_and_preserves_path() {
         .to_path_buf(&packaged.string_table);
     assert_eq!(
         resolved_path,
-        std::path::PathBuf::from("module/#page.moth"),
+        std::path::PathBuf::from("module/@page.moth"),
         "the infrastructure path must resolve exactly after rewrapping the recovered error"
     );
 }

@@ -108,7 +108,7 @@ A grouped import cannot use a single alias for the whole group.
 
 ### Local and public-name distinction
 
-An ordinary import alias is private to the importing file. A public name chosen in a module root's export surface is a different operation. Cross-module visibility is controlled by the module root's explicit `export:` surface. The hash-root filename itself has no semantic role. The current export syntax is owned by @../project-structure (Project Structure) and @../packages (Packages). Do not treat a local import alias as a public API rename.
+An ordinary import alias is private to the importing file. A public name chosen in a module root's export surface is a different operation. Cross-module visibility is controlled by the module root's explicit `export:` surface. The normal module-root filename itself has no semantic role. The current export syntax is owned by @../project-structure (Project Structure) and @../packages (Packages). Do not treat a local import alias as a public API rename.
 
 [codeblock, $code("moth"):
     -- Ordinary local import alias

@@ -54,14 +54,14 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
 fn test_import(header_path: InternedPath, string_table: &mut StringTable) -> FileImport {
     let provider = StructuralProviderReference {
         path: header_path,
-        path_location: location_for(&["src", "#page.moth"], string_table),
+        path_location: location_for(&["src", "@page.moth"], string_table),
         from_grouped: false,
     };
     FileImport {
         authored_provider: provider.clone(),
         provider,
         alias: None,
-        location: location_for(&["src", "#page.moth"], string_table),
+        location: location_for(&["src", "@page.moth"], string_table),
         alias_location: None,
         from_grouped: false,
         export_mode: HeaderExportMode::Private,
@@ -124,7 +124,7 @@ fn external_nested_namespace_tree_builds_correctly() {
         .expect("nested constant should register");
 
     let mut string_table = StringTable::new();
-    let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
     let import_path = intern_path(&["test", "path"], &mut string_table);
     let import = test_import(import_path, &mut string_table);
 
@@ -201,7 +201,7 @@ fn external_nested_namespace_tree_builds_correctly() {
 #[test]
 fn duplicate_external_namespace_value_and_type_slot_is_rejected() {
     let mut string_table = StringTable::new();
-    let location = location_for(&["src", "#page.moth"], &mut string_table);
+    let location = location_for(&["src", "@page.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -235,7 +235,7 @@ fn duplicate_external_namespace_value_and_type_slot_is_rejected() {
 #[test]
 fn duplicate_external_namespace_and_value_slot_is_rejected() {
     let mut string_table = StringTable::new();
-    let location = location_for(&["src", "#page.moth"], &mut string_table);
+    let location = location_for(&["src", "@page.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -269,7 +269,7 @@ fn duplicate_external_namespace_and_value_slot_is_rejected() {
 #[test]
 fn duplicate_external_namespace_and_type_slot_is_rejected() {
     let mut string_table = StringTable::new();
-    let location = location_for(&["src", "#page.moth"], &mut string_table);
+    let location = location_for(&["src", "@page.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -305,7 +305,7 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
     let mut string_table = StringTable::new();
     let helper_file = intern_path(&["src", "helper.moth"], &mut string_table);
     let method_path = intern_path(&["src", "helper", "tick"], &mut string_table);
-    let location = location_for(&["src", "#page.moth"], &mut string_table);
+    let location = location_for(&["src", "@page.moth"], &mut string_table);
     let method_name = method_path
         .name()
         .expect("method path should have a leaf name");
@@ -347,9 +347,9 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
 #[test]
 fn module_root_namespace_uses_prepared_root_file_identity() {
     let mut string_table = StringTable::new();
-    let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
     let module_root = intern_path(&["helper-root"], &mut string_table);
-    let root_file = intern_path(&["helper", "#home.moth"], &mut string_table);
+    let root_file = intern_path(&["helper", "@home.moth"], &mut string_table);
     let import = test_import(
         intern_path(&["helper"], &mut string_table),
         &mut string_table,
@@ -417,7 +417,7 @@ fn prelude_symbol_visibility_has_no_authored_location() {
         .expect("prelude symbol registration should not collide");
 
     let mut string_table = StringTable::new();
-    let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file.clone());
 
@@ -466,8 +466,8 @@ fn explicit_external_symbol_import_retains_authored_location() {
         .expect("test function registration should not collide");
 
     let mut string_table = StringTable::new();
-    let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
-    let import_location = location_for(&["src", "#page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+    let import_location = location_for(&["src", "@page.moth"], &mut string_table);
     let provider = StructuralProviderReference {
         path: intern_path(&["test", "explicit_symbols", "run"], &mut string_table),
         path_location: import_location.clone(),
@@ -539,7 +539,7 @@ fn prelude_namespace_alias_injects_unshadowed_record() {
         .expect("prelude alias registration should not collide");
 
     let mut string_table = StringTable::new();
-    let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
 
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file.clone());
@@ -587,7 +587,7 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
         .expect("prelude alias registration should not collide");
 
     let mut string_table = StringTable::new();
-    let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
     let declaration_path = intern_path(&["src", "prelude_ns"], &mut string_table);
 
     let mut declared_paths = FxHashSet::default();
@@ -624,19 +624,19 @@ fn prelude_namespace_alias_coexists_with_explicit_import_of_same_target() {
         .expect("prelude alias registration should not collide");
 
     let mut string_table = StringTable::new();
-    let source_file = intern_path(&["src", "#page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
     let import_path = intern_path(&["test", "prelude_ns"], &mut string_table);
 
     let provider = StructuralProviderReference {
         path: import_path,
-        path_location: location_for(&["src", "#page.moth"], &mut string_table),
+        path_location: location_for(&["src", "@page.moth"], &mut string_table),
         from_grouped: false,
     };
     let import = FileImport {
         authored_provider: provider.clone(),
         provider,
         alias: None,
-        location: location_for(&["src", "#page.moth"], &mut string_table),
+        location: location_for(&["src", "@page.moth"], &mut string_table),
         alias_location: None,
         from_grouped: false,
         export_mode: HeaderExportMode::Private,
@@ -674,9 +674,9 @@ fn prelude_namespace_alias_coexists_with_explicit_import_of_same_target() {
 fn nested_module_root_imports_child_facade_resolves_child_root() {
     let mut string_table = StringTable::new();
     let helper_root = intern_path(&["helper-root"], &mut string_table);
-    let helper_mod_file = intern_path(&["helper", "#mod.moth"], &mut string_table);
+    let helper_mod_file = intern_path(&["helper", "@mod.moth"], &mut string_table);
     let grandchild_root = intern_path(&["helper", "child-root"], &mut string_table);
-    let grandchild_mod_file = intern_path(&["helper", "child", "#mod.moth"], &mut string_table);
+    let grandchild_mod_file = intern_path(&["helper", "child", "@mod.moth"], &mut string_table);
 
     // The helper module root namespace-imports its grandchild module by bare name `child`.
     let import = test_import(

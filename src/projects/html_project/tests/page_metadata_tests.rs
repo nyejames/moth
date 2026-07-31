@@ -15,7 +15,7 @@ use std::path::PathBuf;
 fn test_module(string_table: &mut StringTable) -> HirModule {
     let mut module = HirModule::new();
     let start_path = InternedPath::try_from_filesystem_path(
-        PathBuf::from("docs/#page.moth").as_path(),
+        PathBuf::from("docs/@page.moth").as_path(),
         string_table,
     )
     .expect("test path should be UTF-8")
@@ -41,9 +41,9 @@ fn extracts_reserved_entry_metadata() {
     let mut string_table = StringTable::new();
     let mut module = test_module(&mut string_table);
     module.module_constants = vec![
-        string_constant("docs/#page.moth/page_title", "Home"),
+        string_constant("docs/@page.moth/page_title", "Home"),
         string_constant(
-            "docs/#page.moth/page_head",
+            "docs/@page.moth/page_head",
             "<meta name=\"x\" content=\"y\">",
         ),
         string_constant("page_description", "Landing page"),
@@ -70,7 +70,7 @@ fn ignores_non_entry_constants() {
     let mut string_table = StringTable::new();
     let mut module = test_module(&mut string_table);
     module.module_constants = vec![
-        string_constant("docs/#page.moth/page_title", "Home"),
+        string_constant("docs/@page.moth/page_title", "Home"),
         string_constant("docs/shared.moth/page_title", "Shared"),
     ];
 
@@ -126,7 +126,7 @@ fn rejects_duplicate_reserved_values() {
     let mut module = test_module(&mut string_table);
     module.module_constants = vec![
         string_constant("page_title", "Home"),
-        string_constant("docs/#page.moth/page_title", "Another"),
+        string_constant("docs/@page.moth/page_title", "Another"),
     ];
 
     let error = extract_html_page_metadata(

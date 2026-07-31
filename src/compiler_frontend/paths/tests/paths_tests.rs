@@ -339,12 +339,12 @@ fn parse_file_path_accepts_backslash_separator() {
 
 #[test]
 fn parse_file_path_accepts_hash_prefixed_file_names() {
-    let paths = first_path_token_values("import @docs { #asset.moth, subfolder/#page.moth }\n");
+    let paths = first_path_token_values("import @docs { @asset.moth, subfolder/@page.moth }\n");
     assert_eq!(
         paths,
         vec![
-            "docs/#asset.moth".to_string(),
-            "docs/subfolder/#page.moth".to_string(),
+            "docs/@asset.moth".to_string(),
+            "docs/subfolder/@page.moth".to_string(),
         ]
     );
 }

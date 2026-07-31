@@ -377,7 +377,7 @@ fn source_package_import_resolves_to_package_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("#mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -423,7 +423,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("#mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
     fs::create_dir_all(entry_root.join("helper")).unwrap();
@@ -598,7 +598,7 @@ fn source_import_resolution_preserves_moth_template_folder_ambiguity() {
     fs::create_dir_all(entry_root.join("docs/intro")).unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
     fs::write(entry_root.join("docs/intro.mtf"), b"hello").unwrap();
-    fs::write(entry_root.join("docs/intro/#content.moth"), b"").unwrap();
+    fs::write(entry_root.join("docs/intro/@content.moth"), b"").unwrap();
 
     let mut registry = SourceFileKindRegistry::new();
     registry.register("mtf", SourceFileKind::MothTemplate);
@@ -640,7 +640,7 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("#mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@mod.moth"), b"").unwrap();
     fs::write(package_root.join("helpers.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -684,7 +684,7 @@ fn package_scan_root_name_is_not_import_prefix() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("#mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::create_dir_all(entry_root.join("lib")).unwrap();
     fs::write(entry_root.join("lib/thing.moth"), b"").unwrap();
@@ -731,7 +731,7 @@ fn package_direct_child_is_import_prefix() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("#mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -813,7 +813,7 @@ fn source_package_prefix_wins_consistently() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("#mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@mod.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
     fs::create_dir_all(entry_root.join("helper")).unwrap();
@@ -992,7 +992,7 @@ fn import_escape_package_root_rejected() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("#mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@mod.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
@@ -1044,7 +1044,7 @@ fn concrete_file_import_inside_module_root_is_accepted() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/#home.moth"), b"").unwrap();
+    fs::write(entry_root.join("helper/@home.moth"), b"").unwrap();
     fs::write(entry_root.join("helper/thing.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -1077,13 +1077,13 @@ fn nearest_root_parent_walk_chooses_nested_module_root_over_ancestor() {
     let entry_root = temp_dir.path().join("src");
 
     fs::create_dir_all(entry_root.join("outer/inner/deep")).unwrap();
-    fs::write(entry_root.join("outer/#outer.moth"), b"").unwrap();
-    fs::write(entry_root.join("outer/inner/#inner.moth"), b"").unwrap();
+    fs::write(entry_root.join("outer/@outer.moth"), b"").unwrap();
+    fs::write(entry_root.join("outer/inner/@inner.moth"), b"").unwrap();
     fs::write(entry_root.join("outer/inner/deep/page.moth"), b"").unwrap();
 
-    let outer_root_file = fs::canonicalize(entry_root.join("outer/#outer.moth"))
+    let outer_root_file = fs::canonicalize(entry_root.join("outer/@outer.moth"))
         .expect("outer root file should canonicalize");
-    let inner_root_file = fs::canonicalize(entry_root.join("outer/inner/#inner.moth"))
+    let inner_root_file = fs::canonicalize(entry_root.join("outer/inner/@inner.moth"))
         .expect("inner root file should canonicalize");
     let outer_root_dir = outer_root_file
         .parent()
@@ -1298,7 +1298,7 @@ fn resolver_with_prepared_source_package_roots(roots: &[(&str, &str)]) -> Projec
         (
             (*prefix).to_owned(),
             PathBuf::from(root),
-            PathBuf::from(root).join("#mod.moth"),
+            PathBuf::from(root).join("@mod.moth"),
         )
     });
 

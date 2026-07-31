@@ -10,6 +10,6 @@ message_contains = [
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0074"
-path = "input/sub/#mod.moth"
+path = "input/sub/@mod.moth"
 line = 4
 count = 1

@@ -100,7 +100,7 @@ fn derive_logical_html_path_from_entry_root(
     })?;
     let parent = relative_entry.parent().unwrap_or_else(|| Path::new(""));
 
-    // Directory routes describe module directories, not cosmetic hash-root filenames. The
+    // Directory routes describe module directories, not cosmetic normal-root filenames. The
     // active root module is the homepage and every nested module is folder-backed at its
     // entry-root-relative directory.
     if parent.as_os_str().is_empty() {
@@ -112,8 +112,8 @@ fn derive_logical_html_path_from_entry_root(
 
 /// Derive the logical HTML path for a single-file build.
 ///
-/// WHAT: converts the entry stem to an exact UTF-8 route name, then maps `#page` to the
-/// homepage and strips a cosmetic leading `#` from any other stem.
+/// WHAT: converts the entry stem to an exact UTF-8 route name, then maps `@page` to the
+/// homepage and strips a cosmetic leading `@` from any other stem.
 /// WHY: the stem is filesystem-authored, so an empty or non-UTF-8 stem is a File
 ///      infrastructure error. It must never collapse to a generic `main` fallback, which
 ///      would alias distinct source identities to one route.
@@ -149,16 +149,16 @@ fn derive_single_file_logical_html_path(
         ));
     }
 
-    if file_stem == "#page" {
+    if file_stem == "@page" {
         return Ok(PathBuf::from("index.html"));
     }
 
-    let route_name = file_stem.strip_prefix('#').unwrap_or(file_stem);
+    let route_name = file_stem.strip_prefix('@').unwrap_or(file_stem);
 
     if route_name.is_empty() {
         return Err(CompilerError::file_error(
             entry_point,
-            "HTML single-file entry stem is empty after stripping the cosmetic '#' prefix; Moth routes require a non-empty route name.".to_string(),
+            "HTML single-file entry stem is empty after stripping the cosmetic '@' prefix; Moth routes require a non-empty route name.".to_string(),
             string_table,
         ));
     }

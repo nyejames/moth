@@ -3,7 +3,7 @@ A `.mtf` file sees compile-time constants from its module root and `@html` helpe
 ### A constant capture
 
 [codeblock, $code("moth"):
-    -- docs/#docs.moth
+    -- docs/@docs.moth
     export:
         site_name #= "Moth"
     ;

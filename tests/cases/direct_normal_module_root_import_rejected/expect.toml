@@ -4,4 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-IMPORT-0008"]
-message_contains = ["Cannot import directly from '#home.moth'"]
+message_contains = ["@home.moth"]

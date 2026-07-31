@@ -4,10 +4,10 @@
 
 ```text
 WORK_ID: module-root-at-marker
-STATUS: active
+STATUS: complete
 BASE_REVISION: 545acab7f72b068e2f6e13d5ade463d106399f1a
-CURRENT_PHASE: ready for implementation
-NEXT_ACTION: run the read-only inventory and baseline gates before editing
+CURRENT_PHASE: complete
+NEXT_ACTION: none
 COMMIT_POLICY: one implementation commit containing the complete migration
 ```
 

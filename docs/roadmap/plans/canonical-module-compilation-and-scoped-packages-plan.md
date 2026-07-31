@@ -76,7 +76,7 @@ Read these before implementation and before every review phase:
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`
 - `docs/src/docs/codebase/style-guide/testing.mtf`
 - `docs/src/docs/codebase/style-guide/validation.mtf`
-- `docs/src/docs/progress/#page.moth`
+- `docs/src/docs/progress/@page.moth`
 - downstream config, entry-config and HTML-Wasm plans
 
 The compiler and build-system overviews own the architecture. This plan owns implementation order, migration boundaries and deletion gates.

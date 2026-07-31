@@ -20,7 +20,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_hash_root_file, file_name_is_support_root_file,
+    file_name_is_normal_module_root_file, file_name_is_support_root_file,
 };
 
 use std::collections::HashMap;
@@ -30,8 +30,8 @@ use std::path::{Path, PathBuf};
 ///
 /// `ModuleId` is the build-local index assigned by sorting canonical logical module paths, so
 /// it is independent of traversal completion order and cosmetic root filename suffixes
-/// (`#mod.moth` and `#page.moth` in the same directory collapse to one root whose identity comes
-/// from the directory, not the filename).
+/// (`@mod.moth` and `@page.moth` in the same directory collapse to one root whose identity
+/// comes from the directory, not the filename).
 ///
 /// It is deliberately not the persistent semantic identity: its numeric value is a build-local
 /// table slot that may cross stages inside that build boundary but must not identify a module
@@ -67,7 +67,7 @@ impl ModuleId {
 ///      `ProjectPackageFacade` from its location, which this filename-only classifier cannot
 ///      infer.
 pub(crate) fn module_root_role_for_file_name(file_name: &str) -> Option<ModuleRootRole> {
-    if file_name_is_hash_root_file(file_name) {
+    if file_name_is_normal_module_root_file(file_name) {
         Some(ModuleRootRole::Normal)
     } else if file_name_is_support_root_file(file_name) {
         Some(ModuleRootRole::Support)

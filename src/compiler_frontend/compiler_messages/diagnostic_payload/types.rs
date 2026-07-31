@@ -222,6 +222,10 @@ pub enum InvalidConfigReason {
         folder_name: StringId,
         directory: StringId,
     },
+    LegacyModuleRootFileName {
+        file_name: StringId,
+        directory: StringId,
+    },
 }
 
 impl InvalidConfigReason {
@@ -344,6 +348,14 @@ impl InvalidConfigReason {
             } => {
                 *file_name = remap.get(*file_name);
                 *folder_name = remap.get(*folder_name);
+                *directory = remap.get(*directory);
+            }
+
+            Self::LegacyModuleRootFileName {
+                file_name,
+                directory,
+            } => {
+                *file_name = remap.get(*file_name);
                 *directory = remap.get(*directory);
             }
 

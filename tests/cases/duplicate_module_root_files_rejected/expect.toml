@@ -4,10 +4,10 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-CONFIG-0001"]
-message_contains = ["multiple hash-root files", "#home.moth", "#page.moth"]
+message_contains = ["multiple normal module root files", "@home.moth", "@page.moth"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-CONFIG-0001"]
-message_contains = ["multiple hash-root files", "#home.moth", "#page.moth"]
+message_contains = ["multiple normal module root files", "@home.moth", "@page.moth"]

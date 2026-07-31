@@ -1,5 +1,5 @@
 -- Ordinary implementation file private to the helper module.
--- The facade (#mod.moth) re-exports these declarations across the module boundary.
+-- The facade (@mod.moth) re-exports these declarations across the module boundary.
 
 Counter = |
     step Int,

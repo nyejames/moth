@@ -25,7 +25,7 @@ fn suite_with_case(role: Option<CaseRole>, contract: Option<&str>) -> TestSuiteS
             contract: contract.map(str::to_owned),
             role,
             backend_id: BackendId::Html,
-            entry_path: PathBuf::from("input/#page.moth"),
+            entry_path: PathBuf::from("input/@page.moth"),
             flags: Vec::new(),
             expected: ExpectedOutcome::Success(SuccessExpectation {
                 warnings: WarningExpectation::Forbid,

@@ -72,7 +72,7 @@ fn assert_unsupported_operator(source: &str, expected_operator: DiagnosticOperat
 #[test]
 fn ordinary_expression_rejects_path_string_concatenation() {
     let mut string_table = StringTable::new();
-    let source_scope = InternedPath::from_single_str("#page.moth", &mut string_table);
+    let source_scope = InternedPath::from_single_str("@page.moth", &mut string_table);
     let asset_path = InternedPath::from_single_str("assets", &mut string_table)
         .join_str("logo.png", &mut string_table);
     let compile_time_paths = CompileTimePaths {
@@ -431,7 +431,7 @@ fn template_shaped_string_operand_is_rejected() {
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
-        InternedPath::from_single_str("#page.moth", &mut string_table),
+        InternedPath::from_single_str("@page.moth", &mut string_table),
         Rc::new(TopLevelDeclarationTable::new(vec![])),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],

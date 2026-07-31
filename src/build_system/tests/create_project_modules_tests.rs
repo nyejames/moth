@@ -322,7 +322,7 @@ fn grouped_import_resolves_same_module_item_file() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @choices { Response }\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -341,7 +341,7 @@ fn grouped_import_resolves_same_module_item_file() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let importer = fs::canonicalize(src.join("#page.moth")).expect("importer should canonicalize");
+    let importer = fs::canonicalize(src.join("@page.moth")).expect("importer should canonicalize");
 
     with_namespace_resolution(
         &config,
@@ -379,12 +379,12 @@ fn grouped_import_resolves_cross_module_child_facade() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @child { greet }\n#[:entry]\n",
     )
     .expect("should write entry");
     fs::write(
-        src.join("child/#mod.moth"),
+        src.join("child/@mod.moth"),
         "export:\n    greet || -> String:\n        return \"hi\"\n    ;\n;\n",
     )
     .expect("should write child module root");
@@ -398,7 +398,7 @@ fn grouped_import_resolves_cross_module_child_facade() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let importer = fs::canonicalize(src.join("#page.moth")).expect("importer should canonicalize");
+    let importer = fs::canonicalize(src.join("@page.moth")).expect("importer should canonicalize");
 
     with_namespace_resolution(
         &config,
@@ -412,7 +412,7 @@ fn grouped_import_resolves_cross_module_child_facade() {
             match resolved {
                 ResolvedImport::CrossModule { root_file, .. } => {
                     assert!(
-                        root_file.ends_with("child/#mod.moth"),
+                        root_file.ends_with("child/@mod.moth"),
                         "expected the child module facade root file, got {:?}",
                         root_file
                     );
@@ -438,12 +438,12 @@ fn grouped_import_resolves_source_package_facade() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @helper { add }\n#[:entry]\n",
     )
     .expect("should write entry");
     fs::write(
-        package_root.join("#mod.moth"),
+        package_root.join("@mod.moth"),
         "export:\n    add |a Int, b Int| -> Int:\n        return a + b\n    ;\n;\n",
     )
     .expect("should write helper package root");
@@ -460,7 +460,7 @@ fn grouped_import_resolves_source_package_facade() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let importer = fs::canonicalize(src.join("#page.moth")).expect("importer should canonicalize");
+    let importer = fs::canonicalize(src.join("@page.moth")).expect("importer should canonicalize");
 
     with_namespace_resolution(
         &config,
@@ -474,7 +474,7 @@ fn grouped_import_resolves_source_package_facade() {
             match resolved {
                 ResolvedImport::SourcePackageSurface { root_file, .. } => {
                     assert!(
-                        root_file.ends_with("helper/#mod.moth"),
+                        root_file.ends_with("helper/@mod.moth"),
                         "expected the helper package facade root file, got {:?}",
                         root_file
                     );
@@ -634,12 +634,12 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     ] {
         let directory = entry_root.join(directory_name);
         fs::create_dir_all(&directory).expect("should create skipped directory");
-        fs::write(directory.join("#skipped.moth"), "").expect("should write skipped root");
+        fs::write(directory.join("@skipped.moth"), "").expect("should write skipped root");
     }
 
-    fs::write(entry_root.join("#home.moth"), "").expect("should write entry root");
+    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
     fs::write(entry_root.join("ordinary.moth"), "").expect("should write ordinary source");
-    fs::write(nested.join("#nested.moth"), "").expect("should write nested root");
+    fs::write(nested.join("@nested.moth"), "").expect("should write nested root");
 
     let mut config = Config::new(root.clone());
     config.dev_folder = PathBuf::from("scratch");
@@ -668,11 +668,11 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
         .map(|module_id| graph.node(*module_id).root_file().to_path_buf())
         .collect();
     assert_eq!(entry_root_files.len(), 2);
-    assert!(entry_root_files[0].ends_with("#home.moth"));
+    assert!(entry_root_files[0].ends_with("@home.moth"));
     assert_eq!(index.stats().dirs_visited, 2);
     assert_eq!(index.stats().dirs_skipped, 10);
     assert_eq!(index.stats().files_seen, 3);
-    assert_eq!(index.stats().hash_root_files_seen, 2);
+    assert_eq!(index.stats().normal_root_files_seen, 2);
     assert_eq!(index.stats().module_roots_found, 2);
 
     let root_directories = index
@@ -707,8 +707,8 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
     // Real module root that should be discovered.
     let nested = entry_root.join("nested");
     fs::create_dir_all(&nested).expect("should create nested module");
-    fs::write(entry_root.join("#home.moth"), "").expect("should write entry root");
-    fs::write(nested.join("#nested.moth"), "").expect("should write nested root");
+    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(nested.join("@nested.moth"), "").expect("should write nested root");
 
     let config = Config::new(root.clone());
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
@@ -743,7 +743,7 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
     // Fixed-skipped directory whose name matches a source-backed package prefix.
     // Under the skip policy this folder is not importable, so no prefix collision.
     fs::create_dir_all(entry_root.join("target")).expect("should create target folder");
-    fs::write(entry_root.join("#home.moth"), "").expect("should write entry root");
+    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
 
     let mut config = Config::new(root.clone());
     config.entry_root = PathBuf::from("src");
@@ -779,7 +779,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
     let entry_root = root.join("src");
     fs::create_dir_all(entry_root.join("helper")).expect("should create helper folder");
     fs::write(entry_root.join("helper.moth"), "x ~= 1\n").expect("should write colliding file");
-    fs::write(entry_root.join("#home.moth"), "").expect("should write entry root");
+    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
 
     let mut config = Config::new(root.clone());
     config.entry_root = PathBuf::from("src");
@@ -819,11 +819,11 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
     fs::create_dir_all(target_dir.join("helper")).expect("should create target/helper");
     fs::write(target_dir.join("helper.moth"), "x ~= 1\n").expect("should write colliding file");
 
-    fs::write(module_dir.join("#home.moth"), "").expect("should write entry root");
-    fs::write(nested.join("#nested.moth"), "").expect("should write nested root");
+    fs::write(module_dir.join("@home.moth"), "").expect("should write entry root");
+    fs::write(nested.join("@nested.moth"), "").expect("should write nested root");
 
     let config = Config::new(root.clone());
-    let entry_file = fs::canonicalize(module_dir.join("#home.moth")).unwrap();
+    let entry_file = fs::canonicalize(module_dir.join("@home.moth")).unwrap();
     let mut string_table = StringTable::new();
 
     let module_roots =
@@ -835,7 +835,7 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
             &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
-        .expect("single-file hash root should index its tree without collision errors");
+        .expect("single-file normal module root should index its tree without collision errors");
 
     let root_directories = module_roots
         .root_directories()
@@ -855,10 +855,10 @@ fn bounded_module_roots_for_single_file_rejects_import_name_collisions() {
     fs::create_dir_all(module_dir.join("helper")).expect("should create helper directory");
     fs::write(module_dir.join("helper.moth"), "helper #= 1\n")
         .expect("should write colliding source file");
-    fs::write(module_dir.join("#home.moth"), "").expect("should write entry root");
+    fs::write(module_dir.join("@home.moth"), "").expect("should write entry root");
 
     let config = Config::new(root.clone());
-    let entry_file = fs::canonicalize(module_dir.join("#home.moth")).unwrap();
+    let entry_file = fs::canonicalize(module_dir.join("@home.moth")).unwrap();
     let mut string_table = StringTable::new();
 
     let messages = super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
@@ -869,7 +869,7 @@ fn bounded_module_roots_for_single_file_rejects_import_name_collisions() {
         &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
         &mut string_table,
     )
-    .expect_err("single-file hash roots should reject real import-name collisions");
+    .expect_err("single-file normal module roots should reject real import-name collisions");
 
     assert!(matches!(
         first_invalid_config_reason(&messages),
@@ -880,12 +880,12 @@ fn bounded_module_roots_for_single_file_rejects_import_name_collisions() {
 }
 
 #[test]
-fn source_tree_index_rejects_duplicate_hash_root_files() {
+fn source_tree_index_rejects_duplicate_normal_module_root_files() {
     let root = temp_dir("source_tree_index_duplicate_roots");
     let entry_root = root.join("src");
     fs::create_dir_all(&entry_root).expect("should create entry root");
-    fs::write(entry_root.join("#home.moth"), "").expect("should write page root");
-    fs::write(entry_root.join("#layout.moth"), "").expect("should write layout root");
+    fs::write(entry_root.join("@home.moth"), "").expect("should write page root");
+    fs::write(entry_root.join("@layout.moth"), "").expect("should write layout root");
 
     let config = Config::new(root.clone());
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
@@ -901,7 +901,7 @@ fn source_tree_index_rejects_duplicate_hash_root_files() {
         &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
         &mut string_table,
     )
-    .expect_err("a module directory may contain only one hash root");
+    .expect_err("a module directory may contain only one normal module root");
 
     let reason = first_invalid_config_reason(&messages);
     let InvalidConfigReason::MultipleModuleRootFiles {
@@ -1367,7 +1367,7 @@ fn rejects_project_local_config_import_even_when_module_root_exists() {
     let root = temp_dir("config_project_local_import_rejected");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("settings")).expect("should create settings module");
-    fs::write(root.join("settings/#mod.moth"), "value #= \"src\"\n")
+    fs::write(root.join("settings/@mod.moth"), "value #= \"src\"\n")
         .expect("should write settings root");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1399,9 +1399,9 @@ fn rejects_builder_config_import_without_discovering_the_package_root() {
     let root = temp_dir("config_builder_import_rejected_before_discovery");
     let package_root = root.join("builder/defaults");
     fs::create_dir_all(&package_root).expect("should create Builder package folder");
-    fs::write(package_root.join("#first.moth"), "value #= 1\n")
+    fs::write(package_root.join("@first.moth"), "value #= 1\n")
         .expect("should write first invalid package root");
-    fs::write(package_root.join("#second.moth"), "value #= 2\n")
+    fs::write(package_root.join("@second.moth"), "value #= 2\n")
         .expect("should write second invalid package root");
 
     let config_path = root.join(settings::CONFIG_FILE_NAME);
@@ -1476,8 +1476,8 @@ fn package_prefix_collision_with_entry_root_folder_rejected() {
     let root = temp_dir("entry_root_lib_collision");
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/#mod.moth"), "foo #= 1\n").expect("should write root");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
     let mut config = Config::new(root.clone());
@@ -1648,7 +1648,7 @@ fn rejects_nested_package_folder_entry() {
 fn missing_default_package_folder_is_ignored() {
     let root = temp_dir("missing_default_lib_ignored");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
     let mut config = Config::new(root.clone());
@@ -1718,7 +1718,7 @@ fn malformed_import_syntax_keeps_precise_location_during_module_discovery() {
         "entry_root #= \"src\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "import\n#[:ok]\n").expect("should write malformed entry");
+    fs::write(src.join("@page.moth"), "import\n#[:ok]\n").expect("should write malformed entry");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -1742,7 +1742,7 @@ fn malformed_import_syntax_keeps_precise_location_during_module_discovery() {
             .primary_location
             .scope
             .to_path_buf(&messages.string_table),
-        PathBuf::from("#page.moth")
+        PathBuf::from("@page.moth")
     );
     assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
     assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
@@ -1815,11 +1815,11 @@ fn discover_modules_uses_reachable_files_only() {
     .expect("should write config");
     fs::create_dir_all(src.join("errors")).expect("should create errors folder");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @libs/html { basic }\n#[:ok]\n",
     )
     .expect("should write entry");
-    fs::write(src.join("errors/#404.moth"), "#[:404]\n").expect("should write 404");
+    fs::write(src.join("errors/@404.moth"), "#[:404]\n").expect("should write 404");
     fs::write(src.join("libs/html.moth"), "basic #= [:basic]\n").expect("should write lib");
     fs::write(src.join("styles/docs.moth"), "navbar #= [:nav]\n").expect("should write style");
     fs::write(src.join("docs/outdated.moth"), "this is invalid syntax")
@@ -1842,7 +1842,7 @@ fn discover_modules_uses_reachable_files_only() {
 
     let page_module = modules
         .iter()
-        .find(|module| module.entry_point.file_name() == Some(OsStr::new("#page.moth")))
+        .find(|module| module.entry_point.file_name() == Some(OsStr::new("@page.moth")))
         .expect("should include #page module");
     let page_paths = page_module
         .input_files
@@ -1856,7 +1856,7 @@ fn discover_modules_uses_reachable_files_only() {
         })
         .collect::<HashSet<_>>();
 
-    assert!(page_paths.contains("#page.moth"));
+    assert!(page_paths.contains("@page.moth"));
     assert!(page_paths.contains("html.moth"));
     assert!(!page_paths.contains("outdated.moth"));
 
@@ -1875,7 +1875,7 @@ fn discover_modules_resolves_relative_child_imports() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @components/widget\nio.line([: [\"page\"]])\n",
     )
     .expect("should write page");
@@ -1914,7 +1914,7 @@ fn discover_modules_resolves_relative_child_imports() {
         })
         .collect::<HashSet<_>>();
 
-    assert!(discovered.contains("#page.moth"));
+    assert!(discovered.contains("@page.moth"));
     assert!(discovered.contains("widget.moth"));
     assert!(discovered.contains("common.moth"));
 
@@ -1935,7 +1935,7 @@ fn module_root_relative_import_resolves_from_the_entry_root() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @helpers/theme\nio.line([: [\"page\"]])\n",
     )
     .expect("should write page");
@@ -1997,14 +1997,14 @@ fn discover_all_modules_finds_multiple_hash_entries_per_root() {
         "entry_root #= \"src\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "io.line([: [\"page\"]])\n").expect("should write #page");
+    fs::write(src.join("@page.moth"), "io.line([: [\"page\"]])\n").expect("should write #page");
     fs::create_dir_all(src.join("layout")).expect("should create layout folder");
     fs::write(
-        src.join("layout/#layout.moth"),
+        src.join("layout/@layout.moth"),
         "io.line([: [\"layout\"]])\n",
     )
     .expect("should write #layout");
-    fs::write(src.join("nested/#lib.moth"), "io.line([: [\"lib\"]])\n")
+    fs::write(src.join("nested/@lib.moth"), "io.line([: [\"lib\"]])\n")
         .expect("should write nested #lib");
     fs::write(src.join("nested/file.moth"), "io.line([: [\"regular\"]])\n")
         .expect("should write regular");
@@ -2036,9 +2036,9 @@ fn discover_all_modules_finds_multiple_hash_entries_per_root() {
         })
         .collect::<HashSet<_>>();
 
-    assert!(entry_names.contains("#page.moth"));
-    assert!(entry_names.contains("#layout.moth"));
-    assert!(entry_names.contains("#lib.moth"));
+    assert!(entry_names.contains("@page.moth"));
+    assert!(entry_names.contains("@layout.moth"));
+    assert!(entry_names.contains("@lib.moth"));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -2523,8 +2523,8 @@ fn project_local_lib_directory_is_discovered_as_source_package_root() {
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/#mod.moth"), "foo #= 1\n").expect("should write root");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(root.join("lib/helper/utils.moth"), "bar #= 2\n").expect("should write lib file");
     fs::write(root.join("config.moth"), "").expect("should write config");
 
@@ -2543,7 +2543,7 @@ fn project_local_lib_directory_is_discovered_as_source_package_root() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = root.join("src/#page.moth");
+    let importer = root.join("src/@page.moth");
     let resolved = resolver
         .resolve_import_to_source_file(&path, &importer, &mut string_table)
         .expect("should resolve source-backed package import")
@@ -2564,8 +2564,8 @@ fn package_prefix_collision_with_builder_package_rejected() {
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("lib/html")).expect("should create lib/html");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/html/#mod.moth"), "foo #= 1\n").expect("should write root");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("lib/html/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(root.join("config.moth"), "").expect("should write config");
 
     let config = Config::new(root.clone());
@@ -2610,8 +2610,8 @@ fn configured_package_folder_is_discovered_as_source_package_root() {
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("packages/helper")).expect("should create packages/helper");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("packages/helper/#mod.moth"), "foo #= 1\n").expect("should write root");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("packages/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(root.join("packages/helper/utils.moth"), "bar #= 2\n")
         .expect("should write lib file");
     fs::write(
@@ -2642,7 +2642,7 @@ fn configured_package_folder_is_discovered_as_source_package_root() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = root.join("src/#page.moth");
+    let importer = root.join("src/@page.moth");
     let resolved = resolver
         .resolve_import_to_source_file(&path, &importer, &mut string_table)
         .expect("should resolve source-backed package import")
@@ -2661,7 +2661,7 @@ fn configured_package_folder_is_discovered_as_source_package_root() {
 fn missing_explicit_package_folder_is_error() {
     let root = temp_dir("missing_explicit_package_folder");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
         "package_folders #= { \"packages\" }\n",
@@ -2708,7 +2708,7 @@ fn missing_explicit_package_folder_is_error() {
 fn explicit_package_folder_must_be_directory() {
     let root = temp_dir("package_folder_not_directory");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("packages"), "").expect("should write file in place of folder");
     fs::write(
         root.join("config.moth"),
@@ -2743,11 +2743,11 @@ fn explicit_package_folder_must_be_directory() {
 }
 
 #[test]
-fn source_package_requires_one_generic_hash_root() {
+fn source_package_requires_one_generic_normal_module_root() {
     let root = temp_dir("source_package_missing_root");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
     let mut config = Config::new(root.clone());
@@ -2767,24 +2767,25 @@ fn source_package_requires_one_generic_hash_root() {
         &mut string_table,
     );
 
-    let messages = result.expect_err("source-backed package without a hash root should fail");
+    let messages =
+        result.expect_err("source-backed package without a normal module root should fail");
     assert!(matches!(
         first_invalid_config_reason(&messages),
         InvalidConfigReason::SourcePackageMissingRoot { .. }
     ));
     let error_text = rendered_first_error(&messages);
-    assert!(error_text.contains("#*.moth"));
+    assert!(error_text.contains("@*.moth"));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
-fn source_package_accepts_cosmetic_hash_root_name() {
+fn source_package_accepts_cosmetic_normal_module_root_name() {
     let root = temp_dir("source_package_cosmetic_root");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/#package.moth"), "foo #= 1\n")
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("lib/helper/@package.moth"), "foo #= 1\n")
         .expect("should write cosmetic root");
     fs::write(root.join("lib/helper/utils.moth"), "bar #= 2\n")
         .expect("should write package source");
@@ -2812,13 +2813,13 @@ fn source_package_accepts_cosmetic_hash_root_name() {
 }
 
 #[test]
-fn source_package_rejects_multiple_generic_hash_roots() {
+fn source_package_rejects_multiple_generic_normal_module_roots() {
     let root = temp_dir("source_package_multiple_roots");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/#first.moth"), "foo #= 1\n").expect("should write first root");
-    fs::write(root.join("lib/helper/#second.moth"), "bar #= 2\n")
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("lib/helper/@first.moth"), "foo #= 1\n").expect("should write first root");
+    fs::write(root.join("lib/helper/@second.moth"), "bar #= 2\n")
         .expect("should write second root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
@@ -2845,8 +2846,8 @@ fn source_package_rejects_multiple_generic_hash_roots() {
         InvalidConfigReason::SourcePackageMultipleRoots { .. }
     ));
     let error_text = rendered_first_error(&messages);
-    assert!(error_text.contains("#first.moth"));
-    assert!(error_text.contains("#second.moth"));
+    assert!(error_text.contains("@first.moth"));
+    assert!(error_text.contains("@second.moth"));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -2857,9 +2858,9 @@ fn package_prefix_collision_across_scan_roots_rejected() {
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
     fs::create_dir_all(root.join("vendor/helper")).expect("should create vendor/helper");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/#mod.moth"), "foo #= 1\n").expect("should write root");
-    fs::write(root.join("vendor/helper/#mod.moth"), "bar #= 2\n").expect("should write root");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
+    fs::write(root.join("vendor/helper/@mod.moth"), "bar #= 2\n").expect("should write root");
     fs::write(
         root.join("config.moth"),
         "package_folders #= { \"lib\", \"vendor\" }\n",
@@ -2919,7 +2920,7 @@ fn entry_root_requires_at_least_one_root_entry_file() {
 
     let resolver = configured_resolver(&config);
     let Err(messages) = discover_modules_for_test(&config, &resolver, &style_directives) else {
-        panic!("entry root without #*.moth entries should fail");
+        panic!("entry root without @*.moth entries should fail");
     };
 
     assert!(matches!(
@@ -2936,7 +2937,7 @@ fn entry_root_requires_at_least_one_root_entry_file() {
 fn rejects_moth_file_and_folder_collision_in_same_directory() {
     let root = temp_dir("moth_folder_collision");
     fs::create_dir_all(root.join("src/UI")).expect("should create src/UI");
-    fs::write(root.join("src/UI/#page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/UI/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.moth"), "y ~= 2\n").expect("should write colliding file");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
@@ -2975,7 +2976,7 @@ fn rejects_moth_file_and_folder_collision_in_same_directory() {
 fn rejects_template_file_and_folder_collision_in_same_directory() {
     let root = temp_dir("template_folder_collision");
     fs::create_dir_all(root.join("src/ui")).expect("should create src/ui");
-    fs::write(root.join("src/ui/#page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/ui/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.mtf"), "template\n").expect("should write colliding file");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
@@ -3012,7 +3013,7 @@ fn allows_same_stem_in_different_directories() {
     fs::create_dir_all(root.join("src/pages")).expect("should create src/pages");
     fs::write(root.join("src/components/card.moth"), "x ~= 1\n").expect("should write card");
     fs::write(root.join("src/pages/card.moth"), "y ~= 2\n").expect("should write another card");
-    fs::write(root.join("src/#page.moth"), "z ~= 3\n").expect("should write entry");
+    fs::write(root.join("src/@page.moth"), "z ~= 3\n").expect("should write entry");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
     let mut config = Config::new(root.clone());
@@ -3041,7 +3042,7 @@ fn rejects_collision_with_empty_folder() {
     let root = temp_dir("collision_empty_folder");
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::write(root.join("src/helper.moth"), "x ~= 1\n").expect("should write colliding file");
-    fs::write(root.join("src/#page.moth"), "y ~= 2\n").expect("should write entry");
+    fs::write(root.join("src/@page.moth"), "y ~= 2\n").expect("should write entry");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
     let mut config = Config::new(root.clone());
@@ -3080,7 +3081,7 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
     let root = temp_dir("js_same_stem_no_collision");
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::write(root.join("src/helper.js"), "// js\n").expect("should write js file");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
     let mut config = Config::new(root.clone());
@@ -3109,8 +3110,8 @@ fn rejects_moth_file_and_folder_collision_in_source_package() {
     let root = temp_dir("source_package_moth_folder_collision");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::create_dir_all(root.join("lib/helper/ui")).expect("should create lib/helper/ui");
-    fs::write(root.join("src/#page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/#mod.moth"), "value #= 1\n").expect("should write root");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("lib/helper/@mod.moth"), "value #= 1\n").expect("should write root");
     fs::write(root.join("lib/helper/ui.moth"), "value #= 2\n")
         .expect("should write colliding package file");
     fs::write(
@@ -3163,7 +3164,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
     .expect("should write config");
 
     // Entry file imports a .js file explicitly.
-    fs::write(src.join("#page.moth"), "import @./drawing.js\n#[:ok]\n")
+    fs::write(src.join("@page.moth"), "import @./drawing.js\n#[:ok]\n")
         .expect("should write entry");
 
     // The .js file actually exists on disk.
@@ -3222,7 +3223,7 @@ fn explicit_moth_extension_still_reports_moth_import_0020() {
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @helper.moth\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @helper.moth\n#[:ok]\n").expect("should write entry");
 
     fs::write(
         src.join("helper.moth"),
@@ -3276,7 +3277,7 @@ fn unsupported_moth_template_import_without_builder_support_reports_moth_import_
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -3321,7 +3322,7 @@ fn direct_moth_template_extension_import_reports_moth_import_0024() {
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @intro.mtf\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @intro.mtf\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -3369,7 +3370,7 @@ fn moth_template_files_are_reachable_without_import_scanning() {
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "import @missing\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -3394,7 +3395,7 @@ fn moth_template_files_are_reachable_without_import_scanning() {
         .iter()
         .map(|input| input.source_path().file_name().unwrap().to_owned())
         .collect();
-    assert!(input_paths.contains(OsStr::new("#page.moth")));
+    assert!(input_paths.contains(OsStr::new("@page.moth")));
     assert!(input_paths.contains(OsStr::new("intro.mtf")));
 
     let moth_template_input = modules[0]
@@ -3423,10 +3424,10 @@ fn reachable_moth_template_queues_same_directory_root_file() {
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @docs\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @docs\n#[:ok]\n").expect("should write entry");
     fs::write(docs.join("intro.mtf"), "hello\n").expect("should write moth template file");
     fs::write(
-        docs.join("#docs.moth"),
+        docs.join("@docs.moth"),
         "import @intro\ntitle #= \"Docs\"\n",
     )
     .expect("should write root");
@@ -3445,7 +3446,7 @@ fn reachable_moth_template_queues_same_directory_root_file() {
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("reachable .mtf should discover same-directory hash root");
+        .expect("reachable .mtf should discover same-directory normal module root");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     // The entry module imports a Moth template file from the `docs` module root, so `docs` is its
@@ -3457,7 +3458,7 @@ fn reachable_moth_template_queues_same_directory_root_file() {
             module
                 .entry_point
                 .file_name()
-                .is_some_and(|name| name == "#page.moth")
+                .is_some_and(|name| name == "@page.moth")
         })
         .expect("entry module should be discovered");
     let input_paths: HashSet<_> = entry_module
@@ -3465,9 +3466,9 @@ fn reachable_moth_template_queues_same_directory_root_file() {
         .iter()
         .map(|input| input.source_path().file_name().unwrap().to_owned())
         .collect();
-    assert!(input_paths.contains(OsStr::new("#page.moth")));
+    assert!(input_paths.contains(OsStr::new("@page.moth")));
     assert!(!input_paths.contains(OsStr::new("intro.mtf")));
-    assert!(!input_paths.contains(OsStr::new("#docs.moth")));
+    assert!(!input_paths.contains(OsStr::new("@docs.moth")));
 
     let docs_module = modules
         .iter()
@@ -3475,7 +3476,7 @@ fn reachable_moth_template_queues_same_directory_root_file() {
             module
                 .entry_point
                 .file_name()
-                .is_some_and(|name| name == "#docs.moth")
+                .is_some_and(|name| name == "@docs.moth")
         })
         .expect("docs provider module should be discovered");
 
@@ -3492,8 +3493,8 @@ fn reachable_moth_template_queues_same_directory_root_file() {
     let root_input = docs_module
         .input_files
         .iter()
-        .find(|input| input.source_path().file_name() == Some(OsStr::new("#docs.moth")))
-        .expect("#docs.moth should be in discovered inputs");
+        .find(|input| input.source_path().file_name() == Some(OsStr::new("@docs.moth")))
+        .expect("@docs.moth should be in discovered inputs");
     assert!(matches!(root_input, PreparedSourceInput::Moth { .. }));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -3511,7 +3512,7 @@ fn unimported_moth_template_file_under_entry_root_is_ignored() {
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -3534,7 +3535,7 @@ fn unimported_moth_template_file_under_entry_root_is_ignored() {
     assert_eq!(modules[0].input_files.len(), 1);
     assert_eq!(
         modules[0].input_files[0].source_path().file_name().unwrap(),
-        OsStr::new("#page.moth")
+        OsStr::new("@page.moth")
     );
     assert!(matches!(
         modules[0].input_files[0],
@@ -3559,7 +3560,7 @@ fn extensionless_moth_import_and_virtual_package_import_still_work() {
     // Normal extensionless imports still resolve as Moth source files, while virtual package
     // imports continue to stay out of Stage 0 filesystem traversal.
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @helper\nimport @core/io { line }\n#[:ok]\n",
     )
     .expect("should write entry");
@@ -3597,7 +3598,7 @@ fn extensionless_moth_import_and_virtual_package_import_still_work() {
         })
         .collect::<HashSet<_>>();
 
-    assert!(discovered.contains("#page.moth"));
+    assert!(discovered.contains("@page.moth"));
     assert!(discovered.contains("helper.moth"));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -3615,7 +3616,7 @@ fn indexed_module_inventory_includes_imported_markdown_without_scanning_its_body
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "import @missing\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -3641,7 +3642,7 @@ fn indexed_module_inventory_includes_imported_markdown_without_scanning_its_body
         .iter()
         .map(|input| input.source_path().file_name().unwrap().to_owned())
         .collect();
-    assert!(input_paths.contains(OsStr::new("#page.moth")));
+    assert!(input_paths.contains(OsStr::new("@page.moth")));
     assert!(input_paths.contains(OsStr::new("intro.md")));
 
     let markdown_input = modules[0]
@@ -3669,9 +3670,9 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
-    fs::write(src.join("other/#other.moth"), "export:\n    x #= 1\n;\n")
+    fs::write(src.join("other/@other.moth"), "export:\n    x #= 1\n;\n")
         .expect("should write other module root");
 
     let mut config = Config::new(root.clone());
@@ -3697,9 +3698,9 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
         .iter()
         .map(|input| input.source_path().file_name().unwrap().to_owned())
         .collect();
-    assert!(input_paths.contains(OsStr::new("#page.moth")));
+    assert!(input_paths.contains(OsStr::new("@page.moth")));
     assert!(input_paths.contains(OsStr::new("intro.md")));
-    assert!(!input_paths.contains(OsStr::new("#other.moth")));
+    assert!(!input_paths.contains(OsStr::new("@other.moth")));
 
     let markdown_input = modules[0]
         .input_files
@@ -3726,7 +3727,7 @@ fn indexed_module_inventory_ignores_unimported_markdown_file() {
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -3750,7 +3751,7 @@ fn indexed_module_inventory_ignores_unimported_markdown_file() {
     assert_eq!(modules[0].input_files.len(), 1);
     assert_eq!(
         modules[0].input_files[0].source_path().file_name().unwrap(),
-        OsStr::new("#page.moth")
+        OsStr::new("@page.moth")
     );
     assert!(matches!(
         modules[0].input_files[0],
@@ -3772,7 +3773,7 @@ fn indexed_module_inventory_rejects_direct_markdown_extension_import() {
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @intro.md\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @intro.md\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -3833,7 +3834,7 @@ fn indexed_module_inventory_rejects_unsupported_markdown_import() {
     )
     .expect("should write config");
 
-    fs::write(src.join("#page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -3890,7 +3891,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
         "entry_root #= \"src\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "import @helper\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @helper\n#[:entry]\n").expect("should write entry");
     fs::write(src.join("helper.moth"), "message #= \"helper\"\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -3913,7 +3914,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(modules.len(), 1);
-    for source in [src.join("#page.moth"), src.join("helper.moth")] {
+    for source in [src.join("@page.moth"), src.join("helper.moth")] {
         let canonical = fs::canonicalize(source).expect("source should canonicalize");
         assert_eq!(
             super::source_loading::source_read_count_for_path_for_test(&canonical),
@@ -3948,7 +3949,7 @@ fn project_prepared_source_store_transitions_one_dense_source_slot_once() {
         "entry_root #= \"src\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "value #= 1\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "value #= 1\n").expect("should write entry");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -3961,7 +3962,7 @@ fn project_prepared_source_store_transitions_one_dense_source_slot_once() {
 
     let project_root = fs::canonicalize(&root).expect("project root should canonicalize");
     let entry_root = fs::canonicalize(&src).expect("entry root should canonicalize");
-    let entry_path = fs::canonicalize(src.join("#page.moth")).expect("entry should canonicalize");
+    let entry_path = fs::canonicalize(src.join("@page.moth")).expect("entry should canonicalize");
     let mut string_table = StringTable::new();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
@@ -4016,7 +4017,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @intro\nimport @notes\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -4053,7 +4054,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(input_names, vec!["#page.moth", "intro.mtf", "notes.md"]);
+    assert_eq!(input_names, vec!["@page.moth", "intro.mtf", "notes.md"]);
     assert!(matches!(
         input_files[1],
         PreparedSourceInput::MothTemplate { .. }
@@ -4159,7 +4160,7 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
         "entry_root #= \"src\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "import @./drawing.js\n#[:entry]\n")
+    fs::write(src.join("@page.moth"), "import @./drawing.js\n#[:entry]\n")
         .expect("should write entry");
     fs::write(src.join("drawing.js"), "export function draw() {}\n").expect("should write js");
 
@@ -4188,7 +4189,7 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
     assert_eq!(modules[0].input_files.len(), 1);
     assert_eq!(
         modules[0].input_files[0].source_path().file_name().unwrap(),
-        OsStr::new("#page.moth")
+        OsStr::new("@page.moth")
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -4209,12 +4210,12 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
 
     // Two entry points with independent module-local dependency trees.
     fs::write(
-        src.join("page_a/#pageA.moth"),
+        src.join("page_a/@pageA.moth"),
         "import @helper\nimport @a_only\n#[:pageA]\n",
     )
     .expect("should write pageA");
     fs::write(
-        src.join("page_b/#pageB.moth"),
+        src.join("page_b/@pageB.moth"),
         "import @helper\nimport @b_only\n#[:pageB]\n",
     )
     .expect("should write pageB");
@@ -4244,10 +4245,10 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     for source in [
-        src.join("page_a/#pageA.moth"),
+        src.join("page_a/@pageA.moth"),
         src.join("page_a/helper.moth"),
         src.join("page_a/a_only.moth"),
-        src.join("page_b/#pageB.moth"),
+        src.join("page_b/@pageB.moth"),
         src.join("page_b/helper.moth"),
         src.join("page_b/b_only.moth"),
     ] {
@@ -4272,7 +4273,7 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
                 .to_string()
         })
         .collect();
-    assert_eq!(module_names, vec!["#pageA.moth", "#pageB.moth"]);
+    assert_eq!(module_names, vec!["@pageA.moth", "@pageB.moth"]);
 
     // Per-module input order must be deterministic.
     let module_a_inputs = modules[0]
@@ -4303,11 +4304,11 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     // Canonical source order is deterministic by logical path (file name within this test).
     assert_eq!(
         module_a_inputs,
-        vec!["#pageA.moth", "a_only.moth", "helper.moth"]
+        vec!["@pageA.moth", "a_only.moth", "helper.moth"]
     );
     assert_eq!(
         module_b_inputs,
-        vec!["#pageB.moth", "b_only.moth", "helper.moth"]
+        vec!["@pageB.moth", "b_only.moth", "helper.moth"]
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -4327,9 +4328,9 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
     .expect("should write config");
 
     // Entry A is plain provider-free; entry B imports a .js file.
-    fs::write(src.join("page_a/#pageA.moth"), "a #= 1\n").expect("should write pageA");
+    fs::write(src.join("page_a/@pageA.moth"), "a #= 1\n").expect("should write pageA");
     fs::write(
-        src.join("page_b/#pageB.moth"),
+        src.join("page_b/@pageB.moth"),
         "import @./drawing.js\n#[:pageB]\n",
     )
     .expect("should write pageB");
@@ -4369,7 +4370,7 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
     assert_eq!(modules[1].input_files.len(), 1);
     assert_eq!(
         modules[1].input_files[0].source_path().file_name().unwrap(),
-        OsStr::new("#pageB.moth")
+        OsStr::new("@pageB.moth")
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -4391,14 +4392,14 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
 
     // Entry A is provider-free; entry B imports a .js file backed by a registered provider.
     fs::write(
-        src.join("page_a/#pageA.moth"),
+        src.join("page_a/@pageA.moth"),
         "import @helper\n#[:pageA]\n",
     )
     .expect("should write pageA");
     fs::write(src.join("page_a/helper.moth"), "helper #= 1\n")
         .expect("should write module-local helper");
     fs::write(
-        src.join("page_b/#pageB.moth"),
+        src.join("page_b/@pageB.moth"),
         "import @./drawing.js\n#[:pageB]\n",
     )
     .expect("should write pageB");
@@ -4432,12 +4433,12 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
             .expect("canonical provider discovery should succeed");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    // Three unique Moth sources: #pageA.moth, page_a/helper.moth, and #pageB.moth.
+    // Three unique Moth sources: @pageA.moth, page_a/helper.moth, and @pageB.moth.
     // The canonical prepared-source store reads each once before header preparation.
     for source in [
-        src.join("page_a/#pageA.moth"),
+        src.join("page_a/@pageA.moth"),
         src.join("page_a/helper.moth"),
-        src.join("page_b/#pageB.moth"),
+        src.join("page_b/@pageB.moth"),
     ] {
         let canonical = fs::canonicalize(source).expect("source should canonicalize");
         assert_eq!(
@@ -4492,9 +4493,9 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
     )
     .expect("should write config");
 
-    fs::write(src.join("page_a/#pageA.moth"), "a #= 1\n").expect("should write pageA");
+    fs::write(src.join("page_a/@pageA.moth"), "a #= 1\n").expect("should write pageA");
     fs::write(
-        src.join("page_b/#pageB.moth"),
+        src.join("page_b/@pageB.moth"),
         "import @./drawing.js\n#[:pageB]\n",
     )
     .expect("should write pageB");
@@ -4556,7 +4557,7 @@ fn directory_provider_import_calls_provider_once_for_repeated_physical_source() 
     // The entry imports the same .js file twice under distinct local aliases, so the physical
     // provider source is reached twice during one traversal.
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @./drawing.js\nimport @./drawing.js as drawing2\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -4604,11 +4605,11 @@ fn directory_provider_import_rejects_cross_module_target() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @feature/private.js\n#[:entry]\n",
     )
     .expect("should write entry importing a cross-module provider file");
-    fs::write(feature.join("#mod.moth"), "").expect("should write feature root");
+    fs::write(feature.join("@mod.moth"), "").expect("should write feature root");
     fs::write(feature.join("private.js"), "export function draw() {}\n")
         .expect("should write feature provider file");
 
@@ -4676,7 +4677,7 @@ fn directory_provider_import_missing_target_reports_structured_diagnostic_withou
     )
     .expect("should write config");
     // The imported .js file does not exist on disk, so it is absent from the source tree index.
-    fs::write(src.join("#page.moth"), "import @./missing.js\n#[:entry]\n")
+    fs::write(src.join("@page.moth"), "import @./missing.js\n#[:entry]\n")
         .expect("should write entry importing a missing provider file");
 
     let mut config = Config::new(root.clone());
@@ -4753,11 +4754,11 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
 
     // Entry A imports its direct child module B, which should queue module B's root.
     fs::write(
-        module_a.join("#pageA.moth"),
+        module_a.join("@pageA.moth"),
         "import @module_b { b }\n#[:pageA]\n",
     )
     .expect("should write pageA");
-    fs::write(module_b.join("#api.moth"), "export:\n    b #= 1\n;\n")
+    fs::write(module_b.join("@api.moth"), "export:\n    b #= 1\n;\n")
         .expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -4786,7 +4787,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
             module
                 .entry_point
                 .file_name()
-                .is_some_and(|name| name == "#pageA.moth")
+                .is_some_and(|name| name == "@pageA.moth")
         })
         .expect("module A should be discovered");
     let module_b = modules
@@ -4795,7 +4796,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
             module
                 .entry_point
                 .file_name()
-                .is_some_and(|name| name == "#api.moth")
+                .is_some_and(|name| name == "@api.moth")
         })
         .expect("module B should be discovered");
     let module_a_inputs = module_a
@@ -4824,12 +4825,12 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
         .collect::<Vec<_>>();
 
     assert!(
-        !module_a_inputs.contains(&"#api.moth".to_string())
+        !module_a_inputs.contains(&"@api.moth".to_string())
             && !module_a_inputs.contains(&"impl.moth".to_string()),
         "the consumer inventory must exclude all provider source files"
     );
     assert!(
-        module_b_inputs.contains(&"#api.moth".to_string())
+        module_b_inputs.contains(&"@api.moth".to_string())
             && !module_b_inputs.contains(&"impl.moth".to_string()),
         "the queued provider module must retain its root without making an unreferenced private file semantic"
     );
@@ -4852,7 +4853,7 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#site.moth"),
+        src.join("@site.moth"),
         "import @markdown { render }\n#[:site]\n",
     )
     .expect("should write owner root");
@@ -4862,7 +4863,7 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
     )
     .expect("should write support root");
     fs::write(
-        pages.join("#page.moth"),
+        pages.join("@page.moth"),
         "import @markdown { render }\n#[:page]\n",
     )
     .expect("should write sibling module root");
@@ -4899,7 +4900,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
         "entry_root #= \"src\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "import @HELPER\n#[:page]\n").expect("should write root");
+    fs::write(src.join("@page.moth"), "import @HELPER\n#[:page]\n").expect("should write root");
     fs::write(src.join("helper.moth"), "value #= 1\n").expect("should write Moth source");
     fs::write(src.join("Helper.md"), "# Helper\n").expect("should write Markdown source");
 
@@ -4942,11 +4943,11 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @core/io { input }\n#[:page]\n",
     )
     .expect("should write root");
-    fs::write(local_core.join("#core.moth"), "#[:local core]\n")
+    fs::write(local_core.join("@core.moth"), "#[:local core]\n")
         .expect("should write colliding local module");
 
     let mut config = Config::new(root.clone());
@@ -4983,7 +4984,7 @@ fn directory_source_import_rejects_obsolete_relative_form() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @./helper { value }\n#[:page]\n",
     )
     .expect("should write root");
@@ -5024,11 +5025,11 @@ fn direct_child_private_path_bypass_is_rejected() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @child/private { value }\n#[:page]\n",
     )
     .expect("should write parent root");
-    fs::write(child.join("#api.moth"), "export:\n    value #= 1\n;\n")
+    fs::write(child.join("@api.moth"), "export:\n    value #= 1\n;\n")
         .expect("should write child root");
     fs::write(child.join("private.moth"), "value #= 2\n")
         .expect("should write private child source");
@@ -5067,7 +5068,7 @@ fn stage0_retains_moth_tokens_and_leaves_non_tokenized_sources_without_tokens() 
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @helper\nimport @intro\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -5124,7 +5125,7 @@ fn stage0_retains_moth_tokens_and_leaves_non_tokenized_sources_without_tokens() 
         .find(|input| match input {
             PreparedSourceInput::Moth { source_path, .. } => source_path
                 .file_name()
-                .is_some_and(|name| name == "#page.moth"),
+                .is_some_and(|name| name == "@page.moth"),
             _ => false,
         })
         .expect("entry file should be in the input set");
@@ -5159,10 +5160,10 @@ fn canonical_discovery_retains_moth_tokens_for_every_reachable_file() {
     .expect("should write config");
 
     // Two entry points share the canonical prepared-source owner. Each module imports a helper.
-    fs::write(module_a.join("#pageA.moth"), "import @helperA\n#[:pageA]\n")
+    fs::write(module_a.join("@pageA.moth"), "import @helperA\n#[:pageA]\n")
         .expect("should write pageA");
     fs::write(module_a.join("helperA.moth"), "a #= 1\n").expect("should write helperA");
-    fs::write(module_b.join("#pageB.moth"), "import @helperB\n#[:pageB]\n")
+    fs::write(module_b.join("@pageB.moth"), "import @helperB\n#[:pageB]\n")
         .expect("should write pageB");
     fs::write(module_b.join("helperB.moth"), "b #= 2\n").expect("should write helperB");
 
@@ -5232,11 +5233,11 @@ fn write_cross_module_project(
     )
     .expect("should write config");
     fs::write(
-        module_a.join("#pageA.moth"),
+        module_a.join("@pageA.moth"),
         "import @module_b\n#[:pageA]\n",
     )
     .expect("should write pageA");
-    fs::write(module_b.join("#api.moth"), "export:\n    b #= 1\n;\n")
+    fs::write(module_b.join("@api.moth"), "export:\n    b #= 1\n;\n")
         .expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -5300,14 +5301,14 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
         .iter()
         .position(|wave| {
             wave.iter()
-                .any(|module| module.entry_point.file_name() == Some(OsStr::new("#api.moth")))
+                .any(|module| module.entry_point.file_name() == Some(OsStr::new("@api.moth")))
         })
         .expect("module_b should appear in a compile wave");
     let consumer_wave = waves
         .iter()
         .position(|wave| {
             wave.iter()
-                .any(|module| module.entry_point.file_name() == Some(OsStr::new("#pageA.moth")))
+                .any(|module| module.entry_point.file_name() == Some(OsStr::new("@pageA.moth")))
         })
         .expect("module_a should appear in a compile wave");
     assert!(
@@ -5340,7 +5341,7 @@ fn same_module_import_creates_no_project_graph_edge() {
     )
     .expect("should write config");
     // The single entry module imports a sibling file inside its own module root.
-    fs::write(src.join("#page.moth"), "import @helper\n#[:page]\n").expect("should write entry");
+    fs::write(src.join("@page.moth"), "import @helper\n#[:page]\n").expect("should write entry");
     fs::write(src.join("helper.moth"), "value #= 1\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -5401,8 +5402,8 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     )
     .expect("should write config");
     // Two independent entry modules with no cross-module imports.
-    fs::write(module_a.join("#pageA.moth"), "#[:pageA]\n").expect("should write pageA");
-    fs::write(module_b.join("#pageB.moth"), "#[:pageB]\n").expect("should write pageB");
+    fs::write(module_a.join("@pageA.moth"), "#[:pageA]\n").expect("should write pageA");
+    fs::write(module_b.join("@pageB.moth"), "#[:pageB]\n").expect("should write pageB");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -5485,11 +5486,11 @@ fn duplicate_import_deduplicates_edge_and_orders_provider_first() {
     // The consumer imports its direct child twice, so the duplicate observation must be
     // idempotent.
     fs::write(
-        module_a.join("#pageA.moth"),
+        module_a.join("@pageA.moth"),
         "import @module_b\nimport @module_b\n#[:pageA]\n",
     )
     .expect("should write pageA");
-    fs::write(module_b.join("#api.moth"), "export:\n    b #= 1\n;\n")
+    fs::write(module_b.join("@api.moth"), "export:\n    b #= 1\n;\n")
         .expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -5552,7 +5553,7 @@ fn duplicate_import_deduplicates_edge_and_orders_provider_first() {
         inventory_waves[0][0]
             .entry_point
             .file_name()
-            .is_some_and(|name| name == "#api.moth"),
+            .is_some_and(|name| name == "@api.moth"),
         "module_b is the provider in the first wave"
     );
     assert_eq!(
@@ -5564,7 +5565,7 @@ fn duplicate_import_deduplicates_edge_and_orders_provider_first() {
         inventory_waves[1][0]
             .entry_point
             .file_name()
-            .is_some_and(|name| name == "#pageA.moth"),
+            .is_some_and(|name| name == "@pageA.moth"),
         "module_a is the consumer in the second wave"
     );
 
@@ -5596,7 +5597,7 @@ fn dependency_fact_retains_authored_source_location() {
     // The retained scope is the importer file that authored the structural provider reference.
     let scope_path = retained_location.scope.to_portable_string(&string_table);
     assert!(
-        scope_path.contains("#pageA.moth"),
+        scope_path.contains("@pageA.moth"),
         "retained location scope should name the importing module root file: {scope_path}"
     );
     // The import clause is on the first source line.
@@ -5810,12 +5811,12 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
+        src.join("@page.moth"),
         "import @z_local\nimport @a_provider { value }\n#[:entry]\n",
     )
     .expect("should write consumer root");
     fs::write(src.join("z_local.moth"), "local #= 1\n").expect("should write local source");
-    fs::write(provider.join("#api.moth"), "export:\n    value #= 1\n;\n")
+    fs::write(provider.join("@api.moth"), "export:\n    value #= 1\n;\n")
         .expect("should write provider root");
 
     let mut config = Config::new(root.clone());
@@ -5834,7 +5835,7 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
         .waves()
         .iter()
         .flatten()
-        .find(|module| module.entry_point.file_name() == Some(OsStr::new("#page.moth")))
+        .find(|module| module.entry_point.file_name() == Some(OsStr::new("@page.moth")))
         .expect("consumer module should be discovered");
     let input_names = consumer
         .input_files
@@ -5851,7 +5852,7 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
 
     assert_eq!(
         input_names,
-        vec!["#page.moth", "z_local.moth"],
+        vec!["@page.moth", "z_local.moth"],
         "the consumer job must contain only its canonical prepared sources; the provider reaches binding through its completed interface"
     );
 
@@ -5861,8 +5862,8 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
 #[test]
 fn indexed_namespace_rejects_direct_entry_root_import() {
     for (import_path, expected_code) in [
-        ("#page", "MOTH-IMPORT-0008"),
-        ("#page.moth", "MOTH-IMPORT-0020"),
+        ("@page", "MOTH-IMPORT-0008"),
+        ("@page.moth", "MOTH-IMPORT-0020"),
     ] {
         let root = temp_dir("indexed_namespace_direct_entry_root_rejected");
         let src = root.join("src");
@@ -5874,7 +5875,7 @@ fn indexed_namespace_rejects_direct_entry_root_import() {
         )
         .expect("should write config");
         fs::write(
-            src.join("#page.moth"),
+            src.join("@page.moth"),
             format!("import @{import_path} {{ symbol }}\n#[:page]\n"),
         )
         .expect("should write entry root");
@@ -5914,11 +5915,11 @@ fn indexed_namespace_rejects_direct_nested_child_root_import() {
     )
     .expect("should write config");
     fs::write(
-        src.join("#page.moth"),
-        "import @child/#home { symbol }\n#[:page]\n",
+        src.join("@page.moth"),
+        "import @child/@home { symbol }\n#[:page]\n",
     )
     .expect("should write parent root");
-    fs::write(child.join("#home.moth"), "export:\n    symbol #= 1\n;\n")
+    fs::write(child.join("@home.moth"), "export:\n    symbol #= 1\n;\n")
         .expect("should write child root");
 
     let mut config = Config::new(root.clone());

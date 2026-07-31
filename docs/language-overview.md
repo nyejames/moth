@@ -59,7 +59,7 @@ The following surfaces are intentionally outside Moth's language design scope.
 - `docs/compiler-design-overview.md`: compiler stage ownership and cross-stage architecture
 - `docs/src/docs/codebase/memory-management/overview.mtf` — reference semantics, borrow validation, lifetime regions, ownership and backend lowering
 - `docs/src/docs/codebase/design-scope/overview.mtf` — accepted mechanisms, constraints and outside-scope families
-- `docs/src/docs/progress/#page.moth` — current implementation status
+- `docs/src/docs/progress/@page.moth` — current implementation status
 - `docs/roadmap/roadmap.md` — planned work
 
 ## Syntax Summary
@@ -949,7 +949,7 @@ Same-directory module-root constants and `@html` constants don't shadow each oth
 Module roots can re-export Moth template content explicitly:
 
 ```moth
--- src/#docs.moth
+-- src/@docs.moth
 export:
     import @docs/intro {
         content as intro_content,
@@ -1366,7 +1366,7 @@ Aliases are transparent type spellings, not constructors. Construct a nominal st
 
 ## Module System, Config, and Imports
 
-A module is a directory-scoped set of Moth source files compiled together. A directory becomes a module root when it contains one `#*.moth` or `+*.moth` file. The suffix after either marker is cosmetic. More than one root file in the same directory is rejected. A project contains normal modules, scoped support packages, an optional project package facade and other builder inputs.
+A module is a directory-scoped set of Moth source files compiled together. A directory becomes a module root when it contains one `@*.moth` or `+*.moth` file. The suffix after either marker is cosmetic. More than one root file in the same directory is rejected. A project contains normal modules, scoped support packages, an optional project package facade and other builder inputs.
 
 ### Project config
 
@@ -1486,13 +1486,13 @@ export:
 - `.moth` source imports are extensionless.
 - Direct project/local JavaScript imports require `.js` and a builder `.js` external import provider.
 - Invalid namespace path stems require explicit aliases.
-- Direct imports of any `#*.moth` or `+*.moth` root file and `config.moth` are invalid.
+- Direct imports of any `@*.moth` or `+*.moth` root file and `config.moth` are invalid.
 
 ### Module roots, runtime, public APIs and packages
 
 | File/root | Role |
 |---|---|
-| one `#*.moth` file per normal module directory | Normal module root with a cosmetic filename |
+| one `@*.moth` file per normal module directory | Normal module root with a cosmetic filename |
 | one `+*.moth` file per support directory | API-only scoped package root named by its directory |
 | optional project-root `+*.moth` beside `config.moth` | API-only external package facade named by project config |
 | entry-selected normal module | Owns active top-level runtime/start code and direct page fragments |
@@ -1546,7 +1546,7 @@ Package metadata has two orthogonal axes:
 
 Core packages require explicit imports unless they are part of the prelude. Unsupported builder packages are rejected with an unsupported-by-builder diagnostic. Source-backed packages expose compiled immutable interfaces backed by support roots, the project package facade or builder-supplied source.
 
-The HTML builder's `@html` source-backed package exposes authored HTML helpers, including `canvas`, `CANVAS_ID`, `get_canvas_context`, `Canvas`, and `get_canvas`. Its cosmetic root filename is currently `packages/html/#mod.moth`, but its public API comes from the root's `export:` block. `Canvas` is a source-owned wrapper around the raw external context, so method-style calls such as `~drawing.fill_rect(...)` come from ordinary Moth receiver methods rather than external package metadata. The raw `@web/canvas` symbols themselves are not re-exported through `@html`. Import raw drawing APIs directly from `@web/canvas` when needed.
+The HTML builder's `@html` source-backed package exposes authored HTML helpers, including `canvas`, `CANVAS_ID`, `get_canvas_context`, `Canvas`, and `get_canvas`. Its cosmetic root filename is currently `packages/html/@mod.moth`, but its public API comes from the root's `export:` block. `Canvas` is a source-owned wrapper around the raw external context, so method-style calls such as `~drawing.fill_rect(...)` come from ordinary Moth receiver methods rather than external package metadata. The raw `@web/canvas` symbols themselves are not re-exported through `@html`. Import raw drawing APIs directly from `@web/canvas` when needed.
 
 ### External platform package imports
 

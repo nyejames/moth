@@ -46,7 +46,7 @@ Use this order when sources disagree:
 3. `docs/src/docs/codebase/memory-management/**` for formal memory semantics
 4. `docs/compiler-design-overview.md` for compiler stages and artefact contracts
 5. `docs/build-system-design.md` for project, module, package and builder architecture
-6. `docs/src/docs/progress/#page.moth` for current implementation support
+6. `docs/src/docs/progress/@page.moth` for current implementation support
 7. Accepted roadmap plans for deferred implementation
 8. Current compiler code and tests as evidence of behaviour
 9. Existing public pages as teaching material under review
@@ -57,7 +57,7 @@ Implementation is not automatically language design. When current code conflicts
 
 - Unsuffixed `.mtf` files own complete Advanced source syntax and observable semantics.
 - Paired `-basic.mtf` files teach a smaller accurate beginner surface.
-- `#page.moth` files own public composition, introductions, ordering and navigation.
+- `@page.moth` files own public composition, introductions, ordering and navigation.
 - The monolith remains maintained until Stage C.
 - Formal compiler, build-system and memory architecture stays in its dedicated owners.
 - The progress matrix owns current implementation and backend status.
@@ -134,7 +134,7 @@ This is the first task because it blocks every docs check and release build.
 
 ### Convert the styles directory to a support package
 
-Do not convert `docs/src/styles/docs.moth` into a normal `#docs.moth` module. That would make `styles` a sibling normal module and preserve the invalid sibling-import topology.
+Do not convert `docs/src/styles/docs.moth` into a normal `@docs.moth` module. That would make `styles` a sibling normal module and preserve the invalid sibling-import topology.
 
 Replace it with a scoped support package:
 
@@ -147,7 +147,7 @@ Required shape:
 - keep private imports outside `export:`
 - retain private helper declarations outside `export:` when consumers do not need them
 - place the actual shared style API inside one strict `export:` block
-- export only declarations used by documentation consumers or intentionally re-exported by `docs/src/#page.moth`
+- export only declarations used by documentation consumers or intentionally re-exported by `docs/src/@page.moth`
 - preserve `Palette`, shared themes, layout components, documentation-level controls and pagers where they remain public API
 - remove unused imports and declarations discovered by the move
 - do not add a compatibility module or forwarding file
@@ -160,7 +160,7 @@ import @styles { ... }
 
 Remove all `@styles/docs` imports.
 
-Update the grouped re-export in `docs/src/#page.moth` to use `@styles`.
+Update the grouped re-export in `docs/src/@page.moth` to use `@styles`.
 
 Update `index.md` for the moved source owner.
 

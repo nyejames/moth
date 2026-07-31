@@ -84,7 +84,7 @@ fn prepare_via_pipeline(
 > {
     let source_files = SourceFileTable::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let options = HeaderParseOptions::default();
     let context = FrontendFilePrepareContext {
         source_files: &source_files,
@@ -118,7 +118,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         &SourceFileKindRegistry::default(),
     )
     .expect("test project path resolver should build");
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let options = HeaderParseOptions {
         entry_file_id: None,
         project_path_resolver: Some(project_path_resolver.clone()),
@@ -157,7 +157,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     .expect("Moth template headers should bind");
     let sorted_headers =
         resolve_module_dependencies(headers, &mut string_table).expect("headers should sort");
-    let entry_dir = InternedPath::from_single_str("src/#page.moth", &mut string_table);
+    let entry_dir = InternedPath::from_single_str("src/@page.moth", &mut string_table);
 
     let ast = Ast::new(
         AstBuildInput {
@@ -208,7 +208,7 @@ impl MothTemplateScopeFixture {
             fs::canonicalize(project_root).expect("project root should canonicalize");
         let entry_root = fs::canonicalize(entry_root).expect("entry root should canonicalize");
         let html_root = fs::canonicalize(html_root).expect("HTML root should canonicalize");
-        let html_root_file = html_root.join("#mod.moth");
+        let html_root_file = html_root.join("@mod.moth");
 
         // The miniature `@html` root deliberately includes non-constant exports so the
         // Moth template implicit scope proves it is filtering by source declaration kind.
@@ -264,7 +264,7 @@ impl MothTemplateScopeFixture {
         .expect("test project path resolver should build");
 
         let mut string_table = StringTable::new();
-        let entry_file_path = entry_root.join("#page.moth");
+        let entry_file_path = entry_root.join("@page.moth");
         let source_files = SourceFileTable::build(
             canonical_files.iter(),
             &entry_file_path,
@@ -539,7 +539,7 @@ impl MothTemplateScopeFixture {
     }
 
     fn source_path_for_fixture_path(&self, relative_path: &str) -> PathBuf {
-        if relative_path == "@html/#mod.moth" {
+        if relative_path == "@html/@mod.moth" {
             return self.html_root_file.clone();
         }
 
@@ -558,7 +558,7 @@ fn prepared_module_roots(entry_root: &Path, files: &[PathBuf]) -> ModuleRootTabl
         let Some(file_name) = file.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !file_name.starts_with('#')
+        if !file_name.starts_with('@')
             || file.extension().and_then(|ext| ext.to_str()) != Some("moth")
         {
             continue;
@@ -882,8 +882,8 @@ fn declaration_like_text_remains_markdown_body_text() {
 #[test]
 fn module_root_export_syntax_can_target_moth_template_content() {
     let mut string_table = StringTable::new();
-    let root_file_path = PathBuf::from("src/#mod.moth");
-    let entry_path = PathBuf::from("src/#page.moth");
+    let root_file_path = PathBuf::from("src/@mod.moth");
+    let entry_path = PathBuf::from("src/@page.moth");
 
     let root_output = prepare_moth_source(
         "export:\n    import @./intro { content as intro }\n;\n",
@@ -916,7 +916,7 @@ fn module_root_export_syntax_can_target_moth_template_content() {
 fn moth_template_body_sees_flat_exported_html_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p]")]);
     let (ast, string_table) = fixture
-        .compile_moth_template_ast_ok("src/intro.mtf", &["@html/#mod.moth", "src/intro.mtf"]);
+        .compile_moth_template_ast_ok("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
 
     folded_content_contains(&ast, &string_table, "<p>");
 }
@@ -925,7 +925,7 @@ fn moth_template_body_sees_flat_exported_html_constants() {
 fn moth_template_header_visibility_contains_implicit_html_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p]")]);
     let (headers, mut string_table) = fixture
-        .prepare_and_bind_headers_for(&["@html/#mod.moth", "src/intro.mtf"])
+        .prepare_and_bind_headers_for(&["@html/@mod.moth", "src/intro.mtf"])
         .expect("headers should parse");
     let moth_template_canonical_path = fixture.project_root_path().join("src/intro.mtf");
     let moth_template_logical_path = fixture
@@ -956,7 +956,7 @@ fn moth_template_header_visibility_contains_implicit_html_constants() {
 fn moth_template_body_sees_exported_same_directory_root_constants() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
-            "src/docs/#mod.moth",
+            "src/docs/@mod.moth",
             "export:\n    local_label #= \"from root\"\n;\n",
         ),
         ("src/docs/intro.mtf", "[local_label]"),
@@ -964,8 +964,8 @@ fn moth_template_body_sees_exported_same_directory_root_constants() {
     let (ast, string_table) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
         &[
-            "@html/#mod.moth",
-            "src/docs/#mod.moth",
+            "@html/@mod.moth",
+            "src/docs/@mod.moth",
             "src/docs/intro.mtf",
         ],
     );
@@ -978,7 +978,7 @@ fn moth_template_without_same_directory_root_sees_only_html_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/docs/intro.mtf", "[collision]")]);
     let (ast, string_table) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
-        &["@html/#mod.moth", "src/docs/intro.mtf"],
+        &["@html/@mod.moth", "src/docs/intro.mtf"],
     );
 
     folded_content_contains(&ast, &string_table, "html");
@@ -988,7 +988,7 @@ fn moth_template_without_same_directory_root_sees_only_html_constants() {
 fn same_directory_root_constants_override_html_constants() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
-            "src/docs/#mod.moth",
+            "src/docs/@mod.moth",
             "export:\n    collision #= \"local\"\n;\n",
         ),
         ("src/docs/intro.mtf", "[collision]"),
@@ -996,8 +996,8 @@ fn same_directory_root_constants_override_html_constants() {
     let (ast, string_table) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
         &[
-            "@html/#mod.moth",
-            "src/docs/#mod.moth",
+            "@html/@mod.moth",
+            "src/docs/@mod.moth",
             "src/docs/intro.mtf",
         ],
     );
@@ -1011,7 +1011,7 @@ fn same_directory_root_constants_override_html_constants() {
 fn exported_html_functions_are_not_visible_to_moth_template_body() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[render_html]")]);
     let diagnostic = fixture
-        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/#mod.moth", "src/intro.mtf"]);
+        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
 
     assert!(
         !matches!(
@@ -1082,7 +1082,7 @@ fn moth_template_sees_html_constants_through_provider_interface_without_html_hea
 fn moth_template_runtime_function_call_is_rejected_by_const_template_folding() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
-            "src/docs/#mod.moth",
+            "src/docs/@mod.moth",
             r#"export:
     render_local || -> String:
         return "runtime"
@@ -1095,8 +1095,8 @@ fn moth_template_runtime_function_call_is_rejected_by_const_template_folding() {
     let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &[
-            "@html/#mod.moth",
-            "src/docs/#mod.moth",
+            "@html/@mod.moth",
+            "src/docs/@mod.moth",
             "src/docs/intro.mtf",
         ],
     );
@@ -1114,7 +1114,7 @@ fn moth_template_runtime_function_call_is_rejected_by_const_template_folding() {
 fn moth_template_unknown_template_condition_is_rejected_by_const_template_folding() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[if show: visible]")]);
     let diagnostic = fixture
-        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/#mod.moth", "src/intro.mtf"]);
+        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
 
     assert!(
         matches!(diagnostic.kind, DiagnosticKind::Rule(_)),
@@ -1126,7 +1126,7 @@ fn moth_template_unknown_template_condition_is_rejected_by_const_template_foldin
 fn exported_same_directory_functions_and_types_are_not_visible_to_moth_template_body() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
-            "src/docs/#mod.moth",
+            "src/docs/@mod.moth",
             r#"export:
     LocalType = | value String |
     render_local || -> String:
@@ -1140,8 +1140,8 @@ fn exported_same_directory_functions_and_types_are_not_visible_to_moth_template_
     let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &[
-            "@html/#mod.moth",
-            "src/docs/#mod.moth",
+            "@html/@mod.moth",
+            "src/docs/@mod.moth",
             "src/docs/intro.mtf",
         ],
     );
@@ -1159,7 +1159,7 @@ fn exported_same_directory_functions_and_types_are_not_visible_to_moth_template_
 fn moth_template_const_record_field_access_folds_in_template_head() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[html_defaults.color]")]);
     let (ast, string_table) = fixture
-        .compile_moth_template_ast_ok("src/intro.mtf", &["@html/#mod.moth", "src/intro.mtf"]);
+        .compile_moth_template_ast_ok("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
 
     folded_content_contains(&ast, &string_table, "green");
 }
@@ -1168,7 +1168,7 @@ fn moth_template_const_record_field_access_folds_in_template_head() {
 fn root_supplied_content_constant_can_be_referenced_normally() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
-            "src/docs/#mod.moth",
+            "src/docs/@mod.moth",
             "export:\n    import @./other { content }\n;\n",
         ),
         ("src/docs/other.mtf", "shared body"),
@@ -1177,8 +1177,8 @@ fn root_supplied_content_constant_can_be_referenced_normally() {
     let (ast, string_table) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
         &[
-            "@html/#mod.moth",
-            "src/docs/#mod.moth",
+            "@html/@mod.moth",
+            "src/docs/@mod.moth",
             "src/docs/other.mtf",
             "src/docs/intro.mtf",
         ],
@@ -1192,7 +1192,7 @@ fn generated_self_content_is_not_visible_to_moth_template_body() {
     let fixture = MothTemplateScopeFixture::new(&[("src/docs/intro.mtf", "[content]")]);
     let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
-        &["@html/#mod.moth", "src/docs/intro.mtf"],
+        &["@html/@mod.moth", "src/docs/intro.mtf"],
     );
 
     assert!(
@@ -1211,7 +1211,7 @@ fn generated_self_content_is_not_visible_to_moth_template_body() {
 fn self_originating_content_reexport_is_excluded_from_moth_template_body_scope() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
-            "src/docs/#mod.moth",
+            "src/docs/@mod.moth",
             "export:\n    import @./intro { content }\n;\n",
         ),
         ("src/docs/intro.mtf", "[content]"),
@@ -1219,8 +1219,8 @@ fn self_originating_content_reexport_is_excluded_from_moth_template_body_scope()
     let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &[
-            "@html/#mod.moth",
-            "src/docs/#mod.moth",
+            "@html/@mod.moth",
+            "src/docs/@mod.moth",
             "src/docs/intro.mtf",
         ],
     );
@@ -1240,7 +1240,7 @@ fn self_originating_content_reexport_is_excluded_from_moth_template_body_scope()
 #[test]
 fn moth_grouped_imports_moth_template_content_as_folded_string_constant() {
     let fixture = MothTemplateScopeFixture::new(&[
-        ("src/#page.moth", ""),
+        ("src/@page.moth", ""),
         (
             "src/main.moth",
             "import @./intro { content as intro_content }\nfrom_intro #String = intro_content\n",
@@ -1249,10 +1249,10 @@ fn moth_grouped_imports_moth_template_content_as_folded_string_constant() {
     ]);
     let (ast, string_table) = fixture
         .compile_module_ast(&[
-            "@html/#mod.moth",
+            "@html/@mod.moth",
             "src/intro.mtf",
             "src/main.moth",
-            "src/#page.moth",
+            "src/@page.moth",
         ])
         .expect("module using imported Moth template content should compile through AST");
 
@@ -1265,7 +1265,7 @@ fn moth_grouped_imports_moth_template_content_as_folded_string_constant() {
 #[test]
 fn moth_namespace_imports_moth_template_content_as_folded_string_constant() {
     let fixture = MothTemplateScopeFixture::new(&[
-        ("src/#page.moth", ""),
+        ("src/@page.moth", ""),
         (
             "src/main.moth",
             "import @./intro\nfrom_intro #String = intro.content\n",
@@ -1274,9 +1274,9 @@ fn moth_namespace_imports_moth_template_content_as_folded_string_constant() {
     ]);
     let (ast, string_table) = fixture
         .compile_module_ast(&[
-            "@html/#mod.moth",
+            "@html/@mod.moth",
             "src/main.moth",
-            "src/#page.moth",
+            "src/@page.moth",
             "src/intro.mtf",
         ])
         .expect("module using namespace-imported Moth template content should compile through AST");
@@ -1290,7 +1290,7 @@ fn moth_namespace_imports_moth_template_content_as_folded_string_constant() {
 #[test]
 fn imported_bd_file_produces_no_runtime_or_start_behavior() {
     let fixture = MothTemplateScopeFixture::new(&[
-        ("src/#page.moth", ""),
+        ("src/@page.moth", ""),
         (
             "src/main.moth",
             "import @./intro\nfrom_intro #String = intro.content\n",
@@ -1300,10 +1300,10 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
 
     let (headers, string_table) = fixture
         .prepare_and_bind_headers_for(&[
-            "@html/#mod.moth",
+            "@html/@mod.moth",
             "src/intro.mtf",
             "src/main.moth",
-            "src/#page.moth",
+            "src/@page.moth",
         ])
         .expect("headers should parse");
 
@@ -1339,10 +1339,10 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
 
     let (ast, ast_string_table) = fixture
         .compile_module_ast(&[
-            "@html/#mod.moth",
+            "@html/@mod.moth",
             "src/intro.mtf",
             "src/main.moth",
-            "src/#page.moth",
+            "src/@page.moth",
         ])
         .expect("module AST should build");
 
@@ -1371,7 +1371,7 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
 fn moth_template_dynamic_loop_condition_rejected_by_const_folding() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[loop show: visible]")]);
     let diagnostic = fixture
-        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/#mod.moth", "src/intro.mtf"]);
+        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
 
     assert!(
         matches!(diagnostic.kind, DiagnosticKind::Rule(_)),
@@ -1383,7 +1383,7 @@ fn moth_template_dynamic_loop_condition_rejected_by_const_folding() {
 fn moth_template_external_prelude_call_rejected_by_const_folding() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[io.line([: [\"test\"]])]")]);
     let diagnostic = fixture
-        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/#mod.moth", "src/intro.mtf"]);
+        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
 
     assert!(
         !matches!(
@@ -1500,7 +1500,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
 
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/content.moth");
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let prepared_file = prepare_moth_source(
         &format!("content #= [$md: {source}]"),
         &file_path,
@@ -1531,7 +1531,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     .expect("authored md headers should bind");
     let sorted_headers =
         resolve_module_dependencies(headers, &mut string_table).expect("headers should sort");
-    let entry_dir = InternedPath::from_single_str("src/#page.moth", &mut string_table);
+    let entry_dir = InternedPath::from_single_str("src/@page.moth", &mut string_table);
 
     let authored_ast = Ast::new(
         AstBuildInput {

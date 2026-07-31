@@ -126,7 +126,7 @@ Aliases to scalar or otherwise non-constructible targets are not callable for th
 
 ### Visibility and module public surfaces
 
-Type aliases follow ordinary module visibility rules. A type alias declared in a source file is importable by other files in the same module. Cross-module visibility is controlled by the module root's explicit `export:` surface. The hash-root filename itself has no semantic role. A public re-export may expose an imported alias under a chosen public name. That operation is not the same as an ordinary local file import alias.
+Type aliases follow ordinary module visibility rules. A type alias declared in a source file is importable by other files in the same module. Cross-module visibility is controlled by the module root's explicit `export:` surface. The normal module-root filename itself has no semantic role. A public re-export may expose an imported alias under a chosen public name. That operation is not the same as an ordinary local file import alias.
 
 ### Related concepts
 

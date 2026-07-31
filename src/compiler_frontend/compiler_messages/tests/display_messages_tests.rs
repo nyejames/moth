@@ -81,24 +81,24 @@ fn guidance_lines_are_empty_when_metadata_is_missing() {
 }
 
 #[test]
-fn special_file_renderer_names_arbitrary_hash_roots() {
+fn special_file_renderer_names_arbitrary_normal_module_roots() {
     let mut string_table = StringTable::new();
     let mut extensionless_path = InternedPath::new();
     extensionless_path.push_str("input", &mut string_table);
-    extensionless_path.push_str("#home", &mut string_table);
+    extensionless_path.push_str("@home", &mut string_table);
 
     assert_eq!(
         special_file_name_from_path(&extensionless_path, &string_table),
-        "#home.moth"
+        "@home.moth"
     );
 
     let mut explicit_path = InternedPath::new();
     explicit_path.push_str("input", &mut string_table);
-    explicit_path.push_str("#home.moth", &mut string_table);
+    explicit_path.push_str("@home.moth", &mut string_table);
 
     assert_eq!(
         special_file_name_from_path(&explicit_path, &string_table),
-        "#home.moth"
+        "@home.moth"
     );
 }
 

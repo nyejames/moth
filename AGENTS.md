@@ -26,10 +26,10 @@ For language syntax, semantics and user-visible behavior, read:
 1. `docs/src/docs/codebase/language/overview.mtf`
 2. The canonical unsuffixed Moth template files it selects
 3. `docs/language-overview.md` for concepts that have not migrated yet
-4. Paired `-basic.mtf` files and `#page.moth` only when teaching, presentation or website structure is in scope
+4. Paired `-basic.mtf` files and `@page.moth` only when teaching, presentation or website structure is in scope
 
 Use:
-- `docs/src/docs/progress/#page.moth` for current implementation status and coverage
+- `docs/src/docs/progress/@page.moth` for current implementation status and coverage
 - `docs/roadmap/roadmap.md` for sequencing, active plans, and genuinely deferred design
 - `index.md` only as a file and module locator
 

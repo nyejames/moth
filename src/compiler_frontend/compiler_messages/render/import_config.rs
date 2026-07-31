@@ -103,7 +103,7 @@ pub(crate) fn invalid_config_message(
             entry_point,
             existing_entry_point,
         } => format!(
-            "HTML builder produced duplicate output path '{}'. Entry '{}' conflicts with already-mapped entry '{}'. Ensure each '#*.moth' entry maps to a unique page output.",
+            "HTML builder produced duplicate output path '{}'. Entry '{}' conflicts with already-mapped entry '{}'. Ensure each '@*.moth' entry maps to a unique page output.",
             string_table.resolve(*output_path),
             string_table.resolve(*entry_point),
             string_table.resolve(*existing_entry_point),
@@ -165,7 +165,7 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*prefix),
         ),
         InvalidConfigReason::SourcePackageMissingRoot { prefix, root } => format!(
-            "Source-backed package '@{}' at '{}' is missing a direct-child hash root file. Every source-backed package must contain exactly one non-empty filename matching '#*.moth'.",
+            "Source-backed package '@{}' at '{}' is missing a direct-child normal module root file. Every source-backed package must contain exactly one non-empty filename matching '@*.moth'.",
             string_table.resolve(*prefix),
             string_table.resolve(*root),
         ),
@@ -180,14 +180,14 @@ pub(crate) fn invalid_config_message(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "Source-backed package '@{}' at '{}' has multiple direct-child hash root files: {}. Every source-backed package must contain exactly one non-empty filename matching '#*.moth'.",
+                "Source-backed package '@{}' at '{}' has multiple direct-child normal module root files: {}. Every source-backed package must contain exactly one non-empty filename matching '@*.moth'.",
                 string_table.resolve(*prefix),
                 string_table.resolve(*root),
                 candidates,
             )
         }
         InvalidConfigReason::NoRootModuleEntries { entry_root } => format!(
-            "No root module entries were found under '{}'. Expected at least one '#*.moth' file under the configured entry root.",
+            "No root module entries were found under '{}'. Expected at least one '@*.moth' file under the configured entry root.",
             string_table.resolve(*entry_root),
         ),
         InvalidConfigReason::MultipleModuleRootFiles {
@@ -200,7 +200,7 @@ pub(crate) fn invalid_config_message(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "Module directory '{}' contains multiple hash-root files: {}. Every module directory must contain exactly one non-config '#*.moth' root file.",
+                "Module directory '{}' contains multiple normal module root files: {}. Every module directory must contain exactly one non-config '@*.moth' root file.",
                 string_table.resolve(*directory),
                 candidates,
             )
@@ -215,6 +215,19 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*folder_name),
             string_table.resolve(*directory),
         ),
+        InvalidConfigReason::LegacyModuleRootFileName {
+            file_name,
+            directory,
+        } => {
+            let name = string_table.resolve(*file_name);
+            let replacement = name.replacen('#', "@", 1);
+            format!(
+                "Legacy module root filename '{}' found in '{}'. The '#' prefix has been replaced with '@'. Rename it to '{}'.",
+                name,
+                string_table.resolve(*directory),
+                replacement,
+            )
+        }
     }
 }
 
@@ -429,7 +442,7 @@ pub(crate) fn invalid_source_file_entry_message(
     let extension = string_table.resolve(extension);
     format!(
         "Entry file `{path}` uses the `.{extension}` source-file kind, but source assets cannot be compiled as page or module entries.\n\
-         Import this file from a `.moth` entry file using extensionless import syntax, or use a `.moth`/`#page.moth` file as the build entry.",
+         Import this file from a `.moth` entry file using extensionless import syntax, or use a `.moth`/`@page.moth` file as the build entry.",
     )
 }
 

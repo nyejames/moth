@@ -166,7 +166,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
         functions: function_link_facts,
     };
 
-    let entry_point = PathBuf::from("src/#page.moth");
+    let entry_point = PathBuf::from("src/@page.moth");
     let mut borrow_analysis = BorrowCheckReport::default();
     borrow_analysis.analysis.reactive_invalidations.insert(
         HirNodeId(1),
@@ -299,7 +299,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::from("#page.moth"),
+            entry_point: PathBuf::from("@page.moth"),
             warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: ModuleRootActivity {

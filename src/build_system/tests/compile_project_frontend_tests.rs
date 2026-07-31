@@ -37,12 +37,12 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @provider { run }\nvalue = run()\n",
     )
     .expect("should write blocked consumer");
     fs::write(
-        dir.join("consumer/#mod.moth"),
+        dir.join("consumer/@mod.moth"),
         "import @provider { run }\nvalue = run()\n",
     )
     .expect("should write second blocked consumer");
@@ -52,7 +52,7 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     )
     .expect("should write diagnosed provider");
     fs::write(
-        dir.join("independent/#mod.moth"),
+        dir.join("independent/@mod.moth"),
         "value = missing_independent_value\n",
     )
     .expect("should write independent diagnosed module");
@@ -94,13 +94,13 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("independent/#mod.moth")),
+            .any(|path| path.ends_with("independent/@mod.moth")),
         "independent branch should continue and retain its diagnostic: {diagnosed_paths:?}"
     );
     assert!(
         diagnosed_paths
             .iter()
-            .all(|path| { !path.ends_with("#page.moth") && !path.ends_with("consumer/#mod.moth") }),
+            .all(|path| { !path.ends_with("@page.moth") && !path.ends_with("consumer/@mod.moth") }),
         "blocked consumers should not be semantically compiled: {diagnosed_paths:?}"
     );
 
@@ -115,14 +115,14 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     fs::create_dir_all(&first_package).expect("should create first package");
     fs::create_dir_all(&second_package).expect("should create second package");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(dir.join("#page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        first_package.join("#mod.moth"),
+        first_package.join("@mod.moth"),
         "export:\n    first || -> Int:\n        return missing_first_package_value\n    ;\n;\n",
     )
     .expect("should write first diagnosed package");
     fs::write(
-        second_package.join("#mod.moth"),
+        second_package.join("@mod.moth"),
         "export:\n    second || -> Int:\n        return missing_second_package_value\n    ;\n;\n",
     )
     .expect("should write second diagnosed package");
@@ -169,13 +169,13 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("packages/first/#mod.moth")),
+            .any(|path| path.ends_with("packages/first/@mod.moth")),
         "first package diagnostic should be retained: {diagnosed_paths:?}"
     );
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("packages/second/#mod.moth")),
+            .any(|path| path.ends_with("packages/second/@mod.moth")),
         "later independent package should still compile: {diagnosed_paths:?}"
     );
 
@@ -188,7 +188,7 @@ fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store()
     fs::create_dir_all(&dir).expect("should create project root");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         r#"shell #= [:<span>[$slot]</span>]
 unused_insert #= [$insert("unused"): unused]
 
@@ -231,7 +231,7 @@ fn generated_sidecars_reconstruct_complete_generic_nominal_members() {
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("provider/#mod.moth"),
+        dir.join("provider/@mod.moth"),
         r#"identity type T |value T| -> T:
     return value
 ;
@@ -245,7 +245,7 @@ export:
     )
     .expect("should write provider");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         r#"import @provider { forward }
 
 export:
@@ -356,7 +356,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     fs::create_dir_all(dir.join("generics")).expect("should create generic provider module");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("facade/provider/#mod.moth"),
+        dir.join("facade/provider/@mod.moth"),
         r#"export:
     Hidden = |
         value Int,
@@ -374,7 +374,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     )
     .expect("should write provider");
     fs::write(
-        dir.join("facade/#mod.moth"),
+        dir.join("facade/@mod.moth"),
         r#"export:
     import @provider { Wrapper, make }
 ;
@@ -382,7 +382,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     )
     .expect("should write facade");
     fs::write(
-        dir.join("generics/#mod.moth"),
+        dir.join("generics/@mod.moth"),
         r#"export:
     identity type T |value T| -> T:
         return value
@@ -392,7 +392,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     )
     .expect("should write generic provider");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         r#"import @facade { Wrapper, make }
 import @generics { identity }
 
@@ -767,7 +767,7 @@ fn provider_created_package_registry_survives_into_module() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { draw }\nvalue = draw()\n",
     )
     .expect("should write page");
@@ -822,7 +822,7 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { draw }\nimport @other { run }\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
@@ -876,7 +876,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     let dir = temp_dir("provider_runtime_metadata_unreachable");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(dir.join("#page.moth"), "import @other { run }\nvalue = 1\n")
+    fs::write(dir.join("@page.moth"), "import @other { run }\nvalue = 1\n")
         .expect("should write entry");
     fs::write(
         dir.join("other.moth"),
@@ -957,7 +957,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @html { canvas }\npage_canvas_id #= canvas\nvalue = 1\n",
     )
     .expect("should write page");
@@ -1024,7 +1024,7 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { draw }\nvalue = draw()\n",
     )
     .expect("should write page");
@@ -1240,8 +1240,8 @@ fn directory_project_discovers_multiple_entry_modules() {
     fs::create_dir_all(dir.join("page")).expect("should create page dir");
     fs::create_dir_all(dir.join("layout")).expect("should create layout dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(dir.join("page/#page.moth"), "x ~= 10\n").expect("should write page");
-    fs::write(dir.join("layout/#layout.moth"), "y ~= 20\n").expect("should write layout");
+    fs::write(dir.join("page/@page.moth"), "x ~= 10\n").expect("should write page");
+    fs::write(dir.join("layout/@layout.moth"), "y ~= 20\n").expect("should write layout");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -1275,12 +1275,12 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     fs::create_dir_all(dir.join("second")).expect("should create second module dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("first/#a.moth"),
+        dir.join("first/@a.moth"),
         "Item = |\n    shared Int,\n    first_only String,\n|\nitem = Item(1, \"first\")\n",
     )
     .expect("should write first entry");
     fs::write(
-        dir.join("second/#b.moth"),
+        dir.join("second/@b.moth"),
         "Item = |\n    shared Int,\n    second_only String,\n|\nitem = Item(1, \"second\")\n",
     )
     .expect("should write second entry");
@@ -1306,11 +1306,11 @@ fn directory_project_remaps_delta_collisions_across_modules() {
                 .entry_point
                 .file_name()
                 .and_then(|name| name.to_str())
-                == Some("#b.moth")
+                == Some("@b.moth")
         })
-        .expect("expected #b.moth module");
+        .expect("expected @b.moth module");
     let item_path =
-        InternedPath::try_from_filesystem_path(Path::new("second/#b.moth"), &mut string_table)
+        InternedPath::try_from_filesystem_path(Path::new("second/@b.moth"), &mut string_table)
             .expect("test path should be UTF-8")
             .join_str("Item", &mut string_table);
     let nominal_id = second_module
@@ -1352,7 +1352,7 @@ fn provider_backed_grouped_import_compiles_and_reuses_cache() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { draw as render }\nimport @other { run }\nvalue = render()\nother_value = run()\n",
     )
     .expect("should write page");
@@ -1397,7 +1397,7 @@ fn provider_backed_namespace_import_exposes_function_and_type_members() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js\nwidget drawing.Widget = drawing.make_widget()\nvalue = drawing.draw()\n",
     )
     .expect("should write page");
@@ -1438,7 +1438,7 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @a/use { run_a }\nimport @b/use { run_b }\nvalue_a = run_a()\nvalue_b = run_b()\n",
     )
     .expect("should write page");
@@ -1489,7 +1489,7 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { make_widget, use_widget }\nwidget = make_widget()\nvalue = use_widget(widget)\n",
     )
     .expect("should write page");
@@ -1525,7 +1525,7 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./a/drawing.js { make_widget }\nimport @./b/drawing.js { use_widget }\nwidget = make_widget()\nvalue = use_widget(widget)\n",
     )
     .expect("should write page");
@@ -1630,7 +1630,7 @@ fn html_js_provider_namespace_import_resolves() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js\nvalue = drawing.draw()\n",
     )
     .expect("should write page");
@@ -1670,7 +1670,7 @@ fn html_js_provider_grouped_import_resolves() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { draw as render }\nvalue = render()\n",
     )
     .expect("should write page");
@@ -1710,7 +1710,7 @@ fn html_js_provider_grouped_alias_for_function_and_opaque_type_resolves() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { Widget as Canvas, draw as render }\nvalue = render()\n",
     )
     .expect("should write page");
@@ -1750,7 +1750,7 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { make_canvas, fill_rect }\ncanvas ~= make_canvas()\n~canvas.fill_rect(0.0, 0.0, 1.0, 1.0)\n",
     )
     .expect("should write page");
@@ -1791,7 +1791,7 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { draw }\nimport @other { run }\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
@@ -1837,7 +1837,7 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
-        dir.join("#page.moth"),
+        dir.join("@page.moth"),
         "import @./drawing.js { Canvas, get_canvas }\nrun || -> Canvas, Error!:\n    return get_canvas(\"game\")!\n;\n",
     )
     .expect("should write page");
@@ -1876,12 +1876,13 @@ fn single_file_rejects_source_package_moth_folder_collision() {
     let dir = temp_dir("single_file_source_package_collision");
     fs::create_dir_all(&dir).expect("should create temp dir");
 
-    // Source-backed package with one valid hash root plus a .moth/folder collision.
+    // Source-backed package with one valid normal module root plus a .moth/folder collision.
     let widget_lib = dir.join("lib").join("widgets");
     fs::create_dir_all(widget_lib.join("widget")).expect("should create widget folder sibling");
     fs::write(widget_lib.join("widget.moth"), "value #= 1\n")
         .expect("should write colliding widget.moth");
-    fs::write(widget_lib.join("#mod.moth"), "value #= 2\n").expect("should write valid hash root");
+    fs::write(widget_lib.join("@mod.moth"), "value #= 2\n")
+        .expect("should write valid normal module root");
 
     // Main single file that does NOT import the ambiguous source-backed package path.
     let main_path = dir.join("main.moth");

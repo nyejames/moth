@@ -1,6 +1,6 @@
 //! Scaffold templates for `moth new html`.
 //!
-//! WHAT: Owns the generated content for `config.moth`, `src/#page.moth`, manifests, and `.gitignore`.
+//! WHAT: Owns the generated content for `config.moth`, `src/@page.moth`, manifests, and `.gitignore`.
 //! WHY: Centralises template strings so they are not scattered through write logic.
 
 /// Escape a string for use in a Moth config string literal.
@@ -29,7 +29,7 @@ html_lang #= "en"
     )
 }
 
-/// Return the exact starter content for `src/#page.moth`.
+/// Return the exact starter content for `src/@page.moth`.
 pub fn page_template() -> &'static str {
     r#"page_title #= "Welcome"
 page_head #= [$html:

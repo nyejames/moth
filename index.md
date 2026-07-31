@@ -7,7 +7,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [moth CLI entry](src/main.rs)
 - [crate module surface](src/lib.rs)
 - [Moth source packages](packages/): compiler-shipped source-backed packages.
-    - [@html Builder package](packages/html/#mod.moth): HTML helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.) and the `Canvas`/`get_canvas` wrapper. Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
+    - [@html Builder package](packages/html/@mod.moth): HTML helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.) and the `Canvas`/`get_canvas` wrapper. Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
     - [Core binding packages](src/builder_surface/core_packages/): compiler-owned operations and prelude visibility policy.
 - [validate/bench/docs workflow](justfile)
 - [contributor workflow and validation commands](CONTRIBUTING.md)
@@ -178,5 +178,5 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [memory management design](docs/src/docs/codebase/memory-management/overview.mtf)
 - [codebase style guide](docs/codebase-style-guide.md)
 - [docs website source](docs/src/docs/); [generated output](docs/release/)
-- [language support progress matrix](docs/src/docs/progress/#page.moth)
+- [language support progress matrix](docs/src/docs/progress/@page.moth)
 - [planned work and implementation plans](docs/roadmap/)

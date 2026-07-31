@@ -56,7 +56,7 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
     // Build a source file table for the single synthetic test file and set the retained
     // file identity on every header so the origin projection can resolve the active root
     // from the per-file source-origin table.
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let source_files = SourceFileTable::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -228,7 +228,7 @@ fn active_origin_missing_from_table_fails_internally() {
     let (mut headers, mut string_table) =
         parse_single_file_headers_with_table("export:\n    alpha #= 1\n;\n");
 
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let source_files = SourceFileTable::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -277,7 +277,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
     let (mut headers, mut string_table) =
         parse_single_file_headers_with_table("export:\n    alpha #= 1\n;\n");
 
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let source_files = SourceFileTable::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -329,7 +329,7 @@ fn conflicting_public_header_ownership_fails_internally() {
     let (mut headers, mut string_table) =
         parse_single_file_headers_with_table("export:\n    alpha #= 1\n    beta #= 2\n;\n");
 
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let second_path = PathBuf::from("src/other.moth");
     let source_files = SourceFileTable::build(
         [file_path.clone(), second_path.clone()],
@@ -409,7 +409,7 @@ fn zero_public_exports_still_validates_active_origin() {
     // None must still fail, proving lookup and validation run before any header is inspected.
     let (headers, mut string_table) = parse_single_file_headers_with_table("#page\n");
 
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let source_files = SourceFileTable::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -531,10 +531,10 @@ fn add_source_package_export_target(
 #[test]
 fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     let mut string_table = StringTable::new();
-    let active_path = PathBuf::from("src/#page.moth");
-    let imported_path = PathBuf::from("src/#mod.moth");
+    let active_path = PathBuf::from("src/@page.moth");
+    let imported_path = PathBuf::from("src/@mod.moth");
 
-    // The active root is the entry file; the imported root is a hash-root file compiled only to
+    // The active root is the entry file; the imported root is a normal module-root file compiled only to
     // validate its public declaration surface.
     let active_output = prepare_single_file(
         "export:\n    Local = | value Int |\n;\n",
@@ -641,8 +641,8 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
 #[test]
 fn public_source_nominal_origin_index_rejects_missing_file_id() {
     let mut string_table = StringTable::new();
-    let active_path = PathBuf::from("src/#page.moth");
-    let imported_path = PathBuf::from("src/#mod.moth");
+    let active_path = PathBuf::from("src/@page.moth");
+    let imported_path = PathBuf::from("src/@mod.moth");
 
     let active_output = prepare_single_file(
         "export:\n    Local = | value Int |\n;\n",
@@ -717,8 +717,8 @@ fn public_source_nominal_origin_index_rejects_missing_file_id() {
 #[test]
 fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     let mut string_table = StringTable::new();
-    let active_path = PathBuf::from("src/#page.moth");
-    let package_path = PathBuf::from("src/#pkg.moth");
+    let active_path = PathBuf::from("src/@page.moth");
+    let package_path = PathBuf::from("src/@pkg.moth");
 
     let active_output = prepare_single_file(
         "export:\n    Local = | value Int |\n;\n",
@@ -809,7 +809,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
 #[test]
 fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nominal() {
     let mut string_table = StringTable::new();
-    let active_path = PathBuf::from("src/#page.moth");
+    let active_path = PathBuf::from("src/@page.moth");
     let impl_path = PathBuf::from("src/impl.moth");
 
     // The active module root carries an unrelated public constant; `Counter` is authored as a
@@ -901,7 +901,7 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
 #[test]
 fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_without_target() {
     let mut string_table = StringTable::new();
-    let active_path = PathBuf::from("src/#page.moth");
+    let active_path = PathBuf::from("src/@page.moth");
     let impl_path = PathBuf::from("src/impl.moth");
 
     // The active root exports `Local` publicly; `Counter` is a private struct in the normal file
@@ -990,7 +990,7 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
 #[test]
 fn public_source_trait_origin_index_includes_directly_defined_trait() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
         &file_path,
@@ -1047,8 +1047,8 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
 #[test]
 fn public_source_trait_origin_index_includes_imported_provider_trait() {
     let mut string_table = StringTable::new();
-    let active_path = PathBuf::from("src/#page.moth");
-    let imported_path = PathBuf::from("src/#mod.moth");
+    let active_path = PathBuf::from("src/@page.moth");
+    let imported_path = PathBuf::from("src/@mod.moth");
 
     let active_output = prepare_single_file(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
@@ -1139,7 +1139,7 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
 #[test]
 fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() {
     let mut string_table = StringTable::new();
-    let active_path = PathBuf::from("src/#page.moth");
+    let active_path = PathBuf::from("src/@page.moth");
     let impl_path = PathBuf::from("src/impl.moth");
 
     // The active root carries an unrelated public constant; `DRAWABLE` is a private trait in the
@@ -1222,7 +1222,7 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
 #[test]
 fn public_source_trait_origin_index_excludes_unexported_private_trait() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
 
     let output = prepare_single_file(
         "RENDERABLE must:\n    show |This| -> String\n;\n",
@@ -1279,7 +1279,7 @@ fn public_source_trait_origin_index_excludes_unexported_private_trait() {
 #[test]
 fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
     let mut string_table = StringTable::new();
-    let package_path = PathBuf::from("src/#pkg.moth");
+    let package_path = PathBuf::from("src/@pkg.moth");
 
     let output = prepare_single_file(
         "export:\n    PKG_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
@@ -1333,7 +1333,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
 #[test]
 fn public_source_trait_origin_index_rejects_missing_file_id() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
         &file_path,

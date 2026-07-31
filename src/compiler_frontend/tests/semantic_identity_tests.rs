@@ -282,8 +282,8 @@ fn owned_source_identity(
 
 #[test]
 fn owned_source_identity_is_equal_for_equal_module_origin_and_relative_path() {
-    let first = owned_source_identity("ui/button", "#page.moth");
-    let second = owned_source_identity("ui/button", "#page.moth");
+    let first = owned_source_identity("ui/button", "@page.moth");
+    let second = owned_source_identity("ui/button", "@page.moth");
 
     assert_eq!(
         first, second,
@@ -299,21 +299,21 @@ fn owned_source_identity_is_equal_for_equal_module_origin_and_relative_path() {
 
 #[test]
 fn owned_source_identity_carries_no_absolute_path_or_source_file_field() {
-    let identity = owned_source_identity("ui/button", "#page.moth");
+    let identity = owned_source_identity("ui/button", "@page.moth");
     let debug = format!("{identity:?}");
 
     assert!(
-        !debug.contains("ui/button/#page.moth"),
+        !debug.contains("ui/button/@page.moth"),
         "the canonical physical source path must not be embedded in the stable identity: {debug}"
     );
-    assert_eq!(identity.relative_source_path(), "#page.moth");
+    assert_eq!(identity.relative_source_path(), "@page.moth");
     assert_eq!(identity.module_origin().logical_module_path(), "ui/button");
 }
 
 #[test]
 fn changing_module_origin_changes_owned_source_identity() {
-    let button = owned_source_identity("ui/button", "#page.moth");
-    let card = owned_source_identity("ui/card", "#page.moth");
+    let button = owned_source_identity("ui/button", "@page.moth");
+    let card = owned_source_identity("ui/card", "@page.moth");
 
     assert_ne!(
         button, card,
@@ -323,25 +323,25 @@ fn changing_module_origin_changes_owned_source_identity() {
 
 #[test]
 fn changing_relative_source_path_changes_owned_source_identity() {
-    let root_file = owned_source_identity("ui/button", "#page.moth");
+    let root_file = owned_source_identity("ui/button", "@page.moth");
     let nested_file = owned_source_identity("ui/button", "internal/renderer.moth");
 
     assert_ne!(
         root_file, nested_file,
         "changing the module-relative source path must change identity"
     );
-    assert_eq!(root_file.relative_source_path(), "#page.moth");
+    assert_eq!(root_file.relative_source_path(), "@page.moth");
     assert_eq!(nested_file.relative_source_path(), "internal/renderer.moth");
 }
 
 #[test]
 fn owned_source_identity_distinguishes_same_name_in_different_modules() {
-    let alpha = owned_source_identity("alpha", "#page.moth");
-    let inner = owned_source_identity("alpha/inner", "#page.moth");
+    let alpha = owned_source_identity("alpha", "@page.moth");
+    let inner = owned_source_identity("alpha/inner", "@page.moth");
 
     assert_ne!(
         alpha, inner,
-        "two root files named #page.moth in different modules must keep distinct identities"
+        "two root files named @page.moth in different modules must keep distinct identities"
     );
 }
 
@@ -368,7 +368,7 @@ fn owned_source_identity_rejects_invalid_relative_path_components() {
 fn owned_source_identity_rejects_absolute_relative_path() {
     let result = StableOwnedSourceIdentity::from_relative_source_path(
         module_origin("ui/button"),
-        Path::new("/abs/#page.moth"),
+        Path::new("/abs/@page.moth"),
     );
     assert!(
         matches!(result, Err(ref e) if e.error_type == ErrorType::Compiler && e.msg.contains("invalid component")),

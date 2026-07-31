@@ -1,4 +1,4 @@
-`@html` provides compile-time HTML helpers as a builder source-backed package. It belongs to the Builder origin family with MothSource backing, so the compiler reads ordinary Moth source from `packages/html/#mod.moth`. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@html` provides compile-time HTML helpers as a builder source-backed package. It belongs to the Builder origin family with MothSource backing, so the compiler reads ordinary Moth source from `packages/html/@mod.moth`. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
 `@html` ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the standard library expands.
 

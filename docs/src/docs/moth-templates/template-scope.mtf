@@ -5,7 +5,7 @@ A `.mtf` file sees a deliberately small compile-time scope. The implicit templat
 Exported compile-time constants and const records from the same-directory module root are visible inside a `.mtf` file. This is the primary way to parameterise moth template content.
 
 [codeblock, $code("moth"):
-    -- docs/#docs.moth
+    -- docs/@docs.moth
     export:
         site_name #= "Moth"
     ;
@@ -37,7 +37,7 @@ location data is available.
 Authors resolve collisions by renaming the module-root export.
 
 [codeblock, $code("moth"):
-    -- docs/#docs.moth
+    -- docs/@docs.moth
     export:
         -- INVALID: @html already exposes `p`, so this collides.
         p #= [p: Custom paragraph]
@@ -45,7 +45,7 @@ Authors resolve collisions by renaming the module-root export.
 ]
 
 [codeblock, $code("moth"):
-    -- docs/#docs.moth
+    -- docs/@docs.moth
     export:
         -- Correct: rename to avoid the collision.
         my_p #= [p: Custom paragraph]

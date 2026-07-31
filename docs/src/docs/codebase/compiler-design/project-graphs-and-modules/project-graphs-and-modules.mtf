@@ -14,7 +14,7 @@ A **graph** here means nodes plus directed edges with meaning.
 
 A **provider** supplies a public interface. A **consumer** binds against that interface after the provider succeeds.
 
-In the running example, `#page.moth` consumes `@greeting`. The edge names a provider relationship. It does not copy `greet`'s body into the page module. Think of a graft point, not a clone.
+In the running example, `@page.moth` consumes `@greeting`. The edge names a provider relationship. It does not copy `greet`'s body into the page module. Think of a graft point, not a clone.
 
 **Diagram placeholder:** Roots own files while imports create provider edges
 
@@ -25,7 +25,7 @@ In the running example, `#page.moth` consumes `@greeting`. The edge names a prov
 
 Moth marks module roots in the filesystem on purpose.
 
-- **Normal roots** use names like `#page.moth`. They may hold declarations, dormant top-level runtime work and page fragments.
+- **Normal roots** use names like `@page.moth`. They may hold declarations, dormant top-level runtime work and page fragments.
 - **Support roots** use names like `+helpers.moth`. They are API-only semantic modules: declarations yes, implicit `start` and page fragments no.
 - The **project package facade** is another API-only role with project-wide assembly privilege owned by the build system.
 - Ordinary owned source files such as `greeting.moth` sit under a root's ownership without each file becoming its own root.
@@ -59,7 +59,7 @@ A module waits until every required provider interface exists. Binding-backed in
 
 One physical module compiles **once** per project or package compilation boundary. Entries later activate roots. They do not recompile the same module once per page.
 
-For the greeting project, `greeting.moth`'s module compiles and publishes an interface. Only then does `#page.moth` bind `import @greeting { greet }`.
+For the greeting project, `greeting.moth`'s module compiles and publishes an interface. Only then does `@page.moth` bind `import @greeting { greet }`.
 
 **Diagram placeholder:** Providers finish before consumers bind
 

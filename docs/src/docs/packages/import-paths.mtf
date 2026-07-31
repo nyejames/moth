@@ -20,7 +20,7 @@ Import paths resolve declaration surfaces, not file bytes. Every source import r
 - Scoped support packages are injected by package name, not physical ancestor paths.
 - Core and builder runtime packages use their registered package path.
 - Specific symbol imports use grouped syntax. Direct symbol-path imports such as `import @core/math/sin` are rejected.
-- Direct imports of `#*.moth`, `+*.moth` and `config.moth` are rejected.
+- Direct imports of `@*.moth`, `+*.moth` and `config.moth` are rejected.
 - Moth template `.mtf` and plain Markdown `.md` content files both expose generated `content` constants. See @../moth-templates/#content-imports (Moth template content imports) and @../markdown/#markdown-imports (Markdown imports).
 - The imported public surface of a module root comes from its `export:` block. See @#module-visibility (Module visibility).
 

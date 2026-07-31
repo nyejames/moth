@@ -7,4 +7,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["hash_root_config_namesake_is_module_root emitted"]
+must_contain = ["normal_module_root_config_namesake_is_module_root emitted"]

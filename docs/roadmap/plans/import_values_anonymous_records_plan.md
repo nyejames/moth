@@ -32,7 +32,7 @@ This plan must complete before entry-local config blocks.
 - `docs/build-system-design.md` for config bootstrap, `@project`, source `#Import` contracts, section schemas and output ownership
 - `docs/language-overview.md` for source syntax
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
-- `docs/src/docs/progress/#page.moth` for current support
+- `docs/src/docs/progress/@page.moth` for current support
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for the module graph this plan builds on
 
 ## Delete rejected design

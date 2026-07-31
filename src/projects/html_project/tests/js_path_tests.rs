@@ -70,7 +70,7 @@ fn render_entry_fragments_preserves_runtime_slot_order() {
 #[test]
 fn no_runtime_fragments_still_emits_start_call() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(std::path::PathBuf::from("#page.moth"), &mut string_table);
+    let module = create_test_module(std::path::PathBuf::from("@page.moth"), &mut string_table);
     let function_names = HashMap::from([(
         module
             .executable

@@ -63,7 +63,7 @@ Use this order whenever documents disagree:
 3. `docs/compiler-design-overview.md`
 4. `docs/build-system-design.md`
 5. `docs/language-overview.md`
-6. `docs/src/docs/progress/#page.moth`
+6. `docs/src/docs/progress/@page.moth`
 7. Roadmap plans for sequencing only
 8. Educational and user-facing pages
 9. Current implementation code
@@ -201,7 +201,7 @@ Do not label them active or queued unless a separate approved plan changes roadm
   - `docs/compiler-design-overview.md`
   - `docs/build-system-design.md`
   - `docs/language-overview.md`
-  - `docs/src/docs/progress/#page.moth`
+  - `docs/src/docs/progress/@page.moth`
   - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md`
   - `docs/roadmap/plans/grouped-memory-design.md`
   - both completed memory documentation plans
@@ -855,7 +855,7 @@ Replace the raw URL with:
 File:
 
 ```text
-docs/src/docs/codebase/memory-management/#page.moth
+docs/src/docs/codebase/memory-management/@page.moth
 ```
 
 Replace:

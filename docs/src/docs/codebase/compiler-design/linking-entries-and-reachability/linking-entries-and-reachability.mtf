@@ -19,7 +19,7 @@ Compilation never activates `start`. Entry assembly may activate it once after t
 
 Support roots and the project package facade have no implicit `start`.
 
-In the walkthrough, `#page.moth` owns dormant root work and a page fragment. `greeting.moth` remains an imported module. Importing `greet` does not run page-level statements from greeting's root, because greeting is not the activated entry root.
+In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` remains an imported module. Importing `greet` does not run page-level statements from greeting's root, because greeting is not the activated entry root.
 
 **Diagram placeholder:** All modules compile before one selected root activates
 
@@ -41,7 +41,7 @@ Fragments split into useful kinds:
 
 Imported modules do not run their root work merely because a consumer imported a function. Activation is explicit and entry-scoped.
 
-The paragraph in `#page.moth` enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the `.moth` file.
+The paragraph in `@page.moth` enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the `.moth` file.
 
 **Diagram placeholder:** Folded and runtime fragments preserve source indexes
 

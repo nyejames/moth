@@ -3,8 +3,8 @@
 //! WHAT: performs one deterministic traversal per project or source-package boundary, preparing
 //! canonical module identities, source ownership and sibling import-name collision facts. Project
 //! boundaries also own entry/package-prefix collisions and optional project-facade discovery;
-//! package boundaries own their required public hash-root validation. Each discovered root gets a
-//! deterministic `ModuleId`, explicit `ModuleRootRole` and boundary-relative logical module path.
+//! package boundaries own their required public normal-root validation. Each discovered root gets
+//! a deterministic `ModuleId`, explicit `ModuleRootRole` and boundary-relative logical module path.
 //! WHY: filesystem discovery belongs to Stage 0. Keeping it here prevents the frontend resolver,
 //! module inventory, and collision validators from repeating the same expensive walk.
 //!
@@ -27,7 +27,8 @@ use crate::compiler_frontend::semantic_identity::{
     portable_relative_logical_path_from,
 };
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_hash_root_file, file_name_is_module_root_file, file_name_is_support_root_file,
+    file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
+    file_name_is_normal_module_root_file, file_name_is_support_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
@@ -60,7 +61,7 @@ pub(crate) struct SourceTreeDiscoveryStats {
     pub(crate) dirs_visited: usize,
     pub(crate) dirs_skipped: usize,
     pub(crate) files_seen: usize,
-    pub(crate) hash_root_files_seen: usize,
+    pub(crate) normal_root_files_seen: usize,
     pub(crate) support_root_files_seen: usize,
     pub(crate) module_roots_found: usize,
     pub(crate) project_package_facade_found: bool,
@@ -407,12 +408,14 @@ impl SourceTreeIndex {
     /// boundary descriptor and delegates to it. Package-boundary sibling collisions and root
     /// discovery are owned by the same traversal via [`SourceTreeIndex::discover_package`].
     ///
-    /// Each source directory may contain one `#*.moth` normal root or one `+*.moth` support root.
+    /// Each source directory may contain one `@*.moth` normal root or one `+*.moth` support root.
     /// Multiple or mixed roots in one directory are rejected through the existing structured config
-    /// diagnostic lane. Normal roots carry the `Normal` role used by the project module graph to
-    /// classify entry modules; the graph, not this index, owns entry selection. The optional
-    /// project-root `+*.moth` facade beside `config.moth` is discovered as a separate
-    /// `ProjectPackageFacade` node outside the entry-root containment tree and is never an entry.
+    /// diagnostic lane. Legacy `#*.moth` root-like filenames are rejected with a structured
+    /// diagnostic that tells the author to rename to `@*.moth`. Normal roots carry the `Normal`
+    /// role used by the project module graph to classify entry modules; the graph, not this index,
+    /// owns entry selection. The optional project-root `+*.moth` facade beside `config.moth` is
+    /// discovered as a separate `ProjectPackageFacade` node outside the entry-root containment
+    /// tree and is never an entry.
     ///
     /// The same traversal inventories every compiler-recognized source candidate (`.moth`,
     /// `.mtf` and `.md`) and every explicit
@@ -591,6 +594,20 @@ impl SourceTreeIndex {
                     source_files_by_stem.insert(stem.to_owned(), file_name.to_owned());
                 }
 
+                // Legacy `#*.moth` root-like filenames are invalid after the `@` migration.
+                // Reject them with a structured diagnostic before any other classification so
+                // they are never treated as ordinary source files or silently ignored.
+                if file_name_is_legacy_hash_root_file(file_name) {
+                    return Err(project_structure_messages(
+                        &path,
+                        InvalidConfigReason::LegacyModuleRootFileName {
+                            file_name: string_table.intern(file_name),
+                            directory: path_id(&directory, string_table),
+                        },
+                        string_table,
+                    ));
+                }
+
                 let is_module_root = file_name_is_module_root_file(file_name);
                 let source_kind = recognized_source_kind(file_name);
                 let source_supported = source_kind.is_some_and(|kind| {
@@ -672,7 +689,7 @@ impl SourceTreeIndex {
                     .expect("a module root file name has a role after is_module_root_file");
 
                 if role == ModuleRootRole::Normal {
-                    stats.hash_root_files_seen += 1;
+                    stats.normal_root_files_seen += 1;
                 } else if role == ModuleRootRole::Support {
                     stats.support_root_files_seen += 1;
                 }
@@ -854,7 +871,7 @@ impl SourceTreeIndex {
             .ok_or_else(|| {
                 non_utf8_filesystem_name_error(entry_file, "single-file entry name", string_table)
             })?;
-        if !file_name_is_hash_root_file(file_name) {
+        if !file_name_is_normal_module_root_file(file_name) {
             return Ok(ModuleRootTable::empty());
         }
 
@@ -889,7 +906,7 @@ impl SourceTreeIndex {
 
     /// The canonical root file of the module rooted at this boundary's entry root.
     ///
-    /// WHAT: for a package boundary index, the package public-surface hash root file. Returns
+    /// WHAT: for a package boundary index, the package public-surface normal root file. Returns
     /// `None` when no module is rooted at the entry root.
     /// WHY: the package-boundary index owner derives the resolver's narrow package-root view
     /// from this indexed fact instead of a separate `read_dir` or root-file discovery pass.
@@ -1141,11 +1158,11 @@ fn classify_directory_root(
 
 /// Classify the single required root at one source-package root directory.
 ///
-/// WHAT: a package boundary requires exactly one direct-child hash root at its root directory and
-/// reports package-specific missing-root and multiple-root diagnostics, preserving the typed
-/// `SourcePackageMissingRoot`/`SourcePackageMultipleRoots` payloads and deterministic
-/// candidate order that the separate preflight validators previously produced. The shared
-/// one-module-root-per-directory rule still rejects a support root beside that hash root.
+/// WHAT: a package boundary requires exactly one direct-child normal root at its root directory
+/// and reports package-specific missing-root and multiple-root diagnostics, preserving the typed
+/// `SourcePackageMissingRoot`/`SourcePackageMultipleRoots` payloads and deterministic candidate
+/// order that the separate preflight validators previously produced. The shared
+/// one-module-root-per-directory rule still rejects a support root beside that normal root.
 /// WHY: the package index traversal owns root discovery for the package boundary, so the
 /// root-directory classification must produce the same structured diagnostics rather than the
 /// generic `MultipleModuleRootFiles` rejection or a silent empty result.
@@ -1155,12 +1172,12 @@ fn classify_package_root_directory(
     import_prefix: &str,
     string_table: &mut StringTable,
 ) -> Result<Option<DiscoveredDirectoryRoot>, CompilerMessages> {
-    let hash_roots = directory_roots
+    let normal_roots = directory_roots
         .iter()
         .filter(|root| root.role == ModuleRootRole::Normal)
         .collect::<Vec<_>>();
 
-    if hash_roots.is_empty() {
+    if normal_roots.is_empty() {
         return Err(project_structure_messages(
             directory,
             InvalidConfigReason::SourcePackageMissingRoot {
@@ -1171,8 +1188,8 @@ fn classify_package_root_directory(
         ));
     }
 
-    if hash_roots.len() > 1 {
-        let mut candidate_paths = hash_roots
+    if normal_roots.len() > 1 {
+        let mut candidate_paths = normal_roots
             .iter()
             .map(|root| &root.root_file)
             .collect::<Vec<_>>();
@@ -1193,8 +1210,8 @@ fn classify_package_root_directory(
     }
 
     // A package root still follows the global one-module-root-per-directory rule. A support root
-    // beside the required hash root is rejected by the shared classifier rather than being
-    // silently ignored as the old direct-child hash scan did.
+    // beside the required normal root is rejected by the shared classifier rather than being
+    // silently ignored as the old direct-child root scan did.
     classify_directory_root(directory, directory_roots, string_table)
 }
 
@@ -1559,8 +1576,8 @@ fn record_discovery_metrics(
     crate::timing::record_counter("source_tree_index.dirs_skipped", stats.dirs_skipped as f64);
     crate::timing::record_counter("source_tree_index.files_seen", stats.files_seen as f64);
     crate::timing::record_counter(
-        "source_tree_index.hash_root_files_seen",
-        stats.hash_root_files_seen as f64,
+        "source_tree_index.normal_root_files_seen",
+        stats.normal_root_files_seen as f64,
     );
     crate::timing::record_counter(
         "source_tree_index.support_root_files_seen",

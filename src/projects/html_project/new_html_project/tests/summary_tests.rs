@@ -13,7 +13,7 @@ fn dummy_report() -> CreateProjectReport {
         project_name: String::from("site"),
         created: vec![
             PathBuf::from("config.moth"),
-            PathBuf::from("src/#page.moth"),
+            PathBuf::from("src/@page.moth"),
         ],
         updated: Vec::new(),
         skipped: Vec::new(),
@@ -37,7 +37,7 @@ fn summary_lists_each_file_action_section() {
         project_name: String::from("site"),
         created: vec![
             PathBuf::from("config.moth"),
-            PathBuf::from("src/#page.moth"),
+            PathBuf::from("src/@page.moth"),
         ],
         updated: vec![PathBuf::from(".gitignore")],
         replaced: vec![PathBuf::from("old-config.moth")],
@@ -47,7 +47,7 @@ fn summary_lists_each_file_action_section() {
 
     assert!(summary.contains("Created:"));
     assert!(summary.contains("  config.moth"));
-    assert!(summary.contains("  src/#page.moth"));
+    assert!(summary.contains("  src/@page.moth"));
     assert!(summary.contains("Updated:"));
     assert!(summary.contains("  .gitignore"));
     assert!(summary.contains("Replaced:"));

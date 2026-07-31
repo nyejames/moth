@@ -26,7 +26,7 @@ To see the current plans and priority goals of the compiler and language, see th
 ### Language and current support
 
 - [User-facing documentation](docs/src/docs/)
-- [Progress matrix](docs/src/docs/progress/#page.moth)
+- [Progress matrix](docs/src/docs/progress/@page.moth)
 - [Roadmap](docs/roadmap/roadmap.md)
 
 ### Compiler and memory design
@@ -133,7 +133,7 @@ compiler-owned qualified reason key, and write normalized paths relative to the 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0057"
 reason = "invalid_generic_instantiation.recursive_function_instantiation"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 3
 
 [[backends.html.diagnostic_assertions.secondary_labels]]

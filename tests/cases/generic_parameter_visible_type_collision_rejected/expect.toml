@@ -7,6 +7,6 @@ message_contains = ["Generic parameter 'Existing' collides with an existing visi
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0043"
 reason = "invalid_declaration.generic_parameter_name_collision"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 5
 count = 1

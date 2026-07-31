@@ -19,7 +19,7 @@ use crate::compiler_frontend::public_interface::{
     PublicDeclarationSemantics, SourceProviderImportSet,
 };
 use crate::compiler_frontend::source_packages::root_file::{
-    import_path_references_config_file, import_path_references_hash_root_file,
+    import_path_references_config_file, import_path_references_module_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -252,8 +252,9 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         // 5. Resolve and register explicit imports.
         if let Some(imports) = self.module_symbols.file_imports_by_source.get(source_file) {
             for import in imports {
-                // Reject direct imports of hash roots and canonical config files.
-                if import_path_references_hash_root_file(
+                // Reject direct imports of module-root files and canonical config files.
+                // Root files are imported through their directory, not by filename.
+                if import_path_references_module_root_file(
                     &import.provider.path,
                     import.from_grouped,
                     self.string_table,
@@ -1135,7 +1136,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     ///
     /// WHAT: `import @web/canvas { get_canvas }` is parsed as a grouped import whose
     /// individual entry path is `web/canvas/get_canvas`. That path may also look like a
-    /// a path into a module public surface if the project has a `web/canvas/#*.moth` root-file shape.
+    /// a path into a module public surface if the project has a `web/canvas/@*.moth` root-file shape.
     /// Checking external metadata here keeps virtual packages out of source public-surface privacy
     /// rules while leaving all source imports on normal public-surface-first resolution.
     fn resolve_and_register_external_package_grouped_import(

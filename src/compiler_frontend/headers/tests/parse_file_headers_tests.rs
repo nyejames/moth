@@ -150,7 +150,7 @@ fn prepare_and_bind_headers_result(
 
 pub(crate) fn parse_single_file_headers(source: &str) -> BoundModuleHeaders {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
 
     prepare_and_bind_headers_result(
@@ -170,7 +170,7 @@ fn parse_single_file_headers_with_warnings(
     Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
 ) {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
     let warnings = output.warnings.clone();
 
@@ -190,7 +190,7 @@ pub(crate) fn parse_single_file_headers_with_table(
     source: &str,
 ) -> (BoundModuleHeaders, StringTable) {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
 
     let headers = prepare_and_bind_headers_result(
@@ -321,7 +321,7 @@ fn prepare_header_syntax_produces_retained_syntax_without_provider_inputs() {
     // WHY: syntax preparation is provider-independent; it owns retained header/import shells,
     //      order-independent symbol facts, and statistics before provider interfaces exist.
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "const_a #Int = 1\nimport_b |x Int| -> Int:\n    return x\n;\n",
         &file_path,
@@ -365,7 +365,7 @@ fn bind_module_headers_consumes_prepared_syntax_and_produces_import_environment(
     // WHY: binding is the only phase that resolves retained import shells against provider
     //      interfaces. It must not retokenize or reparse — it consumes the retained output.
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "const_a #Int = 1\nimport_b |x Int| -> Int:\n    return x\n;\n",
         &file_path,
@@ -435,8 +435,8 @@ fn compile_time_constant_headers_are_parsed() {
 fn malformed_children_wrapper_constant_initializer_reports_eof_delimiter_error() {
     let result = parse_single_file_headers_with_entry(
         "broken #= [$children([:<li>[$slot]</li>):\n<ul>[$slot]</ul>\n]\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
 
     assert!(
@@ -455,8 +455,8 @@ fn malformed_children_wrapper_constant_initializer_reports_eof_delimiter_error()
 fn malformed_nested_children_wrapper_constant_initializer_reports_eof_delimiter_error() {
     let result = parse_single_file_headers_with_entry(
         "broken #= [$children([:<tr>[$slot]</tr>):\n<table>\n    [$children([:<td>[$slot]</td>):[$slot]]\n</table>\n]\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
 
     assert!(
@@ -603,7 +603,7 @@ fn top_level_const_template_outside_entry_file_errors() {
     let result = parse_single_file_headers_with_entry(
         "#[html.head: [\"x\"]]\n",
         "src/lib.moth",
-        "src/#page.moth",
+        "src/@page.moth",
     );
 
     assert!(
@@ -969,7 +969,7 @@ fn struct_field_default_stays_in_header_syntax_tokens() {
 #[test]
 fn function_signature_rejects_void_return_syntax() {
     let source = format!("f|| {}{}:\n;\n", "-> ", "Void");
-    let result = parse_single_file_headers_with_entry(&source, "src/#page.moth", "src/#page.moth");
+    let result = parse_single_file_headers_with_entry(&source, "src/@page.moth", "src/@page.moth");
     assert!(result.is_err(), "void return syntax must be rejected");
     let errors = result.err().expect("expected parse errors");
 
@@ -984,7 +984,7 @@ fn function_signature_rejects_void_return_syntax() {
 #[test]
 fn function_signature_rejects_none_return_syntax() {
     let source = format!("f|| {}{}:\n;\n", "-> ", "None");
-    let result = parse_single_file_headers_with_entry(&source, "src/#page.moth", "src/#page.moth");
+    let result = parse_single_file_headers_with_entry(&source, "src/@page.moth", "src/@page.moth");
     assert!(result.is_err(), "none return syntax must be rejected");
     let errors = result.err().expect("expected parse errors");
 
@@ -1130,8 +1130,8 @@ fn builtin_type_conformance_headers_parse_as_trait_conformances() {
 fn trait_requirement_rejects_lowercase_this_receiver() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |this|\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "lowercase this should be rejected");
 
@@ -1147,8 +1147,8 @@ fn trait_requirement_rejects_lowercase_this_receiver() {
 fn trait_requirement_rejects_missing_this_receiver() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |value Int|\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "trait requirements should start with This");
 
@@ -1164,8 +1164,8 @@ fn trait_requirement_rejects_missing_this_receiver() {
 fn trait_requirement_rejects_mutable_this_after_receiver() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This, ~This|\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "mutable This is receiver-only");
 
@@ -1181,8 +1181,8 @@ fn trait_requirement_rejects_mutable_this_after_receiver() {
 fn trait_requirement_rejects_composed_this_type_forms() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This, values {This}|\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "composed This forms are deferred");
 
@@ -1199,8 +1199,8 @@ fn trait_requirement_rejects_composed_this_type_forms() {
 fn trait_requirement_rejects_method_bodies_and_reversed_mutability() {
     let method_body_result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This|:\n        return \"bad\"\n    ;\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let method_body_errors = expect_header_error(
         method_body_result,
@@ -1217,8 +1217,8 @@ fn trait_requirement_rejects_method_bodies_and_reversed_mutability() {
 
     let reversed_mutability_result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This ~|\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let reversed_mutability_errors = expect_header_error(
         reversed_mutability_result,
@@ -1239,7 +1239,7 @@ fn trait_requirement_rejects_method_bodies_and_reversed_mutability() {
 #[test]
 fn trait_conformance_rejects_missing_trait_name() {
     let result =
-        parse_single_file_headers_with_entry("Card must\n", "src/#page.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("Card must\n", "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "conformance declarations require a trait name");
 
     assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
@@ -1255,8 +1255,8 @@ fn trait_conformance_rejects_missing_trait_name() {
 fn trait_conformance_rejects_semicolon_terminator() {
     let result = parse_single_file_headers_with_entry(
         "Card must DISPLAYABLE;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(
         result,
@@ -1276,8 +1276,8 @@ fn trait_conformance_rejects_semicolon_terminator() {
 fn trait_conformance_rejects_trailing_comma() {
     let result = parse_single_file_headers_with_entry(
         "Card must DISPLAYABLE,\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "trailing conformance commas should be rejected");
 
@@ -1291,8 +1291,8 @@ fn trait_conformance_rejects_trailing_comma() {
 fn trait_declaration_and_reference_names_must_be_all_caps() {
     let declaration_result = parse_single_file_headers_with_entry(
         "Displayable must:\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let declaration_errors = expect_header_error(
         declaration_result,
@@ -1314,8 +1314,8 @@ fn trait_declaration_and_reference_names_must_be_all_caps() {
 
     let conformance_result = parse_single_file_headers_with_entry(
         "Card must Displayable\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let conformance_errors = expect_header_error(
         conformance_result,
@@ -1390,7 +1390,7 @@ fn trait_incompatibility_reuses_subject_trait_name_without_duplicate_error() {
 #[test]
 fn trait_incompatibility_rejects_missing_trait_name() {
     let result =
-        parse_single_file_headers_with_entry("A must not\n", "src/#page.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("A must not\n", "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(
         result,
         "incompatibility declarations require at least one trait name",
@@ -1408,7 +1408,7 @@ fn trait_incompatibility_rejects_missing_trait_name() {
 #[test]
 fn trait_incompatibility_rejects_trailing_comma() {
     let result =
-        parse_single_file_headers_with_entry("A must not B,\n", "src/#page.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("A must not B,\n", "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "trailing incompatibility commas should be rejected");
 
     assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
@@ -1420,7 +1420,7 @@ fn trait_incompatibility_rejects_trailing_comma() {
 #[test]
 fn trait_incompatibility_rejects_semicolon_terminator() {
     let result =
-        parse_single_file_headers_with_entry("A must not B;\n", "src/#page.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("A must not B;\n", "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(
         result,
         "incompatibility declarations should be newline terminated",
@@ -1439,8 +1439,8 @@ fn trait_incompatibility_rejects_semicolon_terminator() {
 fn trait_incompatibility_subject_and_reference_names_must_be_all_caps() {
     let declaration_result = parse_single_file_headers_with_entry(
         "Displayable must not Other\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let declaration_errors = expect_header_error(
         declaration_result,
@@ -1462,8 +1462,8 @@ fn trait_incompatibility_subject_and_reference_names_must_be_all_caps() {
 
     let reference_result = parse_single_file_headers_with_entry(
         "DISPLAYABLE must not Other\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let reference_errors = expect_header_error(
         reference_result,
@@ -1488,8 +1488,8 @@ fn trait_incompatibility_subject_and_reference_names_must_be_all_caps() {
 fn trait_this_outside_trait_declaration_is_targeted() {
     let result = parse_single_file_headers_with_entry(
         "value This = 1\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "This outside trait declarations should be rejected");
 
@@ -1505,8 +1505,8 @@ fn trait_this_outside_trait_declaration_is_targeted() {
 fn function_signature_reports_missing_arrow_before_return_type() {
     let result = parse_single_file_headers_with_entry(
         "f|x Int| Int:\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     assert!(
         result.is_err(),
@@ -1525,7 +1525,7 @@ fn function_signature_reports_missing_arrow_before_return_type() {
 #[test]
 fn function_signature_reports_missing_colon_after_return_list() {
     let result =
-        parse_single_file_headers_with_entry("f|| -> Int\n;\n", "src/#page.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("f|| -> Int\n;\n", "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "missing ':' after return declarations must fail"
@@ -1546,7 +1546,7 @@ fn function_signature_reports_missing_return_type_after_arrow_colon() {
     // parser owns this boundary and must report `MissingReturnType` at the colon rather
     // than the function name or parameter list.
     let result =
-        parse_single_file_headers_with_entry("f|| -> :\n;\n", "src/#page.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("f|| -> :\n;\n", "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "an arrow immediately followed by ':' must fail"
@@ -1566,7 +1566,7 @@ fn function_signature_reports_missing_return_type_after_arrow_newline() {
     // A newline immediately after `->` is a missing-return-type boundary, not a valid
     // empty return list. The signature parser reports `MissingReturnType` at the newline.
     let result =
-        parse_single_file_headers_with_entry("f|| ->\n;\n", "src/#page.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("f|| ->\n;\n", "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "an arrow immediately followed by a newline must fail"
@@ -1590,8 +1590,8 @@ fn trait_requirement_reports_missing_return_type_after_arrow_colon() {
     // boundary after the arrow, not at the requirement name or `This` receiver.
     let result = parse_single_file_headers_with_entry(
         "DISPLAYABLE must:\n    display |This| -> :\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     assert!(
         result.is_err(),
@@ -1623,8 +1623,8 @@ fn trait_requirement_reports_missing_return_type_after_arrow_newline() {
     // body `:` terminator.
     let result = parse_single_file_headers_with_entry(
         "DISPLAYABLE must:\n    display |This| ->\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     assert!(
         result.is_err(),
@@ -1650,8 +1650,8 @@ fn duplicate_top_level_function_names_error_during_header_parsing() {
          simple_function |value Int| -> Int:\n\
              return value + 2\n\
          ;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
 
     assert!(
@@ -1671,7 +1671,7 @@ fn duplicate_top_level_function_names_error_during_header_parsing() {
 #[test]
 fn duplicate_header_detection_ignores_qualified_match_arms() {
     let mut string_table = StringTable::new();
-    let source_file = InternedPath::from_single_str("src/#page.moth", &mut string_table);
+    let source_file = InternedPath::from_single_str("src/@page.moth", &mut string_table);
     let status = string_table.intern("Status");
     let ready = string_table.intern("Ready");
     let write = string_table.intern("write");
@@ -1722,8 +1722,8 @@ fn choice_headers_parse_unit_variants_in_declaration_order() {
 fn choice_headers_reject_duplicate_variants() {
     let result = parse_single_file_headers_with_entry(
         "Status :: Ready, Ready;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     assert!(result.is_err(), "duplicate choice variants must fail");
     let errors = result.err().expect("expected parse errors");
@@ -1741,8 +1741,8 @@ fn choice_headers_reject_invalid_payload_forms() {
     // Shorthand payload is invalid by design (not deferred).
     let payload_shorthand_result = parse_single_file_headers_with_entry(
         "Status :: Ready String;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     assert!(
         payload_shorthand_result.is_err(),
@@ -1762,8 +1762,8 @@ fn choice_headers_reject_invalid_payload_forms() {
     // Constructor-style declarations are invalid by design.
     let payload_paren_result = parse_single_file_headers_with_entry(
         "Status :: Ready(String);\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     assert!(
         payload_paren_result.is_err(),
@@ -1788,8 +1788,8 @@ fn choice_headers_reject_invalid_payload_forms() {
     // Default values remain deferred.
     let defaults_result = parse_single_file_headers_with_entry(
         "Status :: Ready = true;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     assert!(
         defaults_result.is_err(),
@@ -1874,7 +1874,7 @@ fn header_parsing_emits_naming_warnings_for_non_camel_type_like_symbols() {
 #[test]
 fn header_parsing_rejects_keyword_shadow_constant_name() {
     let result =
-        parse_single_file_headers_with_entry("FALSE #= 1\n", "src/#page.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("FALSE #= 1\n", "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "keyword-shadow top-level constants must fail during header parsing"
@@ -1907,8 +1907,8 @@ fn trait_declarations_using_must_parse_as_trait_headers() {
 fn generic_type_aliases_are_rejected_during_header_parsing() {
     let result = parse_single_file_headers_with_entry(
         "Response type T as ResultShape of T, Error\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
 
     assert!(
@@ -1976,7 +1976,7 @@ fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
     let headers = parse_single_file_headers_with_entry(
         "f || -> Int:\n    1\n;\n",
         "src/lib.moth",
-        "src/#page.moth",
+        "src/@page.moth",
     )
     .expect("headers should parse");
     assert_eq!(
@@ -1989,8 +1989,8 @@ fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
 fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
     let headers = parse_single_file_headers_with_entry(
         "export:\n    Button = | label String |\n;\n[ Button(\"ignored\") ]\n",
-        "src/#components.moth",
-        "src/#page.moth",
+        "src/@components.moth",
+        "src/@page.moth",
     )
     .expect("imported module roots should parse their declaration surface");
 
@@ -2015,8 +2015,8 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
 fn imported_module_root_discards_const_root_fragments() {
     let headers = parse_single_file_headers_with_entry(
         "#[html.head: [\"ignored\"]]\n",
-        "src/#components.moth",
-        "src/#page.moth",
+        "src/@components.moth",
+        "src/@page.moth",
     )
     .expect("imported roots should skip const root fragments");
 
@@ -2187,7 +2187,7 @@ fn multi_file_parsing_aggregates_headers_const_fragments_and_runtime_count() {
     let sources = vec![
         (
             "[runtime1]\n#[const1]\n[runtime2]\n".to_owned(),
-            "src/#page.moth".to_owned(),
+            "src/@page.moth".to_owned(),
         ),
         (
             "helper_func || -> Int:\n    return 1\n;\n".to_owned(),
@@ -2195,7 +2195,7 @@ fn multi_file_parsing_aggregates_headers_const_fragments_and_runtime_count() {
         ),
     ];
 
-    let headers = parse_multi_file_headers(&sources, "src/#page.moth");
+    let headers = parse_multi_file_headers(&sources, "src/@page.moth");
 
     // Entry file: 2 runtime templates + 1 const template + 1 start function = 2 headers
     // (const template + start function; runtime templates are inside start function)
@@ -2293,7 +2293,7 @@ fn multi_file_parsing_aggregates_warnings_from_all_files() {
     let sources = vec![
         (
             "Status_type :: bad_variant;\n".to_owned(),
-            "src/#page.moth".to_owned(),
+            "src/@page.moth".to_owned(),
         ),
         (
             "Helper_type :: other_variant;\n".to_owned(),
@@ -2302,7 +2302,7 @@ fn multi_file_parsing_aggregates_warnings_from_all_files() {
     ];
 
     let (result, warnings, _string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/#page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
 
     assert!(result.is_ok(), "expected successful header parsing");
     assert_eq!(
@@ -2328,7 +2328,7 @@ fn multi_file_parsing_preserves_warnings_before_later_parse_error() {
     let sources = vec![
         (
             "io.line([: [\"hello\"]])\n".to_owned(),
-            "src/#page.moth".to_owned(),
+            "src/@page.moth".to_owned(),
         ),
         (
             "Status_type :: bad_variant;\ndup ||:\n;\ndup ||:\n;\n".to_owned(),
@@ -2337,7 +2337,7 @@ fn multi_file_parsing_preserves_warnings_before_later_parse_error() {
     ];
 
     let (result, warnings, _string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/#page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
 
     assert!(
         result.is_err(),
@@ -2365,7 +2365,7 @@ fn per_file_fork_merge_produces_correct_headers_and_warnings_for_multiple_files(
     let sources = [
         (
             "FooA #= \"a\"\nBarA #= \"b\"\n".to_owned(),
-            "src/#page.moth".to_owned(),
+            "src/@page.moth".to_owned(),
         ),
         (
             "FooB #= \"c\"\nBarB #= \"d\"\n".to_owned(),
@@ -2374,7 +2374,7 @@ fn per_file_fork_merge_produces_correct_headers_and_warnings_for_multiple_files(
     ];
 
     let (result, warnings, string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/#page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
 
     let headers = result.expect("headers should parse");
 
@@ -2433,7 +2433,7 @@ fn per_file_fork_merge_remaps_non_identity_strings_across_multiple_files() {
     ];
 
     let (result, warnings, string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/#page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
 
     assert!(
         result.is_err(),
@@ -2476,7 +2476,7 @@ fn import_only_file_contributes_file_imports_and_module_file_paths() {
 
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let helper_output = prepare_single_file(
         "import @core/math\n",
         &file_path,
@@ -2486,7 +2486,7 @@ fn import_only_file_contributes_file_imports_and_module_file_paths() {
 
     let page_output = prepare_single_file(
         "value #= 1\n",
-        &PathBuf::from("src/#page.moth"),
+        &PathBuf::from("src/@page.moth"),
         &entry_file_path,
         &mut string_table,
     );
@@ -2500,7 +2500,7 @@ fn import_only_file_contributes_file_imports_and_module_file_paths() {
     )
     .expect("test path should be UTF-8");
     let page_path =
-        InternedPath::try_from_filesystem_path(&PathBuf::from("src/#page.moth"), &mut string_table)
+        InternedPath::try_from_filesystem_path(&PathBuf::from("src/@page.moth"), &mut string_table)
             .expect("test path should be UTF-8");
 
     assert!(
@@ -2535,7 +2535,7 @@ fn import_only_file_contributes_file_imports_and_module_file_paths() {
 fn per_file_prepare_output_preserves_file_role_and_imports_on_output() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "import @core/math\n",
         &file_path,
@@ -2557,8 +2557,8 @@ fn per_file_prepare_output_preserves_file_role_and_imports_on_output() {
 #[test]
 fn imported_module_root_prepare_output_has_imported_root_role() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#mod.moth");
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@mod.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "Button = | label String |\n",
         &file_path,
@@ -2571,10 +2571,10 @@ fn imported_module_root_prepare_output_has_imported_root_role() {
 }
 
 #[test]
-fn entry_hash_root_file_is_assigned_active_module_root_role() {
+fn entry_normal_module_root_file_is_assigned_active_module_root_role() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "greeting #= \"hello\"\n",
         &file_path,
@@ -2650,7 +2650,7 @@ fn api_only_active_roots_reject_every_root_activity_form() {
 fn support_package_root_file_is_assigned_imported_module_root_role() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/styles/+package.moth");
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "theme #= \"dark\"\n",
         &file_path,
@@ -2665,7 +2665,7 @@ fn support_package_root_file_is_assigned_imported_module_root_role() {
 fn ordinary_source_file_is_assigned_normal_role() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
-    let entry_file_path = PathBuf::from("src/#page.moth");
+    let entry_file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(
         "value #= 1\n",
         &file_path,
@@ -2681,7 +2681,7 @@ fn support_package_root_file_accepts_an_export_block() {
     let headers = parse_single_file_headers_with_entry(
         "export:\n    Button = | label String |\n;\n",
         "src/styles/+package.moth",
-        "src/#page.moth",
+        "src/@page.moth",
     )
     .expect("a `+*.moth` support-package root should be export-capable");
 
@@ -2700,7 +2700,7 @@ fn export_outside_module_root_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    Button = | label String |\n;\n",
         "src/helper.moth",
-        "src/#page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(
         result,
@@ -2714,7 +2714,7 @@ fn export_outside_module_root_is_rejected() {
 #[test]
 fn export_alone_is_rejected() {
     let result =
-        parse_single_file_headers_with_entry("export\n", "src/#mod.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("export\n", "src/@mod.moth", "src/@page.moth");
     let errors = expect_header_error(result, "export without a block colon should be rejected");
 
     assert!(errors.diagnostics.iter().any(|diagnostic| {
@@ -2731,7 +2731,7 @@ fn export_alone_is_rejected() {
 #[test]
 fn empty_export_block_is_rejected() {
     let result =
-        parse_single_file_headers_with_entry("export:\n;\n", "src/#mod.moth", "src/#page.moth");
+        parse_single_file_headers_with_entry("export:\n;\n", "src/@mod.moth", "src/@page.moth");
     let errors = expect_header_error(result, "empty export block should be rejected");
 
     assert!(errors.diagnostics.iter().any(|diagnostic| diagnostic.kind
@@ -2742,8 +2742,8 @@ fn empty_export_block_is_rejected() {
 fn duplicate_export_blocks_are_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    first #= 1\n;\nexport:\n    second #= 2\n;\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "duplicate export blocks should be rejected");
 
@@ -2755,8 +2755,8 @@ fn duplicate_export_blocks_are_rejected() {
 fn legacy_inline_export_declaration_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export Button = | label String |\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "legacy inline export should be rejected");
 
@@ -2776,8 +2776,8 @@ fn export_import_path_parsed_as_public_surface_import() {
     let mut string_table = StringTable::new();
     let output = prepare_single_file(
         "export:\n    import @./button { Button }\n;\n",
-        &PathBuf::from("src/#mod.moth"),
-        &PathBuf::from("src/#page.moth"),
+        &PathBuf::from("src/@mod.moth"),
+        &PathBuf::from("src/@page.moth"),
         &mut string_table,
     );
 
@@ -2796,8 +2796,8 @@ fn export_import_path_parsed_as_public_surface_import() {
 fn export_block_requires_grouped_imports() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    import @./button\n;\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "bare imports in export blocks should be rejected");
 
@@ -2809,8 +2809,8 @@ fn export_block_requires_grouped_imports() {
 fn nested_export_blocks_are_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    export:\n        value #= 1\n    ;\n;\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "nested export blocks should be rejected");
 
@@ -2822,8 +2822,8 @@ fn nested_export_blocks_are_rejected() {
 fn export_block_accepts_an_item_without_a_following_newline() {
     let headers = parse_single_file_headers_with_entry(
         "export: Button = | label String |\n;\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     )
     .expect("export block should accept its first item after the colon");
 
@@ -2837,8 +2837,8 @@ fn export_block_accepts_an_item_without_a_following_newline() {
 fn legacy_export_path_syntax_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export @./card { Card, render as render_card }\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "legacy export path syntax should be rejected");
 
@@ -2857,8 +2857,8 @@ fn legacy_export_path_syntax_is_rejected() {
 fn export_bare_path_rejected_as_deferred_namespace_export() {
     let result = parse_single_file_headers_with_entry(
         "export @./layout\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(
         result,
@@ -2879,7 +2879,7 @@ fn export_bare_path_rejected_as_deferred_namespace_export() {
 #[test]
 fn export_before_authored_declaration_marks_header_public() {
     let source = "export:\n    Button = | label String |\n    render |button Button| -> String:\n        return button.label\n    ;\n;\n";
-    let headers = parse_single_file_headers_with_entry(source, "src/#mod.moth", "src/#page.moth")
+    let headers = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth")
         .expect("headers should parse");
 
     let public_headers: Vec<_> = headers
@@ -2898,7 +2898,7 @@ fn export_before_authored_declaration_marks_header_public() {
 #[test]
 fn unmarked_authored_declarations_in_module_root_remain_private() {
     let source = "Button = | label String |\nrender |button Button| -> String:\n    return button.label\n;\n";
-    let headers = parse_single_file_headers_with_entry(source, "src/#mod.moth", "src/#page.moth")
+    let headers = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth")
         .expect("headers should parse");
 
     let non_start_headers: Vec<_> = headers
@@ -2919,8 +2919,8 @@ fn unmarked_authored_declarations_in_module_root_remain_private() {
 fn duplicate_declaration_detection_works_with_exported_declarations() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    Button = | label String |\n;\nButton = | title String |\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(
         result,
@@ -2936,7 +2936,7 @@ fn duplicate_declaration_detection_works_with_exported_declarations() {
 #[test]
 fn export_before_constant_marks_header_public() {
     let source = "export:\n    theme #= \"dark\"\n    threshold #Int = 42\n;\n";
-    let headers = parse_single_file_headers_with_entry(source, "src/#mod.moth", "src/#page.moth")
+    let headers = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth")
         .expect("headers should parse");
 
     let public_constants: Vec<_> = headers
@@ -2958,7 +2958,7 @@ fn export_before_constant_marks_header_public() {
 #[test]
 fn export_before_type_alias_marks_header_public() {
     let source = "export:\n    UserId as Int\n;\n";
-    let headers = parse_single_file_headers_with_entry(source, "src/#mod.moth", "src/#page.moth")
+    let headers = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth")
         .expect("headers should parse");
 
     let alias_header = headers
@@ -2973,7 +2973,7 @@ fn export_before_type_alias_marks_header_public() {
 #[test]
 fn export_before_choice_marks_header_public() {
     let source = "export:\n    Status :: Ready, Failed | message String |;\n;\n";
-    let headers = parse_single_file_headers_with_entry(source, "src/#mod.moth", "src/#page.moth")
+    let headers = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth")
         .expect("headers should parse");
 
     let choice_header = headers
@@ -2988,7 +2988,7 @@ fn export_before_choice_marks_header_public() {
 #[test]
 fn export_before_trait_declaration_marks_header_public() {
     let source = "export:\n    DISPLAY_TEXT must:\n        display |This| -> String\n    ;\n;\n";
-    let headers = parse_single_file_headers_with_entry(source, "src/#mod.moth", "src/#page.moth")
+    let headers = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth")
         .expect("headers should parse");
 
     let trait_header = headers
@@ -3003,7 +3003,7 @@ fn export_before_trait_declaration_marks_header_public() {
 #[test]
 fn export_trait_incompatibility_is_rejected() {
     let source = "export:\n    DISPLAY_TEXT must not TRY_DISPLAY_TEXT\n;\n";
-    let result = parse_single_file_headers_with_entry(source, "src/#mod.moth", "src/#page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth");
     let errors = expect_header_error(result, "trait incompatibility must not be exported");
 
     assert!(errors.diagnostics.iter().any(|diagnostic| diagnostic.kind
@@ -3014,8 +3014,8 @@ fn export_trait_incompatibility_is_rejected() {
 fn export_before_trait_conformance_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    Label must DISPLAY_TEXT\n;\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "trait conformance should not be exported");
 
@@ -3027,8 +3027,8 @@ fn export_before_trait_conformance_is_rejected() {
 fn export_before_unsupported_runtime_statement_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    io.line([: [\"hello\"]])\n;\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "export before runtime statement should be rejected");
 
@@ -3040,8 +3040,8 @@ fn export_before_unsupported_runtime_statement_is_rejected() {
 fn receiver_methods_cannot_be_directly_exported() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    Button = | label String |\n    render |this Button| -> String:\n        return this.label\n    ;\n;\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "receiver methods should not be direct exports");
 
@@ -3054,8 +3054,8 @@ fn receiver_methods_cannot_be_directly_exported() {
 fn export_before_runtime_template_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    [: hello ]\n;\n",
-        "src/#mod.moth",
-        "src/#page.moth",
+        "src/@mod.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(result, "export before runtime template should be rejected");
 
@@ -3068,8 +3068,8 @@ fn export_import_and_private_import_normalize_to_one_public_record() {
     let mut string_table = StringTable::new();
     let output = prepare_single_file(
         "import @./button { Button }\nexport:\n    import @./button { Button }\n;\n",
-        &PathBuf::from("src/#mod.moth"),
-        &PathBuf::from("src/#page.moth"),
+        &PathBuf::from("src/@mod.moth"),
+        &PathBuf::from("src/@page.moth"),
         &mut string_table,
     );
 
@@ -3131,8 +3131,8 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
 fn header_parsing_rejects_core_cast_trait_source_declaration() {
     let result = parse_single_file_headers_with_entry(
         "CASTABLE_TO_STRING must:\n    to_string |This| -> String\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let errors = expect_header_error(
         result,
@@ -3170,12 +3170,12 @@ fn header_parsing_rejects_grouped_import_alias_to_core_cast_trait_name() {
         ),
         (
             "import @./helper { USER_TRAIT as CASTABLE_TO_STRING }\n".to_owned(),
-            "src/#page.moth".to_owned(),
+            "src/@page.moth".to_owned(),
         ),
     ];
 
     let (result, _warnings, _string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/#page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
     assert!(
         result.is_err(),
         "grouped import alias to a core cast trait name must be rejected"
@@ -3200,13 +3200,13 @@ fn header_parsing_rejects_module_public_surface_re_export_with_core_cast_trait_n
         ),
         (
             "export:\n    import @./helper { USER_TRAIT as CASTABLE_TO_STRING }\n;\n".to_owned(),
-            "src/#mod.moth".to_owned(),
+            "src/@mod.moth".to_owned(),
         ),
-        ("import @./helper\n".to_owned(), "src/#page.moth".to_owned()),
+        ("import @./helper\n".to_owned(), "src/@page.moth".to_owned()),
     ];
 
     let (result, _warnings, _string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/#page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
     assert!(
         result.is_err(),
         "module public-surface re-export under a core cast trait name must be rejected"
@@ -3246,7 +3246,7 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
 
     for (source, expected_line, expected_column) in cases {
         let result =
-            parse_single_file_headers_with_entry(source, "src/#page.moth", "src/#page.moth");
+            parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
         let errors =
             expect_header_error(result, "an authored `=` with no value should be rejected");
         let diagnostic = errors
@@ -3284,8 +3284,8 @@ fn special_member_default_reasons_win_over_missing_default_value() {
     // `=`, so they never fall through to `MissingDefaultValue`.
     let reactive = parse_single_file_headers_with_entry(
         "label |event $String =| -> String:\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let reactive_errors =
         expect_header_error(reactive, "reactive parameter defaults must be rejected");
@@ -3303,8 +3303,8 @@ fn special_member_default_reasons_win_over_missing_default_value() {
 
     let trait_requirement = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This, value Int =|\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let trait_errors = expect_header_error(
         trait_requirement,
@@ -3319,8 +3319,8 @@ fn special_member_default_reasons_win_over_missing_default_value() {
 
     let choice = parse_single_file_headers_with_entry(
         "Response ::\n    Err |\n        message String =|,\n    Success,\n;\n",
-        "src/#page.moth",
-        "src/#page.moth",
+        "src/@page.moth",
+        "src/@page.moth",
     );
     let choice_errors =
         expect_header_error(choice, "choice payload field defaults must be rejected");
@@ -3434,7 +3434,7 @@ fn registry_with_prelude_type_symbol(name: &'static str) -> ExternalPackageRegis
 #[test]
 fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     // Preparation takes no registry input, so a declaration that reuses a prelude symbol name
     // still parses into a retained declaration shell during provider-independent preparation.
     let output = prepare_single_file(
@@ -3487,7 +3487,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
 #[test]
 fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_binding() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/#page.moth");
+    let file_path = PathBuf::from("src/@page.moth");
     // A generic parameter reusing a prelude type name parses during provider-independent
     // preparation; the collision is provider-dependent and is validated during binding.
     let output = prepare_single_file(

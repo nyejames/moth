@@ -774,9 +774,11 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
         ),
         DiagnosticPayload::DirectSpecialFileImport { path } => {
             let special_file = special_file_name_from_path(path, string_table);
+            let path_text = path.to_portable_string(string_table);
+            // Guide the author toward the module directory import rather than the root filename.
+            let suggestion = module_root_import_suggestion(path, string_table);
             format!(
-                "Cannot import directly from '{special_file}' via '{}'. Import exported symbols through the module path instead.",
-                path.to_portable_string(string_table)
+                "Cannot import directly from '{special_file}' via '{path_text}'. Module root files are imported through their directory, not by filename.{suggestion}"
             )
         }
         DiagnosticPayload::ImportNameCollision { name, .. } => {

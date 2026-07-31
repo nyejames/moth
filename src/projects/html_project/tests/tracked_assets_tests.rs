@@ -26,7 +26,7 @@ fn relative_one_segment_underflow_returns_escapes_project_root() {
     fs::write(root.join("img/logo.png"), [7_u8, 8, 9]).expect("should write asset");
 
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("src/docs/guide/#page.moth"), &mut string_table);
+    let mut module = create_test_module(root.join("src/docs/guide/@page.moth"), &mut string_table);
     let usage = rendered_path_usage(
         &mut string_table,
         RenderedPathUsageInput {
@@ -35,7 +35,7 @@ fn relative_one_segment_underflow_returns_escapes_project_root() {
             filesystem_path: root.join("img/logo.png"),
             base: CompileTimePathBase::RelativeToFile,
             kind: CompileTimePathKind::File,
-            source_file_scope_components: &["src", "docs", "guide", "#page.moth"],
+            source_file_scope_components: &["src", "docs", "guide", "@page.moth"],
             line_number: 5,
         },
     );
@@ -76,7 +76,7 @@ fn relative_repeated_underflow_returns_escapes_project_root() {
     fs::write(root.join("img/logo.png"), [10_u8, 11, 12]).expect("should write asset");
 
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("src/#page.moth"), &mut string_table);
+    let mut module = create_test_module(root.join("src/@page.moth"), &mut string_table);
     let usage = rendered_path_usage(
         &mut string_table,
         RenderedPathUsageInput {
@@ -85,7 +85,7 @@ fn relative_repeated_underflow_returns_escapes_project_root() {
             filesystem_path: root.join("img/logo.png"),
             base: CompileTimePathBase::RelativeToFile,
             kind: CompileTimePathKind::File,
-            source_file_scope_components: &["src", "#page.moth"],
+            source_file_scope_components: &["src", "@page.moth"],
             line_number: 7,
         },
     );
@@ -122,7 +122,7 @@ fn duplicate_same_source_and_output_dedupes_within_module() {
     fs::write(root.join("assets/logo.png"), [1_u8, 2, 3]).expect("should write asset");
 
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("#page.moth"), &mut string_table);
+    let mut module = create_test_module(root.join("@page.moth"), &mut string_table);
     let usage = rendered_path_usage(
         &mut string_table,
         RenderedPathUsageInput {
@@ -131,7 +131,7 @@ fn duplicate_same_source_and_output_dedupes_within_module() {
             filesystem_path: root.join("assets/logo.png"),
             base: CompileTimePathBase::EntryRoot,
             kind: CompileTimePathKind::File,
-            source_file_scope_components: &["#page.moth"],
+            source_file_scope_components: &["@page.moth"],
             line_number: 1,
         },
     );
@@ -152,7 +152,7 @@ fn public_root_directory_usage_is_ignored() {
     fs::create_dir_all(root.join("src")).expect("should create entry root");
 
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("src/#page.moth"), &mut string_table);
+    let mut module = create_test_module(root.join("src/@page.moth"), &mut string_table);
     module
         .metadata
         .rendered_path_usages
@@ -164,7 +164,7 @@ fn public_root_directory_usage_is_ignored() {
                 filesystem_path: root.join("src"),
                 base: CompileTimePathBase::EntryRoot,
                 kind: CompileTimePathKind::Directory,
-                source_file_scope_components: &["src", "#page.moth"],
+                source_file_scope_components: &["src", "@page.moth"],
                 line_number: 2,
             },
         ));
@@ -184,7 +184,7 @@ fn non_asset_directory_link_is_ignored() {
     fs::create_dir_all(root.join("src/docs/guide/subdir")).expect("should create nested dir");
 
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("src/docs/guide/#page.moth"), &mut string_table);
+    let mut module = create_test_module(root.join("src/docs/guide/@page.moth"), &mut string_table);
     module
         .metadata
         .rendered_path_usages
@@ -196,7 +196,7 @@ fn non_asset_directory_link_is_ignored() {
                 filesystem_path: root.join("src/docs/guide/subdir"),
                 base: CompileTimePathBase::RelativeToFile,
                 kind: CompileTimePathKind::Directory,
-                source_file_scope_components: &["src", "docs", "guide", "#page.moth"],
+                source_file_scope_components: &["src", "docs", "guide", "@page.moth"],
                 line_number: 5,
             },
         ));
@@ -225,7 +225,7 @@ fn large_asset_warning_dedupes_to_first_render_location() {
     .expect("should write large asset");
 
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("#page.moth"), &mut string_table);
+    let mut module = create_test_module(root.join("@page.moth"), &mut string_table);
     let first_usage = rendered_path_usage(
         &mut string_table,
         RenderedPathUsageInput {
@@ -234,7 +234,7 @@ fn large_asset_warning_dedupes_to_first_render_location() {
             filesystem_path: root.join("assets/video.mp4"),
             base: CompileTimePathBase::EntryRoot,
             kind: CompileTimePathKind::File,
-            source_file_scope_components: &["#page.moth"],
+            source_file_scope_components: &["@page.moth"],
             line_number: 2,
         },
     );
@@ -246,7 +246,7 @@ fn large_asset_warning_dedupes_to_first_render_location() {
             filesystem_path: root.join("assets/video.mp4"),
             base: CompileTimePathBase::EntryRoot,
             kind: CompileTimePathKind::File,
-            source_file_scope_components: &["#page.moth"],
+            source_file_scope_components: &["@page.moth"],
             line_number: 8,
         },
     );
@@ -278,7 +278,7 @@ fn emit_tracked_assets_reads_source_bytes_into_binary_outputs() {
     fs::write(root.join("assets/logo.png"), [9_u8, 8, 7, 6]).expect("should write asset");
 
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("#page.moth"), &mut string_table);
+    let mut module = create_test_module(root.join("@page.moth"), &mut string_table);
     module
         .metadata
         .rendered_path_usages
@@ -290,7 +290,7 @@ fn emit_tracked_assets_reads_source_bytes_into_binary_outputs() {
                 filesystem_path: root.join("assets/logo.png"),
                 base: CompileTimePathBase::EntryRoot,
                 kind: CompileTimePathKind::File,
-                source_file_scope_components: &["#page.moth"],
+                source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },
         ));

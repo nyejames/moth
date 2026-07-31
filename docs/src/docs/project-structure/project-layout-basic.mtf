@@ -9,7 +9,7 @@ A Moth project has one config file, one source root, and generated output folder
 
 ### One root file per module directory
 
-Each source directory can have one `#*.moth` file that marks it as a module. The `#` filename is just a convention. `#page.moth`, `#api.moth` and `#mod.moth` all mean the same thing to the compiler.
+Each source directory can have one `@*.moth` file that marks it as a module. The `@` filename is just a convention. `@page.moth`, `@api.moth` and `@mod.moth` all mean the same thing to the compiler.
 
 ### Outputs are generated
 
@@ -18,5 +18,5 @@ The build command creates output folders. They are not source. The builder clean
 ### Remember
 
 - `config.moth` is the only config file.
-- `#*.moth` files are module roots.
+- `@*.moth` files are module roots.
 - `dev/` and `release/` are generated.

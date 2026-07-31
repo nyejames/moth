@@ -7,7 +7,7 @@ Companion authorities:
 - `docs/compiler-design-overview.md` owns compiler-stage and artefact architecture
 - `docs/build-system-design.md` owns project, link and builder lifecycle orchestration
 - `docs/language-overview.md` and `docs/src/docs/codebase/language/**` own source syntax
-- `docs/src/docs/progress/#page.moth` owns current implementation support
+- `docs/src/docs/progress/@page.moth` owns current implementation support
 - `docs/roadmap/roadmap.md` owns sequencing and deferred implementation order
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
@@ -16,7 +16,7 @@ The source language stays small: existing values use shared access by default, m
 
 These pages record accepted memory model and target backend architecture. They include design decisions that may not yet be fully implemented, particularly around lifetime-region analysis, grouped memory and ownership-aware Wasm lowering.
 
-They are not an implementation-status report. Use `docs/src/docs/progress/#page.moth` for current support and major gaps.
+They are not an implementation-status report. Use `docs/src/docs/progress/@page.moth` for current support and major gaps.
 
 ## The model in one paragraph
 

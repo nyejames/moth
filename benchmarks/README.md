@@ -447,7 +447,7 @@ allocation, lookup, folding, import, and lowering pressure.
   module-root/path-resolution attribution.
 - `module-root-role-mix/`: directory project combining many skipped source directories,
   output-producing and API-only module roots and a source-backed package whose cosmetic root name is
-  not `#mod.moth`.
+  not `@mod.moth`.
 - `external-js-imports/`: HTML project with annotated JavaScript imports, runtime helper imports, opaque external types, namespace imports, and external free functions.
 - `borrow-stress.moth`: valid mutable/exclusive access and borrow-validation coverage.
 - `adversarial/one-module-kitchen-sink.moth`: dense single-module churn across imports, constants,

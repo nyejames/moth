@@ -14,7 +14,7 @@ Keep this tree in mind for the whole series:
 compiler_walkthrough/
 ├── config.moth
 └── src/
-    ├── #page.moth
+    ├── @page.moth
     └── greeting.moth
 ]
 
@@ -31,7 +31,7 @@ greet |name String| -> String:
 ]
 
 [codeblock, $code("moth"):
--- #page.moth
+-- @page.moth
 
 import @greeting { greet }
 
@@ -136,7 +136,7 @@ The series links the progress matrix and roadmap. It does not paste either docum
 - `docs/build-system-design.md` for commands, graphs, builders, linking and outputs
 - `docs/src/docs/codebase/language/overview.mtf` for language surface
 - `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime regions, ownership and backend lowering
-- `docs/src/docs/progress/#page.moth` for what works today
+- `docs/src/docs/progress/@page.moth` for what works today
 - `docs/roadmap/roadmap.md` for order and deferred design
 
 Educational pages explain those authorities. They do not outrank them.

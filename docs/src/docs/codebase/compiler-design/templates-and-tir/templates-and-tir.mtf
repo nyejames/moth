@@ -83,7 +83,7 @@ Moth template `.mtf` and Markdown `.md` files do not invent forever-parallel com
 - `.mtf` builds a private constant whose initializer is a structurally built `$md` template over the original body tokens
 - `.md` can contribute the same declaration shape with a synthetic string-literal initializer after Markdown preparation
 
-Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: `#page.moth` remains the star, and document kinds prove the "one semantic pipeline" bet.
+Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: `@page.moth` remains the star, and document kinds prove the "one semantic pipeline" bet.
 
 **Diagram placeholder:** moth, mtf and md reach one ordinary semantic path
 

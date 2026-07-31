@@ -23,7 +23,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
-use crate::compiler_frontend::source_packages::root_file::file_name_is_hash_root_file;
+use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_module_root_file;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 
 use std::collections::BTreeSet;
@@ -190,7 +190,7 @@ pub(crate) fn compile_single_file_frontend(
         }
     };
 
-    let module_roots = if file_name_is_hash_root_file(entry_file_name) {
+    let module_roots = if file_name_is_normal_module_root_file(entry_file_name) {
         match SourceTreeIndex::bounded_module_roots_for_single_file(
             &entry_path,
             config,

@@ -1,8 +1,9 @@
 use super::root_file::{
-    PreparedSourcePackageRoots, file_name_is_config_file, file_name_is_hash_root_file,
-    file_name_is_module_root_file, file_name_is_support_root_file,
-    hash_root_file_name_from_import_component, import_component_is_hash_root_file,
-    import_path_references_config_file, import_path_references_hash_root_file,
+    PreparedSourcePackageRoots, file_name_is_config_file, file_name_is_legacy_hash_root_file,
+    file_name_is_module_root_file, file_name_is_normal_module_root_file,
+    file_name_is_support_root_file, import_component_is_normal_module_root_file,
+    import_component_is_support_root_file, import_path_references_config_file,
+    import_path_references_module_root_file, module_root_file_name_from_import_component,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -17,30 +18,47 @@ fn path(components: &[&str], string_table: &mut StringTable) -> InternedPath {
 }
 
 #[test]
-fn classifies_only_hash_prefixed_moth_root_filenames() {
-    assert!(file_name_is_hash_root_file("#home.moth"));
-    assert!(file_name_is_hash_root_file("#anything.moth"));
-    assert!(!file_name_is_hash_root_file("home.moth"));
-    assert!(!file_name_is_hash_root_file("#home.js"));
-    assert!(!file_name_is_hash_root_file("#.moth"));
+fn classifies_only_at_prefixed_moth_root_filenames() {
+    assert!(file_name_is_normal_module_root_file("@home.moth"));
+    assert!(file_name_is_normal_module_root_file("@anything.moth"));
+    assert!(!file_name_is_normal_module_root_file("home.moth"));
+    assert!(!file_name_is_normal_module_root_file("@home.js"));
+    assert!(!file_name_is_normal_module_root_file("@.moth"));
     assert!(file_name_is_config_file("config.moth"));
     assert!(!file_name_is_config_file("config"));
 }
 
 #[test]
-fn import_components_accept_extensionless_hash_roots_only() {
-    assert!(import_component_is_hash_root_file("#home"));
-    assert!(import_component_is_hash_root_file("#home.moth"));
-    assert!(!import_component_is_hash_root_file("#home.js"));
-    assert!(!import_component_is_hash_root_file("#home.page"));
+fn classifies_legacy_hash_prefixed_moth_root_filenames() {
+    assert!(file_name_is_legacy_hash_root_file("#home.moth"));
+    assert!(file_name_is_legacy_hash_root_file("#anything.moth"));
+    assert!(!file_name_is_legacy_hash_root_file("home.moth"));
+    assert!(!file_name_is_legacy_hash_root_file("#home.js"));
+    assert!(!file_name_is_legacy_hash_root_file("#.moth"));
+}
+
+#[test]
+fn import_components_accept_extensionless_normal_module_roots_only() {
+    assert!(import_component_is_normal_module_root_file("@home"));
+    assert!(import_component_is_normal_module_root_file("@home.moth"));
+    assert!(!import_component_is_normal_module_root_file("@home.js"));
+    assert!(!import_component_is_normal_module_root_file("@home.page"));
     assert_eq!(
-        hash_root_file_name_from_import_component("#home"),
-        Some("#home.moth".to_owned())
+        module_root_file_name_from_import_component("@home"),
+        Some("@home.moth".to_owned())
     );
     assert_eq!(
-        hash_root_file_name_from_import_component("#home.moth"),
-        Some("#home.moth".to_owned())
+        module_root_file_name_from_import_component("@home.moth"),
+        Some("@home.moth".to_owned())
     );
+}
+
+#[test]
+fn import_components_identify_support_roots() {
+    assert!(import_component_is_support_root_file("+pkg"));
+    assert!(import_component_is_support_root_file("+pkg.moth"));
+    assert!(!import_component_is_support_root_file("pkg"));
+    assert!(!import_component_is_support_root_file("+pkg.js"));
 }
 
 #[test]
@@ -77,26 +95,26 @@ fn config_import_classification_uses_the_source_component() {
 }
 
 #[test]
-fn hash_root_import_classification_uses_the_source_component() {
+fn normal_module_root_import_classification_uses_the_source_component() {
     let mut string_table = StringTable::new();
 
-    let bare_hash_root = path(&["modules", "#home"], &mut string_table);
-    assert!(import_path_references_hash_root_file(
-        &bare_hash_root,
+    let bare_normal_root = path(&["modules", "@home"], &mut string_table);
+    assert!(import_path_references_module_root_file(
+        &bare_normal_root,
         false,
         &string_table
     ));
 
-    let grouped_hash_root = path(&["modules", "#home.moth", "symbol"], &mut string_table);
-    assert!(import_path_references_hash_root_file(
-        &grouped_hash_root,
+    let grouped_normal_root = path(&["modules", "@home.moth", "symbol"], &mut string_table);
+    assert!(import_path_references_module_root_file(
+        &grouped_normal_root,
         true,
         &string_table
     ));
 
-    let ordinary_hash_extension = path(&["modules", "#home.js"], &mut string_table);
-    assert!(!import_path_references_hash_root_file(
-        &ordinary_hash_extension,
+    let ordinary_at_extension = path(&["modules", "@home.js"], &mut string_table);
+    assert!(!import_path_references_module_root_file(
+        &ordinary_at_extension,
         false,
         &string_table
     ));
@@ -108,17 +126,17 @@ fn prepared_roots_preserve_canonical_prefix_order() {
         (
             "zeta".to_string(),
             PathBuf::from("/lib/zeta"),
-            PathBuf::from("/lib/zeta/#mod.moth"),
+            PathBuf::from("/lib/zeta/@mod.moth"),
         ),
         (
             "alpha".to_string(),
             PathBuf::from("/lib/alpha"),
-            PathBuf::from("/lib/alpha/#mod.moth"),
+            PathBuf::from("/lib/alpha/@mod.moth"),
         ),
         (
             "middle".to_string(),
             PathBuf::from("/lib/middle"),
-            PathBuf::from("/lib/middle/#mod.moth"),
+            PathBuf::from("/lib/middle/@mod.moth"),
         ),
     ];
 
@@ -135,11 +153,26 @@ fn prepared_roots_preserve_canonical_prefix_order() {
 fn classifies_only_plus_prefixed_moth_filenames_as_support_roots() {
     assert!(file_name_is_support_root_file("+pkg.moth"));
     assert!(file_name_is_support_root_file("+anything.moth"));
-    assert!(!file_name_is_support_root_file("#home.moth"));
+    assert!(!file_name_is_support_root_file("@home.moth"));
     assert!(!file_name_is_support_root_file("pkg.moth"));
     assert!(!file_name_is_support_root_file("+pkg.js"));
     assert!(!file_name_is_support_root_file("+.moth"));
-    assert!(file_name_is_module_root_file("#home.moth"));
+    assert!(file_name_is_module_root_file("@home.moth"));
     assert!(file_name_is_module_root_file("+pkg.moth"));
     assert!(!file_name_is_module_root_file("home.moth"));
+}
+
+#[test]
+fn config_file_distinct_from_module_and_legacy_roots() {
+    assert!(file_name_is_config_file("config.moth"));
+    assert!(!file_name_is_normal_module_root_file("config.moth"));
+    assert!(!file_name_is_legacy_hash_root_file("config.moth"));
+
+    assert!(file_name_is_normal_module_root_file("@config.moth"));
+    assert!(!file_name_is_config_file("@config.moth"));
+    assert!(!file_name_is_legacy_hash_root_file("@config.moth"));
+
+    assert!(file_name_is_legacy_hash_root_file("#config.moth"));
+    assert!(!file_name_is_config_file("#config.moth"));
+    assert!(!file_name_is_normal_module_root_file("#config.moth"));
 }

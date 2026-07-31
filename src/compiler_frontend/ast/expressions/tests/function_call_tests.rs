@@ -30,7 +30,7 @@ fn parse_args(
     source: &str,
 ) -> Vec<crate::compiler_frontend::ast::expressions::call_argument::CallArgument> {
     let mut string_table = StringTable::new();
-    let file_path = InternedPath::from_single_str("#page.moth", &mut string_table);
+    let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
     let mut tokens = tokenize(
         source,
         &file_path,
@@ -86,7 +86,7 @@ fn parse_raw_call_args_for_test(
 
 fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
-    let file_path = InternedPath::from_single_str("#page.moth", &mut string_table);
+    let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
     let mut tokens = tokenize(
         source,
         &file_path,

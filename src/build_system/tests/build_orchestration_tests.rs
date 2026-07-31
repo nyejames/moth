@@ -154,8 +154,8 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
         "entry_root #= \"src\"\noutput_folder #= \"release\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "value = 1\n").expect("should write active root");
-    fs::write(src.join("api/#api.moth"), "value #= 1\n").expect("should write API-only root");
+    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write active root");
+    fs::write(src.join("api/@api.moth"), "value #= 1\n").expect("should write API-only root");
 
     let module_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let entry_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -187,8 +187,8 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         "entry_root #= \"src\"\noutput_folder #= \"release\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "value = 1\n").expect("should write valid root");
-    fs::write(src.join("broken/#broken.moth"), "value = missing_name\n")
+    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write valid root");
+    fs::write(src.join("broken/@broken.moth"), "value = missing_name\n")
         .expect("should write diagnosed root");
 
     let validated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -518,7 +518,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
         "entry_root #= \"src\"\noutput_folder #= \"release\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("about").join("#page.moth"), "#[:<h1>About</h1>]\n")
+    fs::write(src.join("about").join("@page.moth"), "#[:<h1>About</h1>]\n")
         .expect("should write about");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
@@ -549,7 +549,7 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
         "entry_root #= \"src\"\noutput_folder #= \"release\"\npage_url_style #= \"slashy\"\n",
     )
     .expect("should write config");
-    fs::write(src.join("#page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let result = build_project(

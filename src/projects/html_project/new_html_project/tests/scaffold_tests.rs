@@ -47,7 +47,7 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
     // Scaffold-owned files are the exact conflict set, in declared order.
     for file in [
         "config.moth",
-        "src/#page.moth",
+        "src/@page.moth",
         "dev/.moth_manifest",
         "release/.moth_manifest",
     ] {
@@ -60,7 +60,7 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
         find_scaffold_conflicts(&project_dir),
         vec![
             "config.moth",
-            "src/#page.moth",
+            "src/@page.moth",
             "dev/.moth_manifest",
             "release/.moth_manifest",
         ]
@@ -200,7 +200,7 @@ fn creates_full_default_scaffold_and_reports_every_path() {
 
     // Every scaffold-owned path exists on disk.
     assert!(project_dir.join("config.moth").exists());
-    assert!(project_dir.join("src/#page.moth").exists());
+    assert!(project_dir.join("src/@page.moth").exists());
     assert!(project_dir.join("lib").exists());
     assert!(project_dir.join("dev/.moth_manifest").exists());
     assert!(project_dir.join("release/.moth_manifest").exists());
@@ -208,7 +208,7 @@ fn creates_full_default_scaffold_and_reports_every_path() {
 
     // The default scaffold creates every path and replaces, updates, or skips nothing.
     assert!(report.created.contains(&PathBuf::from("config.moth")));
-    assert!(report.created.contains(&PathBuf::from("src/#page.moth")));
+    assert!(report.created.contains(&PathBuf::from("src/@page.moth")));
     assert!(report.created.contains(&PathBuf::from("lib")));
     assert!(
         report
@@ -244,7 +244,7 @@ fn generated_files_exactly_match_templates() {
         start_page_scaffolding::config_template("Test Site")
     );
     assert_eq!(
-        fs::read_to_string(project_dir.join("src/#page.moth")).unwrap(),
+        fs::read_to_string(project_dir.join("src/@page.moth")).unwrap(),
         start_page_scaffolding::page_template()
     );
     assert_eq!(
@@ -361,7 +361,7 @@ fn force_replaces_scaffold_owned_files_only() {
     fs::create_dir(project_dir.join("dev")).unwrap();
     fs::create_dir(project_dir.join("release")).unwrap();
     fs::write(project_dir.join("config.moth"), b"old config").unwrap();
-    fs::write(project_dir.join("src/#page.moth"), b"old page").unwrap();
+    fs::write(project_dir.join("src/@page.moth"), b"old page").unwrap();
     fs::write(project_dir.join("dev/.moth_manifest"), b"old manifest").unwrap();
     fs::write(project_dir.join("release/.moth_manifest"), b"old manifest").unwrap();
     fs::write(project_dir.join("user-file.txt"), b"keep me").unwrap();
@@ -372,7 +372,7 @@ fn force_replaces_scaffold_owned_files_only() {
     let report = write_scaffold(&target, true, &mut prompt).unwrap();
 
     assert!(report.replaced.contains(&PathBuf::from("config.moth")));
-    assert!(report.replaced.contains(&PathBuf::from("src/#page.moth")));
+    assert!(report.replaced.contains(&PathBuf::from("src/@page.moth")));
     assert!(
         report
             .replaced

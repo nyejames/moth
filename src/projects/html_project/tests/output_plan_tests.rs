@@ -16,7 +16,7 @@ fn single_file_route_uses_exact_utf8_stem() {
 #[test]
 fn single_file_hash_prefix_strips_cosmetic_hash() {
     let mut string_table = StringTable::new();
-    let route = derive_logical_html_path(Path::new("#about.moth"), None, &mut string_table)
+    let route = derive_logical_html_path(Path::new("@about.moth"), None, &mut string_table)
         .expect("hash-prefixed single-file route should resolve");
 
     assert_eq!(route, PathBuf::from("about.html"));
@@ -56,14 +56,14 @@ fn single_file_non_utf8_stem_is_rejected() {
 }
 
 #[test]
-fn single_file_hash_only_stem_is_rejected_not_empty_route() {
+fn single_file_at_only_stem_is_rejected_not_empty_route() {
     let mut string_table = StringTable::new();
-    let error = derive_logical_html_path(Path::new("#.moth"), None, &mut string_table)
-        .expect_err("hash-only stem should be rejected, not produce an empty route name");
+    let error = derive_logical_html_path(Path::new("@.moth"), None, &mut string_table)
+        .expect_err("at-only stem should be rejected, not produce an empty route name");
 
     assert_eq!(
         error.error_type,
         crate::compiler_frontend::compiler_errors::ErrorType::File,
-        "hash-only stem should surface as a File infrastructure error"
+        "at-only stem should surface as a File infrastructure error"
     );
 }

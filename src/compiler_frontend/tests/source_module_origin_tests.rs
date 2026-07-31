@@ -98,10 +98,10 @@ fn single_file_maps_every_source_file_to_one_synthetic_origin() {
 #[test]
 fn directory_active_and_imported_files_map_to_distinct_graph_origins() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let active_root = touch(dir.path(), "#main.moth");
+    let active_root = touch(dir.path(), "@main.moth");
     let nested_dir = dir.path().join("sub");
     fs::create_dir_all(&nested_dir).expect("nested dir should be created");
-    let imported_root = touch(&nested_dir, "#other.moth");
+    let imported_root = touch(&nested_dir, "@other.moth");
 
     let (table, _string_table) =
         build_source_file_table(&[active_root.clone(), imported_root.clone()]);
@@ -153,13 +153,13 @@ fn directory_active_and_imported_files_map_to_distinct_graph_origins() {
 #[test]
 fn source_package_files_outside_the_graph_map_to_none() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let active_root = touch(dir.path(), "#main.moth");
+    let active_root = touch(dir.path(), "@main.moth");
     // A source-package file inside the tempdir so its canonical path exists, but it is not
     // present in the graph lookup, simulating a registered source-package file outside the
     // project module graph.
     let package_dir = dir.path().join("builder");
     fs::create_dir_all(&package_dir).expect("package dir should be created");
-    let source_package_root = touch(&package_dir, "#mod.moth");
+    let source_package_root = touch(&package_dir, "@mod.moth");
 
     let (table, _string_table) =
         build_source_file_table(&[active_root.clone(), source_package_root.clone()]);
@@ -197,7 +197,7 @@ fn source_package_files_outside_the_graph_map_to_none() {
 #[test]
 fn ordinary_donor_files_map_to_their_nearest_owning_module() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let active_root = touch(dir.path(), "#main.moth");
+    let active_root = touch(dir.path(), "@main.moth");
     // An ordinary donor file inside a nested module so it carries a distinct nested module
     // origin rather than the active root's origin.
     let nested_dir = dir.path().join("nested");
@@ -278,8 +278,8 @@ fn checkout_root_movement_does_not_alter_stable_module_origin() {
     let dir_a = tempfile::tempdir().expect("temp dir A");
     let dir_b = tempfile::tempdir().expect("temp dir B");
 
-    let file_a = touch(dir_a.path(), "#main.moth");
-    let file_b = touch(dir_b.path(), "#main.moth");
+    let file_a = touch(dir_a.path(), "@main.moth");
+    let file_b = touch(dir_b.path(), "@main.moth");
 
     let (table_a, _string_a) = build_source_file_table(std::slice::from_ref(&file_a));
     let (table_b, _string_b) = build_source_file_table(std::slice::from_ref(&file_b));
@@ -292,14 +292,14 @@ fn checkout_root_movement_does_not_alter_stable_module_origin() {
 
     let id_a = table_a
         .get_by_canonical_path(
-            &std::fs::canonicalize(dir_a.path().join("#main.moth"))
+            &std::fs::canonicalize(dir_a.path().join("@main.moth"))
                 .expect("canonical path should exist"),
         )
         .expect("file should be in table A")
         .file_id;
     let id_b = table_b
         .get_by_canonical_path(
-            &std::fs::canonicalize(dir_b.path().join("#main.moth"))
+            &std::fs::canonicalize(dir_b.path().join("@main.moth"))
                 .expect("canonical path should exist"),
         )
         .expect("file should be in table B")

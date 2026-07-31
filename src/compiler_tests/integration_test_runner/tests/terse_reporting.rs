@@ -33,7 +33,7 @@ fn success_case(case_id: &str, backend_id: BackendId) -> TestCaseSpec {
         contract: None,
         role: None,
         backend_id,
-        entry_path: PathBuf::from("input/#page.moth"),
+        entry_path: PathBuf::from("input/@page.moth"),
         flags: Vec::new(),
         expected: ExpectedOutcome::Success(SuccessExpectation {
             warnings: WarningExpectation::Forbid,
@@ -56,7 +56,7 @@ fn expected_failure_case(case_id: &str, backend_id: BackendId) -> TestCaseSpec {
         contract: None,
         role: None,
         backend_id,
-        entry_path: PathBuf::from("input/#page.moth"),
+        entry_path: PathBuf::from("input/@page.moth"),
         flags: Vec::new(),
         expected: ExpectedOutcome::Failure(FailureExpectation {
             warnings: WarningExpectation::Forbid,

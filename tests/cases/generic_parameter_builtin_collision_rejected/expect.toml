@@ -7,6 +7,6 @@ message_contains = ["Generic parameter 'Error' collides with a builtin type name
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0043"
 reason = "invalid_declaration.reserved_generic_parameter_name"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 1
 count = 1

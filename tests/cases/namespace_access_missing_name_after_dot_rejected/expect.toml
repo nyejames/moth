@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0048"]
-message_contains = ["#page.moth", "1:12", "Expected a field or method name after '.', but this access ends here."]
+message_contains = ["@page.moth", "1:12", "Expected a field or method name after '.', but this access ends here."]

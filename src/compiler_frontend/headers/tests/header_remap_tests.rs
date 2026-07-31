@@ -95,8 +95,8 @@ fn top_level_const_fragment_remaps_path_and_location() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
 
-    let header_path = InternedPath::from_single_str("src/#page.moth", &mut local);
-    let location = make_location("src/#page.moth", &mut local);
+    let header_path = InternedPath::from_single_str("src/@page.moth", &mut local);
+    let location = make_location("src/@page.moth", &mut local);
 
     let mut fragment = TopLevelConstFragment {
         runtime_insertion_index: 3,
@@ -110,9 +110,9 @@ fn top_level_const_fragment_remaps_path_and_location() {
     assert_eq!(fragment.runtime_insertion_index, 3);
     assert_eq!(
         fragment.header_path.to_portable_string(&global),
-        "src/#page.moth"
+        "src/@page.moth"
     );
-    assert_location_resolves_to(&fragment.location, "src/#page.moth", &global);
+    assert_location_resolves_to(&fragment.location, "src/@page.moth", &global);
 }
 
 #[test]
@@ -623,8 +623,8 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
 
     let fragment = TopLevelConstFragment {
         runtime_insertion_index: 2,
-        header_path: InternedPath::from_single_str("src/#page.moth", &mut local),
-        location: make_location("src/#page.moth", &mut local),
+        header_path: InternedPath::from_single_str("src/@page.moth", &mut local),
+        location: make_location("src/@page.moth", &mut local),
     };
 
     let warning = make_unknown_name_diagnostic("warn_name", &mut local);
@@ -715,9 +715,9 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     assert_eq!(fragment.runtime_insertion_index, 2);
     assert_eq!(
         fragment.header_path.to_portable_string(&global),
-        "src/#page.moth"
+        "src/@page.moth"
     );
-    assert_location_resolves_to(&fragment.location, "src/#page.moth", &global);
+    assert_location_resolves_to(&fragment.location, "src/@page.moth", &global);
 
     // Counters unchanged.
     assert_eq!(output.const_template_count, 5);

@@ -1,6 +1,6 @@
 # A build starts before source compilation
 
-`moth build` does not open `#page.moth` first. It asks a blunter question: which command, builder, profile and inputs should interpret this project at all?
+`moth build` does not open `@page.moth` first. It asks a blunter question: which command, builder, profile and inputs should interpret this project at all?
 
 Until those answers settle, the compiler has no honest graph to walk. Choose climate and soil first. Then grow the plant.
 
@@ -128,7 +128,7 @@ Draw the line early and keep it sharp.
     ]
 ]
 
-The compiler does not wander the filesystem inventing a project. The builder does not re-parse `#page.moth` to rediscover `greet`. Each stage trusts the previous owner's facts.
+The compiler does not wander the filesystem inventing a project. The builder does not re-parse `@page.moth` to rediscover `greet`. Each stage trusts the previous owner's facts.
 
 ## What can fail here
 

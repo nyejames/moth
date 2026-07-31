@@ -74,7 +74,7 @@ RELEVANT_DOCS_THIS_SLICE:
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`
 - `docs/src/docs/codebase/style-guide/testing.mtf`
 - `docs/src/docs/codebase/style-guide/validation.mtf`
-- `docs/src/docs/progress/#page.moth`
+- `docs/src/docs/progress/@page.moth`
 - `docs/roadmap/roadmap.md`
 - `docs/roadmap/plans/compiler-test-suite-hardening-and-integration-coverage-plan.md`
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`
@@ -355,7 +355,7 @@ The following edits are authorized in their owning phases:
 - `docs/src/docs/codebase/style-guide/validation.mtf`: new manual architecture and failure-lane audit wording
 - `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md`: remove overlapping ownership and stale failure rules
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`: park, then refresh against the final schema APIs
-- `docs/src/docs/progress/#page.moth`: only when current support wording changes
+- `docs/src/docs/progress/@page.moth`: only when current support wording changes
 - `benchmarks/README.md` and `CONTRIBUTING.md`: document the alternate data-layout benchmark case list/command if that surface is added
 - `index.md`: final source, token, path and diagnostic module map
 - generated `docs/release/**`: rebuild only; never edit directly

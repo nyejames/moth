@@ -35,7 +35,7 @@ Many ecosystems treat the language and the package tool as strangers. Moth grows
 
 **Command-selected capabilities** mean `moth build` does not discover the universe and hope. It selects a builder, a profile, tooling overlays and target intent before config validation begins.
 
-The greeting project needs a builder before source discovery. Without that choice, the tool cannot know whether `#page.moth` even counts as an entry kind.
+The greeting project needs a builder before source discovery. Without that choice, the tool cannot know whether `@page.moth` even counts as an entry kind.
 
 This coupling feels strange if you expect `package.json` scripts or a free-form `build.rs`. It keeps the project contract visible and bounded before the graph exists.
 
@@ -114,4 +114,4 @@ When you propose an example, ask whether the progress matrix already supports it
 
 ## Exit state
 
-You leave with a design lens and a status vocabulary. Next: what the build command must decide before `#page.moth` even enters the compiler.
+You leave with a design lens and a status vocabulary. Next: what the build command must decide before `@page.moth` even enters the compiler.

@@ -9,7 +9,7 @@ message_contains = ["Prefix the existing mutable place with `~`"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0054"
 reason = "invalid_call_shape.mutable_access_required"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 4
 count = 1
 
@@ -22,6 +22,6 @@ message_contains = ["Prefix the existing mutable place with `~`"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0054"
 reason = "invalid_call_shape.mutable_access_required"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 4
 count = 1

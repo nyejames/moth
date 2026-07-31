@@ -372,13 +372,13 @@ fn structured_diagnostic_assertions_resolve_relative_scopes_under_input_root() {
     let input_root = fixture_root.join("input");
     fs::create_dir_all(input_root.join("nested"))
         .expect("should create temporary fixture input directory");
-    fs::write(input_root.join("#page.moth"), "page").expect("should write source");
+    fs::write(input_root.join("@page.moth"), "page").expect("should write source");
     fs::write(input_root.join("nested/helper.moth"), "helper").expect("should write nested source");
     let fixture_root = fs::canonicalize(&fixture_root).expect("fixture root should canonicalize");
 
     for (scope, expected_path) in [
-        ("#page.moth", "input/#page.moth"),
-        ("input/#page.moth", "input/#page.moth"),
+        ("@page.moth", "input/@page.moth"),
+        ("input/@page.moth", "input/@page.moth"),
         ("nested/helper.moth", "input/nested/helper.moth"),
         ("input/nested/helper.moth", "input/nested/helper.moth"),
         (

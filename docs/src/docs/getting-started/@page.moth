@@ -55,7 +55,7 @@ page_head #= language_theme_head
         [data:
             [$md:`new html`]
             [: Creates a complete HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice, and creates the full default scaffold including `src/#page.moth`, `lib/`, output manifests, and an optional .gitignore.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice, and creates the full default scaffold including `src/@page.moth`, `lib/`, output manifests, and an optional .gitignore.]
         ]
 
         [data:
@@ -188,7 +188,7 @@ page_head #= language_theme_head
         project-root/
         ├── config.moth
         ├── src/
-        │   └── #page.moth
+        │   └── @page.moth
         ├── lib/
         ├── dev/
     │   └── .moth_manifest
@@ -200,7 +200,7 @@ page_head #= language_theme_head
     - `lib/` is created empty by default for project-local source-backed packages.
     - `dev/` and `release/` are output folders.
     - .moth_manifest files are build-system metadata for safe stale-output cleanup.
-    - `src/#page.moth` is the conventional module root with a starter page. The filename is cosmetic.
+    - `src/@page.moth` is the conventional module root with a starter page. The filename is cosmetic.
 
     ### Using --force
 
@@ -287,7 +287,7 @@ page_head #= language_theme_head
     Terse diagnostics have a stable compact shape:
 
     [codeblock, $code("text"):
-        E|type|src/#page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
+        E|type|src/@page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
         W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch
     ]
 ]
@@ -313,7 +313,7 @@ page_head #= language_theme_head
         Type Error (ಠ_ಠ) 🔥
         Declaration 'count' has incompatible initializer type. Expected 'Int', but found 'String'.
 
-          --> src/#page.moth:6:17
+          --> src/@page.moth:6:17
             |
           6 | count Int = "wrong"
             |             ^^^^^^^

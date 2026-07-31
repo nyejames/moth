@@ -1,2 +1,2 @@
--- sibling.moth does NOT implicitly see `greet` from #mod.moth
+-- sibling.moth does NOT implicitly see `greet` from @mod.moth
 impl_val #= "impl ok"

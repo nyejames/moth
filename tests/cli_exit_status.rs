@@ -94,7 +94,7 @@ fn valid_project_build_exits_successfully() {
     let root = tempdir().expect("temporary directory should be created");
     write_source(
         root.path(),
-        "#page.moth",
+        "@page.moth",
         "#[:<h1>Hello</h1>]\nentry = \".\"\n",
     );
 
@@ -148,7 +148,7 @@ fn bare_single_file_build_writes_outputs_in_current_directory() {
 #[test]
 fn invalid_syntax_project_build_exits_with_failure() {
     let root = tempdir().expect("temporary directory should be created");
-    write_source(root.path(), "#page.moth", INVALID_SOURCE);
+    write_source(root.path(), "@page.moth", INVALID_SOURCE);
 
     let output = run_moth(&[
         "build",
@@ -163,7 +163,7 @@ fn output_root_write_failure_exits_with_failure_without_benchmark_status() {
     let root = tempdir().expect("temporary directory should be created");
     write_source(
         root.path(),
-        "#page.moth",
+        "@page.moth",
         "#[:<h1>Hello</h1>]\nentry = \".\"\n",
     );
     fs::write(root.path().join("dev"), b"occupied output root")
@@ -216,7 +216,7 @@ fn benchmark_status_record_is_emitted_once_for_check_and_build() {
     let build_root = tempdir().expect("temporary directory should be created");
     write_source(
         build_root.path(),
-        "#page.moth",
+        "@page.moth",
         "#[:<h1>Hello</h1>]\nentry = \".\"\n",
     );
     let build_path = build_root
@@ -240,7 +240,7 @@ fn benchmark_status_record_covers_warning_only_check_and_build() {
     assert_status_record(&check_output, "MOTH_BENCH status errors=0 warnings=3");
 
     let build_root = tempdir().expect("temporary directory should be created");
-    write_source(build_root.path(), "#page.moth", WARNING_SOURCE);
+    write_source(build_root.path(), "@page.moth", WARNING_SOURCE);
     let build_path = build_root
         .path()
         .to_str()
@@ -262,7 +262,7 @@ fn benchmark_status_record_covers_diagnosed_check_and_build() {
     assert_status_record(&check_output, "MOTH_BENCH status errors=1 warnings=0");
 
     let build_root = tempdir().expect("temporary directory should be created");
-    write_source(build_root.path(), "#page.moth", INVALID_SOURCE);
+    write_source(build_root.path(), "@page.moth", INVALID_SOURCE);
     let build_path = build_root
         .path()
         .to_str()

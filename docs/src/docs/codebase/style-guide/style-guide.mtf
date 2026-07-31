@@ -411,9 +411,9 @@ The diagnostic system has two paths:
 
 Codebase pages and Moth template references have different jobs.
 
-- `#page.moth` owns the website page, title, introduction, navigation and layout
+- `@page.moth` owns the website page, title, introduction, navigation and layout
 - `overview.mtf` provides a compact routing and contract reference and must not
-  be imported by `#page.moth`
+  be imported by `@page.moth`
 - Topic-named `.mtf` files own detailed design content
 - Website pages may import topic-named `.mtf` files
 - Topic-named `.mtf` files should remain useful when read directly

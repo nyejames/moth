@@ -504,13 +504,13 @@ fn resolve_case_entry_path(
         return canonicalize_contained_entry(fixture_root, input_root, entry);
     }
 
-    let default_entry = input_root.join("#page.moth");
+    let default_entry = input_root.join("@page.moth");
     if default_entry.is_file() {
-        return canonicalize_contained_entry(fixture_root, input_root, "#page.moth");
+        return canonicalize_contained_entry(fixture_root, input_root, "@page.moth");
     }
 
     Err(format!(
-        "Could not determine canonical test entry for '{}'. Add 'entry = ...' to '{}' or provide #page.moth.",
+        "Could not determine canonical test entry for '{}'. Add 'entry = ...' to '{}' or provide @page.moth.",
         input_root.display(),
         EXPECT_FILE_NAME
     ))

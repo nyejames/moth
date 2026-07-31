@@ -566,7 +566,7 @@ preparation, tokenization/header parsing, string-table merge/remap, and docs AST
 
 - `docs/compiler-design-overview.md` now records frontend arenas as stage/module-owned
   implementation details, with capacity estimates explicitly policy-only.
-- `docs/src/docs/progress/#page.moth` tracks "Frontend Arena + Semantic Invariant Optimisation" as
+- `docs/src/docs/progress/@page.moth` tracks "Frontend Arena + Semantic Invariant Optimisation" as
   `Partial`: scope-frame arenas, capacity estimates, external package clone reduction, and
   adversarial fixtures are implemented; deeper expression/template/HIR arenas remain deferred.
 - `benchmarks/README.md` records the five independent invocation protocol for optimization phase

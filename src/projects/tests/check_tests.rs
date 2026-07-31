@@ -46,14 +46,14 @@ fn check_compiles_single_file_without_writing_artifacts() {
 /// Stable source-facing identity for one frontend diagnostic.
 type DiagnosticIdentityRow = (&'static str, Option<&'static str>, String, i32);
 
-/// Create a directory project whose `#page.moth` holds `source`.
+/// Create a directory project whose `@page.moth` holds `source`.
 ///
 /// WHAT: returns an unmanaged temp project root containing only the authored source file.
 /// WHY: the parity test reuses one project shape for both `execute_check` and `build_project`.
 fn write_page_project(prefix: &str, source: &str) -> PathBuf {
     let root = temp_dir(prefix);
     fs::create_dir_all(&root).expect("should create temp project root");
-    fs::write(root.join("#page.moth"), source).expect("should write #page.moth source");
+    fs::write(root.join("@page.moth"), source).expect("should write @page.moth source");
     root
 }
 
@@ -163,9 +163,9 @@ if value is:
     );
 
     let expected_warning_identity = vec![
-        ("MOTH-RULE-0022", None, "#page.moth".to_owned(), 6),
-        ("MOTH-RULE-0022", None, "#page.moth".to_owned(), 7),
-        ("MOTH-RULE-0022", None, "#page.moth".to_owned(), 8),
+        ("MOTH-RULE-0022", None, "@page.moth".to_owned(), 6),
+        ("MOTH-RULE-0022", None, "@page.moth".to_owned(), 7),
+        ("MOTH-RULE-0022", None, "@page.moth".to_owned(), 8),
     ];
     assert_eq!(
         check_warning_identity, expected_warning_identity,
@@ -227,7 +227,7 @@ increment(count)
     let expected_error_identity = vec![(
         "MOTH-RULE-0054",
         Some("invalid_call_shape.mutable_access_required"),
-        "#page.moth".to_owned(),
+        "@page.moth".to_owned(),
         6,
     )];
     assert_eq!(

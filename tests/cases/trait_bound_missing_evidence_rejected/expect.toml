@@ -7,6 +7,6 @@ message_contains = ["requires 'T' to satisfy trait 'DISPLAY_TEXT'"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0057"
 reason = "invalid_generic_instantiation.missing_trait_evidence"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 17
 count = 1

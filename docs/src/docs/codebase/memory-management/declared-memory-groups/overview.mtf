@@ -19,4 +19,4 @@ Accepted deferred `group` / `into` semantics and hard destination lifetimes.
 - `docs/src/docs/codebase/memory-management/access-and-aliasing/overview.mtf`
 - `docs/roadmap/plans/grouped-memory-design.md`
 - `docs/language-overview.md`
-- `docs/src/docs/progress/#page.moth`
+- `docs/src/docs/progress/@page.moth`

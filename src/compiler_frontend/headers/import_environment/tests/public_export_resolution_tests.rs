@@ -40,7 +40,7 @@ fn nested_module_root_same_module_import_bypasses_public_surface() {
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let helper_root = intern_path(&["helper-root"], &mut string_table);
-    let helper_mod_file = intern_path(&["helper", "#mod.moth"], &mut string_table);
+    let helper_mod_file = intern_path(&["helper", "@mod.moth"], &mut string_table);
     let importer_file = helper_mod_file.clone();
 
     let mut file_module_membership = FxHashMap::default();
@@ -84,7 +84,7 @@ fn cross_module_child_import_resolves_through_public_surface() {
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let child_root = intern_path(&["child-root"], &mut string_table);
-    let child_mod_file = intern_path(&["child", "#mod.moth"], &mut string_table);
+    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table);
     let page_file = intern_path(&["page.moth"], &mut string_table);
 
     let mut file_module_membership = FxHashMap::default();
@@ -134,7 +134,7 @@ fn cross_module_child_import_missing_symbol_is_not_exported() {
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let child_root = intern_path(&["child-root"], &mut string_table);
-    let child_mod_file = intern_path(&["child", "#mod.moth"], &mut string_table);
+    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table);
     let page_file = intern_path(&["page.moth"], &mut string_table);
 
     let mut file_module_membership = FxHashMap::default();
@@ -175,7 +175,7 @@ fn source_package_nested_module_root_same_module_import_bypasses_public_surface(
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let utils_root = intern_path(&["lib", "utils-root"], &mut string_table);
-    let utils_mod_file = intern_path(&["lib", "utils", "#mod.moth"], &mut string_table);
+    let utils_mod_file = intern_path(&["lib", "utils", "@mod.moth"], &mut string_table);
 
     let mut file_module_membership = FxHashMap::default();
     file_module_membership.insert(utils_mod_file.clone(), utils_root.clone());
@@ -217,7 +217,7 @@ fn importer_without_module_membership_uses_empty_prefix() {
     let mut string_table = StringTable::new();
 
     let child_root = intern_path(&["child-root"], &mut string_table);
-    let child_mod_file = intern_path(&["child", "#mod.moth"], &mut string_table);
+    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table);
     let unknown_importer = intern_path(&["unknown.moth"], &mut string_table);
 
     let boundaries = vec![ModuleRootBoundary {

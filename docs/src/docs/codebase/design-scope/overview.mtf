@@ -133,4 +133,4 @@ Both use structured `CompilerDiagnostic`. The distinction matters because the re
 - `docs/language-overview.md` for the complete compiler-facing language reference
 - `docs/src/docs/codebase/memory-management/overview.mtf` for formal memory semantics
 - `docs/compiler-design-overview.md` for compiler stage and artefact contracts
-- `docs/src/docs/progress/#page.moth` for current implementation status
+- `docs/src/docs/progress/@page.moth` for current implementation status

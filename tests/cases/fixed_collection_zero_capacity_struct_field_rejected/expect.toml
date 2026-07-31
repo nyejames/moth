@@ -6,6 +6,6 @@ diagnostic_codes = ["MOTH-SYNTAX-0016"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0016"
 reason = "invalid_collection_type.zero_capacity"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 2
 count = 1

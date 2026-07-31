@@ -203,7 +203,7 @@ impl StablePackageIdentity {
 
 /// The structural role of one canonical module root.
 ///
-/// `Normal` roots (`#*.moth`) are entry candidates. `Support` roots (`+*.moth`) are scoped package
+/// `Normal` roots (`@*.moth`) are entry candidates. `Support` roots (`+*.moth`) are scoped package
 /// roots that are never entry candidates. `ProjectPackageFacade` is the optional project-root
 /// `+*.moth` beside `config.moth`; Stage 0 assigns it from location rather than filename alone and
 /// it never participates in entry-root containment or import-resolution lookup.
@@ -352,7 +352,7 @@ pub(crate) fn portable_relative_logical_path_from(
 /// `InternedPath`, dense `SourceId`, traversal index, `SourceDatabase` or absolute filesystem path,
 /// so identity is stable across checkout roots and traversal order. The module-relative source
 /// path intentionally includes the actual root filename, so renaming the root file (for example
-/// `#page.moth` to `#pages.moth`) changes the owned-source identity even though the module origin
+/// `@page.moth` to `@pages.moth`) changes the owned-source identity even though the module origin
 /// remains stable.
 /// WHY: later Phase 3 slices consume this identity as the canonical logical source identity for
 /// semantic source sets, check-only orphan units and source attribution. Keeping the dense

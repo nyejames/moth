@@ -29,7 +29,7 @@ ACTIVATION_GATE: representative profiling or counters must identify a material b
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/codebase/memory-management/overview.mtf` and selected leaves when source slices,
   arenas or borrowed storage change lifetime or ownership
-- `docs/src/docs/progress/#page.moth` for current support and backend coverage
+- `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for stable source and
   module identities required by persistent reuse
 - `docs/roadmap/plans/html_project_backend_wasm_final_implementation_plan.md` for backend output and

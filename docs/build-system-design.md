@@ -13,7 +13,7 @@ Companion authorities:
 - `docs/src/docs/codebase/design-scope/overview.mtf` for design bias and scope boundaries
 - `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
 - `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards
-- `docs/src/docs/progress/#page.moth` for current support and backend coverage
+- `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
 
 ## Architectural invariants
@@ -505,7 +505,7 @@ Stage 0 produces structure, resolved build-input contracts and compiler inputs. 
 
 Terminology is strict:
 
-- A module is one directory-scoped compilation and visibility unit rooted by `#*.moth` or `+*.moth`.
+- A module is one directory-scoped compilation and visibility unit rooted by `@*.moth` or `+*.moth`.
 - A package is a named reusable `@...` import root and future dependency or distribution unit.
 - A binding is a typed bridge to an implementation outside Moth source.
 - A prelude is implicit import policy rather than a package kind.
@@ -515,10 +515,10 @@ Terminology is strict:
 
 A directory contains at most one module root.
 
-- `#*.moth` defines a normal module.
+- `@*.moth` defines a normal module.
 - `+*.moth` inside a project source tree defines an API-only scoped support module.
 - One optional project-root `+*.moth` beside `config.moth` defines the external project package facade.
-- The suffix after `#` or `+` is cosmetic.
+- The suffix after `@` or `+` is cosmetic.
 - `config.moth` is not a module root.
 
 A normal module may own dormant top-level runtime work and page fragments.
@@ -543,7 +543,7 @@ Example:
 
 ```text
 src/
-├── #site.moth
+├── @site.moth
 ├── accounts.moth
 └── internal/
     └── deep/
@@ -600,17 +600,17 @@ Example:
 
 ```text
 site/
-├── #site.moth
+├── @site.moth
 ├── markdown/
 │   ├── +package.moth
 │   ├── parser/
-│   │   └── #parser.moth
+│   │   └── @parser.moth
 │   └── rendering/
-│       └── #rendering.moth
+│       └── @rendering.moth
 └── pages/
-    ├── #pages.moth
+    ├── @pages.moth
     └── article/
-        └── #article.moth
+        └── @article.moth
 ```
 
 `@markdown` is visible to `site`, `pages` and `article`. Its private descendants may be imported by the `markdown` facade, but consumers cannot address them through `@markdown/parser` or another implementation path.

@@ -5,7 +5,7 @@ diagnostic_codes = ["MOTH-RULE-0075"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0075"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 1
 
 [backends.html_wasm]
@@ -15,5 +15,5 @@ diagnostic_codes = ["MOTH-RULE-0075"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0075"
-path = "input/#page.moth"
+path = "input/@page.moth"
 line = 1
