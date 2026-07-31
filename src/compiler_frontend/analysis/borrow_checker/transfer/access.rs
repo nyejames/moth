@@ -74,6 +74,12 @@ struct MutableAccessPolicy {
     allow_prior_shared: bool,
     require_root_mutable: bool,
     strict_move_exclusivity: bool,
+    /// Whether to check alias exclusivity for the written roots.
+    /// WHAT: local-target rebinding to a fresh value releases the old allocation without
+    /// mutating it, so aliases of the old allocation should not block the rebinding.
+    /// WHY: a binding-versus-allocation modelling fix. Without this flag, the alias count
+    /// check rejects rebinding when a returned alias of the old allocation is live.
+    check_alias_exclusivity: bool,
 }
 
 /// Shared assignment-transfer environment for one statement.
@@ -235,6 +241,7 @@ fn transfer_assign_target(
                                     allow_prior_shared: true,
                                     require_root_mutable: false,
                                     strict_move_exclusivity: false,
+                                    check_alias_exclusivity: true,
                                 },
                             )?;
                         }
@@ -256,11 +263,20 @@ fn transfer_assign_target(
                 return Ok(());
             }
 
+            // A fresh RHS (no alias roots) means the rebinding replaces the binding's target
+            // with a new allocation. The old allocation stays alive through any aliases, so
+            // alias exclusivity should not block the rebinding.
+            let rhs_is_fresh = rhs_alias_roots
+                .as_ref()
+                .is_none_or(|roots| roots.is_empty());
+
             let mut write_roots = RootSet::empty(layout.local_count());
             if local_state.mode.contains(LocalMode::SLOT) {
                 write_roots.insert(local_index);
             }
-            if local_state.mode.contains(LocalMode::ALIAS) {
+            // Include alias roots in the write check only when the RHS carries alias roots.
+            // A fresh RHS releases the old allocation without mutating it.
+            if !rhs_is_fresh && local_state.mode.contains(LocalMode::ALIAS) {
                 write_roots.union_with(&local_state.alias_roots);
             }
 
@@ -282,6 +298,7 @@ fn transfer_assign_target(
                     allow_prior_shared: true,
                     require_root_mutable: true,
                     strict_move_exclusivity: false,
+                    check_alias_exclusivity: !rhs_is_fresh,
                 },
             )?;
 
@@ -304,23 +321,35 @@ fn transfer_assign_target(
                 }
 
                 (true, true) => {
-                    let mut alias_roots = local_state.alias_roots;
-                    let mut direct_alias_roots = local_state.direct_alias_roots;
-                    if let Some(rhs_roots) = rhs_alias_roots {
-                        alias_roots.union_with(&rhs_roots);
-                    }
-                    if let Some(rhs_direct_roots) = rhs_direct_alias_roots {
-                        direct_alias_roots.union_with(&rhs_direct_roots);
-                    }
+                    if rhs_is_fresh {
+                        // Rebinding to a fresh value releases the old allocation. The binding
+                        // becomes a pure slot with no alias roots.
+                        apply_slot_rebinding(
+                            state,
+                            layout.local_count(),
+                            local_index,
+                            rhs_alias_roots,
+                            rhs_direct_alias_roots,
+                        );
+                    } else {
+                        let mut alias_roots = local_state.alias_roots;
+                        let mut direct_alias_roots = local_state.direct_alias_roots;
+                        if let Some(rhs_roots) = rhs_alias_roots {
+                            alias_roots.union_with(&rhs_roots);
+                        }
+                        if let Some(rhs_direct_roots) = rhs_direct_alias_roots {
+                            direct_alias_roots.union_with(&rhs_direct_roots);
+                        }
 
-                    state.update_local_state(
-                        local_index,
-                        LocalState {
-                            mode: LocalMode::SLOT.union(LocalMode::ALIAS),
-                            alias_roots,
-                            direct_alias_roots,
-                        },
-                    );
+                        state.update_local_state(
+                            local_index,
+                            LocalState {
+                                mode: LocalMode::SLOT.union(LocalMode::ALIAS),
+                                alias_roots,
+                                direct_alias_roots,
+                            },
+                        );
+                    }
                 }
 
                 (false, false) => {
@@ -355,6 +384,7 @@ fn transfer_assign_target(
                     allow_prior_shared: true,
                     require_root_mutable: true,
                     strict_move_exclusivity: false,
+                    check_alias_exclusivity: true,
                 },
             )?;
         }

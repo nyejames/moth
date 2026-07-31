@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "original=2 returned=1\n"

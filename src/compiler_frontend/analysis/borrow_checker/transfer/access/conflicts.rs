@@ -144,76 +144,78 @@ pub(super) fn check_mutable_access(
             ));
         }
 
-        let actor_index = check.actor_index_hint.unwrap_or(root_index);
-        let alias_count = active_alias_count_for_root(
-            &alias_activity,
-            root_index,
-            actor_index,
-            policy.strict_move_exclusivity,
-        );
-        if alias_count > 1 {
-            let conflicting_local_index = conflicting_active_local_for_root(
+        if policy.check_alias_exclusivity {
+            let actor_index = check.actor_index_hint.unwrap_or(root_index);
+            let alias_count = active_alias_count_for_root(
                 &alias_activity,
                 root_index,
                 actor_index,
                 policy.strict_move_exclusivity,
             );
-            let place = check
-                .context
-                .diagnostics
-                .local_place(check.layout.local_ids[actor_index]);
+            if alias_count > 1 {
+                let conflicting_local_index = conflicting_active_local_for_root(
+                    &alias_activity,
+                    root_index,
+                    actor_index,
+                    policy.strict_move_exclusivity,
+                );
+                let place = check
+                    .context
+                    .diagnostics
+                    .local_place(check.layout.local_ids[actor_index]);
 
-            if !policy.strict_move_exclusivity
-                && conflicting_local_index.is_some_and(|index| {
-                    // CFG lowering may use mutable storage slots for iterable aliases, but the
-                    // alias remains shared access from the source program's perspective.
-                    preserve_cfg_future_use_activity
-                        && has_cfg_future_use_after_linear_expiry(
-                            check.layout,
-                            index,
-                            check.block_id,
-                            check.current_order,
-                        )
-                        && is_shared_alias_conflict(check.context, check.layout, index)
-                })
-            {
-                let conflicting_place = conflicting_local_index.map(|index| {
+                if !policy.strict_move_exclusivity
+                    && conflicting_local_index.is_some_and(|index| {
+                        // CFG lowering may use mutable storage slots for iterable aliases, but the
+                        // alias remains shared access from the source program's perspective.
+                        preserve_cfg_future_use_activity
+                            && has_cfg_future_use_after_linear_expiry(
+                                check.layout,
+                                index,
+                                check.block_id,
+                                check.current_order,
+                            )
+                            && is_shared_alias_conflict(check.context, check.layout, index)
+                    })
+                {
+                    let conflicting_place = conflicting_local_index.map(|index| {
+                        check
+                            .context
+                            .diagnostics
+                            .local_place(check.layout.local_ids[index])
+                    });
+                    return Err(check.context.diagnostics.shared_mutable_conflict(
+                        place,
+                        BorrowAccessKind::Shared,
+                        BorrowAccessKind::Mutable,
+                        conflicting_place,
+                        None,
+                        check.location.clone(),
+                    ));
+                }
+
+                let conflicting_place = conflicting_local_index
+                    .map(|index| {
+                        check
+                            .context
+                            .diagnostics
+                            .local_place(check.layout.local_ids[index])
+                    })
+                    .or(Some(DiagnosticPlace::Unknown));
+                let conflicting_location = conflicting_local_index.and_then(|index| {
                     check
                         .context
                         .diagnostics
-                        .local_place(check.layout.local_ids[index])
+                        .local_source_location(check.layout.local_ids[index])
                 });
-                return Err(check.context.diagnostics.shared_mutable_conflict(
+                return Err(check.context.diagnostics.invalid_mutable_access(
                     place,
-                    BorrowAccessKind::Shared,
-                    BorrowAccessKind::Mutable,
+                    InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
                     conflicting_place,
-                    None,
+                    conflicting_location,
                     check.location.clone(),
                 ));
             }
-
-            let conflicting_place = conflicting_local_index
-                .map(|index| {
-                    check
-                        .context
-                        .diagnostics
-                        .local_place(check.layout.local_ids[index])
-                })
-                .or(Some(DiagnosticPlace::Unknown));
-            let conflicting_location = conflicting_local_index.and_then(|index| {
-                check
-                    .context
-                    .diagnostics
-                    .local_source_location(check.layout.local_ids[index])
-            });
-            return Err(check.context.diagnostics.invalid_mutable_access(
-                place,
-                InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
-                conflicting_place,
-                conflicting_location,
-                check.location.clone(),
-            ));
         }
 
         check

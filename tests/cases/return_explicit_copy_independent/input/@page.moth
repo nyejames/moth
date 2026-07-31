@@ -1,0 +1,9 @@
+Point = |
+    x Int,
+|
+
+p ~= Point(1)
+q ~= copy p
+q.x = 99
+
+io.line([:p=[p.x] q=[q.x]])

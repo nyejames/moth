@@ -456,7 +456,7 @@ impl<'hir> JsEmitter<'hir> {
             return Ok(());
         }
 
-        let value = self.lower_fresh_return_value(expression)?;
+        let value = self.lower_moth_return_value(expression)?;
         self.emit_line(&format!("return {value};"));
         Ok(())
     }
@@ -494,7 +494,7 @@ impl<'hir> JsEmitter<'hir> {
             ));
         }
 
-        let value = self.lower_fresh_return_value(expression)?;
+        let value = self.lower_moth_return_value(expression)?;
         self.emit_line(&format!("return {{ tag: \"ok\", value: {value} }};"));
         Ok(())
     }

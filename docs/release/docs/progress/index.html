@@ -531,7 +531,7 @@ body {
      <td style="padding: 0.1em 0.5em; "> Partial</td>
      <td style="padding: 0.1em 0.5em; "> Broad declaration, terminality, call validation, named and positional arguments, defaults, parameter passing, external calls, and return coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / JS / HTML</td>
-     <td style="padding: 0.1em 0.5em; "> Named calls and defaulted parameters are supported. Non-unit success-return functions are validated for all-path terminality before HIR. External and compiler-owned builtin calls remain positional-only. Return slots contain types and channels only. The compiler infers freshness and alias effects from validated bodies and calls. Source-authored return-alias syntax has been removed.</td>
+     <td style="padding: 0.1em 0.5em; "> Named calls and defaulted parameters are supported. Non-unit success-return functions are validated for all-path terminality before HIR. External and compiler-owned builtin calls remain positional-only. Return slots contain types and channels only. The compiler infers freshness and alias effects from validated bodies and calls. Source-authored return-alias syntax has been removed. User-function returns use a raw-value ABI: ordinary returns preserve allocation identity, only explicit copy creates an independent graph. The borrow checker allows rebinding a binding to a fresh value while a returned alias of the old allocation is live.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -1529,7 +1529,7 @@ body {
     let b_l0 = __moth_binding(undefined);
 
     __moth_assign_value(b_l0, []);
-    return __moth_clone_value(__moth_read(b_l0));
+    return __moth_read(b_l0);
     }
 
     </script>

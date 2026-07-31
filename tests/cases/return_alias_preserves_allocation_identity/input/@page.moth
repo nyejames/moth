@@ -1,0 +1,13 @@
+Point = |
+    x Int,
+|
+
+identity |value Point| -> Point:
+    return value
+;
+
+original ~= Point(1)
+returned = identity(original)
+original = Point(2)
+
+io.line([:original=[original.x] returned=[returned.x]])

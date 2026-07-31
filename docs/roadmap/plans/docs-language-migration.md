@@ -11,11 +11,12 @@ CURRENT_SCOPE: B2 unify compiler String semantics
 STAGE_A: complete and accepted
 STAGE_W: complete and accepted
 PRE_B1_CLOSEOUT: complete, full gate green at d82b86d74
-COMPLETED: B1 source-authored return aliases removed (a1cfe6199)
+COMPLETED: B1 source syntax removal and return-value ABI correction complete
 NEXT_ACTION: B2 unify compiler String semantics
-VALIDATION: just validate green, docs build green, 1812/1812 integration correct
+VALIDATION: just validate green, docs build green, 1813/1813 integration correct
 AUDITS: none
 BLOCKERS: none
+STAGE_C: blocked until Stage B completes
 STAGE_C: blocked until Stage B completes
 ```
 

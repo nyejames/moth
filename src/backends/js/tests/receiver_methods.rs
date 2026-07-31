@@ -128,9 +128,9 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     );
 }
 
-/// Verifies that a receiver method with a fresh return emits __moth_assign_value. [receiver] [alias]
+/// Verifies that a receiver method return assigns through __moth_assign_value. [receiver] [alias]
 #[test]
-fn receiver_method_call_assigns_value_for_fresh_return() {
+fn receiver_method_call_assigns_value_for_return() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
@@ -222,7 +222,7 @@ fn receiver_method_call_assigns_value_for_fresh_return() {
         output.source.contains(&format!(
             "__moth_assign_value({result_name}, {callee_name}("
         )),
-        "fresh-return receiver call must assign result with __moth_assign_value"
+        "moth-return receiver call must assign result with __moth_assign_value"
     );
 }
 

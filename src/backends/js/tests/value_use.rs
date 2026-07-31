@@ -461,9 +461,9 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
 // Return value handling [value_use]
 // ---------------------------------------------------------------------------
 
-/// Verifies that returning a Load from an alias-returning function passes the raw place.
+/// Verifies that returning a Load reads the raw value without cloning or returning a place ref.
 #[test]
-fn load_in_return_value_clones_for_fresh_return() {
+fn load_in_return_reads_value_without_cloning() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
@@ -518,10 +518,22 @@ fn load_in_return_value_clones_for_fresh_return() {
     let param_name = expected_dev_local_name("value", 0);
 
     assert!(
-        output.source.contains(&format!(
+        output
+            .source
+            .contains(&format!("return __moth_read({param_name});")),
+        "Load in return value must read the raw value without cloning"
+    );
+
+    assert!(
+        !output.source.contains(&format!(
             "return __moth_clone_value(__moth_read({param_name}));"
         )),
-        "Load in return value must clone the read value for a fresh return"
+        "Load in return value must not clone the read value"
+    );
+
+    assert!(
+        !output.source.contains(&format!("return {param_name};")),
+        "Load in return value must not return a bare binding reference"
     );
 }
 
@@ -671,8 +683,8 @@ fn tuple_return_preserves_return_value_handling_per_element() {
 
     assert!(
         output.source.contains(&format!(
-            "return [__moth_clone_value(__moth_read({first_name})), __moth_clone_value(__moth_read({second_name}))];"
+            "return [__moth_read({first_name}), __moth_clone_value(__moth_read({second_name}))];"
         )),
-        "tuple return must clone both Load and Copy elements for a fresh return"
+        "tuple return must read Load elements and clone Copy elements"
     );
 }

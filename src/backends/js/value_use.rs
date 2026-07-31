@@ -1,11 +1,15 @@
 //! Value-use context lowering for the JavaScript backend.
 //!
 //! WHAT: centralizes how HIR `Load` and `Copy` expressions are lowered depending on the JS
-//! consumption context.
+//! consumption context. User-function return values use a raw-value ABI: the caller receives
+//! a fresh binding holding the raw JS value, never a Moth binding cell.
 //! WHY: Moth calls, host/external calls, assignments, returns, and plain expressions each
 //! use a different value policy. Explicit contexts prevent duplicated `Load`/`Copy` branches
 //! across expression and statement lowering, and make the ABI boundary between Moth
-//! reference bindings and raw JS values explicit.
+//! reference bindings and raw JS values explicit. User-function arguments may use the
+//! internal binding-reference parameter ABI, but results always cross as raw values into
+//! fresh caller bindings. Inferred alias summaries drive borrow validation and do not select
+//! JS assignment mode. Only source `copy` selects deep cloning.
 
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
@@ -14,9 +18,10 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 /// Context in which a lowered JS expression will be consumed.
 ///
 /// WHAT: names the value-use site so the emitter can apply the correct ABI policy.
-/// WHY: Moth functions speak a reference ABI (places are passed as binding refs, rvalues
-/// are wrapped in `__moth_binding`), while host/external JS calls cross into raw JS and must
-/// receive concrete values without binding wrappers. Returns may preserve alias references.
+/// WHY: Moth functions speak a reference ABI for arguments (places are passed as binding
+/// refs, rvalues are wrapped in `__moth_binding`), while host/external JS calls cross into
+/// raw JS and receive concrete values without binding wrappers. User-function results use
+/// a raw-value ABI: the caller receives a fresh binding holding the raw value.
 /// Assignments need concrete values suitable for write-through or rebinding.
 pub(crate) enum JsValueUse {
     /// Ordinary expression position: produces a concrete JS value.
@@ -71,15 +76,31 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    pub(crate) fn lower_fresh_return_value(
+    /// Lower a HIR expression for a user-function return.
+    ///
+    /// WHAT: produces the raw JS value that the caller will receive in a fresh binding.
+    /// WHY: ordinary returns preserve allocation identity by reading the raw value. Only
+    /// explicit `copy` requests an independent graph via `__moth_clone_value`. Reactive
+    /// template values preserve their specialised representation. This name avoids "fresh"
+    /// to prevent confusion with the semantic `FunctionReturnAliasSummary::Fresh` lattice
+    /// value, which describes whether the returned root aliases a parameter root.
+    pub(crate) fn lower_moth_return_value(
         &mut self,
         expression: &HirExpression,
     ) -> Result<String, CompilerError> {
+        // Reactive template values preserve their specialised representation. They must not
+        // pass through generic deep-object cloning or template snapshotting.
+        if self.value_is_reactive_template(expression.id) {
+            return self.lower_reactive_template_value(expression);
+        }
+
         match &expression.kind {
-            HirExpressionKind::Load(place) => Ok(format!(
-                "__moth_clone_value(__moth_read({}))",
-                self.lower_place(place)?
-            )),
+            // Ordinary return: read the raw value. This preserves allocation identity. The
+            // caller receives it in a fresh binding, but the underlying allocation is shared.
+            HirExpressionKind::Load(place) => {
+                Ok(format!("__moth_read({})", self.lower_place(place)?))
+            }
+            // Explicit copy: deep-clone the value to create an independent result graph.
             HirExpressionKind::Copy(place) => Ok(format!(
                 "__moth_clone_value(__moth_read({}))",
                 self.lower_place(place)?
@@ -87,7 +108,7 @@ impl<'hir> JsEmitter<'hir> {
             HirExpressionKind::TupleConstruct { elements } => {
                 let lowered = elements
                     .iter()
-                    .map(|element| self.lower_fresh_return_value(element))
+                    .map(|element| self.lower_moth_return_value(element))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(format!("[{}]", lowered.join(", ")))
             }

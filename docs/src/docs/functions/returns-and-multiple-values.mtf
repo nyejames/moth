@@ -68,3 +68,33 @@ unavailable.
 
 The alias and freshness summary lattice is compiler-owned semantic information.
 It is not source syntax, a source type or a signature category.
+
+### Binding freshness and allocation identity
+
+Every function result enters a fresh caller binding. This does not imply a
+fresh allocation. Returning an existing record, collection, map, string
+allocation, opaque handle or projection preserves its allocation identity and
+lifetime owner. The result binding never points at the callee's parameter or
+local binding slot.
+
+Reassigning one binding does not rebind another binding that received the same
+allocation through a return. The allocation remains alive while any legal alias
+retains it.
+
+Ordinary return does not copy. Use `copy` when the caller needs an independent
+result graph.
+
+The compiler's inferred alias summary governs borrow and lifetime validation.
+It does not change the source type and does not select a binding-reference
+return ABI.
+
+External alias metadata describes whether a foreign result aliases an argument
+allocation. It does not expose binding references to source code and does not
+allow host code to return a Moth binding cell.
+
+### Fallible and multiple returns
+
+A fallible carrier is fresh while its success payload may alias a parameter
+allocation. Multiple return values may alias parameters or each other. Each
+returned value enters its own caller binding. Runtime lowering preserves those
+allocation relationships.

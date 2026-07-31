@@ -5057,6 +5057,20 @@ contract = "language.functions.return_value_type_mismatch_rejected"
 role = "primary"
 
 [[case]]
+id = "return_explicit_copy_independent"
+path = "return_explicit_copy_independent"
+tags = ["integration", "borrows", "returns"]
+contract = "language.functions.explicit_copy_creates_independent_value"
+role = "primary"
+
+[[case]]
+id = "return_alias_preserves_allocation_identity"
+path = "return_alias_preserves_allocation_identity"
+tags = ["integration", "borrows", "returns"]
+contract = "language.functions.return_alias_preserves_allocation_identity"
+role = "primary"
+
+[[case]]
 id = "scope_semantics"
 path = "scope_semantics"
 tags = ["integration", "language"]
