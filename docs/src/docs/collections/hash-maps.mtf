@@ -35,7 +35,6 @@ Invalid key families include:
 - traits
 - functions
 - external opaque types
-- templates as a distinct key type
 - generic parameters
 
 The builtin map surface does not expose user-defined `HASHABLE`, custom

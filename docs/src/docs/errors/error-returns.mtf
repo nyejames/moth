@@ -17,7 +17,7 @@ A fallible function marks one return slot with `!`.
 - Success slots appear before it.
 - A function may have success slots plus one error slot.
 - A function may also expose only an error slot.
-- An alias-candidate return slot cannot be the error slot.
+- Success return slots contain types only. The error slot may carry a channel.
 
 The error slot type is explicit. `Error!` is common, but a compatible custom
 error type can be used when the function contract requires it.

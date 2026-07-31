@@ -607,7 +607,7 @@ Rules:
 - Removing a key removes that entry from the order. Re-inserting the key appends a new entry.
 - Builtin hashmap key types are permanently limited to `String`, `Int`, `Bool`, and `Char`.
   This is a language-owned map surface, not a general hashing abstraction.
-- `Float`, structs, choices, collections, hashmaps, traits, functions, external opaque types, templates as a distinct key type, and generic parameters are invalid keys.
+- `Float`, structs, choices, collections, hashmaps, traits, functions, external opaque types, and generic parameters are invalid keys.
 - Values follow the same runtime-storable rules as collection elements.
 - Maps own their entry structure. Existing keys and values stored in entries follow the ordinary shared-reference, explicit-copy and inferred-transfer rules.
 - `get`, `contains`, and `remove` borrow the lookup key.
@@ -1250,7 +1250,6 @@ Unsupported equality payloads:
 - functions
 - fallible result carriers
 - external opaque types
-- templates
 
 ## Generics
 

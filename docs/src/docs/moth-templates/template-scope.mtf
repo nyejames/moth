@@ -39,8 +39,15 @@ Authors resolve collisions by renaming the module-root export.
 [codeblock, $code("moth"):
     -- docs/#docs.moth
     export:
-        -- If @html already exposes `p`, this creates a collision.
-        -- Rename to avoid it:
+        -- INVALID: @html already exposes `p`, so this collides.
+        p #= [p: Custom paragraph]
+    ;
+]
+
+[codeblock, $code("moth"):
+    -- docs/#docs.moth
+    export:
+        -- Correct: rename to avoid the collision.
         my_p #= [p: Custom paragraph]
     ;
 ]

@@ -957,8 +957,13 @@ body {
     </code></pre><h3>Collision semantics</h3><p><code>@html</code> constants and same-directory module root constants don&#39;t shadow each other. If both surfaces expose the same visible name, compilation fails with a visible-name collision diagnostic. The collision identifies both sources where location data is available.</p><p>Authors resolve collisions by renaming the module-root export.</p><pre style=""><code class='codeblock'>
     <span class='moth-code-comment'>-- docs/#docs.moth</span>
     export<span class='moth-code-operator'>:</span>
-        <span class='moth-code-comment'>-- If @html already exposes `p`, this creates a collision.</span>
-        <span class='moth-code-comment'>-- Rename to avoid it:</span>
+        <span class='moth-code-comment'>-- INVALID: @html already exposes `p`, so this collides.</span>
+        p <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>p<span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Custom</span> paragraph<span class='moth-code-parenthesis'>]</span>
+    ;
+    </code></pre><pre style=""><code class='codeblock'>
+    <span class='moth-code-comment'>-- docs/#docs.moth</span>
+    export<span class='moth-code-operator'>:</span>
+        <span class='moth-code-comment'>-- Correct: rename to avoid the collision.</span>
         my_p <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>p<span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Custom</span> paragraph<span class='moth-code-parenthesis'>]</span>
     ;
     </code></pre><p>This follows the same no-shadowing model as ordinary source visibility.</p><h3>Implementation gap</h3><p>The accepted collision model rejects same-name imports from both surfaces with a visible-name diagnostic. The current compiler resolves some collisions through local-over-HTML precedence rather than diagnosing them. Stage B of the language documentation plan removes the overwrite path and registers both surfaces through one visible-name registry. See <a href="../../codebase/progress">Progress</a> for the recorded drift.</p><h3>Nested templates</h3><p>Nested templates inside a <code>.mtf</code> body are valid. A nested template with no explicit directive defaults to <code>$md</code>. Any explicit directive (such as <code>$raw</code>, <code>$fresh</code>, <code>$html</code>, <code>$code</code>, <code>$css</code> or <code>$escape_html</code>) overrides the moth template Markdown default for that nested template.</p><pre style=""><code class='codeblock'>
