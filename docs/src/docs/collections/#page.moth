@@ -1,44 +1,44 @@
-import @./collection-literals {
+import @collection-literals {
     content as collection_literals,
 }
 
-import @./collection-literals-basic {
+import @collection-literals-basic {
     content as collection_literals_basic,
 }
 
-import @./growable-collections {
+import @growable-collections {
     content as growable_collections,
 }
 
-import @./growable-collections-basic {
+import @growable-collections-basic {
     content as growable_collections_basic,
 }
 
-import @./fixed-collections {
+import @fixed-collections {
     content as fixed_collections,
 }
 
-import @./fixed-collections-basic {
+import @fixed-collections-basic {
     content as fixed_collections_basic,
 }
 
-import @./collection-operations {
+import @collection-operations {
     content as collection_operations,
 }
 
-import @./collection-operations-basic {
+import @collection-operations-basic {
     content as collection_operations_basic,
 }
 
-import @./hash-maps {
+import @hash-maps {
     content as hash_maps,
 }
 
-import @./hash-maps-basic {
+import @hash-maps-basic {
     content as hash_maps_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

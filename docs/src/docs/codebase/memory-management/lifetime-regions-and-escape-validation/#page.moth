@@ -1,5 +1,5 @@
-import @./lifetime-regions-and-escape-validation {content as reference_content}
-import @styles/docs {navbar, section, theme_head}
+import @lifetime-regions-and-escape-validation {content as reference_content}
+import @styles {navbar, section, theme_head}
 
 page_title #= "Lifetime regions and escape validation"
 page_description #= "How Moth validates lifetime owners, retained references, escapes and region topology."

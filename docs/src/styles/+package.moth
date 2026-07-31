@@ -1,0 +1,710 @@
+import @html {table}
+
+docs_font #= [:
+    @font-face {
+        font-family: "Computer Modern Sans";
+        src: url("[@fonts/cmunss.woff2]") format("woff2");
+        font-style: normal;
+        letter-spacing: 10em;
+        font-weight: 400;
+        font-display: swap;
+    }
+]
+
+Palette = |
+    red String = [$html:<span style="color: light-dark(hsl(0, 84%, 35%), hsl(0, 73%, 65%));">[$slot]</span>],
+    highlight String = [$html:<span style="color: light-dark(hsl(254, 86%, 42%), hsl(184, 85%, 76%));">[$slot]</span>],
+|
+
+palette_instance #= Palette()
+
+export:
+    theme_css #= [docs_font, $css:
+        body {
+            font-family:
+                "Computer Modern Sans",
+                var(--moth-font-family-sans-serif);
+
+            min-height: 100vh;
+
+            background-color:
+                light-dark(
+                    hsl(0, 0%, 98%),
+                    #080d0c
+                );
+        }
+
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-image:
+                    radial-gradient(
+                        80rem 55rem at 8% -10%,
+                        rgb(48 92 61 / 20%),
+                        transparent 60%
+                    ),
+                    radial-gradient(
+                        65rem 45rem at 100% 18%,
+                        rgb(25 67 46 / 10%),
+                        transparent 65%
+                    ),
+                    linear-gradient(
+                        145deg,
+                        #050d1b 0%,
+                        #0a0a17 48%,
+                        #0d1a31 100%
+                    );
+
+                background-repeat: no-repeat;
+            }
+        }
+
+        @media (prefers-color-scheme: light) {
+            body {
+                background-image:
+                    radial-gradient(
+                        80rem 55rem at 8% -10%,
+                        rgb(0 50 80 / 20%),
+                        transparent 60%
+                    ),
+                    radial-gradient(
+                        65rem 45rem at 100% 18%,
+                        rgb(0 67 100 / 10%),
+                        transparent 65%
+                    ),
+                    linear-gradient(
+                        145deg,
+                        #abd7ed 0%,
+                        #eff6ff 23%,
+                        #cde3ff 83%,
+                        #bac9ff 100%
+                    );
+
+                background-repeat: no-repeat;
+            }
+        }
+
+        a {
+            color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+        }
+
+        h1 {
+            color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+        }
+
+        .container {
+            width: 100%;
+            margin-right: auto;
+            margin-left: auto;
+            padding-right: var(--moth-spacing-small);
+            padding-left: var(--moth-spacing-small);
+        }
+
+        .container code:not(.codeblock) {
+            color: #c444aff9;
+            font-family: var(--moth-font-family-monospace);
+        }
+
+        .container pre {
+            max-width: 100%;
+            margin-block: 1.25em;
+            padding: 1em;
+            overflow-x: auto;
+            border-radius: 5px;
+            background-color: #151515e9;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            max-width: 100%;
+        }
+
+        th,
+        td {
+            border: 1px solid;
+            border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+            padding: 0.5em 1em;
+            vertical-align: top;
+            text-align: left;
+        }
+
+
+
+        @media (min-width: 576px) {
+            .container {
+                max-width: 510px;
+                padding-right: var(--moth-spacing);
+                padding-left: var(--moth-spacing);
+                padding-bottom: var(--moth-spacing);
+            }
+        }
+
+        @media (min-width: 768px) {
+            .container {
+                max-width: 700px;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .container {
+                max-width: 950px;
+            }
+
+            table {
+                font-size: 0.8rem;
+            }
+
+            th,
+            td {
+                padding: 0.4em;
+            }
+        }
+
+        @media (min-width: 1280px) {
+            .container {
+                max-width: 1200px;
+            }
+        }
+
+        @media (min-width: 1536px) {
+            .container {
+                max-width: 1450px;
+            }
+        }
+
+        .moth-nav-1 {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom-color: grey;
+            border-bottom-style: solid;
+            border-bottom-width: 1px;
+            padding: 0rem 2rem 0rem 2rem;
+        }
+    ]
+
+    red #= palette_instance.red
+
+    highlight #= palette_instance.highlight
+
+    theme_head #= [$html:
+        <style>[theme_css]</style>
+    ]
+
+    language_docs_css #= [$css:
+        .doc-level,
+        .doc-pager {
+            --doc-level-accent: #3f8f4e;
+            --doc-level-accent-hover: #337740;
+            --doc-level-border: #d7dfd8;
+            --doc-level-switch-background: #f1f5f1;
+            --doc-level-selected-background: #ffffff;
+            --doc-level-text: #202722;
+            --doc-level-muted: #687169;
+            --doc-level-focus: #2877d4;
+        }
+
+        .doc-level {
+            min-inline-size: 0;
+            margin: 2rem 0;
+            padding: 0;
+            border: 0;
+            color: var(--doc-level-text);
+        }
+
+        .visually-hidden,
+        .doc-level__input {
+            position: absolute;
+            inline-size: 1px;
+            block-size: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip-path: inset(50%);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .doc-level__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-block-end: 1.25rem;
+        }
+
+        .doc-level__title {
+            margin: 0;
+        }
+
+        .doc-level__switch {
+            display: inline-grid;
+            grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+            gap: 0.2rem;
+            flex: none;
+            padding: 0.22rem;
+            border: 1px solid var(--doc-level-border);
+            border-radius: 0.75rem;
+            background: var(--doc-level-switch-background);
+        }
+
+        .doc-level__option {
+            padding: 0.42rem 0.8rem;
+            border-radius: 0.55rem;
+            color: var(--doc-level-muted);
+            font-size: 0.875rem;
+            font-weight: 650;
+            line-height: 1.3;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+
+            transition:
+                color 130ms ease,
+                background-color 130ms ease,
+                box-shadow 130ms ease;
+        }
+
+        .doc-level__option:hover {
+            color: var(--doc-level-accent-hover);
+        }
+
+        .doc-level__input--basic:checked
+            ~ .doc-level__header
+            .doc-level__option--basic,
+        .doc-level__input--advanced:checked
+            ~ .doc-level__header
+            .doc-level__option--advanced {
+            color: var(--doc-level-accent);
+            background: var(--doc-level-selected-background);
+            box-shadow:
+                0 1px 2px rgb(20 40 24 / 10%),
+                0 0 0 1px rgb(63 143 78 / 8%);
+        }
+
+        .doc-level__input--basic:focus-visible
+            ~ .doc-level__header
+            .doc-level__option--basic,
+        .doc-level__input--advanced:focus-visible
+            ~ .doc-level__header
+            .doc-level__option--advanced {
+            outline: 3px solid var(--doc-level-focus);
+            outline-offset: 2px;
+        }
+
+        .doc-level__panel {
+            display: none;
+        }
+
+        .doc-level__input--basic:checked
+            ~ .doc-level__panel--basic,
+        .doc-level__input--advanced:checked
+            ~ .doc-level__panel--advanced {
+            display: block;
+        }
+
+        .doc-pager {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 1rem;
+            margin-block: 3rem 1rem;
+        }
+
+        .doc-pager--single {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .doc-pager--single .doc-pager__link {
+            width: min(100%, 32rem);
+        }
+
+        .doc-pager--single .doc-pager__link--previous {
+            justify-self: start;
+        }
+
+        .doc-pager--single .doc-pager__link--next {
+            justify-self: end;
+        }
+
+        .doc-pager__link {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            min-inline-size: 0;
+            padding: 0.9rem 1rem;
+            border: 1px solid var(--doc-level-border);
+            border-radius: 0.75rem;
+            color: var(--doc-level-text);
+            text-decoration: none;
+            background: var(--doc-level-selected-background);
+
+            transition:
+                color 130ms ease,
+                border-color 130ms ease,
+                box-shadow 130ms ease;
+        }
+
+        .doc-pager__link:hover {
+            color: var(--doc-level-accent-hover);
+            border-color: var(--doc-level-accent);
+            box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+        }
+
+        .doc-pager__link:focus-visible {
+            outline: 3px solid var(--doc-level-focus);
+            outline-offset: 2px;
+        }
+
+        .doc-pager__link--next {
+            align-items: flex-end;
+            text-align: right;
+        }
+
+        .doc-pager__direction {
+            color: var(--doc-level-muted);
+            font-size: 0.8rem;
+            font-weight: 650;
+            letter-spacing: 0.03rem;
+            text-transform: uppercase;
+        }
+
+        .doc-pager__title {
+            font-size: 1rem;
+            font-weight: 650;
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            .doc-level__input--basic:checked
+                ~ .doc-level__panel--basic,
+            .doc-level__input--advanced:checked
+                ~ .doc-level__panel--advanced {
+                animation: doc-level-enter 150ms ease-out;
+            }
+
+            @keyframes doc-level-enter {
+                from {
+                    opacity: 0;
+                    transform: translateY(0.2rem);
+                }
+
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        }
+
+        @media (max-width: 36rem) {
+            .doc-level__header {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .doc-level__switch {
+                align-self: flex-start;
+            }
+
+            .doc-pager {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .doc-pager__link--next {
+                align-items: flex-start;
+                text-align: left;
+            }
+
+            .doc-pager--single .doc-pager__link {
+                width: 100%;
+                justify-self: stretch;
+            }
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .doc-level,
+            .doc-pager {
+                --doc-level-accent: #80c98c;
+                --doc-level-accent-hover: #a0d9a9;
+                --doc-level-border: #3a493d;
+                --doc-level-switch-background: #202a22;
+                --doc-level-selected-background: #303c32;
+                --doc-level-text: #edf2ee;
+                --doc-level-muted: #a8b3aa;
+                --doc-level-focus: #75b7ff;
+            }
+        }
+
+        @media print {
+            .doc-level__input,
+            .doc-level__switch,
+            .doc-pager {
+                display: none;
+            }
+
+            .doc-level__panel {
+                display: block;
+            }
+
+            .doc-level__panel--advanced {
+                margin-block-start: 1.5rem;
+                padding-block-start: 1.5rem;
+                border-block-start: 1px solid;
+            }
+
+            .doc-level__panel--basic::before,
+            .doc-level__panel--advanced::before {
+                display: block;
+                margin-block-end: 0.75rem;
+                font-weight: 700;
+            }
+
+            .doc-level__panel--basic::before {
+                content: "Basic";
+            }
+
+            .doc-level__panel--advanced::before {
+                content: "Advanced";
+            }
+        }
+    ]
+
+    language_theme_head #= [$html:
+        [theme_head]
+        <style>[language_docs_css]</style>
+    ]
+
+    section #= [$html:
+        <section class="container">[$slot]</section>
+    ]
+
+    doc_level #= [$html:
+        <fieldset class="doc-level">
+            <legend class="visually-hidden">
+                Choose the explanation level: [$slot("title")]
+            </legend>
+
+            <input
+                class="doc-level__input doc-level__input--basic"
+                type="radio"
+                name="[$slot("key")]-level"
+                id="[$slot("key")]-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="[$slot("key")]-level"
+                id="[$slot("key")]-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="[$slot("key")]">
+                    [$slot("title")]
+                </h2>
+
+                <div class="doc-level__switch">
+                    <label
+                        class="doc-level__option doc-level__option--basic"
+                        for="[$slot("key")]-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="[$slot("key")]-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                [$slot]
+            </div>
+
+            <div class="doc-level__panel doc-level__panel--advanced">
+                [$slot("advanced")]
+            </div>
+        </fieldset>
+    ]
+
+    doc_pager #= [$html:
+        <nav class="doc-pager" aria-label="Language documentation">
+            <a
+                class="doc-pager__link doc-pager__link--previous"
+                href="[$slot("previous_path")]"
+                rel="prev"
+            >
+                <span class="doc-pager__direction">← Previous</span>
+                <span class="doc-pager__title">[$slot("previous_title")]</span>
+            </a>
+
+            <a
+                class="doc-pager__link doc-pager__link--next"
+                href="[$slot("next_path")]"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">[$slot("next_title")]</span>
+            </a>
+
+            [$slot]
+        </nav>
+    ]
+
+    doc_pager_previous #= [$html:
+        <nav class="doc-pager doc-pager--single" aria-label="Language documentation">
+            <a
+                class="doc-pager__link doc-pager__link--previous"
+                href="[$slot("previous_path")]"
+                rel="prev"
+            >
+                <span class="doc-pager__direction">← Previous</span>
+                <span class="doc-pager__title">[$slot("previous_title")]</span>
+            </a>
+
+            [$slot]
+        </nav>
+    ]
+
+    doc_pager_next #= [$html:
+        <nav class="doc-pager doc-pager--single" aria-label="Language documentation">
+            <a
+                class="doc-pager__link doc-pager__link--next"
+                href="[$slot("next_path")]"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">[$slot("next_title")]</span>
+            </a>
+
+            [$slot]
+        </nav>
+    ]
+
+    navbar #= [$html:
+        <nav class="moth-nav-1" aria-label="Primary">
+            <a
+                href="[@/]"
+                style="
+                    display: flex;
+                    align-items: center;
+                    gap: 0.6rem;
+                    padding: 0.9rem 0;
+                    text-decoration: none;
+                    font-weight: 700;
+                    letter-spacing: 0.04rem;
+                "
+            >
+                <span
+                    aria-hidden="true"
+                    style="
+                        font-family: var(--moth-font-family-emoji);
+                        font-size: 1.4rem;
+                        line-height: 1;
+                        color: light-dark( #234970, #97b7ef );
+                    "
+                >ʚĭɞ</span>
+
+            </a>
+
+            <div
+                style="
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                "
+            >
+                <a
+                    href="[@docs]"
+                    style="
+                        color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                        text-decoration: none;
+                        font-weight: 500;
+                        padding: 0.35rem 0;
+                    "
+                >
+                    Docs
+                </a>
+
+                <a
+                    href="https://github.com/nyejames/moth"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Moth GitHub repository"
+                    style="
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                        padding: 0.35rem 0;
+                    "
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 16 16"
+                        width="22"
+                        height="22"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    >
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                        0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                        -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                        -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                        2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                        1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                        0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+                    </svg>
+                </a>
+            </div>
+        </nav>
+    ]
+
+    footer #= [$html:
+        <div></div>
+    ]
+
+    header #= [$html:
+        [$children([$html:
+            <th style="border: 1px solid; padding: 0.5em; text-align: left;">[$slot]</th>
+        ]):[$slot]]
+    ]
+
+    styled_table #= [$html:
+        <table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+            [$note: The first row is styled differently to indicate that it is a header row.]
+            <tr style="background-color: hsla(107, 100%, 36%, 0.23);">
+                [$slot(1)]
+            </tr>
+
+            [$note: Each remaining row is styled with a dotted border to separate the rows visually.]
+            [$children([$html:<tr style="border-bottom: 1px dotted grey;">[$slot]</tr>]):
+                [$slot]
+            ]
+
+        </table>
+    ]
+
+    data #= [$html:
+        [$children([$html: <td style="padding: 0.1em 0.5em; [$slot("style")]">[$slot]</td>]):
+            [$slot]
+        ]
+    ]
+
+    codeblock #= [$html:
+        <pre style="
+            padding-left: 1em;
+            border-radius: 5px;
+            max-width: 100%;
+            white-space: pre;
+            overflow-x: auto;
+        ">[$slot]</pre>
+    ]
+
+    title #= [$html: <h1 style="font-size: 2em;[$slot("style")]">[$slot]</h1>]
+;

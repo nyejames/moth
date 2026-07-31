@@ -46,7 +46,7 @@ This is rejected with `MOTH-IMPORT-0024`. Use `import @docs/intro` without the `
 
 ### Relative path resolution
 
-Content imports follow the same path resolution rules as normal source imports. `@./intro` resolves from the importing file's directory. `@docs/intro` resolves from the entry root.
+Content imports follow the same path resolution rules as normal source imports. `@intro` resolves from the importing file's owning module root. `@docs/intro` resolves from the entry root. `@./...` has no supported meaning.
 
 ### Import from root or helper files
 
@@ -62,7 +62,7 @@ A `.mtf` file's `content` is subject to the same module visibility rules as othe
 
 [codeblock, $code("moth"):
     export:
-        import @./intro {
+        import @intro {
             content as intro,
         }
     ;

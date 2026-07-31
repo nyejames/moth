@@ -27,4 +27,4 @@ Most Core packages require explicit imports:
 
 ### Read next
 
-For the full prelude contract, collision rules and builder ownership, see @./prelude (Prelude policy advanced).
+For the full prelude contract, collision rules and builder ownership, see @prelude (Prelude policy advanced).

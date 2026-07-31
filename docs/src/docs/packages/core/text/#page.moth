@@ -1,12 +1,12 @@
-import @./text {
+import @text {
     content as text_advanced,
 }
 
-import @./text-basic {
+import @text-basic {
     content as text_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

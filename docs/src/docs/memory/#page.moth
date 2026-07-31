@@ -1,36 +1,36 @@
-import @./reference-semantics {
+import @reference-semantics {
     content as reference_semantics,
 }
 
-import @./reference-semantics-basic {
+import @reference-semantics-basic {
     content as reference_semantics_basic,
 }
 
-import @./copy-and-exclusive-access {
+import @copy-and-exclusive-access {
     content as copy_and_exclusive_access,
 }
 
-import @./copy-and-exclusive-access-basic {
+import @copy-and-exclusive-access-basic {
     content as copy_and_exclusive_access_basic,
 }
 
-import @./lifetimes-and-result-shapes {
+import @lifetimes-and-result-shapes {
     content as lifetimes_and_result_shapes,
 }
 
-import @./lifetimes-and-result-shapes-basic {
+import @lifetimes-and-result-shapes-basic {
     content as lifetimes_and_result_shapes_basic,
 }
 
-import @./declared-memory-groups {
+import @declared-memory-groups {
     content as declared_memory_groups,
 }
 
-import @./declared-memory-groups-basic {
+import @declared-memory-groups-basic {
     content as declared_memory_groups_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

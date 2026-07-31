@@ -1,5 +1,5 @@
 import @html {table}
-import @styles/docs {navbar, section, theme_head, codeblock}
+import @styles {navbar, section, theme_head, codeblock}
 
 page_title #= "Codebase documentation"
 page_description #= "Internal compiler and build-system references for maintainers and curious readers."
@@ -20,11 +20,11 @@ page_head #= theme_head
 #[section, $md:
     ## Explore the codebase
 
-    - @./compiler-design (Compiler design): staged pipeline, task-reading matrix and cross-cutting contracts
-    - @./memory-management (Memory management): reference semantics, borrow validation, lifetime regions, ownership and backend lowering
-    - @./style-guide (Codebase development standards): implementation style, test strategy and validation gates
-    - @./design-scope (Design scope): accepted mechanisms, constraints and intentionally excluded complexity
-    - @./language (Compiler-facing language reference): bridge to the canonical language overview
+    - @compiler-design (Compiler design): staged pipeline, task-reading matrix and cross-cutting contracts
+    - @memory-management (Memory management): reference semantics, borrow validation, lifetime regions, ownership and backend lowering
+    - @style-guide (Codebase development standards): implementation style, test strategy and validation gates
+    - @design-scope (Design scope): accepted mechanisms, constraints and intentionally excluded complexity
+    - @language (Compiler-facing language reference): bridge to the canonical language overview
     - @../progress (Progress matrix): current implementation status and known gaps
     - @https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (Roadmap): planned work and design direction
     - @https://github.com/nyejames/moth/blob/main/index.md (Repository index): quick module and file locator

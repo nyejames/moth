@@ -1,4 +1,4 @@
-import @styles/docs {
+import @styles {
     navbar,
     section,
     styled_table,

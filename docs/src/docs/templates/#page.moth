@@ -1,52 +1,52 @@
-import @./template-basics {
+import @template-basics {
     content as template_basics,
 }
 
-import @./template-basics-basic {
+import @template-basics-basic {
     content as template_basics_basic,
 }
 
-import @./template-directives {
+import @template-directives {
     content as template_directives,
 }
 
-import @./template-directives-basic {
+import @template-directives-basic {
     content as template_directives_basic,
 }
 
-import @./template-slots {
+import @template-slots {
     content as template_slots,
 }
 
-import @./template-slots-basic {
+import @template-slots-basic {
     content as template_slots_basic,
 }
 
-import @./child-wrappers {
+import @child-wrappers {
     content as child_wrappers,
 }
 
-import @./child-wrappers-basic {
+import @child-wrappers-basic {
     content as child_wrappers_basic,
 }
 
-import @./template-control-flow {
+import @template-control-flow {
     content as template_control_flow,
 }
 
-import @./template-control-flow-basic {
+import @template-control-flow-basic {
     content as template_control_flow_basic,
 }
 
-import @./markdown-formatting {
+import @markdown-formatting {
     content as markdown_formatting,
 }
 
-import @./markdown-formatting-basic {
+import @markdown-formatting-basic {
     content as markdown_formatting_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

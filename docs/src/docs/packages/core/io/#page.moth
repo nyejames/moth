@@ -1,12 +1,12 @@
-import @./io {
+import @io {
     content as io_advanced,
 }
 
-import @./io-basic {
+import @io-basic {
     content as io_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

@@ -1,52 +1,52 @@
-import @./import-paths {
+import @import-paths {
     content as import_paths,
 }
 
-import @./import-paths-basic {
+import @import-paths-basic {
     content as import_paths_basic,
 }
 
-import @./grouped-and-namespace-imports {
+import @grouped-and-namespace-imports {
     content as grouped_and_namespace_imports,
 }
 
-import @./grouped-and-namespace-imports-basic {
+import @grouped-and-namespace-imports-basic {
     content as grouped_and_namespace_imports_basic,
 }
 
-import @./module-visibility {
+import @module-visibility {
     content as module_visibility,
 }
 
-import @./module-visibility-basic {
+import @module-visibility-basic {
     content as module_visibility_basic,
 }
 
-import @./public-reexports {
+import @public-reexports {
     content as public_reexports,
 }
 
-import @./public-reexports-basic {
+import @public-reexports-basic {
     content as public_reexports_basic,
 }
 
-import @./project-local-packages {
+import @project-local-packages {
     content as project_local_packages,
 }
 
-import @./project-local-packages-basic {
+import @project-local-packages-basic {
     content as project_local_packages_basic,
 }
 
-import @./package-origins-and-backing {
+import @package-origins-and-backing {
     content as package_origins_and_backing,
 }
 
-import @./package-origins-and-backing-basic {
+import @package-origins-and-backing-basic {
     content as package_origins_and_backing_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

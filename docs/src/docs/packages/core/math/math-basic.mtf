@@ -44,4 +44,4 @@ All functions take `Float` values and return `Float`.
 
 ### Read next
 
-For the full function list, backend behaviour and deferred surfaces, see @./math (Core math advanced).
+For the full function list, backend behaviour and deferred surfaces, see @math (Core math advanced).

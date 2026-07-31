@@ -1,12 +1,12 @@
-import @./collections {
+import @collections {
     content as collections_advanced,
 }
 
-import @./collections-basic {
+import @collections-basic {
     content as collections_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

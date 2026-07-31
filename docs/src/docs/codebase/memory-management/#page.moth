@@ -1,4 +1,4 @@
-import @styles/docs {navbar, section, theme_head, codeblock}
+import @styles {navbar, section, theme_head, codeblock}
 
 page_title #= "Memory management"
 page_description #= "Reference semantics, borrow validation, lifetime regions, ownership and backend memory lowering."
@@ -69,7 +69,7 @@ page_head #= theme_head
 
     The compiler rejects illegal sibling sharing and cross-region cycles even under GC. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.
 
-    Declared `group` / `into` syntax is accepted end-state design with implementation deferred. See @./declared-memory-groups (Declared memory groups) for the source contract and @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
+    Declared `group` / `into` syntax is accepted end-state design with implementation deferred. See @declared-memory-groups (Declared memory groups) for the source contract and @lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
 ]
 
 #[section, $md:
@@ -89,12 +89,12 @@ page_head #= theme_head
 #[section, $md:
     ## Detailed pages
 
-    - @./access-and-aliasing (Access and aliasing): shared reads, explicit copies and `~` access
-    - @./borrow-validation (Borrow validation): roots, joins, optional transfer safety and facts
-    - @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation): one owner, retained edges, escapes and region topology
-    - @./declared-memory-groups (Declared memory groups): accepted deferred `group` / `into` semantics and hard destination lifetimes
-    - @./ownership-and-drops (Ownership and drops): inferred transfer, unified ABI and conditional destruction
-    - @./runtime-and-backend-lowering (Runtime and backend lowering): GC baseline and ownership-aware backend paths
+    - @access-and-aliasing (Access and aliasing): shared reads, explicit copies and `~` access
+    - @borrow-validation (Borrow validation): roots, joins, optional transfer safety and facts
+    - @lifetime-regions-and-escape-validation (Lifetime regions and escape validation): one owner, retained edges, escapes and region topology
+    - @declared-memory-groups (Declared memory groups): accepted deferred `group` / `into` semantics and hard destination lifetimes
+    - @ownership-and-drops (Ownership and drops): inferred transfer, unified ABI and conditional destruction
+    - @runtime-and-backend-lowering (Runtime and backend lowering): GC baseline and ownership-aware backend paths
 ]
 
 #[section, $md:

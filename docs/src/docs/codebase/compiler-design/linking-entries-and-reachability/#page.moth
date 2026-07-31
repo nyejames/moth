@@ -1,5 +1,5 @@
-import @./linking-entries-and-reachability {content as reference_content}
-import @styles/docs {navbar, section, theme_head}
+import @linking-entries-and-reachability {content as reference_content}
+import @styles {navbar, section, theme_head}
 
 page_title #= "15. Linking, entries and reachability"
 page_description #= "How dormant roots become an explicit entry and reachable function union."

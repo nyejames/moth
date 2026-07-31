@@ -1,5 +1,5 @@
-import @./tokenization {content as reference_content}
-import @styles/docs {navbar, section, theme_head}
+import @tokenization {content as reference_content}
+import @styles {navbar, section, theme_head}
 
 page_title #= "05. Tokenization"
 page_description #= "How Moth recognises source boundaries and preserves locations."

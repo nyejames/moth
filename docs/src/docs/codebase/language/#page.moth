@@ -1,4 +1,4 @@
-import @styles/docs {navbar, section, theme_head}
+import @styles {navbar, section, theme_head}
 
 page_title #= "Compiler-facing language reference"
 page_description #= "Current language authority, focused replacement references and related compiler design documentation."

@@ -1,60 +1,60 @@
-import @./trait-declarations {
+import @trait-declarations {
     content as trait_declarations,
 }
 
-import @./trait-declarations-basic {
+import @trait-declarations-basic {
     content as trait_declarations_basic,
 }
 
-import @./trait-requirements {
+import @trait-requirements {
     content as trait_requirements,
 }
 
-import @./trait-requirements-basic {
+import @trait-requirements-basic {
     content as trait_requirements_basic,
 }
 
-import @./conformance {
+import @conformance {
     content as conformance,
 }
 
-import @./conformance-basic {
+import @conformance-basic {
     content as conformance_basic,
 }
 
-import @./generic-trait-bounds {
+import @generic-trait-bounds {
     content as generic_trait_bounds,
 }
 
-import @./generic-trait-bounds-basic {
+import @generic-trait-bounds-basic {
     content as generic_trait_bounds_basic,
 }
 
-import @./trait-incompatibility {
+import @trait-incompatibility {
     content as trait_incompatibility,
 }
 
-import @./trait-incompatibility-basic {
+import @trait-incompatibility-basic {
     content as trait_incompatibility_basic,
 }
 
-import @./core-cast-traits {
+import @core-cast-traits {
     content as core_cast_traits,
 }
 
-import @./core-cast-traits-basic {
+import @core-cast-traits-basic {
     content as core_cast_traits_basic,
 }
 
-import @./trait-design-scope {
+import @trait-design-scope {
     content as trait_design_scope,
 }
 
-import @./trait-design-scope-basic {
+import @trait-design-scope-basic {
     content as trait_design_scope_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

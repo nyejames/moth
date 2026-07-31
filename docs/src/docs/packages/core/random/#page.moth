@@ -1,12 +1,12 @@
-import @./random {
+import @random {
     content as random_advanced,
 }
 
-import @./random-basic {
+import @random-basic {
     content as random_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

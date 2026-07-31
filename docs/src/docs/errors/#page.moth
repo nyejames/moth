@@ -1,52 +1,52 @@
-import @./error-values {
+import @error-values {
     content as error_values,
 }
 
-import @./error-values-basic {
+import @error-values-basic {
     content as error_values_basic,
 }
 
-import @./error-returns {
+import @error-returns {
     content as error_returns,
 }
 
-import @./error-returns-basic {
+import @error-returns-basic {
     content as error_returns_basic,
 }
 
-import @./propagation {
+import @propagation {
     content as propagation,
 }
 
-import @./propagation-basic {
+import @propagation-basic {
     content as propagation_basic,
 }
 
-import @./catch-and-recovery {
+import @catch-and-recovery {
     content as catch_and_recovery,
 }
 
-import @./catch-and-recovery-basic {
+import @catch-and-recovery-basic {
     content as catch_and_recovery_basic,
 }
 
-import @./options {
+import @options {
     content as options,
 }
 
-import @./options-basic {
+import @options-basic {
     content as options_basic,
 }
 
-import @./assertions {
+import @assertions {
     content as assertions,
 }
 
-import @./assertions-basic {
+import @assertions-basic {
     content as assertions_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

@@ -1,5 +1,5 @@
-import @./ownership-and-drops {content as reference_content}
-import @styles/docs {navbar, section, theme_head}
+import @ownership-and-drops {content as reference_content}
+import @styles {navbar, section, theme_head}
 
 page_title #= "Ownership and drops"
 page_description #= "How Moth infers ownership and lowers conditional destruction."

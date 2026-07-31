@@ -1,36 +1,36 @@
-import @./struct-declarations {
+import @struct-declarations {
     content as struct_declarations,
 }
 
-import @./struct-declarations-basic {
+import @struct-declarations-basic {
     content as struct_declarations_basic,
 }
 
-import @./construction-and-fields {
+import @construction-and-fields {
     content as construction_and_fields,
 }
 
-import @./construction-and-fields-basic {
+import @construction-and-fields-basic {
     content as construction_and_fields_basic,
 }
 
-import @./receiver-methods {
+import @receiver-methods {
     content as receiver_methods,
 }
 
-import @./receiver-methods-basic {
+import @receiver-methods-basic {
     content as receiver_methods_basic,
 }
 
-import @./mutable-receivers {
+import @mutable-receivers {
     content as mutable_receivers,
 }
 
-import @./mutable-receivers-basic {
+import @mutable-receivers-basic {
     content as mutable_receivers_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

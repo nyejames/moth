@@ -1,4 +1,4 @@
-import @styles/docs {navbar, section, theme_head, palette}
+import @styles {navbar, section, theme_head, highlight}
 
 page_title #= "What is Moth?"
 page_description #= "Introduction to the Moth language and toolchain."
@@ -9,7 +9,7 @@ page_head #= theme_head
     # What is Moth?
     Moth is a new programming language and toolchain.
 
-    [palette.highlight, $md: *This website was created using Moth!*]
+    [highlight, $md: *This website was created using Moth!*]
 
     Everything you see on this page, including the layout, styles, and even the text content 
     was written in Moth files and generated using the compiler's built-in HTML project builder.
@@ -17,17 +17,17 @@ page_head #= theme_head
     The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs/src (Github).
 
     ## Documentation
-    The @./docs (Alpha language docs) explains everything about the language, compiler and making Moth projects.
+    The @docs (Alpha language docs) explains everything about the language, compiler and making Moth projects.
 
     This compiler is in early alpha and is undergoing rapid development, so not everything is exactly up to date with the current compiler.
-    [palette.highlight, $md: *You can already use Moth for web projects, but be aware of the early alpha status*]
+    [highlight, $md: *You can already use Moth for web projects, but be aware of the early alpha status*]
 ]
 
 export:
-    import @styles/docs {
-        Palette,
+    import @styles {
         theme_css,
-        palette,
+        red,
+        highlight,
         theme_head,
         language_docs_css,
         language_theme_head,

@@ -26,7 +26,7 @@ Insert the imported content into a template body. The caller decides where it ap
 
 ### Import path and module visibility
 
-Content imports follow the same path resolution and module visibility rules as normal source imports. `@./intro` resolves from the importing file's directory. `@docs/intro` resolves from the entry root. Cross-module imports require the module root's `export:` block to re-export the content.
+Content imports follow the same path resolution and module visibility rules as normal source imports. `@intro` resolves from the importing file's owning module root. `@docs/intro` resolves from the entry root. `@./...` has no supported meaning. Cross-module imports require the module root's `export:` block to re-export the content.
 
 ### No automatic page fragment
 

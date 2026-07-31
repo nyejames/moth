@@ -1,28 +1,28 @@
-import @./type-aliases {
+import @type-aliases {
     content as type_aliases,
 }
 
-import @./type-aliases-basic {
+import @type-aliases-basic {
     content as type_aliases_basic,
 }
 
-import @./import-aliases {
+import @import-aliases {
     content as import_aliases,
 }
 
-import @./import-aliases-basic {
+import @import-aliases-basic {
     content as import_aliases_basic,
 }
 
-import @./payload-capture-aliases {
+import @payload-capture-aliases {
     content as payload_capture_aliases,
 }
 
-import @./payload-capture-aliases-basic {
+import @payload-capture-aliases-basic {
     content as payload_capture_aliases_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

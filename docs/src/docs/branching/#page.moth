@@ -1,36 +1,36 @@
-import @./statement-if {
+import @statement-if {
     content as statement_if,
 }
 
-import @./statement-if-basic {
+import @statement-if-basic {
     content as statement_if_basic,
 }
 
-import @./value-producing-if {
+import @value-producing-if {
     content as value_producing_if,
 }
 
-import @./value-producing-if-basic {
+import @value-producing-if-basic {
     content as value_producing_if_basic,
 }
 
-import @./pattern-matching {
+import @pattern-matching {
     content as pattern_matching,
 }
 
-import @./pattern-matching-basic {
+import @pattern-matching-basic {
     content as pattern_matching_basic,
 }
 
-import @./patterns-and-exhaustiveness {
+import @patterns-and-exhaustiveness {
     content as patterns_and_exhaustiveness,
 }
 
-import @./patterns-and-exhaustiveness-basic {
+import @patterns-and-exhaustiveness-basic {
     content as patterns_and_exhaustiveness_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

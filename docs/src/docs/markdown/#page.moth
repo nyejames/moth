@@ -1,36 +1,36 @@
-import @./markdown-files {
+import @markdown-files {
     content as markdown_files,
 }
 
-import @./markdown-files-basic {
+import @markdown-files-basic {
     content as markdown_files_basic,
 }
 
-import @./markdown-imports {
+import @markdown-imports {
     content as markdown_imports,
 }
 
-import @./markdown-imports-basic {
+import @markdown-imports-basic {
     content as markdown_imports_basic,
 }
 
-import @./rendering-contract {
+import @rendering-contract {
     content as rendering_contract,
 }
 
-import @./rendering-contract-basic {
+import @rendering-contract-basic {
     content as rendering_contract_basic,
 }
 
-import @./choosing-a-content-format {
+import @choosing-a-content-format {
     content as choosing_a_content_format,
 }
 
-import @./choosing-a-content-format-basic {
+import @choosing-a-content-format-basic {
     content as choosing_a_content_format_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

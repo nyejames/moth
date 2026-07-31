@@ -1,76 +1,76 @@
-import @./project-layout {
+import @project-layout {
     content as project_layout,
 }
 
-import @./project-layout-basic {
+import @project-layout-basic {
     content as project_layout_basic,
 }
 
-import @./project-config {
+import @project-config {
     content as project_config,
 }
 
-import @./project-config-basic {
+import @project-config-basic {
     content as project_config_basic,
 }
 
-import @./module-roots {
+import @module-roots {
     content as module_roots,
 }
 
-import @./module-roots-basic {
+import @module-roots-basic {
     content as module_roots_basic,
 }
 
-import @./public-api {
+import @public-api {
     content as public_api,
 }
 
-import @./public-api-basic {
+import @public-api-basic {
     content as public_api_basic,
 }
 
-import @./entry-runtime-and-fragments {
+import @entry-runtime-and-fragments {
     content as entry_runtime_and_fragments,
 }
 
-import @./entry-runtime-and-fragments-basic {
+import @entry-runtime-and-fragments-basic {
     content as entry_runtime_and_fragments_basic,
 }
 
-import @./html-routing-and-artifacts {
+import @html-routing-and-artifacts {
     content as html_routing_and_artifacts,
 }
 
-import @./html-routing-and-artifacts-basic {
+import @html-routing-and-artifacts-basic {
     content as html_routing_and_artifacts_basic,
 }
 
-import @./build-inputs {
+import @build-inputs {
     content as build_inputs,
 }
 
-import @./build-inputs-basic {
+import @build-inputs-basic {
     content as build_inputs_basic,
 }
 
-import @./entry-config {
+import @entry-config {
     content as entry_config,
 }
 
-import @./entry-config-basic {
+import @entry-config-basic {
     content as entry_config_basic,
 }
 
-import @./project-package-facade {
+import @project-package-facade {
     content as project_package_facade,
 }
 
-import @./project-package-facade-basic {
+import @project-package-facade-basic {
     content as project_package_facade_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

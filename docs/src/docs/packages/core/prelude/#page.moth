@@ -1,12 +1,12 @@
-import @./prelude {
+import @prelude {
     content as prelude_advanced,
 }
 
-import @./prelude-basic {
+import @prelude-basic {
     content as prelude_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

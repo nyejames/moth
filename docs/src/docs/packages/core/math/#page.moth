@@ -1,12 +1,12 @@
-import @./math {
+import @math {
     content as math_advanced,
 }
 
-import @./math-basic {
+import @math-basic {
     content as math_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

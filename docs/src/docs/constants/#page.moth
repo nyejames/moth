@@ -1,36 +1,36 @@
-import @./constant-bindings {
+import @constant-bindings {
     content as constant_bindings,
 }
 
-import @./constant-bindings-basic {
+import @constant-bindings-basic {
     content as constant_bindings_basic,
 }
 
-import @./constant-folding {
+import @constant-folding {
     content as constant_folding,
 }
 
-import @./constant-folding-basic {
+import @constant-folding-basic {
     content as constant_folding_basic,
 }
 
-import @./const-records {
+import @const-records {
     content as const_records,
 }
 
-import @./const-records-basic {
+import @const-records-basic {
     content as const_records_basic,
 }
 
-import @./const-templates {
+import @const-templates {
     content as const_templates,
 }
 
-import @./const-templates-basic {
+import @const-templates-basic {
     content as const_templates_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

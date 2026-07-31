@@ -1,36 +1,36 @@
-import @./choice-declarations {
+import @choice-declarations {
     content as choice_declarations,
 }
 
-import @./choice-declarations-basic {
+import @choice-declarations-basic {
     content as choice_declarations_basic,
 }
 
-import @./variant-construction {
+import @variant-construction {
     content as variant_construction,
 }
 
-import @./variant-construction-basic {
+import @variant-construction-basic {
     content as variant_construction_basic,
 }
 
-import @./payload-patterns {
+import @payload-patterns {
     content as payload_patterns,
 }
 
-import @./payload-patterns-basic {
+import @payload-patterns-basic {
     content as payload_patterns_basic,
 }
 
-import @./choice-equality {
+import @choice-equality {
     content as choice_equality,
 }
 
-import @./choice-equality-basic {
+import @choice-equality-basic {
     content as choice_equality_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

@@ -22,7 +22,7 @@ Import individual symbols or the whole namespace:
 | `random_float()` | none | `Float` |
 | `random_int(min, max)` | `Int, Int` | `Int` |
 
-`random_float()` returns a `Float` in the range `[0.0, 1.0)`.
+`random_float()` returns a `Float` in the range `0.0` through `1.0` exclusive.
 
 `random_int(min, max)` returns an `Int` in the inclusive range from `min` to `max`. If `min` exceeds `max`, the bounds swap.
 
@@ -40,7 +40,7 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../../progress (
 
 ### Unsupported source forms
 
-- Direct symbol-path imports such as `import @core/random/random_int` face rejection. Use grouped or namespace imports.
+- Direct symbol-path imports face rejection. Use grouped or namespace imports.
 - Named arguments lack support. Binding-backed calls stay positional-only.
 - The package does not expose receiver methods, opaque types, constants or `Error!` channels.
 

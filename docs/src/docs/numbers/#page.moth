@@ -1,36 +1,36 @@
-import @./numeric-types {
+import @numeric-types {
     content as numeric_types,
 }
 
-import @./numeric-types-basic {
+import @numeric-types-basic {
     content as numeric_types_basic,
 }
 
-import @./numeric-literals {
+import @numeric-literals {
     content as numeric_literals,
 }
 
-import @./numeric-literals-basic {
+import @numeric-literals-basic {
     content as numeric_literals_basic,
 }
 
-import @./operators {
+import @operators {
     content as operators,
 }
 
-import @./operators-basic {
+import @operators-basic {
     content as operators_basic,
 }
 
-import @./checked-arithmetic {
+import @checked-arithmetic {
     content as checked_arithmetic,
 }
 
-import @./checked-arithmetic-basic {
+import @checked-arithmetic-basic {
     content as checked_arithmetic_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

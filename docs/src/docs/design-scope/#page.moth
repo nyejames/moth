@@ -1,28 +1,28 @@
-import @./design-principles {
+import @design-principles {
     content as design_principles,
 }
 
-import @./design-principles-basic {
+import @design-principles-basic {
     content as design_principles_basic,
 }
 
-import @./deferred-and-outside-scope {
+import @deferred-and-outside-scope {
     content as deferred_and_outside_scope,
 }
 
-import @./deferred-and-outside-scope-basic {
+import @deferred-and-outside-scope-basic {
     content as deferred_and_outside_scope_basic,
 }
 
-import @./excluded-language-families {
+import @excluded-language-families {
     content as excluded_language_families,
 }
 
-import @./excluded-language-families-basic {
+import @excluded-language-families-basic {
     content as excluded_language_families_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

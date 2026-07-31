@@ -1,36 +1,36 @@
-import @./blocks-and-statements {
+import @blocks-and-statements {
     content as blocks_and_statements,
 }
 
-import @./blocks-and-statements-basic {
+import @blocks-and-statements-basic {
     content as blocks_and_statements_basic,
 }
 
-import @./comments-and-naming {
+import @comments-and-naming {
     content as comments_and_naming,
 }
 
-import @./comments-and-naming-basic {
+import @comments-and-naming-basic {
     content as comments_and_naming_basic,
 }
 
-import @./core-values {
+import @core-values {
     content as core_values,
 }
 
-import @./core-values-basic {
+import @core-values-basic {
     content as core_values_basic,
 }
 
-import @./strings-and-characters {
+import @strings-and-characters {
     content as strings_and_characters,
 }
 
-import @./strings-and-characters-basic {
+import @strings-and-characters-basic {
     content as strings_and_characters_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

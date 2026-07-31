@@ -1,12 +1,12 @@
-import @./time {
+import @time {
     content as time_advanced,
 }
 
-import @./time-basic {
+import @time-basic {
     content as time_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

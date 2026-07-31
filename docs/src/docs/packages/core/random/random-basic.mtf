@@ -28,4 +28,4 @@ If `min` exceeds `max` in `random_int`, the bounds swap.
 
 ### Read next
 
-For the full function contract, backend behaviour and deferred surfaces, see @./random (Core random advanced).
+For the full function contract, backend behaviour and deferred surfaces, see @random (Core random advanced).

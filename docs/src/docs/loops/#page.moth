@@ -1,36 +1,36 @@
-import @./conditional-loops {
+import @conditional-loops {
     content as conditional_loops,
 }
 
-import @./conditional-loops-basic {
+import @conditional-loops-basic {
     content as conditional_loops_basic,
 }
 
-import @./collection-loops {
+import @collection-loops {
     content as collection_loops,
 }
 
-import @./collection-loops-basic {
+import @collection-loops-basic {
     content as collection_loops_basic,
 }
 
-import @./range-loops {
+import @range-loops {
     content as range_loops,
 }
 
-import @./range-loops-basic {
+import @range-loops-basic {
     content as range_loops_basic,
 }
 
-import @./loop-control {
+import @loop-control {
     content as loop_control,
 }
 
-import @./loop-control-basic {
+import @loop-control-basic {
     content as loop_control_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

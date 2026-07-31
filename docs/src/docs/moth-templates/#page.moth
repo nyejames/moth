@@ -1,44 +1,44 @@
-import @./moth-template-files {
+import @moth-template-files {
     content as moth_template_files,
 }
 
-import @./moth-template-files-basic {
+import @moth-template-files-basic {
     content as moth_template_files_basic,
 }
 
-import @./implicit-markdown {
+import @implicit-markdown {
     content as implicit_markdown,
 }
 
-import @./implicit-markdown-basic {
+import @implicit-markdown-basic {
     content as implicit_markdown_basic,
 }
 
-import @./content-imports {
+import @content-imports {
     content as content_imports,
 }
 
-import @./content-imports-basic {
+import @content-imports-basic {
     content as content_imports_basic,
 }
 
-import @./template-scope {
+import @template-scope {
     content as template_scope,
 }
 
-import @./template-scope-basic {
+import @template-scope-basic {
     content as template_scope_basic,
 }
 
-import @./moth-template-limits {
+import @moth-template-limits {
     content as moth_template_limits,
 }
 
-import @./moth-template-limits-basic {
+import @moth-template-limits-basic {
     content as moth_template_limits_basic,
 }
 
-import @styles/docs {
+import @styles {
     navbar,
     section,
     language_theme_head,

@@ -65,4 +65,4 @@ Use `Timestamp` for real-world UTC instants that may be logged, stored or exchan
 
 ### Read next
 
-For the full function list, backend behaviour and deferred surfaces, see @./time (Core time advanced).
+For the full function list, backend behaviour and deferred surfaces, see @time (Core time advanced).
