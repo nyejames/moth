@@ -22,7 +22,7 @@ checked numeric failures use that error channel.
     ;
 ]
 
-Custom fallible channels, non-fallible functions and active-root top-level
+Custom fallible channels, non-fallible functions and entry-selected top-level
 runtime code use trap mode for checked numeric failure.
 
 Numeric operators remain ordinary source expressions. The compiler lowers

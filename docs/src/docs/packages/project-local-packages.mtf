@@ -1,4 +1,4 @@
-Project-local source-backed packages are scoped `+*.moth` support packages discovered structurally from the project source tree. No config folder scanning or `package_folders` setting exists.
+Project-local source-backed packages are scoped `+*.moth` support packages discovered structurally from the project source tree. The current compiler also retains legacy config-driven `package_folders` discovery, defaulting to `lib/`. The queued Project Config migration removes that compatibility path.
 
 ### Directory structure
 

@@ -487,11 +487,11 @@ body {
                     
 
     <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Active module roots and implicit start</td>
+                 <td style="padding: 0.1em 0.5em; "> Entry-selected module roots and implicit start</td>
      <td style="padding: 0.1em 0.5em; "> Supported</td>
-     <td style="padding: 0.1em 0.5em; "> Broad active-root start, dependency-sort, normal-file top-level rejection, imported-root suppression, fragment-order, and API-only artifact-filtering coverage.</td>
+     <td style="padding: 0.1em 0.5em; "> Broad entry-selected start, dependency-sort, normal-file top-level rejection, imported-root suppression, fragment-order, and API-only artifact-filtering coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HTML builder</td>
-     <td style="padding: 0.1em 0.5em; "> Only active module roots run top-level runtime code. Imported roots expose their public API without replaying runtime work. API-only roots remain importable but emit no HTML page artifact. The implicit <code>start</code> function is build-system-owned and not importable or callable as a user declaration.</td>
+     <td style="padding: 0.1em 0.5em; "> Selected normal modules compile dormant compiler-synthesised <code>start</code> work. Entry assembly activates an entry-selected module's <code>start</code> exactly once. Imported roots expose public interfaces without activating root work. API-only roots remain importable and emit no HTML page artefact. The implicit <code>start</code> function is build-system-owned and not user-importable or callable.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -844,11 +844,19 @@ body {
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
+                 <td style="padding: 0.1em 0.5em; "> Project config model</td>
+     <td style="padding: 0.1em 0.5em; "> Partial</td>
+     <td style="padding: 0.1em 0.5em; "> Targeted flat-config parsing, known-key validation, self-contained import rejection, and builder-section coverage.</td>
+     <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
+     <td style="padding: 0.1em 0.5em; "> The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped <code>project</code> and builder records are accepted deferred design. <code>#Import</code>, <code>@project</code> and entry-local <code>config:</code> remain separately queued. Legacy <code>package_folders</code> remains current implementation drift. The queued Project Config and recursive schemas plan owns replacement.</td>
+            </tr>
+
+    <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> Project-local packages</td>
      <td style="padding: 0.1em 0.5em; "> Partial</td>
-     <td style="padding: 0.1em 0.5em; "> Targeted config-defined package folders, import resolution, generic normal module-root, and public-surface coverage.</td>
+     <td style="padding: 0.1em 0.5em; "> Targeted structural support-package roots, legacy config-defined package folders, import resolution, generic normal module-root, and public-surface coverage.</td>
      <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
-     <td style="padding: 0.1em 0.5em; "> Project-local source-backed packages are discovered structurally from scoped <code>+*.moth</code> support packages and the optional project-root facade. No <code>package_folders</code> config setting exists. Each support package's containing directory supplies its name. Stage 0 requires exactly one direct <code>@*.moth</code> or <code>+*.moth</code> root with a non-empty cosmetic name. The filename after <code>@</code> or <code>+</code> has no semantic role and the root's strict <code>export:</code> block defines its public surface.</td>
+     <td style="padding: 0.1em 0.5em; "> Structural <code>+*.moth</code> support packages and the optional project-root facade define the accepted package model. The current compiler also retains legacy config-driven <code>package_folders</code> discovery, defaulting to <code>lib/</code>. The queued Project Config migration removes that compatibility path. Each support package's containing directory supplies its name. Stage 0 requires exactly one direct <code>@*.moth</code> or <code>+*.moth</code> root with a non-empty cosmetic name. The filename after <code>@</code> or <code>+</code> has no semantic role and the root's strict <code>export:</code> block defines its public surface.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -969,7 +977,7 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "> HTML-Wasm</td>
      <td style="padding: 0.1em 0.5em; "> Experimental</td>
-     <td style="padding: 0.1em 0.5em; "> Backend experiment and integration path for future Wasm output. Ordinary active-root `start` execution and non-reactive runtime page fragments use the shared HTML builder slot/hydration contract. Reactive mounting remains unsupported.</td>
+     <td style="padding: 0.1em 0.5em; "> Backend experiment and integration path for future Wasm output. Ordinary entry-selected `start` execution and non-reactive runtime page fragments use the shared HTML builder slot/hydration contract. Reactive mounting remains unsupported.</td>
      <td style="padding: 0.1em 0.5em; "> Keep behind <code>--html-wasm</code>. Tests may pin current behavior, but Alpha support is JS / HTML.</td>
             </tr>
 

@@ -29,9 +29,9 @@ compile-time page fragment.
 
 The direct form:
 
-- is valid only as top-level active-root fragment syntax
+- is valid only as top-level entry-selected fragment syntax
 - must fully fold
-- records its position relative to active-root runtime fragments
+- records its position relative to entry-selected runtime fragments
 - is handed to the project builder
 - never becomes HIR runtime code
 

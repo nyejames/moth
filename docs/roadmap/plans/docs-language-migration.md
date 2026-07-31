@@ -7,7 +7,8 @@ STATUS: active
 CURRENT_STAGE: Stage B compiler semantic realignment
 STAGE_A: complete and accepted
 STAGE_W: complete and accepted
-VALIDATION: full gate green at 780215f05
+PRE_B1_CLOSEOUT: complete, full gate green at d82b86d74
+VALIDATION: full gate green at d82b86d74
 NEXT_ACTION: B1 remove source-authored return aliases
 STAGE_C: blocked until Stage B completes
 ```

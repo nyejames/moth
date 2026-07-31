@@ -738,7 +738,7 @@ body {
     </code></pre><h3>Declaration forms</h3><pre style=""><code class='codeblock'>
     name <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> value
     name <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Type</span> <span class='moth-code-operator'>=</span> value
-    </code></pre><ul><li>Every constant must have an initializer.</li><li>A constant is immutable.</li><li>A mutable marker cannot be combined with <code>#</code>.</li><li>Without an annotation, the initializer supplies the type.</li><li>An explicit annotation supplies a compile-time receiving type.</li><li>The initializer must fully fold.</li><li>A constant may reference only compile-time values.</li></ul><p><code>#</code> controls compile-time evaluation. It does not control visibility.</p><p>Top-level constants follow ordinary module and public-surface visibility rules.</p><p>Body-local constant declarations remain local to their scope.</p><p>A top-level runtime binding without <code>#</code> belongs to active-root <code>start</code> code rather than the importable constant surface.</p>
+    </code></pre><ul><li>Every constant must have an initializer.</li><li>A constant is immutable.</li><li>A mutable marker cannot be combined with <code>#</code>.</li><li>Without an annotation, the initializer supplies the type.</li><li>An explicit annotation supplies a compile-time receiving type.</li><li>The initializer must fully fold.</li><li>A constant may reference only compile-time values.</li></ul><p><code>#</code> controls compile-time evaluation. It does not control visibility.</p><p>Top-level constants follow ordinary module and public-surface visibility rules.</p><p>Body-local constant declarations remain local to their scope.</p><p>A top-level runtime binding without <code>#</code> belongs to entry-selected <code>start</code> code rather than the importable constant surface.</p>
     </div>
     </fieldset></section>
     <section class="container"><fieldset class="doc-level">
@@ -954,7 +954,7 @@ body {
     <span class='moth-code-operator'>#</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>md<span class='moth-code-operator'>:</span>
         <span class='moth-code-operator'>#</span> <span class='moth-code-struct'>Compile</span><span class='moth-code-operator'>-</span>time heading
     <span class='moth-code-parenthesis'>]</span>
-    </code></pre><p>The direct form:</p><ul><li>is valid only as top-level active-root fragment syntax</li><li>must fully fold</li><li>records its position relative to active-root runtime fragments</li><li>is handed to the project builder</li><li>never becomes HIR runtime code</li></ul><h3>Const template <code>if</code></h3><pre style=""><code class='codeblock'>
+    </code></pre><p>The direct form:</p><ul><li>is valid only as top-level entry-selected fragment syntax</li><li>must fully fold</li><li>records its position relative to entry-selected runtime fragments</li><li>is handed to the project builder</li><li>never becomes HIR runtime code</li></ul><h3>Const template <code>if</code></h3><pre style=""><code class='codeblock'>
     <span class='moth-code-operator'>#</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>if</span> show_heading<span class='moth-code-operator'>:</span>
         <span class='moth-code-struct'>Visible</span> heading
     <span class='moth-code-parenthesis'>[</span><span class='moth-code-keyword'>else</span><span class='moth-code-parenthesis'>]</span>

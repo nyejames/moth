@@ -708,7 +708,7 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>new html</code></p></td>
      <td style="padding: 0.1em 0.5em; "> Creates a complete HTML project scaffold.</td>
-     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there.         It then asks for a project name, a .gitignore choice and creates the full default scaffold including <code>src/@page.moth</code>, output manifests and an optional .gitignore. The scaffold may also create an empty <code>lib/</code> folder as a temporary placeholder. It has no special meaning in the accepted package design. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</p></td>
+     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the default scaffold including <code>src/@page.moth</code>, an empty legacy <code>lib/</code> placeholder, output manifests and an optional .gitignore. The <code>lib/</code> folder has no special meaning in the accepted package design. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</p></td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -732,7 +732,7 @@ body {
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>tests</code></p></td>
      <td style="padding: 0.1em 0.5em; "> Runs the compiler integration test suite. (developer tool)</td>
-     <td style="padding: 0.1em 0.5em; "><p> Mainly useful when working on the compiler itself. Use <code>--backend html</code> or <code>--backend html_wasm</code> to focus one backend profile.</p></td>
+     <td style="padding: 0.1em 0.5em; "><p> Mainly useful when working on the compiler itself. Use <code>--terse</code> for compact output or <code>--backend html</code> / <code>--backend html_wasm</code> to focus one backend profile.</p></td>
             </tr>
                 
 
@@ -762,8 +762,8 @@ body {
 
     <tr style="border-bottom: 1px dotted grey;">
                  <td style="padding: 0.1em 0.5em; "><p><code>--terse</code></p></td>
-     <td style="padding: 0.1em 0.5em; "><p><code>check</code> only</p></td>
-     <td style="padding: 0.1em 0.5em; "> Prints compact diagnostics for tools, logs and LLM workflows.</td>
+     <td style="padding: 0.1em 0.5em; "><p><code>check</code>, <code>tests</code></p></td>
+     <td style="padding: 0.1em 0.5em; "> Prints compact diagnostics or test summaries for tools, logs and LLM workflows.</td>
             </tr>
 
     <tr style="border-bottom: 1px dotted grey;">
@@ -780,7 +780,7 @@ body {
                 
 
     </table></section>
-    <section class="container"><h2>Create a new HTML project</h2><p>The scaffold creates a complete default project including config, a starter page, package folder, output folders with build manifests and an optional .gitignore. The HTML project builder itself has more rules than this page needs to cover. See <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments and generated output details.</p><p>Start a new project:</p><pre style="
+    <section class="container"><h2>Create a new HTML project</h2><p>The scaffold creates a default project with config, a starter page, generated output folders, build manifests and an optional .gitignore. The HTML project builder itself has more rules than this page needs to cover. See <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments and generated output details.</p><p>Start a new project:</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;
@@ -853,12 +853,13 @@ body {
             ├── config.moth
             ├── src/
             │   └── @page.moth
+            ├── lib/
             ├── dev/
             │   └── .moth_manifest
             ├── release/
             │   └── .moth_manifest
             └── .gitignore
-        </code></pre><ul><li><code>dev/</code> and <code>release/</code> are output folders.</li><li>.moth_manifest files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li><li>The scaffold may create an empty <code>lib/</code> folder as a temporary placeholder. It has no special meaning. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
+        </code></pre><ul><li><code>dev/</code> and <code>release/</code> are output folders.</li><li><code>.moth_manifest</code> files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li><li>The current scaffold creates an empty legacy <code>lib/</code> placeholder. It has no special package meaning. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
         padding-left: 1em;
         border-radius: 5px;
         max-width: 100%;

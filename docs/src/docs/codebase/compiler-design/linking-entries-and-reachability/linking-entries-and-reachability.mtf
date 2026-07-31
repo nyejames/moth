@@ -110,7 +110,7 @@ Target capability failures wait for the next article even when they appear adjac
 
 ## Roadmap and current status
 
-- **Accepted design:** active-root `start`, entry assembly and exact reachable union.
+- **Accepted design:** entry-selected `start`, entry assembly and exact reachable union.
 - **Current implementation:** label transitional entry activation where the progress matrix differs.
 - **Queued work:** entry-config plans may change root metadata and must stay labelled.
 - **Deferred or outside scope:** link-time deferred source compilation.

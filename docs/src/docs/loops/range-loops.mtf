@@ -73,6 +73,6 @@ Bindings use the same one-or-two-name `|...|` rules as collection loops.
 ### Checked updates
 
 Runtime range counter updates use checked numeric operations. Their failures
-follow the numeric failure mode of the enclosing function or active-root code.
+follow the numeric failure mode of the enclosing function or entry-selected `start` code.
 
 Const range loops diagnose statically known counter failures while folding.

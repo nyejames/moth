@@ -54,7 +54,7 @@ A `.mtf` file can be imported from a module root, a normal source file, or both.
 
 ### Imported content does not become a page fragment
 
-Importing a `.mtf` file and inserting its content into a template does not create a page fragment. The caller controls where the content appears. Only direct top-level templates in the active module root become page fragments.
+Importing a `.mtf` file and inserting its content into a template does not create a page fragment. The caller controls where the content appears. Only direct top-level templates in the entry-selected module root become page fragments.
 
 ### Visibility and module boundary
 

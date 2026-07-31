@@ -75,7 +75,7 @@ formatter.
 Only direct top-level template expressions in an active HTML module root contribute
 page fragments.
 
-- top-level runtime templates run through active-root `start()` in source order
+- top-level runtime templates run through entry-selected `start()` in source order
 - direct top-level const templates fold into compile-time fragments
 - a template assigned to a binding or returned from a function does not become a page fragment by itself
 
