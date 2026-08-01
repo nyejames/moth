@@ -1,9 +1,9 @@
 //! Focused output policy subsystem.
 //!
-//! WHAT: owns the pure output-folder classifier used by config diagnostics and the durable
-//! validated output-folder value that output-plan construction and Phase 1D carry through
-//! bootstrap.
+//! WHAT: owns portable output-folder classification, validated output-folder values and the
+//! deterministic relative output-path identity.
 //! WHY: output ownership and validation must exist once so CLI and the dev server never drift.
+//! Consumers live in config validation and output planning.
 
 mod output_path;
 mod policy;

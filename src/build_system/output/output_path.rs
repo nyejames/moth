@@ -1,39 +1,84 @@
-//! Deterministic output-path identity for comparing resolved output roots.
+//! Portable output-path parsing and deterministic identity.
 //!
-//! WHAT: normalises a resolved output path and lowercases it so development and release roots
-//! such as `dev` and `DEV` compare equal, keeping results stable across case-sensitive and
-//! case-insensitive filesystems.
-//! WHY: output-plan construction and Phase 3 destination collision checks need one deterministic
-//! comparison key that does not depend on the host filesystem's case semantics.
+//! WHAT: owns the one portable relative-path parser that interprets both `/` and `\` as
+//! separators on every host, and the deterministic ASCII-case-folded identity derived from its
+//! validated components.
+//! WHY: output-folder classification, development/release root comparison and destination
+//! collision checks must all consume the same validated components rather than each owning a
+//! separate lexical parser. `std::path` component classification is host-dependent (Windows
+//! prefixes are only recognised on Windows), so the parser handles every host explicitly.
 
-use std::path::{Component, Path};
+use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 
-/// Case-normalised output-path identity.
+use std::path::Path;
+
+/// Portable validated relative-path components.
 ///
-/// WHAT: wraps the normalised, ASCII-lowercased path spelling used only for equality comparisons.
-/// WHY: `dev` and `DEV` must resolve to the same output identity so the build stays stable when a
-/// project is moved between case-sensitive and case-insensitive filesystems.
+/// WHAT: holds the ASCII-lowercased normal components of a validated project-relative path.
+/// WHY: the identity key is derived directly from these components, so `dev` and `DEV` compare
+/// equal and spelling with either `/` or `\` normalises to the same value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PortableRelativePath {
+    components: Vec<String>,
+}
+
+impl PortableRelativePath {
+    fn identity_string(&self) -> String {
+        self.components.join("/")
+    }
+}
+
+/// Case-folded output-path identity.
+///
+/// WHAT: wraps the deterministic ASCII-lowercased spelling of a validated relative path, used
+/// only for equality comparisons.
+/// WHY: development and release roots must compare through one stable key that does not depend
+/// on host case semantics or separator spelling.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct OutputPathIdentity(String);
 
-/// Build the deterministic identity for a resolved output path.
+/// Parse a portable relative path on every host.
 ///
-/// WHAT: drops authored `.` segments and lowercases each component so equivalent resolved paths
-/// compare equal regardless of spelling or host case semantics.
-pub(crate) fn output_path_identity(path: &Path) -> OutputPathIdentity {
-    let mut normalised = String::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(part) => {
-                normalised.push('/');
-                normalised.push_str(&part.to_string_lossy().to_ascii_lowercase());
-            }
-            _ => {}
+/// Both `/` and `\` are separators. Rejects empty, rooted and platform-prefix spellings as well
+/// as authored `.` and `..` segments, without relying on host-dependent `std::path` component
+/// classification.
+pub(crate) fn parse_relative_path(
+    raw: &str,
+) -> Result<PortableRelativePath, InvalidOutputFolderReason> {
+    if raw.is_empty() {
+        return Err(InvalidOutputFolderReason::Empty);
+    }
+    if raw.starts_with(['/', '\\']) {
+        return Err(InvalidOutputFolderReason::AbsolutePath);
+    }
+
+    let mut components = Vec::new();
+    for segment in raw.split(['/', '\\']) {
+        if segment.is_empty() {
+            return Err(InvalidOutputFolderReason::Empty);
         }
+        if segment.contains(':') {
+            return Err(InvalidOutputFolderReason::RootOrPrefix);
+        }
+        if segment == "." {
+            return Err(InvalidOutputFolderReason::CurrentDirectory);
+        }
+        if segment == ".." {
+            return Err(InvalidOutputFolderReason::ParentDirectorySegment);
+        }
+        components.push(segment.to_ascii_lowercase());
     }
-    if normalised.is_empty() {
-        normalised.push('/');
-    }
-    OutputPathIdentity(normalised)
+
+    Ok(PortableRelativePath { components })
+}
+
+/// Build the deterministic identity for a project-relative path.
+///
+/// Returns an error when the path is not a valid portable relative path, so invalid components
+/// such as roots, prefixes or parent segments are never silently ignored.
+pub(crate) fn output_path_identity(
+    relative: &Path,
+) -> Result<OutputPathIdentity, InvalidOutputFolderReason> {
+    parse_relative_path(&relative.to_string_lossy())
+        .map(|portable| OutputPathIdentity(portable.identity_string()))
 }

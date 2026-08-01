@@ -821,7 +821,13 @@ fn validate_output_folders_distinct(
     string_table: &mut StringTable,
     errors: &mut Vec<CompilerDiagnostic>,
 ) {
-    if output_path_identity(&dev.resolved_path) == output_path_identity(&release.resolved_path) {
+    // Both folders passed classification, so their relative paths are guaranteed valid.
+    let dev_identity = output_path_identity(&dev.relative_path)
+        .expect("dev folder was already validated as a relative output path");
+    let release_identity = output_path_identity(&release.relative_path)
+        .expect("release folder was already validated as a relative output path");
+
+    if dev_identity == release_identity {
         let location = config.setting_location_or_config_file("dev_folder", string_table);
         errors.push(CompilerDiagnostic::invalid_config_reason(
             Some(string_table.intern("dev_folder")),

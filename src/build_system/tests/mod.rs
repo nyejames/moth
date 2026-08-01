@@ -404,4 +404,5 @@ mod build_directive_tests;
 mod build_import_tests;
 mod build_infrastructure_tests;
 mod build_orchestration_tests;
+mod build_profile_tests;
 mod module_lane_tests;
