@@ -5,7 +5,9 @@
 //! WHY: separating value semantics from AST construction keeps the Stage 0 pipeline easier to
 //! audit and extend.
 
-use crate::build_system::output::{OutputFolderClassification, classify_output_folder};
+use crate::build_system::output::{
+    ValidatedOutputFolder, classify_output_folder, output_path_identity,
+};
 use crate::build_system::project_config::parsing::ParsedConfigFile;
 
 use crate::builder_surface::config_key_registry::{
@@ -751,7 +753,7 @@ pub(crate) fn validate_directory_output_settings(
             Some(project_root.join(&config.entry_root))
         };
 
-    validate_one_output_folder(
+    let dev = validate_one_output_folder(
         "dev_folder",
         &config.dev_folder,
         project_root,
@@ -760,7 +762,7 @@ pub(crate) fn validate_directory_output_settings(
         string_table,
         &mut errors,
     );
-    validate_one_output_folder(
+    let release = validate_one_output_folder(
         "output_folder",
         &config.release_folder,
         project_root,
@@ -771,8 +773,8 @@ pub(crate) fn validate_directory_output_settings(
     );
 
     // Only check distinctness when both folders individually passed validation.
-    if errors.is_empty() {
-        validate_output_folders_distinct(config, string_table, &mut errors);
+    if let (Some(dev), Some(release)) = (dev, release) {
+        validate_output_folders_distinct(&dev, &release, config, string_table, &mut errors);
     }
 
     if errors.is_empty() {
@@ -782,6 +784,7 @@ pub(crate) fn validate_directory_output_settings(
     }
 }
 
+/// Validate one output folder, returning the validated folder when it is valid.
 fn validate_one_output_folder(
     key: &str,
     folder: &Path,
@@ -790,41 +793,41 @@ fn validate_one_output_folder(
     config: &Config,
     string_table: &mut StringTable,
     errors: &mut Vec<CompilerDiagnostic>,
-) {
+) -> Option<ValidatedOutputFolder> {
     let location = config.setting_location_or_config_file(key, string_table);
 
-    let classification = classify_output_folder(folder, project_root, resolved_entry_root);
-    let reason = match classification {
-        OutputFolderClassification::Valid { .. } => return,
-        OutputFolderClassification::Invalid(reason) => reason,
-    };
-
-    let folder_id = (!matches!(reason, InvalidOutputFolderReason::Empty))
-        .then(|| string_table.intern(&folder.to_string_lossy()));
-    errors.push(output_folder_diagnostic(
-        key,
-        folder_id,
-        reason,
-        location,
-        string_table,
-    ));
+    match classify_output_folder(folder, project_root, resolved_entry_root) {
+        Ok(valid) => Some(valid),
+        Err(reason) => {
+            let folder_id = (!matches!(reason, InvalidOutputFolderReason::Empty))
+                .then(|| string_table.intern(&folder.to_string_lossy()));
+            errors.push(output_folder_diagnostic(
+                key,
+                folder_id,
+                reason,
+                location,
+                string_table,
+            ));
+            None
+        }
+    }
 }
 
+/// Reject development and release output roots that share one output identity.
 fn validate_output_folders_distinct(
+    dev: &ValidatedOutputFolder,
+    release: &ValidatedOutputFolder,
     config: &Config,
     string_table: &mut StringTable,
     errors: &mut Vec<CompilerDiagnostic>,
 ) {
-    let dev_resolved = config.entry_dir.join(&config.dev_folder);
-    let release_resolved = config.entry_dir.join(&config.release_folder);
-
-    if dev_resolved == release_resolved {
+    if output_path_identity(&dev.resolved_path) == output_path_identity(&release.resolved_path) {
         let location = config.setting_location_or_config_file("dev_folder", string_table);
         errors.push(CompilerDiagnostic::invalid_config_reason(
             Some(string_table.intern("dev_folder")),
             InvalidConfigReason::OutputFoldersNotDistinct {
-                dev_folder: string_table.intern(&config.dev_folder.to_string_lossy()),
-                release_folder: string_table.intern(&config.release_folder.to_string_lossy()),
+                dev_folder: string_table.intern(&dev.relative_path.to_string_lossy()),
+                release_folder: string_table.intern(&release.relative_path.to_string_lossy()),
             },
             location,
         ));

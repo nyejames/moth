@@ -305,12 +305,6 @@ fn invalid_output_folder_message(
                 "'{key_label}' must not be '.'. Configure a named project-relative output folder."
             )
         }
-        InvalidOutputFolderReason::EqualsProjectRoot => {
-            let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
-            format!(
-                "'{key_label}' '{name}' must not equal the project root. Configure a distinct output folder."
-            )
-        }
         InvalidOutputFolderReason::InsideOrEqualToEntryRoot => {
             let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
             format!(

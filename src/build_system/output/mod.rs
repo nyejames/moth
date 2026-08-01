@@ -1,13 +1,15 @@
-//! Focused output subsystem: policy, manifest ownership, and writer preflight.
+//! Focused output policy subsystem.
 //!
-//! WHAT: owns the build-system output policy (profiles, builder identity, owners and
-//! validated plans), the output manifest format, and final output batch emission.
-//! WHY: build orchestration must stay focused on compilation; output ownership,
-//! validation and writing each have a single owner that CLI and the dev server share.
-//!
-//! Phase 1 introduces the policy owner. Manifest and writer responsibilities move here
-//! in later phases without leaving compatibility shims behind.
+//! WHAT: owns the pure output-folder classifier used by config diagnostics and the durable
+//! validated output-folder value that output-plan construction and Phase 1D carry through
+//! bootstrap.
+//! WHY: output ownership and validation must exist once so CLI and the dev server never drift.
 
+mod output_path;
 mod policy;
 
-pub(crate) use policy::{BuildProfile, OutputFolderClassification, classify_output_folder};
+#[cfg(test)]
+mod tests;
+
+pub(crate) use output_path::output_path_identity;
+pub(crate) use policy::{ValidatedOutputFolder, classify_output_folder};

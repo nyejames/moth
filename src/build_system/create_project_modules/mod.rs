@@ -62,7 +62,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{Flag, FrontendBuildProfile};
 
-use crate::build_system::output::BuildProfile;
+use crate::build_system::BuildProfile;
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 

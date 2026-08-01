@@ -89,7 +89,6 @@ define_stable_reason_keys! {
     &InvalidOutputFolderReason::RootOrPrefix => "invalid_config.invalid_output_folder.root_or_prefix",
     &InvalidOutputFolderReason::ParentDirectorySegment => "invalid_config.invalid_output_folder.parent_directory_segment",
     &InvalidOutputFolderReason::CurrentDirectory => "invalid_config.invalid_output_folder.current_directory",
-    &InvalidOutputFolderReason::EqualsProjectRoot => "invalid_config.invalid_output_folder.equals_project_root",
     &InvalidOutputFolderReason::InsideOrEqualToEntryRoot => "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
     },
 

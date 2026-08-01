@@ -39,7 +39,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
         borrow_analysis: &module.executable.borrow_analysis,
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
-        release_build: false,
+        build_profile: crate::build_system::BuildProfile::Dev,
         root_activity: &module.metadata.root_activity,
         external_package_registry: Arc::new(
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
@@ -135,7 +135,7 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
         borrow_analysis: &module.executable.borrow_analysis,
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
-        release_build: false,
+        build_profile: crate::build_system::BuildProfile::Dev,
         root_activity: &module.metadata.root_activity,
         external_package_registry: Arc::new(
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),

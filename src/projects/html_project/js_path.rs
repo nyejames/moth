@@ -108,7 +108,7 @@ pub(crate) fn compile_html_module_js(
         output_path,
     } = input;
     let js_lowering_config = JsLoweringConfig::html_page_bundle(
-        input.release_build,
+        input.build_profile.is_release(),
         Arc::clone(&input.external_package_registry),
         input.reachability.backend_selection().clone(),
         Arc::clone(&source_function_names),
@@ -132,7 +132,7 @@ pub(crate) fn compile_html_module_js(
         let mut isolated_modules = Vec::with_capacity(linked_modules.len() + 1);
         for linked in linked_modules {
             let linked_config = JsLoweringConfig::html_page_bundle(
-                input.release_build,
+                input.build_profile.is_release(),
                 Arc::clone(&linked.module.link_facts.external_package_registry),
                 linked.reachability.backend_selection().clone(),
                 Arc::clone(&source_function_names),
@@ -216,7 +216,7 @@ pub(crate) fn compile_html_module_js(
             &js_module.referenced_external_functions,
             input.external_package_registry.as_ref(),
             &output_path,
-            input.release_build,
+            input.build_profile.is_release(),
         )
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
     };

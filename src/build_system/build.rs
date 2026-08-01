@@ -4,6 +4,7 @@
 //! writer (`write_project_outputs`). Build tools can compile once and choose where artifacts are
 //! written without reimplementing frontend/backend orchestration.
 
+use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::compile_project_frontend;
 pub use crate::build_system::output_cleanup::CleanupPolicy;
 use crate::build_system::output_cleanup::{
@@ -879,7 +880,7 @@ pub struct WriteOptions {
 /// WHY: config validation rejects empty, absolute or unsafe folders before this runs, so the
 /// folder is always a valid project-relative path.
 pub fn resolve_project_output_root(config: &Config, flags: &[Flag]) -> PathBuf {
-    let release_build = flags.contains(&Flag::Release);
+    let release_build = BuildProfile::from_flags(flags).is_release();
     let configured_folder = if release_build {
         &config.release_folder
     } else {

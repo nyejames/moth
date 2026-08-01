@@ -23,7 +23,7 @@ use crate::compiler_frontend::compiler_messages::source_location::SourceLocation
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticCategory, DiagnosticPayload,
     InvalidAssignmentTargetReason, InvalidConfigReason, InvalidImportClauseReason,
-    InvalidPackageFolderReason,
+    InvalidOutputFolderReason, InvalidPackageFolderReason,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalTypeId};
@@ -1175,6 +1175,56 @@ fn rejects_unknown_config_key() {
         diagnostic.primary_location.end_pos.char_column, 10,
         "UnknownKey should end at the authored key name span, not the initializer value"
     );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn rejects_output_folder_inside_or_equal_to_entry_root_with_exact_location() {
+    let root = temp_dir("config_output_inside_entry_root");
+    fs::create_dir_all(&root).expect("should create root dir");
+    let config_path = root.join(settings::CONFIG_FILE_NAME);
+
+    // `entry_root` covers `src`, so an `output_folder` of `src/out` is inside the entry root.
+    fs::write(
+        &config_path,
+        "entry_root #= \"src\"\noutput_folder #= \"src/out\"\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
+        .expect_err("output inside entry root should fail");
+
+    let diagnostic = first_error_diagnostic(&messages);
+    let DiagnosticPayload::InvalidConfig {
+        reason:
+            InvalidConfigReason::InvalidOutputFolder {
+                reason: InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
+                ..
+            },
+        ..
+    } = &diagnostic.payload
+    else {
+        panic!(
+            "expected InsideOrEqualToEntryRoot diagnostic, got: {:?}",
+            diagnostic.payload
+        );
+    };
+
+    // `output_folder` is authored on the second physical line and its value begins at column 18
+    // (the string starts immediately after `output_folder #= `). Locations are 0-indexed.
+    assert_eq!(
+        diagnostic
+            .primary_location
+            .scope
+            .to_path_buf(&messages.string_table),
+        config_path.as_path(),
+        "the diagnostic should point at the authored config file"
+    );
+    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
+    assert_eq!(diagnostic.primary_location.start_pos.char_column, 18);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }

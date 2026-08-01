@@ -108,7 +108,7 @@ pub(crate) fn compile_html_module_wasm(
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 
     let js_lowering_config = JsLoweringConfig::html_wasm_companion(
-        input.release_build,
+        input.build_profile.is_release(),
         Arc::clone(&input.external_package_registry),
         input.reachability.backend_selection().clone(),
     );

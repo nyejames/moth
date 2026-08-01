@@ -9,11 +9,11 @@ use crate::backends::backend_feature_validation::{
 use crate::backends::external_package_validation::{
     BackendTarget, validate_hir_external_package_support,
 };
+use crate::build_system::BuildProfile;
 use crate::build_system::build::{
     BackendBuilder, CleanupPolicy, Module, ModuleExternalImport, OutputFile, Project,
     ProjectCompilation, ProjectLinkedModule,
 };
-use crate::build_system::output::BuildProfile;
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::FrontendBuildProfile;
@@ -111,8 +111,8 @@ impl BackendBuilder for HtmlProjectBuilder {
             ));
         }
 
-        let release_build = flags.contains(&Flag::Release);
-        let build_profile = match BuildProfile::from_flags(flags) {
+        let build_profile = BuildProfile::from_flags(flags);
+        let frontend_profile = match build_profile {
             BuildProfile::Dev => FrontendBuildProfile::Dev,
             BuildProfile::Release => FrontendBuildProfile::Release,
         };
@@ -157,7 +157,7 @@ impl BackendBuilder for HtmlProjectBuilder {
                     &logical_html_output_path,
                     config.project_name.as_str(),
                     &document_config,
-                    release_build,
+                    build_profile,
                     wasm_enabled,
                     string_table,
                 )?;
@@ -269,7 +269,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         Ok(Project {
             output_files,
             entry_page_rel,
-            cleanup_policy: CleanupPolicy::html(build_profile),
+            cleanup_policy: CleanupPolicy::html(frontend_profile),
             warnings,
         })
     }
@@ -385,7 +385,7 @@ impl HtmlProjectBuilder {
         logical_html_output_path: &Path,
         project_name: &str,
         document_config: &crate::projects::html_project::document_config::HtmlDocumentConfig,
-        release_build: bool,
+        build_profile: BuildProfile,
         wasm_enabled: bool,
         string_table: &mut StringTable,
     ) -> Result<CompiledHtmlModuleArtifacts, CompilerMessages> {
@@ -466,7 +466,7 @@ impl HtmlProjectBuilder {
             borrow_analysis: &module.executable.borrow_analysis,
             project_name,
             document_config,
-            release_build,
+            build_profile,
             root_activity: &module.metadata.root_activity,
             external_package_registry: Arc::clone(&module.link_facts.external_package_registry),
         };

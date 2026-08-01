@@ -243,7 +243,6 @@ pub enum InvalidOutputFolderReason {
     RootOrPrefix,
     ParentDirectorySegment,
     CurrentDirectory,
-    EqualsProjectRoot,
     InsideOrEqualToEntryRoot,
 }
 
