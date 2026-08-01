@@ -5,6 +5,7 @@
 //! WHY: separating value semantics from AST construction keeps the Stage 0 pipeline easier to
 //! audit and extend.
 
+use crate::build_system::output::{OutputFolderClassification, classify_output_folder};
 use crate::build_system::project_config::parsing::ParsedConfigFile;
 
 use crate::builder_surface::config_key_registry::{
@@ -739,9 +740,22 @@ pub(crate) fn validate_directory_output_settings(
 ) -> Result<(), Vec<CompilerDiagnostic>> {
     let mut errors = Vec::new();
 
+    let project_root = &config.entry_dir;
+    // The transitional empty or "." entry root form means the entry root covers the whole
+    // project, so output containment is validated against the project root only. When
+    // entry_root is a strict subdirectory, enforce that the output is outside it.
+    let resolved_entry_root =
+        if config.entry_root.as_os_str().is_empty() || config.entry_root == Path::new(".") {
+            None
+        } else {
+            Some(project_root.join(&config.entry_root))
+        };
+
     validate_one_output_folder(
         "dev_folder",
         &config.dev_folder,
+        project_root,
+        resolved_entry_root.as_deref(),
         config,
         string_table,
         &mut errors,
@@ -749,6 +763,8 @@ pub(crate) fn validate_directory_output_settings(
     validate_one_output_folder(
         "output_folder",
         &config.release_folder,
+        project_root,
+        resolved_entry_root.as_deref(),
         config,
         string_table,
         &mut errors,
@@ -768,94 +784,30 @@ pub(crate) fn validate_directory_output_settings(
 
 fn validate_one_output_folder(
     key: &str,
-    folder: &PathBuf,
+    folder: &Path,
+    project_root: &Path,
+    resolved_entry_root: Option<&Path>,
     config: &Config,
     string_table: &mut StringTable,
     errors: &mut Vec<CompilerDiagnostic>,
 ) {
     let location = config.setting_location_or_config_file(key, string_table);
-    let folder_str = folder.to_string_lossy().to_string();
-    let folder_id = string_table.intern(&folder_str);
 
-    if folder.as_os_str().is_empty() {
-        errors.push(output_folder_diagnostic(
-            key,
-            None,
-            InvalidOutputFolderReason::Empty,
-            location,
-            string_table,
-        ));
-        return;
-    }
+    let classification = classify_output_folder(folder, project_root, resolved_entry_root);
+    let reason = match classification {
+        OutputFolderClassification::Valid { .. } => return,
+        OutputFolderClassification::Invalid(reason) => reason,
+    };
 
-    if folder.is_absolute() || folder_str.starts_with('/') {
-        errors.push(output_folder_diagnostic(
-            key,
-            Some(folder_id),
-            InvalidOutputFolderReason::AbsolutePath,
-            location,
-            string_table,
-        ));
-        return;
-    }
-
-    if folder
-        .components()
-        .any(|component| component == std::path::Component::ParentDir)
-    {
-        errors.push(output_folder_diagnostic(
-            key,
-            Some(folder_id),
-            InvalidOutputFolderReason::ParentDirectorySegment,
-            location,
-            string_table,
-        ));
-        return;
-    }
-
-    if folder
-        .components()
-        .any(|component| component == std::path::Component::CurDir)
-    {
-        errors.push(output_folder_diagnostic(
-            key,
-            Some(folder_id),
-            InvalidOutputFolderReason::CurrentDirectory,
-            location,
-            string_table,
-        ));
-        return;
-    }
-
-    // Only check entry-root containment when entry_root is a strict subdirectory. When
-    // entry_root is "." or empty, the entry root covers the entire project root and the output
-    // folder being inside it is the normal case.
-    if !config.entry_root.as_os_str().is_empty() && config.entry_root != Path::new(".") {
-        let resolved_entry_root = config.entry_dir.join(&config.entry_root);
-        let resolved_folder = config.entry_dir.join(folder);
-
-        if resolved_folder == resolved_entry_root {
-            errors.push(output_folder_diagnostic(
-                key,
-                Some(folder_id),
-                InvalidOutputFolderReason::EqualsProjectRoot,
-                location,
-                string_table,
-            ));
-            return;
-        }
-
-        if resolved_folder.starts_with(&resolved_entry_root) {
-            errors.push(CompilerDiagnostic::invalid_config_reason(
-                Some(string_table.intern(key)),
-                InvalidConfigReason::OutputFolderInsideEntryRoot {
-                    folder: folder_id,
-                    entry_root: string_table.intern(&config.entry_root.to_string_lossy()),
-                },
-                location,
-            ));
-        }
-    }
+    let folder_id = (!matches!(reason, InvalidOutputFolderReason::Empty))
+        .then(|| string_table.intern(&folder.to_string_lossy()));
+    errors.push(output_folder_diagnostic(
+        key,
+        folder_id,
+        reason,
+        location,
+        string_table,
+    ));
 }
 
 fn validate_output_folders_distinct(

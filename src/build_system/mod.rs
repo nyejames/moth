@@ -9,6 +9,7 @@
 
 pub(crate) mod build;
 pub(crate) mod create_project_modules;
+pub(crate) mod output;
 pub(crate) mod output_cleanup;
 pub(crate) mod path_validation;
 pub(crate) mod project_config;

@@ -231,14 +231,6 @@ pub(crate) fn invalid_config_message(
         InvalidConfigReason::InvalidOutputFolder { folder, reason } => {
             invalid_output_folder_message(key_label, *folder, *reason, string_table)
         }
-        InvalidConfigReason::OutputFolderInsideEntryRoot {
-            folder,
-            entry_root,
-        } => format!(
-            "Output folder '{}' must be outside the source entry root '{}'. Configure a distinct project-relative output folder in config.moth.",
-            string_table.resolve(*folder),
-            string_table.resolve(*entry_root),
-        ),
         InvalidConfigReason::OutputFoldersNotDistinct {
             dev_folder,
             release_folder: _,
@@ -299,6 +291,11 @@ fn invalid_output_folder_message(
             let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
             format!("'{key_label}' '{name}' must be relative to the project root, not absolute.")
         }
+        InvalidOutputFolderReason::RootOrPrefix => {
+            format!(
+                "'{key_label}' must be a project-relative path, not a root or platform-prefix path."
+            )
+        }
         InvalidOutputFolderReason::ParentDirectorySegment => {
             let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
             format!("'{key_label}' '{name}' must not contain parent-directory segments ('..').")
@@ -312,6 +309,12 @@ fn invalid_output_folder_message(
             let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
             format!(
                 "'{key_label}' '{name}' must not equal the project root. Configure a distinct output folder."
+            )
+        }
+        InvalidOutputFolderReason::InsideOrEqualToEntryRoot => {
+            let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
+            format!(
+                "'{key_label}' '{name}' must be outside the source entry root. Configure a distinct output folder."
             )
         }
     }

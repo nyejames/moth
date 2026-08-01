@@ -62,6 +62,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{Flag, FrontendBuildProfile};
 
+use crate::build_system::output::BuildProfile;
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 
@@ -85,10 +86,9 @@ pub fn compile_project_frontend(
     // it safely from Rayon workers.
     reset_frontend_counters();
 
-    let build_profile = if flags.contains(&Flag::Release) {
-        FrontendBuildProfile::Release
-    } else {
-        FrontendBuildProfile::Dev
+    let build_profile = match BuildProfile::from_flags(flags) {
+        BuildProfile::Dev => FrontendBuildProfile::Dev,
+        BuildProfile::Release => FrontendBuildProfile::Release,
     };
 
     // ---------------------------------------

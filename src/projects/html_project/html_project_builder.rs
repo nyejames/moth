@@ -13,6 +13,7 @@ use crate::build_system::build::{
     BackendBuilder, CleanupPolicy, Module, ModuleExternalImport, OutputFile, Project,
     ProjectCompilation, ProjectLinkedModule,
 };
+use crate::build_system::output::BuildProfile;
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::FrontendBuildProfile;
@@ -111,10 +112,9 @@ impl BackendBuilder for HtmlProjectBuilder {
         }
 
         let release_build = flags.contains(&Flag::Release);
-        let build_profile = if release_build {
-            FrontendBuildProfile::Release
-        } else {
-            FrontendBuildProfile::Dev
+        let build_profile = match BuildProfile::from_flags(flags) {
+            BuildProfile::Dev => FrontendBuildProfile::Dev,
+            BuildProfile::Release => FrontendBuildProfile::Release,
         };
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
         let entry_paths = {

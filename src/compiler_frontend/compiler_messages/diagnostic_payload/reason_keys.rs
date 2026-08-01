@@ -80,16 +80,17 @@ define_stable_reason_keys! {
         &InvalidConfigReason::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
         &InvalidConfigReason::SourceFileFolderCollision { .. } => "invalid_config.source_file_folder_collision",
         &InvalidConfigReason::LegacyModuleRootFileName { .. } => "invalid_config.legacy_module_root_file_name",
-        &InvalidConfigReason::OutputFolderInsideEntryRoot { .. } => "invalid_config.output_folder_inside_entry_root",
         &InvalidConfigReason::OutputFoldersNotDistinct { .. } => "invalid_config.output_folders_not_distinct",
     },
 
     InvalidOutputFolderReason => {
     &InvalidOutputFolderReason::Empty => "invalid_config.invalid_output_folder.empty",
     &InvalidOutputFolderReason::AbsolutePath => "invalid_config.invalid_output_folder.absolute_path",
+    &InvalidOutputFolderReason::RootOrPrefix => "invalid_config.invalid_output_folder.root_or_prefix",
     &InvalidOutputFolderReason::ParentDirectorySegment => "invalid_config.invalid_output_folder.parent_directory_segment",
     &InvalidOutputFolderReason::CurrentDirectory => "invalid_config.invalid_output_folder.current_directory",
     &InvalidOutputFolderReason::EqualsProjectRoot => "invalid_config.invalid_output_folder.equals_project_root",
+    &InvalidOutputFolderReason::InsideOrEqualToEntryRoot => "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
     },
 
     InvalidPackageFolderReason => {

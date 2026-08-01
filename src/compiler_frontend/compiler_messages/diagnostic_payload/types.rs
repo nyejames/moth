@@ -230,10 +230,6 @@ pub enum InvalidConfigReason {
         folder: Option<StringId>,
         reason: InvalidOutputFolderReason,
     },
-    OutputFolderInsideEntryRoot {
-        folder: StringId,
-        entry_root: StringId,
-    },
     OutputFoldersNotDistinct {
         dev_folder: StringId,
         release_folder: StringId,
@@ -244,9 +240,11 @@ pub enum InvalidConfigReason {
 pub enum InvalidOutputFolderReason {
     Empty,
     AbsolutePath,
+    RootOrPrefix,
     ParentDirectorySegment,
     CurrentDirectory,
     EqualsProjectRoot,
+    InsideOrEqualToEntryRoot,
 }
 
 impl InvalidConfigReason {
@@ -384,11 +382,6 @@ impl InvalidConfigReason {
                 if let Some(folder) = folder {
                     *folder = remap.get(*folder);
                 }
-            }
-
-            Self::OutputFolderInsideEntryRoot { folder, entry_root } => {
-                *folder = remap.get(*folder);
-                *entry_root = remap.get(*entry_root);
             }
 
             Self::OutputFoldersNotDistinct {
