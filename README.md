@@ -10,7 +10,8 @@
   A language for creating reliable software in elegant codebases
 </em></p>
 
-<p>⚠️ This project is in early Alpha ⚠️</p> 
+<p>⚠️ This project is in early Alpha ⚠️</p>
+<p>⚠️ Still missing diagnostics, backend stability and compile time optimisations ⚠️</p> 
 
 <p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using <a href="https://github.com/nyejames/moth/blob/main/docs/src">Moth</a>. </p>
 
@@ -27,10 +28,11 @@
 
 Moth is a small, statically typed and opinionated programming language. 
 
-The goal is to provide everything you need. Designed from the ground up to work elegantly within one language and build system.
+The goal is to provide everything you need for modern, memory safe apps. Designed from the ground up to work elegantly within one language and build system.
 
-Web development is the current focus with the home-grown HTML project builder.
+Web development is the current focus. The home-grown HTML project builder creates static web pages using core compiler tooling.
 
+</br>
 
 <img src="./docs/assets/code-snippet-2.webp" width="600px"/>
 
@@ -41,6 +43,8 @@ The HTML build system will generate an HTML page from this code:
 <img src="./docs/assets/code-snippet-3.webp" width="600px"/>
 
 <div align="center">
+
+</br>
 
 ## Moth  🤝  Markdown
 
@@ -62,8 +66,7 @@ No more TypeScript framework lasagne, build-tool linguini or 17 package dependen
 `moth` is the project tool for creating, checking, building and running Moth projects.
 It's the CLI bundled with the compiler and build system.
 
-Installation scripts will arrive for Beta, for now it's best to install manually from a tagged release.
-(of which there are 0 atm, so you'll have to build from source)
+Installation scripts will arrive for Beta, with tagged releases starting soon. For now you'll have to build from source.
 
 ### Create a project
 
@@ -101,19 +104,19 @@ This compiles the project using the command-selected builder and writes output t
 
 - First-class string templates powerful enough to act as a small compile-time markup engine. They support built-in Markdown, formatting, slots and reactive runtime output.
 
-- Readable, consistent syntax. Each keyword or symbol exclusively covers one concept (or as few as possible).
+- Readable and consistent syntax. Unique but quick to learn.
 
 - Fast, modular tooling for short feedback loops and quick development builds (currently needs a lot more optimisation work).
 
-- One batteries-included project tool for checking, building and running the development server.
+- Built-in hot reloading development server.
 
 - A small static type system plus borrow validation for memory-safe code that's free of data races and iterator invalidation by default.
 
-- **Safe automatic memory management, with compiler checks that prevent invalid memory use and optimisations that can avoid garbage collection when proven safe.**
+- **Safe automatic memory management**, with compiler checks that prevent invalid memory use and optimisations that can avoid garbage collection when proven safe.
 
 - A backend-neutral frontend. Wasm as the main, platform-agnostic workhorse output target (Wasm backend in development).
 
-- As few dependencies as possible. A language project shouldn't need a PhD dissertation for a lockfile.
+- **As few dependencies as possible**. A language project shouldn't need a PhD dissertation for a lockfile.
 
 <div align="center">
 
@@ -121,18 +124,16 @@ This compiles the project using the command-selected builder and writes output t
 
 </div>
 
-Developers are using coding agents increasingly as part of their workflow.
+Coding agents are increasingly becoming core to software workflows. Developers should own the final design and architecture. Agents can handle the churn.
 
-Programmers should own the final design and architecture. 
-Agents can handle repetitive churn. 
-Compilers should give detailed, fast feedback for producing reliable code.
+Compilers should give detailed, fast feedback for producing reliable code. Good languages for the future should be easy to review and strict about what the code should look like and how it's structured.
 
-A small syntax, strict rules, fast tooling and stable diagnostics make generated changes easier to inspect and validate.
+A small syntax, strict rules, opinionated design, fast tooling and good diagnostics make generated changes easier to inspect and validate.
 
 Compiler diagnostics should carry stable codes, structured facts and source metadata for editors, development servers and coding agents.
 
 Moth has very little training data, but this may be useful later: 
-examples can grow around the language that exists and the agent will have to follow your codebase style more strictly when there's no legacy patterns to hallucinate.
+examples can grow around the language that exists and agents will have to follow your codebase style more strictly. No legacy patterns to pollute generated output.
 
 <div align="center">
   
@@ -187,6 +188,6 @@ Here is the current <a href="https://nyejames.github.io/moth/docs/progress/">pro
 
 The compiler already has broad frontend, backend and build-system tooling in place.
 
-The language semantics and implementation is still settling.
+The language semantics and implementation is still shifting around as the final design is settled on.
 
 <br>
