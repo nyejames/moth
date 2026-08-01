@@ -1,0 +1,13 @@
+Point = |
+    x Int,
+|
+
+pair |left Point, right Point| -> Point, Point:
+    return left, right
+;
+
+original ~= Point(1)
+first, second = pair(original, original)
+original.x = 2
+
+io.line([:first=[first.x] second=[second.x]])

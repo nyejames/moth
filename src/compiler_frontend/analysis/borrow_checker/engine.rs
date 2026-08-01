@@ -574,6 +574,14 @@ impl<'a> BorrowChecker<'a> {
                 LocalState::uninit(local_count)
             } else if destination_is_alias_only {
                 destination_state
+            } else if source_state.has_value_aliases() {
+                // Jump arguments enter the destination's binding slot. Preserve the source
+                // value's allocation provenance without turning the destination into a
+                // write-through alias view.
+                LocalState::slot_with_value_roots(
+                    source_state.value_roots.clone(),
+                    source_state.direct_alias_roots.clone(),
+                )
             } else {
                 LocalState::slot(local_count)
             };

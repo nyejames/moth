@@ -8,4 +8,8 @@ path = "index.html"
 kind = "html"
 must_contain = [
     "function __moth_mount_template_fragment(",
+    "__moth_template_string(",
+]
+must_not_contain = [
+    "return __moth_clone_value(__moth_read",
 ]

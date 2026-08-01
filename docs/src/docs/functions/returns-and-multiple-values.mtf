@@ -97,4 +97,7 @@ allow host code to return a Moth binding cell.
 A fallible carrier is fresh while its success payload may alias a parameter
 allocation. Multiple return values may alias parameters or each other. Each
 returned value enters its own caller binding. Runtime lowering preserves those
-allocation relationships.
+allocation relationships. The current compact borrow summary conservatively
+unions all parameter roots returned by one function across each projected
+result; this is sound but may be imprecise until per-result provenance is
+introduced.

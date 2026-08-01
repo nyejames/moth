@@ -851,7 +851,9 @@ fn transfer_call_result_alias(
     };
 
     let new_local_state = match alias_roots {
-        Some(roots) if !roots.is_empty() => LocalState::alias(roots),
+        Some(roots) if !roots.is_empty() => {
+            LocalState::slot_with_value_roots(roots, RootSet::empty(input.layout.local_count()))
+        }
         _ => LocalState::slot(input.layout.local_count()),
     };
     input.state.update_local_state(local_index, new_local_state);

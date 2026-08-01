@@ -196,6 +196,16 @@ There is no move syntax and no ordinary mandatory-consuming value operation. Inf
 - An alias result reuses an existing root or projection.
 - An independent result graph has no retained Moth reference to pre-existing storage.
 
+Every function result also enters a fresh caller binding slot, which is separate
+from allocation freshness. An aliasing call result is slot-backed even when its
+current value carries an older allocation root. Rebinding that result clears
+its old value roots without rebinding another binding that still observes the
+allocation. Fallible carriers are fresh slots whose success payload may alias,
+and each multiple-return value enters its own caller slot. The compact borrow
+summary currently unions all parameter roots returned by one multi-return
+function across its projections; this is conservative until per-result
+provenance is available.
+
 Canonical detail: `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`.
 
 ### Accepted but deferred: declared memory groups

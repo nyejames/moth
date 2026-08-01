@@ -463,8 +463,13 @@ score = scores.get("Priya") catch:
         .expect("entry snapshot should include the map-operation result");
 
     assert!(
-        result_snapshot.mode.contains(LocalMode::ALIAS),
-        "get result should alias the receiver, got mode {:?}",
+        result_snapshot.mode.contains(LocalMode::SLOT),
+        "get result should be stored in a caller slot, got mode {:?}",
+        result_snapshot.mode
+    );
+    assert!(
+        !result_snapshot.mode.contains(LocalMode::ALIAS),
+        "get result should not be a write-through alias binding, got mode {:?}",
         result_snapshot.mode
     );
     assert!(
@@ -799,8 +804,13 @@ sentinel = 0
         value_snapshot.mode
     );
     assert!(
-        result_snapshot.mode.contains(LocalMode::ALIAS),
-        "retained alias result should remain rooted in its argument, got mode {:?}",
+        result_snapshot.mode.contains(LocalMode::SLOT),
+        "retained alias result should be stored in a caller slot, got mode {:?}",
+        result_snapshot.mode
+    );
+    assert!(
+        !result_snapshot.mode.contains(LocalMode::ALIAS),
+        "retained alias result should not be a write-through alias binding, got mode {:?}",
         result_snapshot.mode
     );
     assert!(
@@ -905,8 +915,13 @@ compute || -> User, Error!:
         .find(|snapshot| snapshot.local == result_local)
         .expect("exit snapshot should include the retained identity result");
     assert!(
-        result_snapshot.mode.contains(LocalMode::ALIAS),
-        "identity result should retain alias mode, got {:?}",
+        result_snapshot.mode.contains(LocalMode::SLOT),
+        "identity result should retain slot-backed value provenance, got {:?}",
+        result_snapshot.mode
+    );
+    assert!(
+        !result_snapshot.mode.contains(LocalMode::ALIAS),
+        "identity result should not be a write-through alias binding, got {:?}",
         result_snapshot.mode
     );
     assert!(
@@ -1170,8 +1185,13 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         argument_snapshot.mode
     );
     assert!(
-        result_snapshot.mode.contains(LocalMode::ALIAS),
-        "retained unknown result should retain possible alias roots, got mode {:?}",
+        result_snapshot.mode.contains(LocalMode::SLOT),
+        "retained unknown result should use a caller slot for possible alias roots, got mode {:?}",
+        result_snapshot.mode
+    );
+    assert!(
+        !result_snapshot.mode.contains(LocalMode::ALIAS),
+        "retained unknown result should not be a write-through alias binding, got mode {:?}",
         result_snapshot.mode
     );
     assert!(

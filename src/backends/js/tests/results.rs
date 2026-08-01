@@ -554,4 +554,16 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
         )),
         "fallible call result carriers must not inherit the success payload alias mode"
     );
+    assert!(
+        output
+            .source
+            .contains("return { tag: \"ok\", value: __moth_read("),
+        "ReturnSuccess(Load(...)) must read the payload value without cloning"
+    );
+    assert!(
+        !output
+            .source
+            .contains("return { tag: \"ok\", value: __moth_clone_value(__moth_read("),
+        "ReturnSuccess(Load(...)) must not clone the success payload"
+    );
 }

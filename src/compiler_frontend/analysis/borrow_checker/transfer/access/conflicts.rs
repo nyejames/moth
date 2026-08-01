@@ -7,7 +7,7 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     BorrowState, FunctionLayout, FutureUseKind, RootSet,
 };
-use crate::compiler_frontend::analysis::borrow_checker::types::{AccessKind, LocalMode};
+use crate::compiler_frontend::analysis::borrow_checker::types::AccessKind;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, DiagnosticPlace, InvalidMutableAccessReason,
 };
@@ -279,8 +279,8 @@ fn active_alias_count_for_root(
     let mut count = 0u32;
     let actor_state = activity.state.local_state(actor_index);
     let actor_is_alias_for_root = actor_index != root_index
-        && actor_state.mode.contains(LocalMode::ALIAS)
-        && actor_state.alias_roots.contains(root_index);
+        && actor_state.is_alias_only()
+        && actor_state.value_roots.contains(root_index);
 
     for candidate_index in 0..activity.layout.local_count() {
         if actor_is_alias_for_root && candidate_index == root_index {
@@ -337,7 +337,7 @@ fn active_mutable_alias_for_root(
         }
 
         let candidate_state = activity.state.local_state(candidate_index);
-        if !candidate_state.mode.contains(LocalMode::ALIAS) {
+        if !candidate_state.has_value_aliases() {
             continue;
         }
 
@@ -364,8 +364,8 @@ fn conflicting_active_local_for_root(
 ) -> Option<usize> {
     let actor_state = activity.state.local_state(actor_index);
     let actor_is_alias_for_root = actor_index != root_index
-        && actor_state.mode.contains(LocalMode::ALIAS)
-        && actor_state.alias_roots.contains(root_index);
+        && actor_state.is_alias_only()
+        && actor_state.value_roots.contains(root_index);
 
     for candidate_index in 0..activity.layout.local_count() {
         if actor_is_alias_for_root && candidate_index == root_index {
@@ -412,7 +412,7 @@ fn is_local_active_for_alias_conflict(
         }
 
         let local_state = activity.state.local_state(local_index);
-        if !local_state.mode.contains(LocalMode::ALIAS) {
+        if !local_state.has_value_aliases() {
             return false;
         }
 
@@ -436,7 +436,7 @@ fn is_local_active_for_alias_conflict(
     }
 
     let local_state = activity.state.local_state(local_index);
-    if !local_state.mode.contains(LocalMode::ALIAS) {
+    if !local_state.has_value_aliases() {
         return false;
     }
 
@@ -500,7 +500,7 @@ fn local_alias_never_read(
     local_index: usize,
 ) -> bool {
     let local_state = state.local_state(local_index);
-    if !local_state.mode.contains(LocalMode::ALIAS) {
+    if !local_state.has_value_aliases() {
         return false;
     }
 

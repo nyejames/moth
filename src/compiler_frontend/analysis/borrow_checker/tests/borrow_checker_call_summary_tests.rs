@@ -756,7 +756,7 @@ check |source String|:
 }
 
 #[test]
-fn user_function_returning_param_aliases_caller_root() {
+fn user_function_returning_param_alias_allows_caller_rebinding() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
@@ -846,12 +846,34 @@ fn user_function_returning_param_aliases_caller_root() {
         build_ast(vec![callee, caller], entry_path),
         &mut string_table,
     );
-    let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect_err("callee return alias should keep caller root aliased");
-    assert_invalid_mutable_access_reason(
-        &error,
-        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
-    );
+    run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("reassigning the source binding should detach it from the returned alias");
+}
+
+#[test]
+fn slot_backed_alias_result_rebinding_to_another_alias_detaches_old_root() {
+    let source = r#"Point = |
+    x Int,
+|
+
+identity |value Point| -> Point:
+    return value
+;
+
+original ~= Point(1)
+returned ~= identity(original)
+other ~= Point(2)
+other_returned ~= identity(other)
+
+returned = other_returned
+original.x = 4
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+
+    run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("slot-backed result rebinding should detach its previous allocation root");
 }
 
 #[test]
@@ -1345,7 +1367,99 @@ remove_value |scores ~{String = String}| -> String, Error!:
 }
 
 #[test]
-fn inferred_alias_return_from_parameter_reference_conflicts_with_mutation() {
+fn multi_return_alias_summary_conservatively_unions_returned_elements() {
+    let source = r#"
+Point = |
+    x Int,
+|
+
+pair |left Point, right Point| -> Point, Point:
+    return left, right
+;
+
+duplicate |value Point| -> Point, Point:
+    return value, value
+;
+
+copy_one |value Point| -> Point, Point:
+    return value, copy value
+;
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("multi-return alias summaries should validate");
+
+    let summary_for = |name: &str| {
+        let function = hir
+            .functions
+            .iter()
+            .find(|function| {
+                hir.side_table
+                    .function_name_path(function.id)
+                    .is_some_and(|path| path.name_str(&string_table) == Some(name))
+            })
+            .expect("multi-return function should lower to HIR");
+        report
+            .analysis
+            .public_call_summaries
+            .get(&function.id)
+            .expect("multi-return function should have a call summary")
+            .return_alias
+            .clone()
+    };
+
+    assert_eq!(
+        summary_for("pair"),
+        FunctionReturnAliasSummary::AliasParams(vec![0, 1])
+    );
+    assert_eq!(
+        summary_for("duplicate"),
+        FunctionReturnAliasSummary::AliasParams(vec![0])
+    );
+    assert_eq!(
+        summary_for("copy_one"),
+        FunctionReturnAliasSummary::AliasParams(vec![0])
+    );
+}
+
+#[test]
+fn recursive_return_summary_stays_unknown() {
+    let source = r#"
+recursive |value Int| -> Int:
+    return recursive(value)
+;
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("recursive summary cycle should remain a valid conservative analysis");
+    let recursive_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path.name_str(&string_table) == Some("recursive"))
+        })
+        .expect("recursive function should lower to HIR")
+        .id;
+
+    assert_eq!(
+        report
+            .analysis
+            .public_call_summaries
+            .get(&recursive_id)
+            .expect("recursive function should have a call summary")
+            .return_alias,
+        FunctionReturnAliasSummary::Unknown
+    );
+}
+
+#[test]
+fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
@@ -1440,9 +1554,8 @@ fn inferred_alias_return_from_parameter_reference_conflicts_with_mutation() {
         build_ast(vec![callee, caller], entry_path),
         &mut string_table,
     );
-    run_borrow_checker(&hir, &external_package_registry, &string_table).expect_err(
-        "inferred alias return from parameter reference should conflict with later mutation",
-    );
+    run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("reassigning the source binding should preserve the returned allocation alias");
 }
 
 #[test]
@@ -1954,6 +2067,184 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
         (*existing_access, *requested_access),
         (BorrowAccessKind::Shared, BorrowAccessKind::Mutable)
     );
+}
+
+#[test]
+fn external_alias_args_result_stays_slot_backed_after_rebinding() {
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let host_alias = register_external_function(
+        &mut external_package_registry,
+        "alias_arg_result",
+        vec![ExternalAccessKind::Shared],
+        ExternalReturnAlias::AliasArgs(vec![0]),
+        ExternalAbiType::I32,
+    );
+    let original = symbol("original", &mut string_table);
+    let returned = symbol("returned", &mut string_table);
+
+    let returned_call = Expression::host_function_call_with_arguments(
+        host_alias,
+        vec![CallArgument::positional(
+            reference_expr(
+                original.clone(),
+                DataType::Int,
+                builtin_type_ids::INT,
+                test_location(11),
+            ),
+            CallAccessMode::Shared,
+            test_location(11),
+        )],
+        vec![builtin_type_ids::INT],
+        test_location(11),
+    );
+
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    original.clone(),
+                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                )),
+                test_location(10),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(returned.clone(), returned_call)),
+                test_location(11),
+            ),
+            node(
+                NodeKind::Assignment {
+                    target: assignment_target(
+                        returned,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_location(12),
+                    ),
+                    value: Expression::int(2, test_location(12), ValueMode::ImmutableOwned),
+                },
+                test_location(12),
+            ),
+            node(
+                NodeKind::Assignment {
+                    target: assignment_target(
+                        original,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_location(13),
+                    ),
+                    value: Expression::int(3, test_location(13), ValueMode::ImmutableOwned),
+                },
+                test_location(13),
+            ),
+        ],
+        test_location(10),
+    );
+
+    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect("external AliasArgs result should remain rebindable as a caller slot");
+    let original_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Assign {
+                target: HirPlace::Local(local),
+                ..
+            } if hir.side_table.resolve_local_name(*local, &string_table) == Some("original") => {
+                Some(*local)
+            }
+            _ => None,
+        })
+        .expect("should locate the original binding");
+    let returned_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Assign {
+                target: HirPlace::Local(local),
+                ..
+            } if hir.side_table.resolve_local_name(*local, &string_table) == Some("returned") => {
+                Some(*local)
+            }
+            _ => None,
+        })
+        .expect("should locate the returned binding");
+    let returned_rebinding = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .rfind(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(local),
+                    ..
+                } if *local == returned_local
+            )
+        })
+        .expect("should locate the result rebinding statement");
+    let returned_before_rebinding = report
+        .analysis
+        .statement_entry_states
+        .get(&returned_rebinding.id)
+        .expect("result rebinding should have an entry snapshot")
+        .locals
+        .iter()
+        .find(|local| local.local == returned_local)
+        .expect("result rebinding snapshot should include the external result");
+
+    assert!(
+        returned_before_rebinding.mode.contains(LocalMode::SLOT),
+        "external AliasArgs result should use a caller slot before rebinding, got mode {:?} with roots {:?}",
+        returned_before_rebinding.mode,
+        returned_before_rebinding.alias_roots
+    );
+    assert!(!returned_before_rebinding.mode.contains(LocalMode::ALIAS));
+    assert!(
+        returned_before_rebinding
+            .alias_roots
+            .contains(&original_local),
+        "external AliasArgs result should retain the argument root before rebinding, got mode {:?} with roots {:?}",
+        returned_before_rebinding.mode,
+        returned_before_rebinding.alias_roots
+    );
+
+    let original_assignment = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .rfind(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(local),
+                    ..
+                } if *local == original_local
+            )
+        })
+        .expect("should locate the source rebinding statement");
+    let snapshot = report
+        .analysis
+        .statement_entry_states
+        .get(&original_assignment.id)
+        .expect("source rebinding should have an entry snapshot");
+    let returned_snapshot = snapshot
+        .locals
+        .iter()
+        .find(|local| local.local == returned_local)
+        .expect("source rebinding snapshot should include the external result");
+
+    assert!(returned_snapshot.mode.contains(LocalMode::SLOT));
+    assert!(!returned_snapshot.mode.contains(LocalMode::ALIAS));
+    assert!(returned_snapshot.alias_roots.is_empty());
 }
 
 #[test]

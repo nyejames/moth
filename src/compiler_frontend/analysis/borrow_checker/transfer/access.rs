@@ -168,18 +168,22 @@ fn transfer_assign_target(
             };
 
             let local_state = state.local_state(local_index).clone();
-            let rhs_alias_roots = direct_place_roots_from_expression(
+            let rhs_provenance = direct_value_provenance_from_expression(
                 layout,
                 state,
                 value,
                 location.clone(),
                 &transfer_context.diagnostics,
             )?;
-            let rhs_direct_alias_roots = rhs_alias_roots.as_ref().map(|rhs_roots| {
-                direct_root_aliases_from_expression(layout, state, value, rhs_roots)
+            let rhs_direct_alias_roots = rhs_provenance.as_ref().map(|provenance| {
+                direct_root_aliases_from_expression(layout, state, value, &provenance.roots)
             });
 
-            if let Some(rhs_roots) = rhs_alias_roots.as_ref().filter(|roots| !roots.is_empty()) {
+            if let Some(rhs_roots) = rhs_provenance
+                .as_ref()
+                .map(|provenance| &provenance.roots)
+                .filter(|roots| !roots.is_empty())
+            {
                 let can_attempt_move = local_state.mode.is_definitely_uninit()
                     && layout.local_mutable[local_index]
                     && rhs_roots
@@ -207,8 +211,9 @@ fn transfer_assign_target(
             }
 
             if local_state.mode.is_definitely_uninit() {
-                match rhs_alias_roots {
-                    Some(rhs_roots) => {
+                match rhs_provenance {
+                    Some(provenance) => {
+                        let rhs_roots = provenance.roots;
                         let target_is_mutable = layout.local_mutable[local_index];
                         let target_is_compiler_owned_scratch =
                             is_compiler_owned_scratch_local(transfer_context, layout, local_index);
@@ -221,6 +226,7 @@ fn transfer_assign_target(
                         //      get and stopped the alias before it could reach the user binding.
                         if target_is_mutable
                             && !rhs_roots.is_empty()
+                            && !provenance.slot_backed
                             && !target_is_compiler_owned_scratch
                         {
                             let mut check = AccessCheckContext {
@@ -248,10 +254,12 @@ fn transfer_assign_target(
 
                         let direct_roots = rhs_direct_alias_roots
                             .unwrap_or_else(|| RootSet::empty(layout.local_count()));
-                        state.update_local_state(
-                            local_index,
-                            LocalState::alias_with_direct(rhs_roots, direct_roots),
-                        );
+                        let new_state = if provenance.slot_backed {
+                            LocalState::slot_with_value_roots(rhs_roots, direct_roots)
+                        } else {
+                            LocalState::alias_with_direct(rhs_roots, direct_roots)
+                        };
+                        state.update_local_state(local_index, new_state);
                     }
                     None => {
                         state.update_local_state(
@@ -266,18 +274,19 @@ fn transfer_assign_target(
             // A fresh RHS (no alias roots) means the rebinding replaces the binding's target
             // with a new allocation. The old allocation stays alive through any aliases, so
             // alias exclusivity should not block the rebinding.
-            let rhs_is_fresh = rhs_alias_roots
+            let rhs_is_fresh = rhs_provenance
                 .as_ref()
-                .is_none_or(|roots| roots.is_empty());
+                .is_none_or(|provenance| provenance.roots.is_empty());
 
             let mut write_roots = RootSet::empty(layout.local_count());
             if local_state.mode.contains(LocalMode::SLOT) {
                 write_roots.insert(local_index);
             }
-            // Include alias roots in the write check only when the RHS carries alias roots.
-            // A fresh RHS releases the old allocation without mutating it.
-            if !rhs_is_fresh && local_state.mode.contains(LocalMode::ALIAS) {
-                write_roots.union_with(&local_state.alias_roots);
+            // An alias-only binding writes through to its current allocation. A slot-backed
+            // binding instead replaces its cell, so its previous value roots must not block the
+            // rebind even when the new RHS aliases a different existing allocation.
+            if local_state.mode.contains(LocalMode::ALIAS) && local_state.has_value_aliases() {
+                write_roots.union_with(&local_state.value_roots);
             }
 
             let mut check = AccessCheckContext {
@@ -315,7 +324,7 @@ fn transfer_assign_target(
                         state,
                         layout.local_count(),
                         local_index,
-                        rhs_alias_roots,
+                        rhs_provenance,
                         rhs_direct_alias_roots,
                     );
                 }
@@ -328,14 +337,14 @@ fn transfer_assign_target(
                             state,
                             layout.local_count(),
                             local_index,
-                            rhs_alias_roots,
+                            rhs_provenance,
                             rhs_direct_alias_roots,
                         );
                     } else {
-                        let mut alias_roots = local_state.alias_roots;
+                        let mut value_roots = local_state.value_roots;
                         let mut direct_alias_roots = local_state.direct_alias_roots;
-                        if let Some(rhs_roots) = rhs_alias_roots {
-                            alias_roots.union_with(&rhs_roots);
+                        if let Some(provenance) = rhs_provenance {
+                            value_roots.union_with(&provenance.roots);
                         }
                         if let Some(rhs_direct_roots) = rhs_direct_alias_roots {
                             direct_alias_roots.union_with(&rhs_direct_roots);
@@ -345,7 +354,7 @@ fn transfer_assign_target(
                             local_index,
                             LocalState {
                                 mode: LocalMode::SLOT.union(LocalMode::ALIAS),
-                                alias_roots,
+                                value_roots,
                                 direct_alias_roots,
                             },
                         );
@@ -416,19 +425,20 @@ fn apply_slot_rebinding(
     state: &mut BorrowState,
     local_count: usize,
     local_index: usize,
-    rhs_alias_roots: Option<RootSet>,
+    rhs_provenance: Option<DirectValueProvenance>,
     rhs_direct_alias_roots: Option<RootSet>,
 ) {
-    match rhs_alias_roots {
-        Some(roots) => {
+    match rhs_provenance {
+        Some(provenance) if !provenance.roots.is_empty() => {
             let direct_roots =
                 rhs_direct_alias_roots.unwrap_or_else(|| RootSet::empty(local_count));
             state.update_local_state(
                 local_index,
-                LocalState::alias_with_direct(roots, direct_roots),
+                LocalState::slot_with_value_roots(provenance.roots, direct_roots),
             )
         }
         None => state.update_local_state(local_index, LocalState::slot(local_count)),
+        Some(_) => state.update_local_state(local_index, LocalState::slot(local_count)),
     }
 }
 
@@ -472,19 +482,56 @@ fn transparent_place_from_expression(expression: &HirExpression) -> Option<&HirP
     }
 }
 
-fn direct_place_roots_from_expression(
+#[derive(Debug)]
+struct DirectValueProvenance {
+    roots: RootSet,
+    slot_backed: bool,
+}
+
+fn direct_value_provenance_from_expression(
     layout: &FunctionLayout,
     state: &BorrowState,
     expression: &HirExpression,
     location: SourceLocation,
     diagnostics: &BorrowDiagnostics<'_>,
-) -> Result<Option<RootSet>, BorrowCheckError> {
+) -> Result<Option<DirectValueProvenance>, BorrowCheckError> {
     // WHAT: a fallible success unwrap carries the success payload's alias roots through the
     //      carrier local, so a map `get` result keeps aliasing the map across the catch join.
     // WHY: without this, the shared alias established at `get` is dropped at the unwrap and
     //      never reaches the user binding, so a later mutation is not blocked.
-    if let HirExpressionKind::FallibleUnwrapSuccess { result } = &expression.kind {
-        return direct_place_roots_from_expression(layout, state, result, location, diagnostics);
+    match &expression.kind {
+        HirExpressionKind::FallibleUnwrapSuccess { result }
+        | HirExpressionKind::TupleGet { tuple: result, .. } => {
+            return direct_value_provenance_from_expression(
+                layout,
+                state,
+                result,
+                location,
+                diagnostics,
+            );
+        }
+        HirExpressionKind::TupleConstruct { elements } => {
+            let mut roots = RootSet::empty(layout.local_count());
+            for element in elements {
+                if let Some(provenance) = direct_value_provenance_from_expression(
+                    layout,
+                    state,
+                    element,
+                    location.clone(),
+                    diagnostics,
+                )? {
+                    roots.union_with(&provenance.roots);
+                }
+            }
+
+            return Ok(Some(DirectValueProvenance {
+                roots,
+                // The tuple itself always enters a binding slot. Its elements may retain older
+                // allocations, which the union above records conservatively.
+                slot_backed: true,
+            }));
+        }
+        _ => {}
     }
 
     let HirExpressionKind::Load(place) = &expression.kind else {
@@ -492,29 +539,21 @@ fn direct_place_roots_from_expression(
     };
 
     if expression.value_kind == ValueKind::Place {
-        return Ok(Some(roots_for_place(
-            layout,
-            state,
-            place,
-            location,
-            diagnostics,
-        )?));
+        return Ok(Some(DirectValueProvenance {
+            roots: roots_for_place(layout, state, place, location, diagnostics)?,
+            slot_backed: false,
+        }));
     }
 
     if let HirPlace::Local(local_id) = place
         && let Some(local_index) = layout.index_of(*local_id)
-        && state
-            .local_state(local_index)
-            .mode
-            .contains(LocalMode::ALIAS)
+        && state.local_state(local_index).has_value_aliases()
     {
-        return Ok(Some(roots_for_place(
-            layout,
-            state,
-            place,
-            location,
-            diagnostics,
-        )?));
+        let source_state = state.local_state(local_index);
+        return Ok(Some(DirectValueProvenance {
+            roots: roots_for_place(layout, state, place, location, diagnostics)?,
+            slot_backed: source_state.mode.contains(LocalMode::SLOT),
+        }));
     }
 
     Ok(None)

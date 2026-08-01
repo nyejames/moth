@@ -1,0 +1,16 @@
+forward |input io.input.Input| -> io.input.Input:
+    return input
+;
+
+run || -> String, Error!:
+    input ~= io.input.new()!
+    returned ~= forward(input)
+    pressed = io.input.key_pressed(returned, "d")
+    return "ok"
+;
+
+result = run() catch:
+    then "error"
+;
+
+io.line([:opaque_handle_forwarding_through_user_function [result]])

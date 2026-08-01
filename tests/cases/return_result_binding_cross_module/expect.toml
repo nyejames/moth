@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "original=2 returned=1\n"
+rendered_output_exact = "original=4 returned=3\n"

@@ -5,18 +5,17 @@
 ```text
 WORK_ID: docs-lang-mig
 WORK_SOURCE: docs/roadmap/plans/docs-language-migration.md
-BASE_REVISION: a1cfe6199
+BASE_REVISION: 63fd418f4dc42ec593c78e58a07299f3e6e58b4e
 STATUS: active
-CURRENT_SCOPE: B2 unify compiler String semantics
+CURRENT_SCOPE: B1 result-binding state and multi-return alias correction
 STAGE_A: complete and accepted
 STAGE_W: complete and accepted
 PRE_B1_CLOSEOUT: complete, full gate green at d82b86d74
-COMPLETED: B1 source syntax removal and return-value ABI correction complete
-NEXT_ACTION: B2 unify compiler String semantics
-VALIDATION: just validate green, docs build green, 1813/1813 integration correct
-AUDITS: none
-BLOCKERS: none
-STAGE_C: blocked until Stage B completes
+COMPLETED: B1 source syntax removal and JS raw-value return ABI correction; slot-backed result provenance and multi-return summary correction implemented
+NEXT_ACTION: close B1 and begin B2 only after the user resumes the migration
+VALIDATION: just validate green: native/Linux/Windows Clippy, 3,855 Rust tests, 1,819 integration cases, docs check, and benchmark sanity; docs release build green (69 files)
+AUDITS: local final audit green; Codex CLI review checkpoint run read-only until an unsafe mutation probe was interrupted and the fixture was verified restored; implementation-agent auditor timed out without a handoff
+BLOCKERS: none for B1 correction; B2-B7 paused by user
 STAGE_C: blocked until Stage B completes
 ```
 

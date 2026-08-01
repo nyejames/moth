@@ -5064,10 +5064,38 @@ contract = "language.functions.explicit_copy_creates_independent_value"
 role = "primary"
 
 [[case]]
-id = "return_alias_preserves_allocation_identity"
-path = "return_alias_preserves_allocation_identity"
+id = "return_result_binding_survives_source_rebind"
+path = "return_result_binding_survives_source_rebind"
 tags = ["integration", "borrows", "returns"]
-contract = "language.functions.return_alias_preserves_allocation_identity"
+contract = "language.functions.return_result_binding_survives_source_rebind"
+role = "primary"
+
+[[case]]
+id = "multi_return_alias_live_blocks_mutation"
+path = "multi_return_alias_live_blocks_mutation"
+tags = ["integration", "borrows", "returns", "diagnostics"]
+contract = "language.functions.multi_return_alias_live_blocks_mutation"
+role = "primary"
+
+[[case]]
+id = "collection_result_binding_survives_source_rebind"
+path = "collection_result_binding_survives_source_rebind"
+tags = ["integration", "borrows", "collections"]
+contract = "language.collections.result_binding_survives_source_rebind"
+role = "primary"
+
+[[case]]
+id = "return_result_binding_cross_module"
+path = "return_result_binding_cross_module"
+tags = ["integration", "borrows", "returns", "imports"]
+contract = "language.modules.return_result_binding_cross_module"
+role = "primary"
+
+[[case]]
+id = "opaque_handle_forwarding_through_user_function"
+path = "opaque_handle_forwarding_through_user_function"
+tags = ["integration", "borrows", "external", "returns"]
+contract = "language.external.opaque_handle_forwarding_through_user_function"
 role = "primary"
 
 [[case]]

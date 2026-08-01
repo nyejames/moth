@@ -1,0 +1,7 @@
+Point = |
+    x Int,
+|
+
+identity |value Point| -> Point:
+    return value
+;

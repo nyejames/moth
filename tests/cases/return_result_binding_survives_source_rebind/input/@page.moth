@@ -7,7 +7,10 @@ identity |value Point| -> Point:
 ;
 
 original ~= Point(1)
-returned = identity(original)
-original = Point(2)
+returned ~= identity(original)
+
+returned = Point(2)
+returned.x = 3
+original.x = 4
 
 io.line([:original=[original.x] returned=[returned.x]])

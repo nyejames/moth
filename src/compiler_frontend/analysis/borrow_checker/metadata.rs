@@ -213,6 +213,23 @@ impl<'a> BorrowChecker<'a> {
         // Return aliases form a finite monotone lattice. Recompute every function from the same
         // retained map, then publish the whole pass so local call chains cannot depend on HIR
         // declaration order.
+        let recursive_functions = self.recursive_return_alias_functions()?;
+        for function_id in &recursive_functions {
+            let Some(summary) = self.public_call_summaries.get_mut(function_id) else {
+                return Err(self.diagnostics.internal_error(
+                    format!(
+                        "Borrow checker is missing the public call summary for recursive function '{}'",
+                        self.diagnostics.function_name(*function_id)
+                    ),
+                    self.diagnostics.function_error_location(*function_id),
+                ));
+            };
+            // A recursive return-summary cycle has no finite body summary to project through.
+            // Publish Unknown at the cycle boundary so callers cannot mistake the initial Fresh
+            // seed for a proven fresh result.
+            summary.return_alias = FunctionReturnAliasSummary::Unknown;
+        }
+
         let parameter_count = self
             .module
             .functions
@@ -226,7 +243,11 @@ impl<'a> BorrowChecker<'a> {
         for _ in 0..max_iterations {
             let mut retained_by_function = Vec::with_capacity(self.module.functions.len());
             for function in &self.module.functions {
-                let classified = self.classify_function_return_alias(function)?;
+                let classified = if recursive_functions.contains(&function.id) {
+                    FunctionReturnAliasSummary::Unknown
+                } else {
+                    self.classify_function_return_alias(function)?
+                };
                 retained_by_function.push((function.id, classified.clone(), classified));
             }
 
@@ -257,6 +278,40 @@ impl<'a> BorrowChecker<'a> {
             "Borrow checker could not stabilize local return-alias summaries",
             self.diagnostics.module_error_location(),
         ))
+    }
+
+    fn recursive_return_alias_functions(&self) -> Result<FxHashSet<FunctionId>, BorrowCheckError> {
+        let mut edges = FxHashMap::<FunctionId, Vec<FunctionId>>::default();
+        for function in &self.module.functions {
+            let mut callees = Vec::new();
+            let reachable_blocks = self.collect_reachable_blocks(function)?;
+            for block_id in reachable_blocks {
+                let block = self.block_by_id_or_error(block_id, function.id)?;
+
+                for statement in &block.statements {
+                    let HirStatementKind::Call {
+                        target: CallTarget::Local(callee),
+                        ..
+                    } = &statement.kind
+                    else {
+                        continue;
+                    };
+                    callees.push(*callee);
+                }
+            }
+            callees.sort_unstable_by_key(|callee| callee.0);
+            callees.dedup();
+            edges.insert(function.id, callees);
+        }
+
+        let mut recursive = FxHashSet::default();
+        for function in &self.module.functions {
+            let mut visited = FxHashSet::default();
+            if reaches_function(function.id, function.id, &edges, &mut visited) {
+                recursive.insert(function.id);
+            }
+        }
+        Ok(recursive)
     }
 
     fn retain_hir_reactive_parameter_effects(
@@ -672,6 +727,36 @@ impl<'a> BorrowChecker<'a> {
                     visiting_locals,
                 )
             }
+            HirExpressionKind::TupleConstruct { elements } => {
+                // Multi-return summaries currently expose one conservative function-wide
+                // union. Each projected result receives that union until the public summary
+                // grows per-result provenance.
+                let mut summary = FunctionReturnAliasSummary::Fresh;
+                for element in elements {
+                    summary = merge_return_alias(
+                        summary,
+                        self.classify_return_expression_with_visiting(
+                            function,
+                            reachable_blocks,
+                            element,
+                            param_index_by_local,
+                            visiting_locals,
+                        )?,
+                    );
+                    if matches!(summary, FunctionReturnAliasSummary::Unknown) {
+                        break;
+                    }
+                }
+                Ok(summary)
+            }
+            HirExpressionKind::TupleGet { tuple, .. } => self
+                .classify_return_expression_with_visiting(
+                    function,
+                    reachable_blocks,
+                    tuple,
+                    param_index_by_local,
+                    visiting_locals,
+                ),
             // Copies and computed/constructed expressions produce independent results. Their
             // input aliases do not become aliases of the result.
             _ => Ok(FunctionReturnAliasSummary::Fresh),
@@ -1788,6 +1873,28 @@ fn merge_return_alias(
             FunctionReturnAliasSummary::AliasParams(left)
         }
     }
+}
+
+fn reaches_function(
+    start: FunctionId,
+    current: FunctionId,
+    edges: &FxHashMap<FunctionId, Vec<FunctionId>>,
+    visited: &mut FxHashSet<FunctionId>,
+) -> bool {
+    let Some(callees) = edges.get(&current) else {
+        return false;
+    };
+
+    for callee in callees {
+        if *callee == start {
+            return true;
+        }
+        if visited.insert(*callee) && reaches_function(start, *callee, edges, visited) {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn root_local_for_place(place: &HirPlace) -> Option<LocalId> {

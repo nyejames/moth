@@ -239,14 +239,14 @@ impl BorrowState {
             let left = &self.locals[index];
             let right = &other.locals[index];
 
-            let mut alias_roots = left.alias_roots.clone();
-            alias_roots.union_with(&right.alias_roots);
+            let mut value_roots = left.value_roots.clone();
+            value_roots.union_with(&right.value_roots);
             let mut direct_alias_roots = left.direct_alias_roots.clone();
             direct_alias_roots.union_with(&right.direct_alias_roots);
 
             joined_locals.push(LocalState {
                 mode: left.mode.union(right.mode),
-                alias_roots,
+                value_roots,
                 direct_alias_roots,
             });
         }
@@ -274,16 +274,12 @@ impl BorrowState {
             }
 
             let mut next = self.locals[local_index].clone();
-            if next.mode.contains(LocalMode::ALIAS) {
-                next.alias_roots.intersect_with(visible_mask);
+            if !next.value_roots.is_empty() {
+                next.value_roots.intersect_with(visible_mask);
                 next.direct_alias_roots.intersect_with(visible_mask);
-                if next.alias_roots.is_empty() {
+                if next.value_roots.is_empty() {
                     next = if next.mode.contains(LocalMode::SLOT) {
-                        LocalState {
-                            mode: LocalMode::SLOT,
-                            alias_roots: RootSet::empty(local_count),
-                            direct_alias_roots: RootSet::empty(local_count),
-                        }
+                        LocalState::slot(local_count)
                     } else {
                         LocalState::uninit(local_count)
                     };
@@ -308,7 +304,7 @@ impl BorrowState {
 
         for (index, local_state) in self.locals.iter().enumerate() {
             let alias_roots = local_state
-                .alias_roots
+                .value_roots
                 .iter_ones()
                 .map(|root_index| local_ids[root_index])
                 .collect::<Vec<_>>();
@@ -327,12 +323,19 @@ impl BorrowState {
         let local_count = self.locals.len();
         let mut roots = RootSet::empty(local_count);
 
-        if state.mode.contains(LocalMode::SLOT) {
+        let has_slot_binding = state.mode.contains(LocalMode::SLOT);
+        let has_alias_binding = state.mode.contains(LocalMode::ALIAS);
+
+        // A definite slot stores the current value in its own binding cell. If that value
+        // aliases an older allocation, the older roots replace the slot's own allocation root.
+        // A SLOT | ALIAS join remains conservative because either binding representation may
+        // have reached the join.
+        if has_slot_binding && (has_alias_binding || state.value_roots.is_empty()) {
             roots.insert(local_index);
         }
 
-        if state.mode.contains(LocalMode::ALIAS) {
-            roots.union_with(&state.alias_roots);
+        if has_alias_binding || (has_slot_binding && !state.value_roots.is_empty()) {
+            roots.union_with(&state.value_roots);
         }
 
         roots
@@ -352,8 +355,10 @@ impl BorrowState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LocalState {
+    // Binding storage mode and value provenance are deliberately separate. A call result has a
+    // SLOT binding even when its current value aliases roots owned by an argument.
     pub mode: LocalMode,
-    pub alias_roots: RootSet,
+    pub value_roots: RootSet,
     pub direct_alias_roots: RootSet,
 }
 
@@ -361,7 +366,7 @@ impl LocalState {
     pub(super) fn uninit(local_count: usize) -> Self {
         Self {
             mode: LocalMode::UNINIT,
-            alias_roots: RootSet::empty(local_count),
+            value_roots: RootSet::empty(local_count),
             direct_alias_roots: RootSet::empty(local_count),
         }
     }
@@ -369,22 +374,33 @@ impl LocalState {
     pub(super) fn slot(local_count: usize) -> Self {
         Self {
             mode: LocalMode::SLOT,
-            alias_roots: RootSet::empty(local_count),
+            value_roots: RootSet::empty(local_count),
             direct_alias_roots: RootSet::empty(local_count),
         }
     }
 
-    pub(super) fn alias(alias_roots: RootSet) -> Self {
-        let local_count = alias_roots.bit_len;
-        Self::alias_with_direct(alias_roots, RootSet::empty(local_count))
-    }
-
-    pub(super) fn alias_with_direct(alias_roots: RootSet, direct_alias_roots: RootSet) -> Self {
+    pub(super) fn slot_with_value_roots(value_roots: RootSet, direct_alias_roots: RootSet) -> Self {
         Self {
-            mode: LocalMode::ALIAS,
-            alias_roots,
+            mode: LocalMode::SLOT,
+            value_roots,
             direct_alias_roots,
         }
+    }
+
+    pub(super) fn alias_with_direct(value_roots: RootSet, direct_alias_roots: RootSet) -> Self {
+        Self {
+            mode: LocalMode::ALIAS,
+            value_roots,
+            direct_alias_roots,
+        }
+    }
+
+    pub(super) fn has_value_aliases(&self) -> bool {
+        !self.value_roots.is_empty()
+    }
+
+    pub(super) fn is_alias_only(&self) -> bool {
+        self.mode.contains(LocalMode::ALIAS) && !self.mode.contains(LocalMode::SLOT)
     }
 }
 
@@ -497,5 +513,34 @@ impl<'a> Iterator for RootSetIter<'a> {
                 self.current_word = self.set.words[self.word_index];
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BorrowState, LocalState, RootSet};
+
+    #[test]
+    fn slot_backed_alias_rebinding_clears_old_value_roots() {
+        let local_count = 2;
+        let mut state = BorrowState::new_uninitialized(local_count);
+        state.initialize_parameter(0);
+
+        let mut aliased_root = RootSet::empty(local_count);
+        aliased_root.insert(0);
+        state.update_local_state(
+            1,
+            LocalState::slot_with_value_roots(aliased_root, RootSet::empty(local_count)),
+        );
+
+        assert_eq!(
+            state.effective_roots(1).iter_ones().collect::<Vec<_>>(),
+            vec![0]
+        );
+
+        state.update_local_state(1, LocalState::slot(local_count));
+
+        assert!(state.effective_roots(1).contains(1));
+        assert!(!state.effective_roots(1).contains(0));
     }
 }

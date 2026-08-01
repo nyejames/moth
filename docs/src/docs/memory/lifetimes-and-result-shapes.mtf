@@ -67,6 +67,21 @@ An alias result reuses an existing root or projection. Shared bindings, field ac
 
 Interior projections remain rooted in their containing allocation family. Returning, storing or escaping a projection retains that family. A projection doesn't silently become an independent allocation or independent copy.
 
+### Result binding versus allocation identity
+
+Every returned value enters a fresh caller binding slot. Binding-slot freshness and allocation freshness are separate facts: a fresh slot may contain a value that aliases an older allocation. Rebinding that slot replaces its current value provenance; it does not rebind or mutate another binding that still observes the older allocation.
+
+[codeblock, $code("moth"):
+    original ~= Point(1)
+    returned ~= identity(original) -- fresh caller slot, aliased allocation
+
+    returned = Point(2)             -- clears returned's old allocation provenance
+    returned.x = 3
+    original.x = 4                  -- the original allocation remains independent
+]
+
+The borrow state therefore tracks binding storage separately from the allocation roots carried by the current value. A call result is slot-backed even when its value aliases an argument. Fallible carriers are likewise fresh carrier slots whose success payload may alias an argument allocation. A slot-backed result must not be modelled as a write-through alias binding, because rebinding it must detach the old value roots from that result slot.
+
 ### Independent result graphs
 
 An independent result graph has no retained Moth reference to pre-existing storage. `copy` produces independent results. WIT value-only lifting produces independent results. An independent graph may enter an unrelated destination lifetime without retained-edge constraints to its source graph.
@@ -82,6 +97,8 @@ Maps own their entry structure while keys and values follow the same shared/copy
 Function lifetime summaries cover fresh result roots, parameter aliases, projection aliases, result-to-result aliases, retained-parameter constraints and required outlives relationships.
 
 Multiple return values may alias one allocation when they remain under one caller lifetime owner. A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination.
+
+The current compact borrow summary conservatively unions parameter roots across all values in one multi-return function. Each projected result may therefore carry the function-wide union until per-result provenance is available; this is intentionally conservative and may reject a mutation that a per-result summary could prove independent.
 
 ### Cycles
 
