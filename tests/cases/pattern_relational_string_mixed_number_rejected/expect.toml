@@ -1,4 +1,11 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-TYPE-0001"]
+diagnostic_codes = ["MOTH-RULE-0049"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0049"
+reason = "invalid_match_pattern.scrutinee_type_unsupported_for_relational"
+path = "input/@page.moth"
+line = 7
+count = 1

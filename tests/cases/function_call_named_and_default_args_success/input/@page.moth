@@ -6,7 +6,7 @@
 -- output event.
 
 format |prefix String = "<<", value String, suffix String| -> String:
-    return prefix + value + suffix
+    return [prefix, value, suffix]
 ;
 
 mixed_positional_then_named = format("P", value = "V", suffix = "1")

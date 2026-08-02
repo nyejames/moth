@@ -9,5 +9,5 @@ if status is:
 ;
 
 suffix ~= "-done"
-result = label + suffix
+result = [label, suffix]
 [:choice_match_wildcard_merge_continuation result=[result]]
