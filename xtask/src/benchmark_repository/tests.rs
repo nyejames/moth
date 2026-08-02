@@ -58,6 +58,22 @@ fn clean_repository_remains_accepted() {
 }
 
 #[test]
+fn clean_repository_is_verified_before_recording_persistence() {
+    let repo = init_git_repo();
+    write_file(repo.path(), "file.moth", "value = 1\n");
+    commit_all(repo.path(), "initial");
+
+    let snapshot =
+        BenchmarkRepositorySnapshot::capture(repo.path()).expect("snapshot should capture");
+
+    verify_before_persistence(&snapshot, repo.path())
+        .expect("clean repository should be accepted before persistence");
+
+    write_file(repo.path(), "runs.jsonl", "recorded\n");
+    assert!(repo.path().join("runs.jsonl").exists());
+}
+
+#[test]
 fn dirty_repository_that_remains_unchanged_is_accepted_and_records_dirty() {
     let repo = init_git_repo();
     write_file(repo.path(), "file.moth", "value = 1\n");

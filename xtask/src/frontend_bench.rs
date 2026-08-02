@@ -32,7 +32,9 @@ use crate::benchmark_fingerprint::{BenchmarkFingerprints, compute_benchmark_fing
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, FrontendBenchmarkProfile, load_benchmark_manifest,
 };
-use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
+use crate::benchmark_repository::{
+    BenchmarkRepositorySnapshot, verify_after_operation, verify_before_persistence,
+};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use std::num::NonZeroUsize;
 
@@ -93,10 +95,19 @@ pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), 
                 policy.measured_iterations(),
             )
         },
-        |case_results| complete_frontend_run(case_results, thread_count, policy, &git_revision),
+        |case_results| {
+            if policy.recording() == BenchmarkRecording::Record {
+                verify_before_persistence(&snapshot, &manifest.repository_root)?;
+            }
+            complete_frontend_run(case_results, thread_count, policy, &git_revision)
+        },
     );
 
-    verify_after_operation(&snapshot, &manifest.repository_root, result)
+    if policy.recording() == BenchmarkRecording::Record {
+        result
+    } else {
+        verify_after_operation(&snapshot, &manifest.repository_root, result)
+    }
 }
 
 fn complete_frontend_run(

@@ -35,7 +35,9 @@ use crate::benchmark_execution::{
 };
 use crate::benchmark_fingerprint::{BenchmarkFingerprints, compute_benchmark_fingerprints};
 use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, load_benchmark_manifest};
-use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
+use crate::benchmark_repository::{
+    BenchmarkRepositorySnapshot, verify_after_operation, verify_before_persistence,
+};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
 use std::num::NonZeroUsize;
@@ -105,10 +107,19 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
                 policy.measured_iterations(),
             )
         },
-        |case_results| complete_benchmark_run(case_results, thread_count, policy, &git_revision),
+        |case_results| {
+            if policy.recording() == BenchmarkRecording::Record {
+                verify_before_persistence(&snapshot, &manifest.repository_root)?;
+            }
+            complete_benchmark_run(case_results, thread_count, policy, &git_revision)
+        },
     );
 
-    verify_after_operation(&snapshot, &manifest.repository_root, result)
+    if policy.recording() == BenchmarkRecording::Record {
+        result
+    } else {
+        verify_after_operation(&snapshot, &manifest.repository_root, result)
+    }
 }
 
 fn complete_benchmark_run(
