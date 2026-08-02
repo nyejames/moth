@@ -1,18 +1,5 @@
 # July 2026 Summary
 
-## Frontend phases / macOS Apple Silicon (6D851D)
-Change since initial benchmark: baseline
-Initial: all ~78ms, core ~61ms, docs ~1221ms, stress ~47ms, module ~38ms, borrow ~20ms, parallelism ~29ms
-Latest: all ~78ms, core ~61ms, docs ~1221ms, stress ~47ms, module ~38ms, borrow ~20ms, parallelism ~29ms
-Case spread latest: ~213ms
-
-## End-to-end CLI / macOS Apple Silicon (6D851D)
-Change since initial benchmark: baseline
-Initial: all ~26ms, core ~31ms, docs ~289ms, stress ~16ms, module ~14ms, borrow ~8ms
-Latest: all ~26ms, core ~31ms, docs ~289ms, stress ~16ms, module ~14ms, borrow ~8ms
-Case spread latest: ~51ms
----------------------
-
 # End-to-end CLI / macOS Apple Silicon (6D851D): July 8th - 09:55
 case set changed: avg 0ms on 26/28 shared cases; 2 slower, 1 faster
 Avg: all ~21ms, core ~5ms, docs ~228ms, stress ~16ms, module ~13ms, borrow ~10ms
@@ -26,25 +13,3 @@ Stage movement: reachable discovery +587ms, import resolve +412ms, ast -364ms
 no measurable change: avg 0ms; 28/28 cases
 Avg: all ~15ms, core ~5ms, docs ~201ms, stress ~8ms, module ~8ms, borrow ~6ms
 Stage movement: import resolve -16ms, reachable discovery -13ms, frontend module -9ms
-
-# End-to-end CLI / macOS Apple Silicon (6D851D): July 26th - 22:39
-**baseline**; 28 cases, avg ~18ms
-Avg: all ~18ms, core ~17ms, docs ~191ms, stress ~11ms, module ~10ms, borrow ~7ms
-
-# Frontend phases / macOS Apple Silicon (6D851D): July 26th - 22:39
-**baseline**; 30 cases, avg ~47ms
-Avg: all ~47ms, core ~53ms, docs ~494ms, stress ~40ms, module ~30ms, borrow ~23ms, parallelism ~21ms
-
-# End-to-end CLI / macOS Apple Silicon (6D851D): July 27th - 06:25
-**+7ms avg**; 0 faster, 21 slower; 28/28 cases
-Avg: all ~25ms, core ~29ms, docs ~259ms, stress ~17ms, module ~13ms, borrow ~10ms
-Stage movement: frontend module +632ms, ast +483ms, check total +178ms
-
-# End-to-end CLI / macOS Apple Silicon (6D851D): July 31st - 15:22
-**baseline**; 28 cases, avg ~26ms
-Avg: all ~26ms, core ~31ms, docs ~289ms, stress ~16ms, module ~14ms, borrow ~8ms
-
-# Frontend phases / macOS Apple Silicon (6D851D): July 31st - 15:23
-**baseline**; 30 cases, avg ~78ms
-Avg: all ~78ms, core ~61ms, docs ~1221ms, stress ~47ms, module ~38ms, borrow ~20ms, parallelism ~29ms
-
