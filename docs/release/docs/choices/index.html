@@ -931,7 +931,7 @@ same <span class='moth-code-operator'>=</span> first is second</code></pre><p>Tw
 right <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Status</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Ready</span>
 
 same <span class='moth-code-operator'>=</span> left is right
-different <span class='moth-code-operator'>=</span> left is not right</code></pre><h3>Structural comparison</h3><p>Equality compares:</p><ol><li>the active variant tag</li><li>each payload field for that variant</li></ol><p>Two different nominal choice types are never comparable, even when their variants have matching shapes.</p><p>A choice cannot be compared with a non-choice value.</p><p>Choices support equality and inequality. They do not support ordering operators.</p><h3>Supported payload equality</h3><ul><li><code>Int</code></li><li><code>Float</code></li><li><code>Bool</code></li><li><code>Char</code></li><li><code>String</code></li><li>choices whose payloads all support equality</li><li>options whose inner type supports equality</li></ul><p>The rule applies after generic choice parameters are replaced by concrete type arguments.</p><h3>Unsupported payload equality</h3><ul><li>structs</li><li>collections</li><li>maps</li><li>functions</li><li>fallible result carriers</li><li>external opaque types</li></ul><p>If any variant contains an unsupported payload field, equality for the whole choice type is rejected.</p><p>Payload matching remains available regardless of equality support.</p><p>The current compiler does not fully implement option payload equality inside choices. Choice variants that carry option payloads may not participate in automatic equality even when the inner type supports it. Stage B closes this gap. See <a href="../progress">progress matrix</a> for the current implementation status.</p>
+different <span class='moth-code-operator'>=</span> left is not right</code></pre><h3>Structural comparison</h3><p>Equality compares:</p><ol><li>the active variant tag</li><li>each payload field for that variant</li></ol><p>Two different nominal choice types are never comparable, even when their variants have matching shapes.</p><p>A choice cannot be compared with a non-choice value.</p><p>Choices support equality and inequality. They do not support ordering operators.</p><h3>Supported payload equality</h3><ul><li><code>Int</code></li><li><code>Float</code></li><li><code>Bool</code></li><li><code>Char</code></li><li><code>String</code></li><li>choices whose payloads all support equality</li><li>options whose inner type supports equality</li></ul><p>The rule applies after generic choice parameters are replaced by concrete type arguments.</p><h3>Unsupported payload equality</h3><ul><li>structs</li><li>collections</li><li>maps</li><li>functions</li><li>fallible result carriers</li><li>external opaque types</li></ul><p>If any variant contains an unsupported payload field, equality for the whole choice type is rejected.</p><p>Payload matching remains available regardless of equality support.</p><p>Option payloads participate in choice equality when their inner type supports equality. The rule recurses through the option payload instead of treating the option as an unsupported constructed type. This applies to both <code>some</code> and <code>none</code> values inside an equality-safe choice payload.</p>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">
@@ -1240,6 +1240,34 @@ return { tag: "ok", value: removed };
 function __moth_collection_length(collection) {
 const items = __moth_collection_items(collection);
 return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
 }
 
 function __moth_value_to_string(value) {

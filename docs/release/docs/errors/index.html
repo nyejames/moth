@@ -798,7 +798,7 @@ coded <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>E
     <span class='moth-code-keyword'>if</span> not ready<span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;not ready&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
-;</code></pre><ul><li>The arrow is required: <code>-&gt; Error!</code>.</li><li>No success return value is required.</li><li>Normal fallthrough is valid when no error is returned.</li><li>In the current compiler <code>return!</code> inside a nested block of an error-only function is not yet supported. Use a direct top-level <code>return!</code> or a function that also returns a success value.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-struct'>Failure</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+;</code></pre><ul><li>The arrow is required: <code>-&gt; Error!</code>.</li><li>No success return value is required.</li><li>Normal fallthrough is valid when no error is returned.</li><li>A nested block may use <code>return!</code> too. The statement leaves through the enclosing error-only function&#39;s error channel and terminates that path.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-struct'>Failure</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
     message <span class='moth-code-struct'>String,</span>
 <span class='moth-code-operator'>|</span>
 
@@ -1385,6 +1385,34 @@ return { tag: "ok", value: removed };
 function __moth_collection_length(collection) {
 const items = __moth_collection_items(collection);
 return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
 }
 
 function __moth_value_to_string(value) {

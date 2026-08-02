@@ -870,7 +870,12 @@ greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parent
     <span class='moth-code-operator'>&lt;</span>img src<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[$slot(1)]&quot;</span> alt<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[$slot]&quot;</span><span class='moth-code-operator'>&gt;</span>
 <span class='moth-code-parenthesis'>]</span>
 
-<span class='moth-code-parenthesis'>[</span>image, <span class='moth-code-string'>&quot;logo.png&quot;</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Site</span> logo<span class='moth-code-parenthesis'>]</span></code></pre><p>The first loose contribution fills slot <code>1</code>.</p><p>The remaining loose body content fills the default slot.</p><h3>Routing rules</h3><ul><li>Loose contributions fill positional slots in ascending numeric order.</li><li>Remaining loose contributions go to the default slot when one exists.</li><li>Loose content that cannot be assigned is an error when no default slot exists.</li><li>Missing slots render as empty strings.</li><li>Repeated slots replay the same contribution.</li><li>Named inserts target only their named slot.</li><li>One application may combine named, positional and default contributions.</li></ul><h3>Stored named inserts</h3><p>The language intends to support preparing a named insert in a binding and passing it as a loose contribution. The current compiler does not yet accept this form.</p><h3>Runtime contributions</h3><p>Runtime-capable templates support slot contributions from selected template <code>if</code> branches and template loop bodies.</p><p>AST prepares the slot routing before HIR.</p><p>Runtime lowering appends the routed contributions through normal string accumulators.</p><p>Unresolved slot or insert artifacts after routing are invalid template structure.</p>
+<span class='moth-code-parenthesis'>[</span>image, <span class='moth-code-string'>&quot;logo.png&quot;</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Site</span> logo<span class='moth-code-parenthesis'>]</span></code></pre><p>The first loose contribution fills slot <code>1</code>.</p><p>The remaining loose body content fills the default slot.</p><h3>Routing rules</h3><ul><li>Loose contributions fill positional slots in ascending numeric order.</li><li>Remaining loose contributions go to the default slot when one exists.</li><li>Loose content that cannot be assigned is an error when no default slot exists.</li><li>Missing slots render as empty strings.</li><li>Repeated slots replay the same contribution.</li><li>Named inserts target only their named slot.</li><li>One application may combine named, positional and default contributions.</li></ul><h3>Stored named inserts</h3><p>Named inserts can be prepared in a binding and passed as loose contributions through an immediate parent:</p><pre style=""><code class='codeblock'>card <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-operator'>&lt;</span>h<span class='moth-code-number'>1</span><span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;title&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>h<span class='moth-code-number'>1</span><span class='moth-code-operator'>&gt;</span>
+    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>slot<span class='moth-code-parenthesis'>]</span>
+<span class='moth-code-parenthesis'>]</span>
+stored_title <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>$</span>insert<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;title&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Stored</span> title<span class='moth-code-parenthesis'>]</span>
+rendered <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>card<span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>stored_title<span class='moth-code-parenthesis'>]</span> <span class='moth-code-struct'>Body</span><span class='moth-code-parenthesis'>]</span></code></pre><p>The stored helper is flattened into the immediate parent&#39;s slot-routing stream. An insert with no matching immediate parent remains invalid.</p><h3>Runtime contributions</h3><p>Runtime-capable templates support slot contributions from selected template <code>if</code> branches and template loop bodies.</p><p>AST prepares the slot routing before HIR.</p><p>Runtime lowering appends the routed contributions through normal string accumulators.</p><p>Unresolved slot or insert artifacts after routing are invalid template structure.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1409,6 +1414,34 @@ return { tag: "ok", value: removed };
 function __moth_collection_length(collection) {
 const items = __moth_collection_items(collection);
 return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
 }
 
 function __moth_value_to_string(value) {
