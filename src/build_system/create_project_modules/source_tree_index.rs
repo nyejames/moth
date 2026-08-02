@@ -72,6 +72,7 @@ pub(crate) struct SourceTreeDiscoveryStats {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SourceTreeSkipPolicy {
     configured_directories: Vec<PathBuf>,
+    canonical_output_directories: Vec<PathBuf>,
 }
 
 /// Validated project-level inputs shared by source-tree discovery and output-policy exclusion.
@@ -86,6 +87,7 @@ impl SourceTreeSkipPolicy {
         validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     ) -> Self {
         let mut configured_directories = Vec::new();
+        let mut canonical_output_directories = Vec::new();
 
         if let Some(settings) = validated_output_settings {
             for configured_path in [&settings.dev.resolved_path, &settings.release.resolved_path] {
@@ -99,16 +101,20 @@ impl SourceTreeSkipPolicy {
                 if let Ok(canonical_path) = fs::canonicalize(configured_path)
                     && canonical_path != entry_root
                 {
-                    configured_directories.push(canonical_path);
+                    configured_directories.push(canonical_path.clone());
+                    canonical_output_directories.push(canonical_path);
                 }
             }
         }
 
         configured_directories.sort();
         configured_directories.dedup();
+        canonical_output_directories.sort();
+        canonical_output_directories.dedup();
 
         Self {
             configured_directories,
+            canonical_output_directories,
         }
     }
 
@@ -133,9 +139,10 @@ impl SourceTreeSkipPolicy {
         fs::canonicalize(directory)
             .ok()
             .is_some_and(|canonical_directory| {
-                self.configured_directories
-                    .binary_search(&canonical_directory)
-                    .is_ok()
+                self.canonical_output_directories.iter().any(|output_root| {
+                    canonical_directory == *output_root
+                        || canonical_directory.starts_with(output_root)
+                })
             })
     }
 }

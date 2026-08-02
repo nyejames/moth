@@ -105,7 +105,8 @@ pub(crate) struct ProfileCaseManifest {
     pub(crate) profile_path: String,
     pub(crate) stdout_path: String,
     pub(crate) stderr_path: String,
-    pub(crate) summary_path: String,
+    /// Relative summary path, absent for filters such as `raw-index` that do not write summaries.
+    pub(crate) summary_path: Option<String>,
 }
 
 impl ProfileRunPaths {
@@ -396,7 +397,7 @@ fn append_bullets(lines: &mut Vec<String>, items: &[String]) {
     }
 }
 
-/// Format run-manifest.json as manual JSON.
+/// Format run-manifest.json through serde_json so optional paths and identities remain valid JSON.
 fn format_run_manifest_json(
     run_id: &str,
     git_revision: Option<&crate::bench_types::GitRevision>,
@@ -404,76 +405,39 @@ fn format_run_manifest_json(
     samply_rate_hz: Option<f64>,
     cases: &[ProfileCaseManifest],
 ) -> String {
-    let (commit_json, git_dirty_json) = match git_revision {
-        Some(revision) => {
-            let commit = match &revision.commit {
-                Some(c) => format!("\"{}\"", escape(c)),
-                None => "null".to_string(),
-            };
-            let dirty = match revision.dirty {
-                Some(true) => "true".to_string(),
-                Some(false) => "false".to_string(),
-                None => "null".to_string(),
-            };
-            (commit, dirty)
-        }
-        None => ("null".to_string(), "null".to_string()),
-    };
-
-    let samply_json = match samply_rate_hz {
-        Some(rate) => format!("{}", rate),
-        None => "null".to_string(),
-    };
-
-    let cases_json: Vec<String> = cases
+    let cases_json: Vec<serde_json::Value> = cases
         .iter()
         .map(|case| {
-            let args_json = case
-                .args
-                .iter()
-                .map(|a| format!("\"{}\"", escape(a)))
-                .collect::<Vec<_>>()
-                .join(",");
-
-            let identity_json = match &case.identity {
-                Some(identity) => format!(
-                    ",\n      \"workload_id\": \"{}\",\n      \"source_fingerprint\": \"{}\",\n      \"measurement_fingerprint\": \"{}\"",
-                    escape(&identity.workload_id),
-                    escape(&identity.source_fingerprint),
-                    escape(&identity.measurement_fingerprint),
-                ),
-                None => String::from(
-                    ",\n      \"workload_id\": null,\n      \"source_fingerprint\": null,\n      \"measurement_fingerprint\": null"
-                ),
-            };
-
-            format!(
-                "    {{\n      \"case_id\": \"{}\",\n      \"group_name\": \"{}\"{},,\n      \"command\": \"{}\",\n      \"args\": [{}],\n      \"observation_wall_ms\": {},\n      \"profile_path\": \"{}\",\n      \"stdout_path\": \"{}\",\n      \"stderr_path\": \"{}\",\n      \"summary_path\": \"{}\"\n    }}",
-                escape(&case.case_id),
-                escape(&case.group_name),
-                identity_json,
-                escape(&case.command),
-                args_json,
-                case.observation_wall_ms,
-                escape(&case.profile_path),
-                escape(&case.stdout_path),
-                escape(&case.stderr_path),
-                escape(&case.summary_path),
-            )
+            let identity = case.identity.as_ref();
+            serde_json::json!({
+                "case_id": case.case_id,
+                "group_name": case.group_name,
+                "workload_id": identity.map(|value| &value.workload_id),
+                "source_fingerprint": identity.map(|value| &value.source_fingerprint),
+                "measurement_fingerprint": identity.map(|value| &value.measurement_fingerprint),
+                "command": case.command,
+                "args": case.args,
+                "observation_wall_ms": case.observation_wall_ms,
+                "profile_path": case.profile_path,
+                "stdout_path": case.stdout_path,
+                "stderr_path": case.stderr_path,
+                "summary_path": case.summary_path,
+            })
         })
         .collect();
 
-    format!(
-        "{{\n  \"format_version\": {},\n  \"run_id\": \"{}\",\n  \"timestamp\": \"{}\",\n  \"commit\": {},\n  \"git_dirty\": {},\n  \"filter\": \"{}\",\n  \"samply_rate_hz\": {},\n  \"cases\": [\n{}\n  ]\n}}",
-        RUN_MANIFEST_FORMAT_VERSION,
-        escape(run_id),
-        escape(&BenchmarkTimestamp::now().format_run_header()),
-        commit_json,
-        git_dirty_json,
-        filter.display_label(),
-        samply_json,
-        cases_json.join(",\n"),
-    )
+    let output = serde_json::json!({
+        "format_version": RUN_MANIFEST_FORMAT_VERSION,
+        "run_id": run_id,
+        "timestamp": BenchmarkTimestamp::now().format_run_header(),
+        "commit": git_revision.and_then(|revision| revision.commit.as_deref()),
+        "git_dirty": git_revision.and_then(|revision| revision.dirty),
+        "filter": filter.display_label(),
+        "samply_rate_hz": samply_rate_hz,
+        "cases": cases_json,
+    });
+
+    serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Format hotspots.json for a single case using serde_json.

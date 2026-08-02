@@ -1068,17 +1068,17 @@ output_folder #= "generated\\release"
 
 #[cfg(unix)]
 #[test]
-fn directory_frontend_skips_contained_symlink_output_aliases() {
+fn directory_frontend_skips_symlink_ancestor_output_aliases() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("stage0_symlink_output_alias_skip");
+    let root = temp_dir("stage0_symlink_ancestor_output_alias_skip");
     let physical_output_root = root.join("generated/site");
     fs::create_dir_all(&physical_output_root).expect("should create physical output root");
-    symlink(&physical_output_root, root.join("preview"))
+    symlink(root.join("generated"), root.join("preview"))
         .expect("should create output-root symlink alias");
     fs::write(
         root.join("config.moth"),
-        r#"dev_folder #= "preview"
+        r#"dev_folder #= "generated\\site"
 output_folder #= "generated\\release"
 "#,
     )
@@ -1099,7 +1099,51 @@ output_folder #= "generated\\release"
 
     assert!(
         result.is_ok(),
-        "Stage 0 must skip both the configured symlink alias and its physical output root: {:?}",
+        "Stage 0 must skip the output root reached through a symlink ancestor: {:?}",
+        result
+            .err()
+            .map(|messages| rendered_error_messages(&messages))
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_frontend_skips_symlink_aliases_to_output_descendants() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_dir("stage0_symlink_output_descendant_skip");
+    let physical_output_root = root.join("generated/site");
+    let physical_output_descendant = physical_output_root.join("nested");
+    fs::create_dir_all(&physical_output_descendant)
+        .expect("should create physical output descendant");
+    symlink(&physical_output_descendant, root.join("preview"))
+        .expect("should create descendant output symlink alias");
+    fs::write(
+        root.join("config.moth"),
+        r#"dev_folder #= "generated\\site"
+output_folder #= "generated\\release"
+"#,
+    )
+    .expect("should write config");
+    fs::write(root.join("@page.moth"), "value = 1\n").expect("should write entry module");
+    fs::write(
+        physical_output_descendant.join("@stale.moth"),
+        "value = missing_stale_value\n",
+    )
+    .expect("should write source-looking stale output");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    );
+
+    assert!(
+        result.is_ok(),
+        "Stage 0 must skip symlink aliases that target output descendants: {:?}",
         result
             .err()
             .map(|messages| rendered_error_messages(&messages))

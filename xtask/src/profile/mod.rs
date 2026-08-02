@@ -265,7 +265,9 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
             profile_path: format!("cases/{}/profile.json.gz", case.id),
             stdout_path: format!("cases/{}/stdout.log", case.id),
             stderr_path: format!("cases/{}/stderr.log", case.id),
-            summary_path: format!("cases/{}/summary.md", case.id),
+            summary_path: hotspot_result
+                .as_ref()
+                .map(|_| format!("cases/{}/summary.md", case.id)),
         });
 
         // Accumulate for root summary generation.
