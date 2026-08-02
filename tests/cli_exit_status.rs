@@ -11,7 +11,9 @@ use tempfile::tempdir;
 const WARNING_SOURCE: &str = "value ~= \"hello\"\n\
 result ~= \"unset\"\n\
 if value is:\n\
-    captured => result = captured\n\
+    \"one\" => result = \"one\"\n\
+    \"one\" => result = \"one\"\n\
+    \"one\" => result = \"one\"\n\
     \"one\" => result = \"one\"\n\
     \"two\" => result = \"two\"\n\
     else => result = \"other\"\n\
