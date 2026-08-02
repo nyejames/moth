@@ -85,12 +85,24 @@ impl SourceTreeSkipPolicy {
         entry_root: &Path,
         validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     ) -> Self {
-        let mut configured_directories = validated_output_settings
-            .into_iter()
-            .flat_map(|settings| [&settings.dev.resolved_path, &settings.release.resolved_path])
-            .filter_map(|configured_path| fs::canonicalize(configured_path).ok())
-            .filter(|canonical_path| canonical_path != entry_root)
-            .collect::<Vec<_>>();
+        let mut configured_directories = Vec::new();
+
+        if let Some(settings) = validated_output_settings {
+            for configured_path in [&settings.dev.resolved_path, &settings.release.resolved_path] {
+                // Keep the validated lexical path so a symlink alias is excluded before Stage 0
+                // descends through it, then retain the physical target so another path to the
+                // same output tree cannot reintroduce source-looking generated files.
+                if configured_path != entry_root {
+                    configured_directories.push(configured_path.clone());
+                }
+
+                if let Ok(canonical_path) = fs::canonicalize(configured_path)
+                    && canonical_path != entry_root
+                {
+                    configured_directories.push(canonical_path);
+                }
+            }
+        }
 
         configured_directories.sort();
         configured_directories.dedup();
@@ -106,11 +118,25 @@ impl SourceTreeSkipPolicy {
             .and_then(|name| name.to_str())
             .is_some_and(|name| FIXED_SKIPPED_DIRECTORY_NAMES.contains(&name));
 
-        fixed_name
+        if fixed_name
             || self
                 .configured_directories
                 .binary_search(&directory.to_path_buf())
                 .is_ok()
+        {
+            return true;
+        }
+
+        // Traversal preserves the lexical spelling of the path used to reach a directory. A
+        // symlink ancestor can therefore make the same physical output tree appear under a path
+        // that does not match either stored spelling until the candidate is canonicalized here.
+        fs::canonicalize(directory)
+            .ok()
+            .is_some_and(|canonical_directory| {
+                self.configured_directories
+                    .binary_search(&canonical_directory)
+                    .is_ok()
+            })
     }
 }
 

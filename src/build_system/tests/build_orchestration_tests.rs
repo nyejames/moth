@@ -1068,6 +1068,48 @@ output_folder #= "generated\\release"
 
 #[cfg(unix)]
 #[test]
+fn directory_frontend_skips_contained_symlink_output_aliases() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_dir("stage0_symlink_output_alias_skip");
+    let physical_output_root = root.join("generated/site");
+    fs::create_dir_all(&physical_output_root).expect("should create physical output root");
+    symlink(&physical_output_root, root.join("preview"))
+        .expect("should create output-root symlink alias");
+    fs::write(
+        root.join("config.moth"),
+        r#"dev_folder #= "preview"
+output_folder #= "generated\\release"
+"#,
+    )
+    .expect("should write config");
+    fs::write(root.join("@page.moth"), "value = 1\n").expect("should write entry module");
+    fs::write(
+        physical_output_root.join("@stale.moth"),
+        "value = missing_stale_value\n",
+    )
+    .expect("should write source-looking stale output");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let result = build_project(
+        &builder,
+        root.to_str().expect("root path should be valid UTF-8"),
+        &[],
+    );
+
+    assert!(
+        result.is_ok(),
+        "Stage 0 must skip both the configured symlink alias and its physical output root: {:?}",
+        result
+            .err()
+            .map(|messages| rendered_error_messages(&messages))
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[cfg(unix)]
+#[test]
 fn validated_output_settings_reject_canonical_root_aliases() {
     use std::os::unix::fs::symlink;
 
