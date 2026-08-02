@@ -322,7 +322,7 @@ fn output_folder_collision_rendering_preserves_both_authored_spellings() {
             &reason,
             &string_table
         ),
-        "Development and release output folders 'Build' and 'build' resolve to the same portable path and must be distinct."
+        "Development and release output folders 'Build' and 'build' resolve to the same output root and must be distinct."
     );
 }
 

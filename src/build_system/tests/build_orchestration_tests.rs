@@ -1205,6 +1205,14 @@ fn validated_output_settings_reject_canonical_root_aliases() {
         resolve_source_file_path(&diagnostic.primary_location.scope, &string_table),
         root.join("config.moth")
     );
+    let rendered = terse::format_terse_diagnostic_with_context(
+        diagnostic,
+        DiagnosticRenderContext::new(&string_table),
+    );
+    assert!(
+        rendered.contains("resolve to the same output root and must be distinct"),
+        "canonical-alias rejection should explain the physical output-root conflict: {rendered}"
+    );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }

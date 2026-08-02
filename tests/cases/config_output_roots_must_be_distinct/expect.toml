@@ -4,7 +4,7 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-CONFIG-0001"]
-message_contains = ["Development and release output folders 'dist/release' and 'dist\\release' resolve to the same portable path and must be distinct."]
+message_contains = ["Development and release output folders 'dist/release' and 'dist\\release' resolve to the same output root and must be distinct."]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-CONFIG-0001"

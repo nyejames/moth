@@ -235,7 +235,7 @@ pub(crate) fn invalid_config_message(
             dev_folder,
             release_folder,
         } => format!(
-            "Development and release output folders '{}' and '{}' resolve to the same portable path and must be distinct.",
+            "Development and release output folders '{}' and '{}' resolve to the same output root and must be distinct.",
             string_table.resolve(*dev_folder),
             string_table.resolve(*release_folder),
         ),
