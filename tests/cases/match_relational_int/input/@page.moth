@@ -10,4 +10,22 @@ if value is:
     else => result = "large"
 ;
 
-[:relational_result=[result]]
+float_value ~= 1.5
+float_result ~= ""
+
+if float_value is:
+    < 1.0 => float_result = "small"
+    <= 2.0 => float_result = "medium"
+    else => float_result = "large"
+;
+
+char_value ~= 'm'
+char_result ~= ""
+
+if char_value is:
+    < 'a' => char_result = "before-a"
+    < 'z' => char_result = "between-a-z"
+    else => char_result = "after-z"
+;
+
+[:relational_result=[result] float_result=[float_result] char_result=[char_result]]

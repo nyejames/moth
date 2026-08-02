@@ -4,9 +4,27 @@ import @core/math
 finite_direct = sqrt(16.0)
 finite_namespace = math.sqrt(16.0)
 finite_alias = exponential(1.0)
-invalid_sqrt = sqrt(-1.0)
-invalid_exp = math.exp(10000.0)
-invalid_alias_exp = exponential(10000.0)
 
-io.line([:finite=[finite_direct] namespace=[finite_namespace] alias=[finite_alias] invalid=[invalid_sqrt] [invalid_exp] [invalid_alias_exp]])
-entry = "."
+invalid_sqrt || -> Float, Error!:
+    return sqrt(-1.0)
+;
+
+invalid_exp || -> Float, Error!:
+    return math.exp(10000.0)
+;
+
+invalid_alias_exp || -> Float, Error!:
+    return exponential(10000.0)
+;
+
+sqrt_code = invalid_sqrt() catch |sqrt_err|:
+    then sqrt_err.code
+;
+exp_code = invalid_exp() catch |exp_err|:
+    then exp_err.code
+;
+alias_exp_code = invalid_alias_exp() catch |alias_err|:
+    then alias_err.code
+;
+
+[:core_math_float_boundary_validation finite=[finite_direct] namespace=[finite_namespace] alias=[finite_alias] errors=[sqrt_code]/[exp_code]/[alias_exp_code]]

@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["relational_result=small"]
+rendered_output_contains = ["relational_result=small float_result=medium char_result=between-a-z"]

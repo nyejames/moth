@@ -995,7 +995,7 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
     .expect("JS lowering should succeed");
 
     assert!(
-        output.source.contains("if ((__match_value_") && output.source.contains("=== 1) && ("),
+        output.source.contains("if (((__match_value_") && output.source.contains("=== 1)) && ("),
         "guarded match arm should emit conjunction between pattern and guard"
     );
     assert!(

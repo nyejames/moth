@@ -371,8 +371,10 @@ pub(crate) struct PublicEvidenceRecord {
 /// only owned stable values: no donor-local `TypeId`, `NominalTypeId`, `GenericParameterId`,
 /// `TraitId`, `InternedPath` or `StringId` crosses this boundary.
 ///
-/// It is deliberately not the final `PublicSemanticInterface`. Generic template bodies,
-/// provenance, re-export interfaces and cross-module call lowering remain for later phases.
+/// It is deliberately not the final `PublicSemanticInterface`. Generic template bodies and
+/// cross-module call lowering remain for later phases. Exported-name diagnostic provenance is
+/// already portable here, and re-export bindings already retain donor-owned origins before the
+/// completed interface is published.
 /// Folded constant values are owned by each constant declaration record. Reusable evidence is a
 /// separate collection, not a declaration variant. Concrete callable borrow summaries never enter
 /// the pre-HIR draft: [`finalize_after_borrow_validation`](Self::finalize_after_borrow_validation)
@@ -381,6 +383,7 @@ pub(crate) struct PublicEvidenceRecord {
 pub(crate) struct PublicInterfaceDraft {
     pub(crate) module_origin: StableModuleOriginIdentity,
     pub(crate) export_bindings: Vec<ExportBinding>,
+    pub(crate) export_diagnostic_provenance: Vec<PublicExportDiagnosticProvenance>,
     pub(crate) binding_exports: Vec<PublicBindingExport>,
     pub(crate) declarations: Vec<PublicDeclarationRecord>,
     pub(crate) reusable_evidence: Vec<PublicEvidenceRecord>,
@@ -397,6 +400,34 @@ pub(crate) struct PublicBindingExport {
     pub(crate) exporting_module: StableModuleOriginIdentity,
     pub(crate) public_name: String,
     pub(crate) target: CanonicalBindingSymbolIdentity,
+}
+
+/// Portable source coordinates retained for diagnostics on a completed provider interface.
+///
+/// WHAT: stores authored scope components and character spans as owned values so a provider can
+///       carry declaration provenance without leaking its compiler-local `StringId` table.
+/// WHY: semantic identity must remain independent from diagnostic provenance, while consumers
+///      still need to remap provider declaration locations into their own string table when a
+///      visible-name collision crosses a module boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PublicDiagnosticLocation {
+    pub(crate) scope_components: Vec<String>,
+    pub(crate) start_line: i32,
+    pub(crate) start_column: i32,
+    pub(crate) end_line: i32,
+    pub(crate) end_column: i32,
+}
+
+/// Authored diagnostic provenance for one public export spelling.
+///
+/// WHAT: maps the provider-facing public name to its declaration location without changing the
+///       stable `ExportBinding` identity or declaration semantics.
+/// WHY: aliases and provider re-exports need a diagnostic side table so the visible-name registry
+///      can label the actual declaration that introduced a collision.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PublicExportDiagnosticProvenance {
+    pub(crate) public_name: String,
+    pub(crate) location: PublicDiagnosticLocation,
 }
 
 /// One completed concrete-local summary record, retained in stable-origin order.
@@ -443,6 +474,7 @@ pub(crate) struct LocalPublicInterface {
 pub(crate) struct PublicSemanticInterface {
     pub(crate) module_origin: StableModuleOriginIdentity,
     pub(crate) export_bindings: Vec<ExportBinding>,
+    pub(crate) export_diagnostic_provenance: Vec<PublicExportDiagnosticProvenance>,
     pub(crate) binding_exports: Vec<PublicBindingExport>,
     pub(crate) declarations: Vec<PublicDeclarationRecord>,
     pub(crate) reusable_evidence: Vec<PublicEvidenceRecord>,
@@ -461,6 +493,16 @@ impl PublicSemanticInterface {
         self.binding_exports
             .iter()
             .find(|binding| binding.public_name == public_name)
+    }
+
+    pub(crate) fn export_diagnostic_provenance(
+        &self,
+        public_name: &str,
+    ) -> Option<&PublicDiagnosticLocation> {
+        self.export_diagnostic_provenance
+            .iter()
+            .find(|entry| entry.public_name == public_name)
+            .map(|entry| &entry.location)
     }
 
     pub(crate) fn declaration(

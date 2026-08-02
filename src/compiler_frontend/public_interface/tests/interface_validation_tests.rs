@@ -107,6 +107,7 @@ fn evidence_interface(requirement_names: &[&str]) -> PublicSemanticInterface {
     PublicSemanticInterface {
         module_origin: module_origin(),
         export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: vec![
             PublicDeclarationRecord {
@@ -169,6 +170,7 @@ fn local_interface(
         draft: PublicInterfaceDraft {
             module_origin: module_origin(),
             export_bindings: bindings,
+            export_diagnostic_provenance: Vec::new(),
             binding_exports: Vec::new(),
             declarations,
             reusable_evidence: Vec::new(),
@@ -189,6 +191,7 @@ fn binding_interface(target: CanonicalBindingSymbolIdentity) -> PublicSemanticIn
     PublicSemanticInterface {
         module_origin: module_origin(),
         export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: vec![PublicBindingExport {
             exporting_module: module_origin(),
             public_name: "binding".to_owned(),
@@ -224,6 +227,7 @@ fn rejects_binding_export_owned_by_another_module() {
     let interface = PublicSemanticInterface {
         module_origin: module_origin(),
         export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: vec![PublicBindingExport {
             exporting_module: provider_module_origin(),
             public_name: "sine".to_owned(),
@@ -328,6 +332,7 @@ fn rejects_nested_external_type_from_same_path_but_different_package_origin() {
     let interface = PublicSemanticInterface {
         module_origin: module_origin(),
         export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: OriginDeclarationId::Type(struct_origin("Wrapper")),
@@ -382,6 +387,7 @@ fn accepts_external_type_with_same_stable_identity_and_different_local_ids() {
     let interface = PublicSemanticInterface {
         module_origin: module_origin(),
         export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: OriginDeclarationId::Function(OriginFunctionId::new_free(
@@ -488,6 +494,7 @@ fn rejects_nested_private_generic_instance_before_publication() {
     let interface = PublicSemanticInterface {
         module_origin: module_origin(),
         export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: OriginDeclarationId::Function(origin),
@@ -656,6 +663,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
                 OriginDeclarationId::Function(make_origin.clone()),
             ),
         ],
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: vec![hidden_record, card_record, make_record],
         reusable_evidence: Vec::new(),

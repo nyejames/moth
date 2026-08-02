@@ -769,14 +769,14 @@ impl<'hir> JsEmitter<'hir> {
         let pattern_condition = match &arm.pattern {
             HirPattern::Literal(value) => {
                 let literal = self.lower_expr(value)?;
-                format!("{scrutinee_expression} === {literal}")
+                self.lower_typed_equality(scrutinee_expression.to_owned(), value.ty, literal)
             }
             HirPattern::OptionNone => {
                 format!("({scrutinee_expression}).tag === \"none\"")
             }
             HirPattern::OptionValue { value } => {
                 let literal = self.lower_expr(value)?;
-                let inner_equality = self.lower_option_inner_equality(
+                let inner_equality = self.lower_typed_equality(
                     format!("({scrutinee_expression}).value"),
                     value.ty,
                     literal,

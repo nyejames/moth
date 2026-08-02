@@ -6,4 +6,12 @@ if value is:
     else => match_result = "other"
 ;
 
-[:literal_match_with_else_success result=[match_result]]
+reactive_text $= [:one]
+reactive_match_result ~= "unset"
+
+if reactive_text is:
+    "one" => reactive_match_result = "content"
+    else => reactive_match_result = "other"
+;
+
+[:literal_match_with_else_success result=[match_result] reactive=[reactive_match_result]]

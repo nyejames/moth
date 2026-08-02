@@ -2,3 +2,10 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0049"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0049"
+reason = "invalid_match_pattern.wildcard_not_supported"
+path = "input/@page.moth"
+line = 5
+count = 1

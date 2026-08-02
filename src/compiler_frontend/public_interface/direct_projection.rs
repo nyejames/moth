@@ -20,7 +20,7 @@
 //! projection, trait projection, evidence projection and local finalization.
 
 use super::evidence_projection::{EvidenceProjectionContext, project_reusable_evidence};
-use super::export_projection::DirectExportSeed;
+use super::export_projection::{DirectExportSeed, DirectExportSeedParts};
 use super::model::{
     PublicAliasSemantics, PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationRecord,
     PublicDeclarationSemantics, PublicInterfaceDraft, PublicStructSemantics,
@@ -352,12 +352,18 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
 
         // Consume the seed: the module origin and export bindings move into the draft and the
         // directly-defined nominal origin index is dropped.
-        let (module_origin, export_bindings, binding_exports, _) = export_seed.into_parts();
+        let DirectExportSeedParts {
+            module_origin,
+            export_bindings,
+            export_diagnostic_provenance,
+            binding_exports,
+        } = export_seed.into_parts();
 
         Ok(PublicInterfaceDraftBuildResult {
             draft: PublicInterfaceDraft {
                 module_origin,
                 export_bindings,
+                export_diagnostic_provenance,
                 binding_exports,
                 declarations,
                 reusable_evidence,

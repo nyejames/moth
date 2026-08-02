@@ -20,12 +20,15 @@ use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_te
 use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::prepare_single_file;
 use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
 use crate::compiler_frontend::public_interface::{
-    DirectExportSeed, SourceProviderImportSet, build_direct_export_seed,
-    build_public_source_nominal_origin_index, build_public_source_trait_origin_index,
+    DirectExportSeed, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
+    PublicSemanticInterface, SourceProviderImport, SourceProviderImportSet,
+    build_direct_export_seed, build_public_source_nominal_origin_index,
+    build_public_source_trait_origin_index,
 };
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, FunctionOriginKind, ModuleRootRole, OriginDeclarationId, OriginTraitId,
-    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+    ExportBinding, FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
@@ -85,6 +88,113 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
         &string_table,
     )
     .expect("the direct export seed must build for valid headers")
+}
+
+struct ExportProjectionFixture {
+    headers: Vec<Header>,
+    module_symbols: ModuleSymbols,
+    source_module_origins: SourceModuleOriginTable,
+    string_table: StringTable,
+    active_root_file_id: FileId,
+    active_root_source: InternedPath,
+    module_root: InternedPath,
+    module_origin: StableModuleOriginIdentity,
+}
+
+/// Prepare a small multi-file projection fixture while retaining the header-owned membership
+/// facts that `collect_reexport_bindings` consumes. The focused re-export tests intentionally
+/// model the already-bound public export map so they exercise semantic projection rather than
+/// duplicating path-resolver setup owned by header binding.
+fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> ExportProjectionFixture {
+    let active_path = PathBuf::from(
+        sources
+            .first()
+            .expect("a projection fixture needs an active source")
+            .0,
+    );
+    let mut string_table = StringTable::new();
+    let mut prepared_outputs = Vec::with_capacity(sources.len());
+    let mut canonical_paths = Vec::with_capacity(sources.len());
+
+    for (path, source) in sources {
+        let path = PathBuf::from(path);
+        prepared_outputs.push(prepare_single_file(
+            source,
+            &path,
+            &active_path,
+            &mut string_table,
+        ));
+        canonical_paths.push(path);
+    }
+
+    let source_files = SourceFileTable::build(
+        canonical_paths.iter(),
+        &active_path,
+        None,
+        &mut string_table,
+    )
+    .expect("projection source files should build");
+    let active_root_file_id = source_files
+        .get_by_canonical_path(&active_path)
+        .expect("the projection active root should have a file identity")
+        .file_id;
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local(project_name),
+        "active".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let source_module_origins =
+        SourceModuleOriginTable::from_synthetic_origin(&source_files, &module_origin);
+    let module_root = InternedPath::from_single_str("module-root", &mut string_table);
+
+    let mut headers = Vec::new();
+    let mut module_symbols = ModuleSymbols::empty();
+    let mut active_root_source = None;
+    for (output, path) in prepared_outputs.into_iter().zip(canonical_paths.iter()) {
+        let source_file = output.source_file.clone();
+        module_symbols
+            .file_roles_by_source
+            .insert(source_file.clone(), output.file_role);
+        module_symbols
+            .file_module_membership
+            .insert(source_file.clone(), module_root.clone());
+        if output.file_role.is_active_module_root() {
+            active_root_source = Some(source_file.clone());
+        }
+
+        let file_id = source_files
+            .get_by_canonical_path(path)
+            .expect("every prepared projection source should have a file identity")
+            .file_id;
+        for mut header in output.headers {
+            header.tokens.file_id = Some(file_id);
+            headers.push(header);
+        }
+    }
+
+    ExportProjectionFixture {
+        headers,
+        module_symbols,
+        source_module_origins,
+        string_table,
+        active_root_file_id,
+        active_root_source: active_root_source
+            .expect("the projection fixture should have one active root source"),
+        module_root,
+        module_origin,
+    }
+}
+
+fn location_scope_components(
+    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+    string_table: &StringTable,
+) -> Vec<String> {
+    location
+        .scope
+        .as_components()
+        .iter()
+        .map(|component| string_table.resolve(*component).to_owned())
+        .collect()
 }
 
 fn binding_for<'a>(seed: &'a DirectExportSeed, public_name: &str) -> &'a ExportBinding {
@@ -171,6 +281,193 @@ fn directly_defined_public_exports_get_export_bindings_with_exact_category() {
 }
 
 #[test]
+fn directly_defined_public_exports_retain_authored_diagnostic_provenance() {
+    let seed = build_seed("export:\n    alpha #= 1\n;\n");
+
+    assert_eq!(seed.export_diagnostic_provenance().len(), 1);
+    let provenance = &seed.export_diagnostic_provenance()[0];
+    assert_eq!(provenance.public_name, "alpha");
+    assert_eq!(provenance.location.start_line, 1);
+    assert_eq!(provenance.location.start_column, 5);
+    assert_eq!(provenance.location.end_line, 1);
+    assert!(provenance.location.end_column > provenance.location.start_column);
+}
+
+#[test]
+fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
+    let mut fixture = build_reexport_fixture(
+        &[
+            ("src/@page.moth", "placeholder #= 1\n"),
+            ("src/impl.moth", "value #= 1\n"),
+        ],
+        "same-module-reexport",
+    );
+    let target_header = fixture
+        .headers
+        .iter()
+        .find(|header| header.tokens.src_path.name_str(&fixture.string_table) == Some("value"))
+        .expect("the private re-export target should have a header");
+    let target_path = target_header.tokens.src_path.clone();
+    let target_source = target_header.source_file.clone();
+    let expected_location = target_header.name_location.clone();
+
+    fixture
+        .module_symbols
+        .canonical_source_by_symbol_path
+        .insert(target_path.clone(), target_source);
+    fixture.module_symbols.module_root_public_exports.insert(
+        fixture.module_root.clone(),
+        [PublicExportEntry {
+            export_name: fixture.string_table.intern("PublicValue"),
+            target: PublicExportTarget::Source(target_path),
+        }]
+        .into_iter()
+        .collect(),
+    );
+
+    let seed = build_direct_export_seed(
+        &fixture.source_module_origins,
+        fixture.active_root_file_id,
+        &fixture.headers,
+        &fixture.module_symbols,
+        &SourceProviderImportSet::default(),
+        &ExternalPackageRegistry::default(),
+        &fixture.string_table,
+    )
+    .expect("same-module re-export projection should succeed");
+
+    let binding = binding_for(&seed, "PublicValue");
+    assert_eq!(
+        binding.origin(),
+        &OriginDeclarationId::Constant(OriginConstantId::new(
+            fixture.module_origin.clone(),
+            "value".to_owned(),
+        ))
+    );
+    let provenance = seed
+        .export_diagnostic_provenance()
+        .iter()
+        .find(|entry| entry.public_name == "PublicValue")
+        .expect("same-module re-export should retain target provenance");
+    assert_eq!(
+        provenance.location.scope_components,
+        location_scope_components(&expected_location, &fixture.string_table)
+    );
+    assert_eq!(
+        (
+            provenance.location.start_line,
+            provenance.location.start_column,
+            provenance.location.end_line,
+            provenance.location.end_column,
+        ),
+        (
+            expected_location.start_pos.line_number,
+            expected_location.start_pos.char_column,
+            expected_location.end_pos.line_number,
+            expected_location.end_pos.char_column,
+        )
+    );
+}
+
+#[test]
+fn provider_reexport_preserves_alias_and_provider_provenance() {
+    let mut fixture = build_reexport_fixture(
+        &[("src/@page.moth", "placeholder #= 1\n")],
+        "provider-reexport",
+    );
+    let target_path = InternedPath::from_single_str("provider", &mut fixture.string_table)
+        .join_str("Imported", &mut fixture.string_table);
+    let provider_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("provider"),
+        "provider/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let provider_constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        provider_origin.clone(),
+        "Imported".to_owned(),
+    ));
+    let provider_interface = PublicSemanticInterface {
+        module_origin: provider_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            provider_origin,
+            "Imported".to_owned(),
+            provider_constant_origin.clone(),
+        )],
+        export_diagnostic_provenance: vec![PublicExportDiagnosticProvenance {
+            public_name: "Imported".to_owned(),
+            location: PublicDiagnosticLocation {
+                scope_components: vec!["provider".to_owned(), "@mod.moth".to_owned()],
+                start_line: 20,
+                start_column: 4,
+                end_line: 20,
+                end_column: 12,
+            },
+        }],
+        binding_exports: Vec::new(),
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
+        importer_source: fixture
+            .active_root_source
+            .as_components()
+            .iter()
+            .map(|component| fixture.string_table.resolve(*component).to_owned())
+            .collect(),
+        imported_path: target_path
+            .as_components()
+            .iter()
+            .map(|component| fixture.string_table.resolve(*component).to_owned())
+            .collect(),
+        from_grouped: true,
+        implicit_template_scope: false,
+        interface: &provider_interface,
+    }]);
+    fixture.module_symbols.module_root_public_exports.insert(
+        fixture.module_root.clone(),
+        [PublicExportEntry {
+            export_name: fixture.string_table.intern("PublicImported"),
+            target: PublicExportTarget::Source(target_path),
+        }]
+        .into_iter()
+        .collect(),
+    );
+
+    let seed = build_direct_export_seed(
+        &fixture.source_module_origins,
+        fixture.active_root_file_id,
+        &fixture.headers,
+        &fixture.module_symbols,
+        &provider_imports,
+        &ExternalPackageRegistry::default(),
+        &fixture.string_table,
+    )
+    .expect("provider re-export projection should succeed");
+
+    let binding = binding_for(&seed, "PublicImported");
+    assert_eq!(binding.origin(), &provider_constant_origin);
+    let provenance = seed
+        .export_diagnostic_provenance()
+        .iter()
+        .find(|entry| entry.public_name == "PublicImported")
+        .expect("provider re-export should retain provider provenance under the alias");
+    assert_eq!(
+        provenance.location.scope_components,
+        vec!["provider".to_owned(), "@mod.moth".to_owned()]
+    );
+    assert_eq!(
+        (
+            provenance.location.start_line,
+            provenance.location.start_column,
+            provenance.location.end_line,
+            provenance.location.end_column,
+        ),
+        (20, 4, 20, 12)
+    );
+}
+
+#[test]
 fn private_declarations_and_implicit_start_are_excluded() {
     // `helper` and `Inner` are private; the implicit start function is always present for an
     // active module root. Only the public `public_fn` must be recorded.
@@ -216,8 +513,32 @@ export:\n\
         "export bindings must be sorted by public name"
     );
     assert_eq!(
-        first, second,
-        "the seed must be identical regardless of declaration scheduling"
+        first.module_origin(),
+        second.module_origin(),
+        "module origin must be independent of declaration scheduling"
+    );
+    assert_eq!(
+        first.export_bindings(),
+        second.export_bindings(),
+        "semantic export bindings must be independent of declaration scheduling"
+    );
+    assert_eq!(
+        first.public_nominal_type_origins(),
+        second.public_nominal_type_origins(),
+        "public nominal origins must be independent of declaration scheduling"
+    );
+    assert_eq!(
+        first
+            .export_diagnostic_provenance()
+            .iter()
+            .map(|entry| entry.public_name.as_str())
+            .collect::<Vec<_>>(),
+        second
+            .export_diagnostic_provenance()
+            .iter()
+            .map(|entry| entry.public_name.as_str())
+            .collect::<Vec<_>>(),
+        "diagnostic provenance names must remain deterministic"
     );
 }
 

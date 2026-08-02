@@ -593,16 +593,7 @@ fn build_source_provider_imports<'a>(
     // Builder source-backed packages are implicitly available only to modules that actually
     // contain a `.mtf` semantic source. The package capability is supplied by the active
     // builder surface; generic orchestration must not infer it from a package-name list.
-    let contains_moth_template = prepared.source_files.iter().any(|source_file| {
-        source_file
-            .canonical_os_path
-            .extension()
-            .and_then(OsStr::to_str)
-            .and_then(SourceFileKind::from_extension)
-            == Some(SourceFileKind::MothTemplate)
-    });
-
-    if contains_moth_template {
+    if prepared.contains_moth_template {
         let implicit_provider_imports: Vec<SourceProviderImport<'a>> = completed_source_packages
             .iter()
             .filter(|package| {

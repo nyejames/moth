@@ -62,4 +62,9 @@ impl PreparedSourceInput {
             | PreparedSourceInput::PlainMarkdown { source_path, .. } => source_path,
         }
     }
+
+    /// Whether this selected source is a Moth template body.
+    pub(crate) fn is_moth_template(&self) -> bool {
+        matches!(self, Self::MothTemplate { .. })
+    }
 }

@@ -135,6 +135,10 @@ pub(crate) struct ModuleSymbols {
 
     // Order-independent maps built during header parsing.
     pub(crate) canonical_source_by_symbol_path: FxHashMap<InternedPath, InternedPath>,
+    // Authored declaration-name locations keyed by canonical symbol path. These remain local to
+    // header/import preparation; public interfaces convert them to portable diagnostic
+    // provenance before crossing a module boundary.
+    pub(crate) declaration_locations_by_symbol_path: FxHashMap<InternedPath, SourceLocation>,
     pub(crate) module_file_paths: FxHashSet<InternedPath>,
     // Per-file metadata is recorded for every prepared file, including import-only root files that
     // produce no declaration headers.
@@ -202,6 +206,7 @@ impl ModuleSymbols {
             declarations: Vec::new(),
             builtin_declarations: Vec::new(),
             canonical_source_by_symbol_path: FxHashMap::default(),
+            declaration_locations_by_symbol_path: FxHashMap::default(),
             module_file_paths: FxHashSet::default(),
             file_roles_by_source: FxHashMap::default(),
             canonical_os_path_by_source: FxHashMap::default(),

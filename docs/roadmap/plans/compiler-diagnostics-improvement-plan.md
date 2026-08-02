@@ -1220,11 +1220,12 @@ A second reactive declaration is not invalid because `$` is unexpected. It is in
 
 ### 7.1b Pattern captures should use the normal no-shadowing path
 
-**Additional confirmed gap:** option-present captures, choice payload captures and general match
-captures currently use `InvalidMatchPatternReason::CaptureBindingShadowsVariable`. That parallel
+**Additional confirmed gap:** option-present captures and declared choice payload captures
+currently use `InvalidMatchPatternReason::CaptureBindingShadowsVariable`. That parallel
 reason carries neither the authored capture name nor the previous declaration location, uses
 source-inaccurate `variable` terminology and reports `MOTH-RULE-0049` for the ordinary language-wide
-no-shadowing rule.
+no-shadowing rule. General full-match captures were removed by the language migration and are not
+part of this diagnostics slice; those forms must remain rejected.
 
 - Delete `CaptureBindingShadowsVariable` and its renderer branch.
 - When a capture collides with a visible binding, reuse `DuplicateDeclaration` with the capture name
@@ -1232,7 +1233,8 @@ no-shadowing rule.
 - Use the factual authored binding location exposed by `ScopeDeclarationRef` after Phase 3.2 for the
   secondary label. Omit the secondary label when a visible symbol has no authored binding location.
 - Preserve distinct `DuplicateCaptureBinding` handling for two captures inside the same pattern.
-- Keep the current capture location primary and preserve option, choice and general-capture parsing.
+- Keep the current capture location primary and preserve option-present and declared choice-payload
+  capture parsing. Do not preserve or reintroduce general full-match capture parsing.
 - Update the existing capture-shadowing integration owners to `MOTH-RULE-0002` rather than adding
   cosmetic duplicate fixtures.
 

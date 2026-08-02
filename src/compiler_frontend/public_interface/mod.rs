@@ -6,8 +6,10 @@
 //! [`OriginDeclarationId`], carrying a closed [`PublicDeclarationSemantics`] enum that
 //! distinguishes free functions, structs, choices, transparent aliases, constants and traits.
 //! Receiver methods are attached to their owning struct or choice record, not stored as a
-//! top-level parallel vector. Direct [`ExportBinding`] values remain distinct from declaration
-//! records so future re-exports can add bindings without changing donor origins.
+//! top-level parallel vector. Direct and re-exported [`ExportBinding`] values remain distinct
+//! from declaration records so a public alias can change the consumer-facing name without
+//! changing the donor-owned semantic origin. Exported-name diagnostic provenance is carried in
+//! its own portable side table for cross-module remapping.
 //!
 //! The builder internalizes the projection components as private builder steps:
 //! - the pre-AST direct-export seed ([`DirectExportSeed`]) carrying the module origin, export
@@ -21,9 +23,9 @@
 //! - the direct reusable-evidence projection ([`project_reusable_evidence`]).
 //!
 //! These intermediates are consumed before the draft boundary: the draft stores only `Public*`
-//! semantic leaf types and the separate export bindings. The transient projection indexes and
-//! the seed are destructured and dropped before the draft. No `DefinedPublic*` aggregate
-//! surface crosses orchestration.
+//! semantic leaf types, stable export bindings and portable exported-name diagnostic provenance.
+//! The transient projection indexes and the seed are destructured and dropped before the draft.
+//! No `DefinedPublic*` aggregate surface crosses orchestration.
 //!
 //! WHY: the compiler design overview and the recovery plan require one aggregate producer
 //! boundary with a declaration-centric shape instead of parallel `DefinedPublic*` fields that
@@ -81,13 +83,15 @@ pub(crate) use export_projection::{
 pub(crate) use import_bindings::{SourceProviderImport, SourceProviderImportSet};
 #[cfg(test)]
 pub(crate) use model::LocalPublicInterface;
+#[cfg(test)]
+pub(crate) use model::PublicExportDiagnosticProvenance;
 pub(crate) use model::{
     PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationRecord,
-    PublicDeclarationSemantics, PublicEvidenceRecord, PublicFunctionCategory,
-    PublicGenericParameterSurface, PublicInterfaceDraft, PublicParameterTypeSlot,
-    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicReturnTypeSlot,
-    PublicSemanticInterface, PublicStructSemantics, PublicTraitReceiverAccess,
-    PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
+    PublicDeclarationSemantics, PublicDiagnosticLocation, PublicEvidenceRecord,
+    PublicFunctionCategory, PublicGenericParameterSurface, PublicInterfaceDraft,
+    PublicParameterTypeSlot, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
+    PublicReturnTypeSlot, PublicSemanticInterface, PublicStructSemantics,
+    PublicTraitReceiverAccess, PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
 };
 pub(crate) use receiver_projection::CallableSeed;
 

@@ -2,9 +2,10 @@
 
 use super::support::*;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, ChoiceId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::module::{HirChoiceVariant, HirModule};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
@@ -13,9 +14,52 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 // Choice lowering contract tests [choice]
 // ---------------------------------------------------------------------------
 
-/// Verifies that choice variant construction emits a plain integer literal.
+fn configure_choice_layout(
+    module: &mut HirModule,
+    string_table: &mut StringTable,
+    choice_type: crate::compiler_frontend::datatypes::ids::TypeId,
+) {
+    module.choices[0].frontend_type_id = choice_type;
+    module.choices[0].variants = ["zero", "one", "two"]
+        .into_iter()
+        .map(|name| HirChoiceVariant {
+            name: string_table.intern(name),
+            fields: vec![],
+        })
+        .collect();
+}
+
+fn choice_construct(
+    id: u32,
+    variant_index: usize,
+    choice_type: crate::compiler_frontend::datatypes::ids::TypeId,
+    region: RegionId,
+) -> crate::compiler_frontend::hir::expressions::HirExpression {
+    expression(
+        id,
+        HirExpressionKind::VariantConstruct {
+            carrier: HirVariantCarrier::Choice {
+                choice_id: ChoiceId(0),
+            },
+            variant_index,
+            fields: vec![],
+        },
+        choice_type,
+        region,
+        ValueKind::Const,
+    )
+}
+
+fn choice_pattern(variant_index: usize) -> HirPattern {
+    HirPattern::ChoiceVariant {
+        choice_id: ChoiceId(0),
+        variant_index,
+    }
+}
+
+/// Verifies that choice variant construction emits a tagged carrier object.
 #[test]
-fn choice_variant_construction_emits_integer_literal() {
+fn choice_variant_construction_emits_tagged_carrier() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
 
@@ -27,7 +71,7 @@ fn choice_variant_construction_emits_integer_literal() {
             1,
             HirStatementKind::Assign {
                 target: HirPlace::Local(LocalId(0)),
-                value: int_expression(1, 2, types.choice_unit, RegionId(0)),
+                value: choice_construct(1, 2, types.choice_unit, RegionId(0)),
             },
             1,
         )],
@@ -41,13 +85,14 @@ fn choice_variant_construction_emits_integer_literal() {
         return_type: types.unit,
     };
 
-    let module = build_module(
+    let mut module = build_module(
         &mut string_table,
         "main",
         vec![block],
         function,
         &[(LocalId(0), "status")],
     );
+    configure_choice_layout(&mut module, &mut string_table, types.choice_unit);
 
     let output = lower_hir_to_js(
         &module,
@@ -61,14 +106,14 @@ fn choice_variant_construction_emits_integer_literal() {
     assert!(
         output
             .source
-            .contains("__moth_assign_value(moth_status_l0, 2)"),
-        "choice variant must lower to a plain integer literal inside an assignment"
+            .contains("__moth_assign_value(moth_status_l0, { tag: 2 })"),
+        "choice variant must lower to a tagged carrier object inside an assignment"
     );
 }
 
-/// Verifies that choice match lowers to structured if with === against integer tags.
+/// Verifies that choice match lowers to structured if with tagged choice variants.
 #[test]
-fn choice_match_lowers_to_structured_if_with_literal_equals() {
+fn choice_match_lowers_to_structured_if_with_choice_tags() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
 
@@ -81,7 +126,7 @@ fn choice_match_lowers_to_structured_if_with_literal_equals() {
                 1,
                 HirStatementKind::Assign {
                     target: HirPlace::Local(LocalId(0)),
-                    value: int_expression(1, 0, types.choice_unit, RegionId(0)),
+                    value: choice_construct(1, 0, types.choice_unit, RegionId(0)),
                 },
                 1,
             )],
@@ -95,32 +140,17 @@ fn choice_match_lowers_to_structured_if_with_literal_equals() {
                 ),
                 arms: vec![
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
-                            3,
-                            0,
-                            types.choice_unit,
-                            RegionId(0),
-                        )),
+                        pattern: choice_pattern(0),
                         guard: None,
                         body: BlockId(1),
                     },
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
-                            4,
-                            1,
-                            types.choice_unit,
-                            RegionId(0),
-                        )),
+                        pattern: choice_pattern(1),
                         guard: None,
                         body: BlockId(2),
                     },
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
-                            5,
-                            2,
-                            types.choice_unit,
-                            RegionId(0),
-                        )),
+                        pattern: choice_pattern(2),
                         guard: None,
                         body: BlockId(3),
                     },
@@ -173,13 +203,14 @@ fn choice_match_lowers_to_structured_if_with_literal_equals() {
         return_type: types.unit,
     };
 
-    let module = build_module(
+    let mut module = build_module(
         &mut string_table,
         "main",
         blocks,
         function,
         &[(LocalId(0), "status")],
     );
+    configure_choice_layout(&mut module, &mut string_table, types.choice_unit);
 
     let output = lower_hir_to_js(
         &module,
@@ -195,12 +226,10 @@ fn choice_match_lowers_to_structured_if_with_literal_equals() {
         "choice match must emit structured if"
     );
     assert!(
-        output.source.contains("=== 0"),
-        "choice match arm must compare with === 0"
-    );
-    assert!(
-        output.source.contains("=== 1"),
-        "choice match arm must compare with === 1"
+        output.source.contains(".tag === 0")
+            && output.source.contains(".tag === 1")
+            && output.source.contains(".tag === 2"),
+        "choice match arms must compare the tagged carrier variants"
     );
     assert!(
         !output.source.contains("while (true)"),
@@ -223,7 +252,7 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
                 1,
                 HirStatementKind::Assign {
                     target: HirPlace::Local(LocalId(0)),
-                    value: int_expression(1, 1, types.choice_unit, RegionId(0)),
+                    value: choice_construct(1, 1, types.choice_unit, RegionId(0)),
                 },
                 1,
             )],
@@ -237,12 +266,7 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
                 ),
                 arms: vec![
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
-                            3,
-                            0,
-                            types.choice_unit,
-                            RegionId(0),
-                        )),
+                        pattern: choice_pattern(0),
                         guard: None,
                         body: BlockId(1),
                     },
@@ -290,13 +314,14 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
         return_type: types.unit,
     };
 
-    let module = build_module(
+    let mut module = build_module(
         &mut string_table,
         "main",
         blocks,
         function,
         &[(LocalId(0), "status")],
     );
+    configure_choice_layout(&mut module, &mut string_table, types.choice_unit);
 
     let output = lower_hir_to_js(
         &module,

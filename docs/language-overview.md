@@ -155,6 +155,18 @@ newlines, but that tokenizer behaviour does not make raw backticks valid source 
 
 `copy` accepts a visible binding, field projection or parenthesised place. Literals, templates, calls and computed expressions aren't copy places and are rejected.
 
+Quoted string slices and template-produced strings share one semantic `String`
+type at typed boundaries. Construction origin does not change parameter or
+return compatibility, equality, choice or option payload equality, collection
+use, map-key legality, casts, or template insertion. `String` equality compares
+content; it supports `is` and `is not`, but not ordering operators.
+
+Source `String + String` is invalid. The `+` operator is numeric-only, so use a
+string template such as `[left, right]` for concatenation. Internal template
+lowering uses a compiler-owned append operation and is not source string
+addition. HTML-JS normalizes template-backed map keys to content equality;
+non-JS map lowering remains deferred.
+
 ## Memory semantics
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**

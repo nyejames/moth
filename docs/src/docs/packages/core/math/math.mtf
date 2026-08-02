@@ -56,12 +56,13 @@ All functions take `Float` parameters and return `Float`. Parameters stay positi
 | `max(a, b)` | `Float, Float` | `Float` |
 | `clamp(x, min, max)` | `Float, Float, Float` | `Float` |
 
-All functions stay infallible at the Moth level. They do not return through
-`Error!`. Moth-level non-finite `Float` results from operations such as
-`sqrt(-1.0)` follow the checked numeric contract: `NaN`, positive infinity and
-negative infinity are not valid Moth `Float` values. HTML-JS routes every
-single-`Float` external result through the shared finite-result boundary, which
-traps a non-finite result before ordinary Moth code observes it.
+All functions keep infallible Moth signatures. A non-finite result still fails
+at the shared external `Float` boundary before ordinary Moth code observes it.
+The enclosing numeric failure mode decides what happens next: a function with
+builtin `Error!` recovers through that error channel, while a non-fallible
+function, a custom fallible channel or entry-selected root runtime code traps.
+`NaN`, positive infinity and negative infinity never become valid Moth
+`Float` values.
 
 ### Access and return contracts
 
@@ -71,8 +72,7 @@ All parameters use shared access. No function requires mutable access. Every fun
 
 HTML-JS lowers each function to a JavaScript `Math` expression. `clamp` lowers to `Math.min(Math.max(x, min), max)`. Constants fold into the expression at compile time.
 
-HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress
-(progress matrix) for current target availability.
+HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 
 ### Unsupported source forms
 

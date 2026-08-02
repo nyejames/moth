@@ -2981,13 +2981,6 @@ contract = "language.patterns.wildcard_rejected"
 role = "primary"
 
 [[case]]
-id = "pattern_wildcard_rejected"
-path = "pattern_wildcard_rejected"
-tags = ["integration", "diagnostics", "pattern-matching"]
-contract = "language.patterns.wildcard_rejected"
-role = "boundary"
-
-[[case]]
 id = "pattern_wildcard_with_guard_rejected"
 path = "pattern_wildcard_with_guard_rejected"
 tags = ["integration", "diagnostics", "pattern-matching"]
@@ -4250,7 +4243,7 @@ role = "primary"
 id = "match_relational_int"
 path = "match_relational_int"
 tags = ["integration", "control-flow", "language"]
-contract = "language.patterns.relational_int_match_acceptance"
+contract = "language.patterns.relational_scalar_match_acceptance"
 role = "primary"
 
 [[case]]
@@ -4745,7 +4738,7 @@ id = "nested_block_return_error_success"
 path = "nested_block_return_error_success"
 tags = ["integration", "results", "errors", "control-flow"]
 contract = "language.errors.nested_block_return_success"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "result_handler_nested_control_flow"
@@ -6027,7 +6020,7 @@ id = "template_stored_named_insert_success"
 path = "template_stored_named_insert_success"
 tags = ["integration", "templates", "slots", "const-folding"]
 contract = "language.templates.stored_named_insert_acceptance"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "template_named_slots_ignore_surrounding_whitespace"
@@ -8749,7 +8742,7 @@ id = "core_math_float_boundary_validation"
 path = "core_math_float_boundary_validation"
 tags = ["integration", "math", "numeric", "imports", "aliases", "diagnostics"]
 contract = "language.imports.core_math_float_boundary_validation"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "core_math_old_std_namespace_rejected"
@@ -9543,13 +9536,6 @@ contract = "language.patterns.general_capture_rejected"
 role = "primary"
 
 [[case]]
-id = "pattern_capture_rejects_underscore"
-path = "pattern_capture_rejects_underscore"
-tags = ["integration", "language", "pattern-matching", "diagnostics"]
-contract = "language.patterns.wildcard_rejected"
-role = "boundary"
-
-[[case]]
 id = "pattern_duplicate_literal_warning"
 path = "pattern_duplicate_literal_warning"
 tags = ["integration", "language", "pattern-matching", "diagnostics", "warnings"]
@@ -10198,7 +10184,7 @@ id = "value_if_cross_choice_predicate_rejected"
 path = "value_if_cross_choice_predicate_rejected"
 tags = ["integration", "language", "value-blocks", "if", "choice", "match", "diagnostics"]
 contract = "language.expressions.value_if_cross_choice_predicate_rejected"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "option_value_if_inline_unwrap"
@@ -10576,14 +10562,21 @@ id = "moth_without_template_implicit_provider_rejected"
 path = "moth_without_template_implicit_provider_rejected"
 tags = ["integration", "moth_template", "html", "diagnostics", "imports"]
 contract = "language.imports.moth_without_template_implicit_provider_rejected"
-role = "boundary"
+role = "primary"
+
+[[case]]
+id = "moth_template_provider_constant_collision_rejected"
+path = "moth_template_provider_constant_collision_rejected"
+tags = ["integration", "moth_template", "html", "diagnostics", "imports", "source-packages"]
+contract = "language.imports.moth_template_provider_constant_collision_rejected"
+role = "primary"
 
 [[case]]
 id = "moth_template_unrelated_source_package_implicit_rejected"
 path = "moth_template_unrelated_source_package_implicit_rejected"
 tags = ["integration", "moth_template", "html", "diagnostics", "imports", "source-packages"]
 contract = "language.imports.moth_template_unrelated_source_package_implicit_rejected"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "moth_template_grouped_alias_import"

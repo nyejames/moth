@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["literal_match_with_else_success result=one"]
+rendered_output_contains = ["literal_match_with_else_success result=one reactive=content"]

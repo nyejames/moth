@@ -58,6 +58,12 @@ pub(crate) struct PreparedModule {
     pub(crate) string_table: StringTable,
     /// Source identities built from the prepared source paths.
     pub(crate) source_files: SourceFileTable,
+    /// Whether the selected, actually prepared semantic source set contains a `.mtf` file.
+    ///
+    /// This is deliberately separate from `source_files`: that table also retains candidate
+    /// source identities needed for ownership and diagnostics, while implicit builder providers
+    /// may be enabled only by sources that Stage 0 actually prepared and reached.
+    pub(crate) contains_moth_template: bool,
     /// Warnings accumulated during file preparation.
     pub(crate) warnings: Vec<CompilerDiagnostic>,
     /// Number of source files in the module, for arena capacity estimation.

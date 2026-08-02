@@ -2,3 +2,10 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0049"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0049"
+reason = "invalid_match_pattern.qualifier_does_not_match_scrutinee"
+path = "input/@page.moth"
+line = 10
+count = 1

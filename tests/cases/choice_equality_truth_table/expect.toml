@@ -1,7 +1,7 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "choice_equality_truth_table unit_same=true unit_different=false word_same_payload=true word_different_payload=false unit_vs_payload=false different_payload_variants=false nested_same=true nested_different=false choice_template_same_payload=true option_template_same_payload=true optional_payload_same=true optional_payload_different=false"
+rendered_output_exact = "choice_equality_truth_table unit_same=true unit_different=false word_same_payload=true word_different_payload=false unit_vs_payload=false different_payload_variants=false nested_same=true nested_different=false choice_template_same_payload=true option_template_same_payload=true optional_payload_same=true optional_payload_different=false optional_payload_none_same=true optional_payload_none_different=false"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

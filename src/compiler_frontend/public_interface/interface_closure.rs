@@ -38,6 +38,7 @@ impl PublicSemanticInterface {
         let PublicInterfaceDraft {
             module_origin,
             export_bindings,
+            export_diagnostic_provenance,
             binding_exports,
             declarations,
             reusable_evidence,
@@ -46,6 +47,7 @@ impl PublicSemanticInterface {
         let direct = Self {
             module_origin: module_origin.clone(),
             export_bindings: export_bindings.clone(),
+            export_diagnostic_provenance: export_diagnostic_provenance.clone(),
             binding_exports: binding_exports.clone(),
             declarations,
             reusable_evidence,
@@ -66,6 +68,7 @@ impl PublicSemanticInterface {
         let interface = Self {
             module_origin,
             export_bindings,
+            export_diagnostic_provenance,
             binding_exports,
             declarations: closure.declarations,
             reusable_evidence: closure.reusable_evidence,

@@ -6,17 +6,17 @@
 WORK_ID: docs-lang-mig
 WORK_SOURCE: docs/roadmap/plans/docs-language-migration.md
 BASE_REVISION: 820098759bc896365eb99f2239c2bd1a570132f1
-STATUS: active
-CURRENT_SCOPE: Stage B interim audit pass 3 after resolving the three required pass-2 corrections
+STATUS: stage-b-complete - B2-B7 implementation and mandatory final review accepted; Stage C remains approval-gated
+CURRENT_SCOPE: Stage B complete after resolving the final-auditor corrections; no Stage C authority switch performed
 STAGE_A: complete and accepted
 STAGE_W: complete and accepted
 PRE_B1_CLOSEOUT: complete, full gate green at d82b86d74
 COMPLETED: B1 source syntax removal and JS raw-value return ABI correction; slot-backed result provenance and multi-return summary correction; B2 String semantics, HIR StringAppend, JS/Wasm content equality and map normalization; B3 pattern-surface removal; B4 template collision registry; B5 accepted language gaps; B6 Core Text and Core Math boundary corrections; B7 builder capability metadata
-NEXT_ACTION: run the fresh Stage B interim auditor, resolve any required findings, then run the full code-bearing gate and mandatory final audit
-VALIDATION: cargo fmt; cargo check -p moth; delayed HTML-Wasm harness unit test passed; executable html_wasm_runtime_template passed; prior focused B2-B7 cases and reason-level B3 diagnostics passed; tests --audit inventory passed; full gate and docs release not yet run
-AUDITS: prior B1 audits remain accepted; B2 AST findings resolved; Stage B interim audit pass 1 produced four findings, all corrected; pass 2 produced three findings, all corrected; fresh pass-3 interim audit and mandatory final audit remain
+NEXT_ACTION: request explicit user approval before beginning the separate Stage C parity and authority-switch work
+VALIDATION: cargo fmt; targeted B7 reachability, provider-collision, choice/option equality, provider re-export, same-module re-export, and provenance-remap tests passed; cargo check --all-targets passed; tests --audit passed with 1666 cases and 1816 backend executions; just validate passed (cross-target Clippy, 3933 library tests, 17 CLI tests, 538 xtask tests, 1816 integration executions, docs check, and 58 benchmark preflights); cargo run --quiet -- build docs --release built 69 files successfully; generated raw source-link search returned no matches; git diff --check passed
+AUDITS: prior B1 audits remain accepted; B2 AST findings resolved; Stage B interim audit pass 1 produced four findings, all corrected; pass 2 produced three findings, all corrected; pass 3 clean; final-auditor pass 1 produced three findings, all corrected; final-auditor pass 2 produced one diagnostic-assertion finding, corrected; a subsequent final-auditor attempt was stopped by the launcher path-safety contract with no workspace change; final-auditor pass 4 produced four documentation/comment/fixture findings, all corrected; final-auditor pass 5 produced two B2/B3 findings, all corrected; final-auditor pass 6 found one stale plan-state finding, corrected; final-auditor pass 7 was stopped by the launcher path-safety contract with no workspace change; final-auditor pass 8 found one stale active diagnostics-plan instruction, corrected; final-auditor pass 9 found provider-interface diagnostic provenance and stale invalid-HIR choice-test findings, both corrected; final-auditor pass 10 found reachable B7 source gating, provider re-export/path coverage, none-state choice equality coverage, and stale monolith/count/comments, all requiring correction; all four corrections were implemented and the full post-correction gate is green; fresh final_auditor run 20260802T204605Z-3569a191 returned pass with no findings and no worktree changes
 BLOCKERS: none; B2-B7 resumed by user
-STAGE_C: blocked until Stage B completes
+STAGE_C: blocked pending explicit user approval; authority switch not performed
 ```
 
 ## Completion record

@@ -11,12 +11,12 @@ impl<'hir> JsEmitter<'hir> {
     /// Emits the choice structural equality helper.
     ///
     /// WHAT: `__moth_choice_eq` compares two choice carriers by tag and then by every
-    /// payload field. Nested choices recurse and String payloads use the canonical content
-    /// equality helper rather than relying on a backend representation.
+    /// payload field. Nested tagged choice or option carriers recurse and String payloads use
+    /// the canonical content equality helper rather than relying on a backend representation.
     ///
     /// WHY: the frontend only approves choice equality when every payload field supports
     /// structural equality, so the helper can safely assume primitives are `===`-comparable
-    /// and only needs recursion for nested choice carriers.
+    /// and only needs recursive handling for tagged choice or option carriers.
     pub(crate) fn emit_runtime_choice_helpers(&mut self) {
         self.emit_line("function __moth_choice_eq(a, b) {");
         self.with_indent(|emitter| {

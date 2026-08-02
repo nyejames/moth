@@ -1,6 +1,9 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
+rendered_output_contains = [
+    "core_math_float_boundary_validation finite=4 namespace=4 alias=2.718281828459045 errors=304/304/304",
+]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

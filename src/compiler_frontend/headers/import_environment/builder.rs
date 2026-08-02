@@ -23,7 +23,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use rustc_hash::FxHashSet;
 
 use super::{
@@ -830,10 +830,16 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                     .imported_declarations_by_local_path
                     .entry(synthetic_path.clone())
                     .or_insert_with(|| declaration.clone());
-                let location = SourceLocation {
-                    scope: InternedPath::from_single_str(&format!("@{prefix}"), self.string_table),
-                    ..SourceLocation::default()
-                };
+                let location = interface
+                    .export_diagnostic_provenance(binding.public_name())
+                    .map(|location| self.remap_provider_diagnostic_location(location))
+                    .unwrap_or_else(|| SourceLocation {
+                        scope: InternedPath::from_single_str(
+                            &format!("@{prefix}"),
+                            self.string_table,
+                        ),
+                        ..SourceLocation::default()
+                    });
                 implicit_constants.push((name_id, synthetic_path, location));
             }
         }
@@ -890,6 +896,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     }
 
     fn source_location_for_symbol(&mut self, symbol_path: &InternedPath) -> SourceLocation {
+        if let Some(location) = self
+            .module_symbols
+            .declaration_locations_by_symbol_path
+            .get(symbol_path)
+        {
+            return location.clone();
+        }
+
         if let Some(source_file) = self
             .module_symbols
             .canonical_source_by_symbol_path
@@ -912,6 +926,29 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         SourceLocation {
             scope: symbol_path.clone(),
             ..SourceLocation::default()
+        }
+    }
+
+    fn remap_provider_diagnostic_location(
+        &mut self,
+        location: &crate::compiler_frontend::public_interface::PublicDiagnosticLocation,
+    ) -> SourceLocation {
+        SourceLocation {
+            scope: InternedPath::from_components(
+                location
+                    .scope_components
+                    .iter()
+                    .map(|component| self.string_table.intern(component))
+                    .collect(),
+            ),
+            start_pos: CharPosition {
+                line_number: location.start_line,
+                char_column: location.start_column,
+            },
+            end_pos: CharPosition {
+                line_number: location.end_line,
+                char_column: location.end_column,
+            },
         }
     }
 

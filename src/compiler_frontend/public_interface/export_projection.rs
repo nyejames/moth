@@ -46,7 +46,9 @@
 //! narrower because imported-module-root headers belong to another module's component.
 
 use super::SourceProviderImportSet;
-use super::model::PublicBindingExport;
+use super::model::{
+    PublicBindingExport, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{
@@ -61,6 +63,7 @@ use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -77,8 +80,16 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) struct DirectExportSeed {
     module_origin: StableModuleOriginIdentity,
     export_bindings: Vec<ExportBinding>,
+    export_diagnostic_provenance: Vec<PublicExportDiagnosticProvenance>,
     binding_exports: Vec<PublicBindingExport>,
     public_nominal_type_origins: FxHashMap<InternedPath, OriginTypeId>,
+}
+
+pub(crate) struct DirectExportSeedParts {
+    pub(crate) module_origin: StableModuleOriginIdentity,
+    pub(crate) export_bindings: Vec<ExportBinding>,
+    pub(crate) export_diagnostic_provenance: Vec<PublicExportDiagnosticProvenance>,
+    pub(crate) binding_exports: Vec<PublicBindingExport>,
 }
 
 impl DirectExportSeed {
@@ -96,9 +107,18 @@ impl DirectExportSeed {
         Self {
             module_origin,
             export_bindings,
+            export_diagnostic_provenance: Vec::new(),
             binding_exports: Vec::new(),
             public_nominal_type_origins,
         }
+    }
+
+    fn with_export_diagnostic_provenance(
+        mut self,
+        export_diagnostic_provenance: Vec<PublicExportDiagnosticProvenance>,
+    ) -> Self {
+        self.export_diagnostic_provenance = export_diagnostic_provenance;
+        self
     }
 
     fn with_binding_exports(mut self, binding_exports: Vec<PublicBindingExport>) -> Self {
@@ -117,6 +137,13 @@ impl DirectExportSeed {
         &self.export_bindings
     }
 
+    /// Authored source provenance for directly-defined public export spellings, in deterministic
+    /// public-name order. This is diagnostic metadata, not part of semantic export identity.
+    #[cfg(test)]
+    pub(crate) fn export_diagnostic_provenance(&self) -> &[PublicExportDiagnosticProvenance] {
+        &self.export_diagnostic_provenance
+    }
+
     /// The transient public nominal-type origin index used by the post-AST callable seed table
     /// builder to resolve receiver paths to stable [`OriginTypeId`] values.
     pub(crate) fn public_nominal_type_origins(&self) -> &FxHashMap<InternedPath, OriginTypeId> {
@@ -129,20 +156,21 @@ impl DirectExportSeed {
     /// The only production consumer is [`PublicInterfaceDraftBuilder::build`](super::direct_projection::PublicInterfaceDraftBuilder::build),
     /// which calls this after the borrowing projections finish so the module origin and export
     /// bindings move into the draft and the nominal-type origin index is dropped.
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        StableModuleOriginIdentity,
-        Vec<ExportBinding>,
-        Vec<PublicBindingExport>,
-        FxHashMap<InternedPath, OriginTypeId>,
-    ) {
-        (
-            self.module_origin,
-            self.export_bindings,
-            self.binding_exports,
-            self.public_nominal_type_origins,
-        )
+    pub(crate) fn into_parts(self) -> DirectExportSeedParts {
+        let Self {
+            module_origin,
+            export_bindings,
+            export_diagnostic_provenance,
+            binding_exports,
+            public_nominal_type_origins: _,
+        } = self;
+
+        DirectExportSeedParts {
+            module_origin,
+            export_bindings,
+            export_diagnostic_provenance,
+            binding_exports,
+        }
     }
 }
 
@@ -171,7 +199,7 @@ pub(crate) fn build_direct_export_seed(
     let active_origin =
         resolve_active_module_origin(source_module_origins, active_root_file_id, sorted_headers)?;
 
-    let export_bindings = collect_free_export_bindings(
+    let (export_bindings, export_diagnostic_provenance) = collect_free_export_bindings(
         source_module_origins,
         &active_origin,
         sorted_headers,
@@ -196,6 +224,7 @@ pub(crate) fn build_direct_export_seed(
 
     Ok(
         DirectExportSeed::new(active_origin, export_bindings, public_nominal_type_origins)
+            .with_export_diagnostic_provenance(export_diagnostic_provenance)
             .with_binding_exports(binding_exports),
     )
 }
@@ -662,8 +691,9 @@ fn collect_free_export_bindings(
     module_symbols: &ModuleSymbols,
     source_provider_imports: &SourceProviderImportSet<'_>,
     string_table: &StringTable,
-) -> Result<Vec<ExportBinding>, CompilerError> {
+) -> Result<(Vec<ExportBinding>, Vec<PublicExportDiagnosticProvenance>), CompilerError> {
     let mut export_bindings = Vec::new();
+    let mut export_diagnostic_provenance = Vec::new();
     let mut seen_public_names: FxHashSet<String> = FxHashSet::default();
 
     for header in sorted_headers {
@@ -690,11 +720,16 @@ fn collect_free_export_bindings(
             continue;
         };
         seen_public_names.insert(name.to_owned());
+        let public_name = name.to_owned();
         export_bindings.push(ExportBinding::new(
             module_origin.clone(),
-            name.to_owned(),
+            public_name.clone(),
             origin,
         ));
+        export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
+            public_name,
+            location: portable_source_location(&header.name_location, string_table),
+        });
     }
 
     // Collect re-export bindings from the module root's public export entries. These entries
@@ -709,9 +744,16 @@ fn collect_free_export_bindings(
         string_table,
     )?;
 
-    for binding in reexport_bindings {
-        if seen_public_names.insert(binding.public_name().to_owned()) {
-            export_bindings.push(binding);
+    for reexport in reexport_bindings {
+        if seen_public_names.insert(reexport.binding.public_name().to_owned()) {
+            let public_name = reexport.binding.public_name().to_owned();
+            export_bindings.push(reexport.binding);
+            if let Some(location) = reexport.provenance {
+                export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
+                    public_name,
+                    location,
+                });
+            }
         }
     }
 
@@ -723,7 +765,26 @@ fn collect_free_export_bindings(
         })
     });
 
-    Ok(export_bindings)
+    export_diagnostic_provenance.sort_by(|left, right| left.public_name.cmp(&right.public_name));
+    Ok((export_bindings, export_diagnostic_provenance))
+}
+
+fn portable_source_location(
+    location: &SourceLocation,
+    string_table: &StringTable,
+) -> PublicDiagnosticLocation {
+    PublicDiagnosticLocation {
+        scope_components: location
+            .scope
+            .as_components()
+            .iter()
+            .map(|component| string_table.resolve(*component).to_owned())
+            .collect(),
+        start_line: location.start_pos.line_number,
+        start_column: location.start_pos.char_column,
+        end_line: location.end_pos.line_number,
+        end_column: location.end_pos.char_column,
+    }
 }
 
 /// Collect re-export bindings from `module_root_public_exports` and
@@ -745,7 +806,7 @@ fn collect_reexport_bindings(
     module_symbols: &ModuleSymbols,
     source_provider_imports: &SourceProviderImportSet<'_>,
     string_table: &StringTable,
-) -> Result<Vec<ExportBinding>, CompilerError> {
+) -> Result<Vec<ReexportBinding>, CompilerError> {
     if module_symbols.file_module_membership.is_empty() {
         return Ok(Vec::new());
     }
@@ -794,6 +855,11 @@ struct ReexportBindingContext<'a> {
     header_by_path: &'a FxHashMap<&'a InternedPath, &'a Header>,
     source_provider_imports: &'a SourceProviderImportSet<'a>,
     string_table: &'a StringTable,
+}
+
+struct ReexportBinding {
+    binding: ExportBinding,
+    provenance: Option<PublicDiagnosticLocation>,
 }
 
 fn resolve_active_root_source<'a>(
@@ -859,7 +925,7 @@ fn resolve_optional_active_module_root_membership(
 /// Resolve one re-export entry to an `ExportBinding` if it targets a same-module source
 /// declaration.
 fn collect_one_reexport_binding(
-    bindings: &mut Vec<ExportBinding>,
+    bindings: &mut Vec<ReexportBinding>,
     exporting_source: &InternedPath,
     entry: &PublicExportEntry,
     context: &ReexportBindingContext<'_>,
@@ -893,11 +959,16 @@ fn collect_one_reexport_binding(
             )));
         };
         let export_name = context.string_table.resolve(entry.export_name).to_owned();
-        bindings.push(ExportBinding::new(
-            context.module_origin.clone(),
-            export_name,
-            provider_origin,
-        ));
+        bindings.push(ReexportBinding {
+            binding: ExportBinding::new(
+                context.module_origin.clone(),
+                export_name,
+                provider_origin,
+            ),
+            provenance: provider_interface
+                .export_diagnostic_provenance(imported_name)
+                .cloned(),
+        });
         return Ok(());
     }
 
@@ -948,11 +1019,13 @@ fn collect_one_reexport_binding(
     let origin = reexport_declaration_origin(header, context.module_origin, name)?;
 
     let export_name = context.string_table.resolve(entry.export_name).to_owned();
-    bindings.push(ExportBinding::new(
-        context.module_origin.clone(),
-        export_name,
-        origin,
-    ));
+    bindings.push(ReexportBinding {
+        binding: ExportBinding::new(context.module_origin.clone(), export_name, origin),
+        provenance: Some(portable_source_location(
+            &header.name_location,
+            context.string_table,
+        )),
+    });
 
     Ok(())
 }

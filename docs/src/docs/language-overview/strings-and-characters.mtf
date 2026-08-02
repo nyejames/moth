@@ -75,8 +75,7 @@ typing and compile-time folding now follow that rule, while internal template
 lowering uses a compiler-owned append operation. Runtime equality compares
 string content for every `String` origin. HTML-JS normalizes template-backed
 map keys to that same content; HTML-Wasm compares finalized string bytes for
-equality, while non-JS map lowering remains deferred. See @../progress
-(progress matrix) for the current target status.
+equality, while non-JS map lowering remains deferred. See @../progress (progress matrix) for the current target status.
 
 ### One semantic `String` type
 

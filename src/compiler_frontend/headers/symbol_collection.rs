@@ -71,6 +71,10 @@ pub(super) fn build_module_symbols(
                 header.tokens.src_path.to_owned(),
                 header.canonical_source_file(string_table),
             );
+            module_symbols.declaration_locations_by_symbol_path.insert(
+                header.tokens.src_path.to_owned(),
+                header.name_location.to_owned(),
+            );
 
             register_header_symbol(&mut module_symbols, header, string_table);
         }

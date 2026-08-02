@@ -16,7 +16,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
-    DiagnosticPayload, SyntaxDiagnosticKind,
+    DiagnosticLabelStyle, DiagnosticPayload, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -37,7 +37,8 @@ use crate::compiler_frontend::pipeline::{
 };
 use crate::compiler_frontend::public_interface::{
     PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicSemanticInterface, SourceProviderImport, SourceProviderImportSet,
+    PublicDiagnosticLocation, PublicExportDiagnosticProvenance, PublicSemanticInterface,
+    SourceProviderImport, SourceProviderImportSet,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::semantic_identity::{
@@ -194,6 +195,7 @@ fn empty_provider_interface(prefix: &str) -> PublicSemanticInterface {
     PublicSemanticInterface {
         module_origin,
         export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: Vec::new(),
         reusable_evidence: Vec::new(),
@@ -450,6 +452,24 @@ impl MothTemplateScopeFixture {
         ),
         Box<CompilerDiagnostic>,
     > {
+        self.prepare_and_bind_headers_with_providers_with_table(
+            prepared_relative_paths,
+            source_provider_imports,
+        )
+        .map_err(|(diagnostic, _string_table)| diagnostic)
+    }
+
+    fn prepare_and_bind_headers_with_providers_with_table(
+        &self,
+        prepared_relative_paths: &[&str],
+        source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<'_>,
+    ) -> Result<
+        (
+            crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
+            StringTable,
+        ),
+        (Box<CompilerDiagnostic>, StringTable),
+    > {
         let style_directives = StyleDirectiveRegistry::built_ins();
         let external_package_registry = Arc::new(ExternalPackageRegistry::new());
         let options = HeaderParseOptions {
@@ -487,7 +507,7 @@ impl MothTemplateScopeFixture {
                         TokenizerEntryMode::SourceFile,
                         &mut string_table,
                     )
-                    .map_err(|diagnostic| *diagnostic)?,
+                    .map_err(|diagnostic| (diagnostic, string_table.clone()))?,
                 )
             } else {
                 None
@@ -521,12 +541,12 @@ impl MothTemplateScopeFixture {
 
             let output =
                 CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table)
-                    .map_err(|error| error.diagnostic)?;
+                    .map_err(|error| (error.diagnostic, string_table.clone()))?;
             prepared_files.push(output);
         }
 
         let prepared_syntax = prepare_header_syntax(prepared_files, &mut string_table)
-            .map_err(first_diagnostic_from_bag)?;
+            .map_err(|bag| (first_diagnostic_from_bag(bag), string_table.clone()))?;
         let headers = bind_module_headers(
             prepared_syntax,
             &external_package_registry,
@@ -535,7 +555,7 @@ impl MothTemplateScopeFixture {
             Some(&self.project_path_resolver),
             &mut string_table,
         )
-        .map_err(first_diagnostic_from_bag)?;
+        .map_err(|bag| (first_diagnostic_from_bag(bag), string_table.clone()))?;
 
         Ok((headers, string_table))
     }
@@ -1092,6 +1112,7 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
             "test_constant".to_owned(),
             constant_origin.clone(),
         )],
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: constant_origin,
@@ -1120,6 +1141,7 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
             "custom_constant".to_owned(),
             custom_constant_origin.clone(),
         )],
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: custom_constant_origin,
@@ -1159,6 +1181,102 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
 
     folded_content_contains(&ast, &string_table, "from html");
     folded_content_contains(&ast, &string_table, "from custom");
+}
+
+#[test]
+fn provider_interface_collision_remaps_authored_declaration_location() {
+    let fixture = MothTemplateScopeFixture::new(&[
+        (
+            "src/docs/@mod.moth",
+            "export:\n    collision #= \"local\"\n;\n",
+        ),
+        ("src/docs/intro.mtf", "[collision]"),
+    ]);
+
+    let html_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("html"),
+        "html".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let collision_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        html_origin.clone(),
+        "collision".to_owned(),
+    ));
+    let html_interface = PublicSemanticInterface {
+        module_origin: html_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            html_origin,
+            "collision".to_owned(),
+            collision_origin.clone(),
+        )],
+        export_diagnostic_provenance: vec![PublicExportDiagnosticProvenance {
+            public_name: "collision".to_owned(),
+            location: PublicDiagnosticLocation {
+                scope_components: vec!["@html".to_owned(), "@mod.moth".to_owned()],
+                start_line: 88,
+                start_column: 5,
+                end_line: 88,
+                end_column: 10,
+            },
+        }],
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: collision_origin,
+            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                folded_value: PublicFoldedValue::String("from html".to_owned()),
+            }),
+        }],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
+        importer_source: Vec::new(),
+        imported_path: vec!["html".to_owned()],
+        from_grouped: false,
+        implicit_template_scope: true,
+        interface: &html_interface,
+    }]);
+
+    let (diagnostic, diagnostic_string_table) = match fixture
+        .prepare_and_bind_headers_with_providers_with_table(
+            &["src/docs/@mod.moth", "src/docs/intro.mtf"],
+            &provider_imports,
+        ) {
+        Ok(_) => panic!("provider and same-directory constants should collide"),
+        Err((diagnostic, string_table)) => (*diagnostic, string_table),
+    };
+
+    assert!(matches!(
+        diagnostic.kind,
+        DiagnosticKind::Import(
+            crate::compiler_frontend::compiler_messages::ImportDiagnosticKind::ImportNameCollision
+        )
+    ));
+    let primary = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.style == DiagnosticLabelStyle::Primary)
+        .expect("collision should have a primary label");
+    let secondary = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.style == DiagnosticLabelStyle::Secondary)
+        .expect("collision should preserve the provider declaration label");
+    assert_eq!(primary.location.start_pos.line_number, 1);
+    assert_eq!(secondary.location.start_pos.line_number, 88);
+    assert_eq!(secondary.location.start_pos.char_column, 5);
+    assert_eq!(
+        secondary
+            .location
+            .scope
+            .to_portable_string(&diagnostic_string_table),
+        "@html/@mod.moth"
+    );
+    assert_ne!(
+        primary.location.start_pos.line_number,
+        secondary.location.start_pos.line_number
+    );
 }
 
 #[test]

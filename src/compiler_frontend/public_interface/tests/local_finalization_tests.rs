@@ -157,6 +157,7 @@ fn draft_with_records(records: Vec<PublicDeclarationRecord>) -> PublicInterfaceD
     PublicInterfaceDraft {
         module_origin: module_origin(),
         export_bindings: vec![],
+        export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
         declarations: records,
         reusable_evidence: vec![],

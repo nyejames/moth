@@ -1,0 +1,7 @@
+export:
+    import @intro {
+        content as intro_content,
+    }
+
+    center #= "local center"
+;

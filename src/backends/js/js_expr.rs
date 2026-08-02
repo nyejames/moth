@@ -446,7 +446,7 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             (OptionComparisonSide::Option { inner_type }, OptionComparisonSide::Option { .. }) => {
-                let inner_equality = self.lower_option_inner_equality(
+                let inner_equality = self.lower_typed_equality(
                     format!("({left}).value"),
                     inner_type,
                     format!("({right}).value"),
@@ -458,13 +458,13 @@ impl<'hir> JsEmitter<'hir> {
 
             (OptionComparisonSide::Option { inner_type }, OptionComparisonSide::Other) => {
                 let inner_equality =
-                    self.lower_option_inner_equality(format!("({left}).value"), inner_type, right);
+                    self.lower_typed_equality(format!("({left}).value"), inner_type, right);
                 format!("((({left}).tag === \"some\") && {inner_equality})")
             }
 
             (OptionComparisonSide::Other, OptionComparisonSide::Option { inner_type }) => {
                 let inner_equality =
-                    self.lower_option_inner_equality(left, inner_type, format!("({right}).value"));
+                    self.lower_typed_equality(left, inner_type, format!("({right}).value"));
                 format!("((({right}).tag === \"some\") && {inner_equality})")
             }
 
@@ -484,13 +484,13 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    /// Lower the inner-value equality check for option comparison.
+    /// Lower equality according to the semantic type of both operands.
     ///
-    /// WHAT: when both sides of an option comparison are `some`, this produces the
-    /// inner equality expression. For choice-typed inner values, it uses the runtime
-    /// `__moth_choice_eq` helper; for other types, it uses JS `===`.
-    /// WHY: choice types need structural equality rather than reference equality.
-    pub(crate) fn lower_option_inner_equality(
+    /// WHAT: selects the language equality helper for String and choice carriers, while
+    /// primitive values retain JavaScript strict equality.
+    /// WHY: String, choice and option carriers need language equality rather than backend
+    /// reference equality.
+    pub(crate) fn lower_typed_equality(
         &mut self,
         left: String,
         inner_type: TypeId,

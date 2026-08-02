@@ -229,6 +229,7 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
     prepared_outputs: Vec<(usize, FileFrontendPrepareOutput)>,
     warnings: Vec<CompilerDiagnostic>,
     source_byte_count: usize,
+    contains_moth_template: bool,
 }
 
 // -------------------------
@@ -351,6 +352,7 @@ impl ModulePreparationContext<'_> {
             prepared_outputs: Vec::new(),
             warnings: Vec::new(),
             source_byte_count: 0,
+            contains_moth_template: false,
         })
     }
 
@@ -383,6 +385,7 @@ impl ModulePreparationContext<'_> {
         module_label: Option<&str>,
     ) -> Result<PreparedModule, CompilerMessages> {
         let mut warnings = Vec::new();
+        let contains_moth_template = module.iter().any(PreparedSourceInput::is_moth_template);
 
         // Entry identity and root semantics are separate. The stable module origin owns whether
         // the active file is a normal runtime-capable root or an API-only support/facade root.
@@ -450,6 +453,7 @@ impl ModulePreparationContext<'_> {
             prepared_header_syntax,
             string_table,
             source_files,
+            contains_moth_template,
             warnings,
             source_file_count: module.len(),
             source_byte_count,
@@ -886,6 +890,7 @@ impl ModuleSyntaxDiscovery<'_> {
         source_order: usize,
         source: &PreparedSourceInput,
     ) -> Result<Vec<StructuralProviderReference>, CompilerMessages> {
+        self.contains_moth_template |= source.is_moth_template();
         let entry_file_id = self
             .source_files
             .get_by_canonical_path(&self.entry_file_path)
@@ -995,6 +1000,7 @@ impl ModuleSyntaxDiscovery<'_> {
             prepared_header_syntax,
             string_table: self.string_table,
             source_files: self.source_files,
+            contains_moth_template: self.contains_moth_template,
             warnings: self.warnings,
             source_file_count,
             source_byte_count: self.source_byte_count,
@@ -1030,6 +1036,7 @@ impl FrontendModuleBuildContext<'_> {
             prepared_header_syntax,
             string_table,
             source_files,
+            contains_moth_template: _contains_moth_template,
             mut warnings,
             source_file_count,
             source_byte_count,

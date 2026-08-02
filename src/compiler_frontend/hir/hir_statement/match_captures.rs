@@ -1,7 +1,7 @@
-//! Choice payload capture lowering for HIR match arms.
+//! Choice payload and option-present capture lowering for HIR match arms.
 //!
 //! WHAT: allocates capture locals, rewrites guard capture reads, and emits payload extraction
-//! assignments for choice-variant match arms.
+//! assignments for choice-variant and present-option match arms.
 //! WHY: capture materialization has different timing from generic CFG lowering: guards are
 //! evaluated in the match terminator, while capture assignments execute inside arm blocks.
 //!

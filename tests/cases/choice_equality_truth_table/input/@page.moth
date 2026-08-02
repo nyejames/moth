@@ -45,5 +45,8 @@ choice_template_same_payload = Outer::Word(reactive_word) is Outer::Word("samex"
 option_template_same_payload = reactive_word_option is "samex"
 optional_payload_same = OptionalPayload::Present("x") is OptionalPayload::Present("x")
 optional_payload_different = OptionalPayload::Present("x") is OptionalPayload::Present("y")
+optional_none String? = none
+optional_payload_none_same = OptionalPayload::Present(optional_none) is OptionalPayload::Present(optional_none)
+optional_payload_none_different = OptionalPayload::Present(optional_none) is OptionalPayload::Present("x")
 
-[:choice_equality_truth_table unit_same=[unit_same] unit_different=[unit_different] word_same_payload=[word_same_payload] word_different_payload=[word_different_payload] unit_vs_payload=[unit_vs_payload] different_payload_variants=[different_payload_variants] nested_same=[nested_same] nested_different=[nested_different] choice_template_same_payload=[choice_template_same_payload] option_template_same_payload=[option_template_same_payload] optional_payload_same=[optional_payload_same] optional_payload_different=[optional_payload_different]]
+[:choice_equality_truth_table unit_same=[unit_same] unit_different=[unit_different] word_same_payload=[word_same_payload] word_different_payload=[word_different_payload] unit_vs_payload=[unit_vs_payload] different_payload_variants=[different_payload_variants] nested_same=[nested_same] nested_different=[nested_different] choice_template_same_payload=[choice_template_same_payload] option_template_same_payload=[option_template_same_payload] optional_payload_same=[optional_payload_same] optional_payload_different=[optional_payload_different] optional_payload_none_same=[optional_payload_none_same] optional_payload_none_different=[optional_payload_none_different]]
