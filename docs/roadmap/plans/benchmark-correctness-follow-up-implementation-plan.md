@@ -13,7 +13,7 @@ WORK_ID: benchmark-output-final-corrections
 WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
 BASE_REVISION: f15fbbfab7b0d3b4c18cb82ecaa14f311ffb3225
 REVIEW_BASE: c162458b3f22c48e5b277e3c777909e1a59cdbce
-IMPLEMENTATION_UNDER_REVIEW: working tree based on BASE_REVISION (pre-commit)
+IMPLEMENTATION_UNDER_REVIEW: fc81a727b74f04ec524cc2ac3834026ea23ae1d7 (committed implementation; benchmark closeout pending)
 STATUS: active, implementation checkpoint accepted; benchmark closeout pending, intentionally not linked from the roadmap
 CURRENT_SLICE: Output lifecycle ownership, canonical root identity, Windows-safe portable identity, fail-closed hard-link inspection, byte-safe manifest recovery, explicit-directory retention, non-regular stale-node retention and validated Stage 0 output exclusion complete; benchmark history and baseline closeout pending
 ACCEPTED: Phase 0 baseline; one selected BuildProfile and OutputOwner per build; validated directory plans consumed by CLI, check, frontend benchmarks and dev; fail-closed manifest ownership; scaffold manifests removed; prepared output preflight and stale-path retention; restored config/output/dev-server/scaffold coverage; stale skipped-collision coverage and comments removed; canonical output-root alias rejection; authored diagnostics; Windows portable-component policy including superscript DOS-device names; fail-closed Windows hard-link inspection; non-regular stale-node retention; validated Stage 0 exclusion for separator-normalized output roots; final independent audit clean
