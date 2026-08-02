@@ -82,6 +82,11 @@ pub(crate) enum ManifestReadResult {
         reason: ManifestRecoveryReason,
         owner: OutputOwner,
     },
+    ForeignOwner {
+        reason: ManifestRecoveryReason,
+        builder: String,
+        profile: String,
+    },
     Valid(BuildManifest),
 }
 
@@ -152,16 +157,36 @@ pub(crate) fn prepare_output_cleanup(
         validate_output_root_is_safe(output_root, project_root, entry_root, string_table)?;
         let manifest_read_result = read_build_manifest(output_root, cleanup_policy);
         let existing_owner = match &manifest_read_result {
-            ManifestReadResult::Valid(manifest) => Some(manifest.owner),
-            ManifestReadResult::RecoverableWithOwner { owner, .. } => Some(*owner),
+            ManifestReadResult::Valid(manifest) => Some((
+                manifest.owner.builder.manifest_name(),
+                build_profile_manifest_name(manifest.owner.profile),
+            )),
+            ManifestReadResult::RecoverableWithOwner { owner, .. } => Some((
+                owner.builder.manifest_name(),
+                build_profile_manifest_name(owner.profile),
+            )),
+            ManifestReadResult::ForeignOwner {
+                builder, profile, ..
+            } => {
+                return Err(manifest_owner_conflict_messages(
+                    output_root,
+                    builder,
+                    profile,
+                    owner,
+                    setting_location,
+                    string_table,
+                ));
+            }
             ManifestReadResult::Uninitialised | ManifestReadResult::Recoverable { .. } => None,
         };
-        if let Some(existing_owner) = existing_owner
-            && existing_owner != owner
+        if let Some((existing_builder, existing_profile)) = existing_owner
+            && (existing_builder != owner.builder.manifest_name()
+                || existing_profile != build_profile_manifest_name(owner.profile))
         {
             return Err(manifest_owner_conflict_messages(
                 output_root,
-                existing_owner,
+                existing_builder,
+                existing_profile,
                 owner,
                 setting_location,
                 string_table,
@@ -206,6 +231,9 @@ pub(crate) fn finalize_output_cleanup(
         ManifestReadResult::Recoverable { reason }
         | ManifestReadResult::RecoverableWithOwner { reason, .. } => {
             emit_recoverable_manifest_warning(reason)
+        }
+        ManifestReadResult::ForeignOwner { .. } => {
+            unreachable!("foreign manifest owners fail during cleanup preparation")
         }
     }
 
@@ -674,13 +702,15 @@ where
     let Some(raw_builder_kind) = builder_line.strip_prefix(BUILD_MANIFEST_BUILDER_PREFIX) else {
         return invalid_manifest_metadata();
     };
-    let Some(manifest_builder_kind) = BuilderKind::from_manifest_name(raw_builder_kind) else {
-        return invalid_manifest_metadata();
-    };
+    let manifest_builder_kind = BuilderKind::from_manifest_name(raw_builder_kind);
 
     // 2. Parse build profile.
     let Some(profile_line) = manifest_lines.next() else {
-        return invalid_manifest_metadata();
+        return manifest_owner_metadata_result(
+            manifest_builder_kind,
+            raw_builder_kind,
+            "<missing>",
+        );
     };
     let Ok(profile_line) = profile_line else {
         return ManifestReadResult::Recoverable {
@@ -689,15 +719,25 @@ where
     };
     let profile_line = profile_line.trim_end_matches('\r');
     let Some(raw_profile) = profile_line.strip_prefix(BUILD_MANIFEST_PROFILE_PREFIX) else {
-        return invalid_manifest_metadata();
+        return manifest_owner_metadata_result(
+            manifest_builder_kind,
+            raw_builder_kind,
+            "<invalid>",
+        );
     };
-    let Some(manifest_profile) = build_profile_from_manifest_name(raw_profile) else {
-        return invalid_manifest_metadata();
-    };
+    let manifest_profile = build_profile_from_manifest_name(raw_profile);
+
+    if manifest_builder_kind.is_none() || manifest_profile.is_none() {
+        return ManifestReadResult::ForeignOwner {
+            reason: ManifestRecoveryReason::InvalidMetadata,
+            builder: raw_builder_kind.trim().to_owned(),
+            profile: raw_profile.trim().to_owned(),
+        };
+    }
 
     let owner = OutputOwner {
-        builder: manifest_builder_kind,
-        profile: manifest_profile,
+        builder: manifest_builder_kind.expect("foreign builder was handled above"),
+        profile: manifest_profile.expect("foreign profile was handled above"),
     };
 
     // 3. Parse managed extensions (normalized so order, leading dot and ASCII case do not matter).
@@ -756,6 +796,21 @@ fn invalid_manifest_metadata_with_owner(owner: OutputOwner) -> ManifestReadResul
     }
 }
 
+fn manifest_owner_metadata_result(
+    builder: Option<BuilderKind>,
+    raw_builder: &str,
+    raw_profile: &str,
+) -> ManifestReadResult {
+    match builder {
+        Some(_) => invalid_manifest_metadata(),
+        None => ManifestReadResult::ForeignOwner {
+            reason: ManifestRecoveryReason::InvalidMetadata,
+            builder: raw_builder.trim().to_owned(),
+            profile: raw_profile.to_owned(),
+        },
+    }
+}
+
 fn parse_manifest_managed_extensions(raw_value: &str) -> Option<BTreeSet<String>> {
     if raw_value.trim().is_empty() {
         return None;
@@ -784,7 +839,8 @@ fn describe_extension_set(extensions: &BTreeSet<String>) -> String {
 
 fn manifest_owner_conflict_messages(
     output_root: &Path,
-    manifest_owner: OutputOwner,
+    existing_builder: &str,
+    existing_profile: &str,
     active_owner: OutputOwner,
     setting_location: &SourceLocation,
     string_table: &StringTable,
@@ -792,9 +848,8 @@ fn manifest_owner_conflict_messages(
     let mut diagnostic_table = string_table.clone();
     let reason = InvalidConfigReason::OutputManifestOwnerConflict {
         output_root: diagnostic_table.intern(&output_root.to_string_lossy()),
-        existing_builder: diagnostic_table.intern(manifest_owner.builder.manifest_name()),
-        existing_profile: diagnostic_table
-            .intern(build_profile_manifest_name(manifest_owner.profile)),
+        existing_builder: diagnostic_table.intern(existing_builder),
+        existing_profile: diagnostic_table.intern(existing_profile),
         active_builder: diagnostic_table.intern(active_owner.builder.manifest_name()),
         active_profile: diagnostic_table.intern(build_profile_manifest_name(active_owner.profile)),
     };

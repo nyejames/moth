@@ -1033,18 +1033,102 @@ fn read_build_manifest_rejects_malformed_v4_metadata() {
     let root = temp_dir("cleanup_ext_malformed_metadata");
     fs::create_dir_all(&root).expect("should create temp root");
 
-    // A v4 header with an unknown builder name is invalid metadata, distinct from an extension
-    // mismatch or builder mismatch between known builders.
+    // An explicit v4 owner with an unknown builder is foreign ownership, not ownerless recovery.
     write_v4_manifest_text(&root, "unknown", "dev", ".html,.js,.wasm", &["index.html"]);
 
     assert_eq!(
         read_html_manifest(&root),
-        ManifestReadResult::Recoverable {
+        ManifestReadResult::ForeignOwner {
             reason: ManifestRecoveryReason::InvalidMetadata,
+            builder: "unknown".to_string(),
+            profile: "dev".to_string(),
         }
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+fn assert_foreign_manifest_owner_fails_without_mutation(
+    test_name: &str,
+    builder: &str,
+    profile: &str,
+) {
+    let root = temp_dir(test_name);
+    let project_dir = root.join("project");
+    let output_root = project_dir.join("dev");
+    fs::create_dir_all(&output_root).expect("should create output root");
+    fs::write(output_root.join("index.html"), "foreign index")
+        .expect("should write foreign output");
+    fs::write(output_root.join("foreign.js"), "foreign script")
+        .expect("should write foreign managed output");
+    write_v4_manifest_text(
+        &output_root,
+        builder,
+        profile,
+        ".html,.js,.wasm",
+        &["foreign.js", "index.html"],
+    );
+
+    let previous_index = fs::read(output_root.join("index.html")).expect("index should exist");
+    let previous_script = fs::read(output_root.join("foreign.js")).expect("script should exist");
+    let previous_manifest =
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should exist");
+
+    let project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>Home</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    let messages = write_project_outputs(
+        &project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect_err("foreign manifest ownership must fail before output mutation");
+    assert!(matches!(
+        &messages
+            .error_diagnostics()
+            .next()
+            .expect("owner conflict diagnostic should exist")
+            .payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
+            ..
+        }
+    ));
+    assert_eq!(
+        fs::read(output_root.join("index.html")).expect("index should remain"),
+        previous_index
+    );
+    assert_eq!(
+        fs::read(output_root.join("foreign.js")).expect("script should remain"),
+        previous_script
+    );
+    assert_eq!(
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
+        previous_manifest
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn unknown_v4_builder_fails_without_mutation() {
+    assert_foreign_manifest_owner_fails_without_mutation(
+        "cleanup_unknown_v4_builder_no_mutation",
+        "foreign-builder",
+        "dev",
+    );
+}
+
+#[test]
+fn unknown_v4_profile_fails_without_mutation() {
+    assert_foreign_manifest_owner_fails_without_mutation(
+        "cleanup_unknown_v4_profile_no_mutation",
+        "html",
+        "future-profile",
+    );
 }
 
 #[test]
