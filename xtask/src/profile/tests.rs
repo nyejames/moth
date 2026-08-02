@@ -1,4 +1,4 @@
-use super::select_profile_cases;
+use super::{profile_artifacts_root, select_profile_cases};
 use crate::benchmark_execution::BenchmarkExecutionContext;
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
@@ -28,6 +28,19 @@ fn unfiltered_profile_selection_keeps_only_cli_cases() {
 
     assert_eq!(cases.len(), 1);
     assert_eq!(cases[0].id, "cli_case");
+}
+
+#[test]
+fn profile_artifacts_root_is_anchored_to_repository_root() {
+    let repository = tempfile::tempdir().expect("temporary repository should exist");
+
+    let profiles_root = profile_artifacts_root(repository.path());
+
+    assert!(profiles_root.is_absolute());
+    assert_eq!(
+        profiles_root,
+        repository.path().join("benchmarks/local-data/profiles")
+    );
 }
 
 fn manifest() -> BenchmarkManifest {

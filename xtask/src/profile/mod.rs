@@ -51,7 +51,7 @@ use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_oper
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::{CompilerBinary, build_profiling_compiler_with_timers};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use artifacts::{ProfileCaseManifest, ProfileRunPaths, write_index_md, write_run_manifest};
 use drift::{
@@ -71,6 +71,12 @@ use summary::{
 
 /// Root path for all profiling local data, relative to repo root.
 const PROFILES_ROOT: &str = "benchmarks/local-data/profiles";
+
+/// Anchor profile artifact paths to the repository rather than the benchmark
+/// case's current directory, which may be an isolated file-entry workspace.
+fn profile_artifacts_root(repository_root: &Path) -> PathBuf {
+    repository_root.join(PROFILES_ROOT)
+}
 
 /// Run the profiling benchmark workflow.
 ///
@@ -132,7 +138,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     let commit = git_revision.commit.clone();
 
     // Create the run directory.
-    let profiles_root = PathBuf::from(PROFILES_ROOT);
+    let profiles_root = profile_artifacts_root(&manifest.repository_root);
     let run_paths = ProfileRunPaths::create(&profiles_root, commit.as_deref())?;
 
     println!(
