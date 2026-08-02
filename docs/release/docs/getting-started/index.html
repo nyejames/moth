@@ -151,1208 +151,1167 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3f8f4e;
+    --doc-level-accent-hover: #337740;
+    --doc-level-border: #d7dfd8;
+    --doc-level-switch-background: #f1f5f1;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202722;
+    --doc-level-muted: #687169;
+    --doc-level-focus: #2877d4;
+}
 
-        table {
-            font-size: 0.8rem;
-        }
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
 
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
 
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
 
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
+.doc-level__title {
+    margin: 0;
+}
 
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-    <style>.doc-level,
-    .doc-pager {
-        --doc-level-accent: #3f8f4e;
-        --doc-level-accent-hover: #337740;
-        --doc-level-border: #d7dfd8;
-        --doc-level-switch-background: #f1f5f1;
-        --doc-level-selected-background: #ffffff;
-        --doc-level-text: #202722;
-        --doc-level-muted: #687169;
-        --doc-level-focus: #2877d4;
-    }
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
 
-    .doc-level {
-        min-inline-size: 0;
-        margin: 2rem 0;
-        padding: 0;
-        border: 0;
-        color: var(--doc-level-text);
-    }
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
 
-    .visually-hidden,
-    .doc-level__input {
-        position: absolute;
-        inline-size: 1px;
-        block-size: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-        border: 0;
-    }
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
 
-    .doc-level__header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-block-end: 1.25rem;
-    }
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
 
-    .doc-level__title {
-        margin: 0;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
 
-    .doc-level__switch {
-        display: inline-grid;
-        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
-        gap: 0.2rem;
-        flex: none;
-        padding: 0.22rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        background: var(--doc-level-switch-background);
-    }
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
 
-    .doc-level__option {
-        padding: 0.42rem 0.8rem;
-        border-radius: 0.55rem;
-        color: var(--doc-level-muted);
-        font-size: 0.875rem;
-        font-weight: 650;
-        line-height: 1.3;
-        text-align: center;
-        cursor: pointer;
-        user-select: none;
+.doc-level__panel {
+    display: none;
+}
 
-        transition:
-            color 130ms ease,
-            background-color 130ms ease,
-            box-shadow 130ms ease;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
 
-    .doc-level__option:hover {
-        color: var(--doc-level-accent-hover);
-    }
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
 
-    .doc-level__input--basic:checked
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:checked
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        color: var(--doc-level-accent);
-        background: var(--doc-level-selected-background);
-        box-shadow:
-            0 1px 2px rgb(20 40 24 / 10%),
-            0 0 0 1px rgb(63 143 78 / 8%);
-    }
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
 
-    .doc-level__input--basic:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
 
-    .doc-level__panel {
-        display: none;
-    }
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
 
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
     .doc-level__input--basic:checked
         ~ .doc-level__panel--basic,
     .doc-level__input--advanced:checked
         ~ .doc-level__panel--advanced {
-        display: block;
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
     }
 
     .doc-pager {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
-        margin-block: 3rem 1rem;
-    }
-
-    .doc-pager--single {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .doc-pager--single .doc-pager__link {
-        width: min(100%, 32rem);
-    }
-
-    .doc-pager--single .doc-pager__link--previous {
-        justify-self: start;
-    }
-
-    .doc-pager--single .doc-pager__link--next {
-        justify-self: end;
-    }
-
-    .doc-pager__link {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        min-inline-size: 0;
-        padding: 0.9rem 1rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        color: var(--doc-level-text);
-        text-decoration: none;
-        background: var(--doc-level-selected-background);
-
-        transition:
-            color 130ms ease,
-            border-color 130ms ease,
-            box-shadow 130ms ease;
-    }
-
-    .doc-pager__link:hover {
-        color: var(--doc-level-accent-hover);
-        border-color: var(--doc-level-accent);
-        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
-    }
-
-    .doc-pager__link:focus-visible {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
-
     .doc-pager__link--next {
-        align-items: flex-end;
-        text-align: right;
+        align-items: flex-start;
+        text-align: left;
     }
 
-    .doc-pager__direction {
-        color: var(--doc-level-muted);
-        font-size: 0.8rem;
-        font-weight: 650;
-        letter-spacing: 0.03rem;
-        text-transform: uppercase;
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #80c98c;
+        --doc-level-accent-hover: #a0d9a9;
+        --doc-level-border: #3a493d;
+        --doc-level-switch-background: #202a22;
+        --doc-level-selected-background: #303c32;
+        --doc-level-text: #edf2ee;
+        --doc-level-muted: #a8b3aa;
+        --doc-level-focus: #75b7ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
     }
 
-    .doc-pager__title {
-        font-size: 1rem;
-        font-weight: 650;
+    .doc-level__panel {
+        display: block;
     }
 
-    @media (prefers-reduced-motion: no-preference) {
-        .doc-level__input--basic:checked
-            ~ .doc-level__panel--basic,
-        .doc-level__input--advanced:checked
-            ~ .doc-level__panel--advanced {
-            animation: doc-level-enter 150ms ease-out;
-        }
-
-        @keyframes doc-level-enter {
-            from {
-                opacity: 0;
-                transform: translateY(0.2rem);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
     }
 
-    @media (max-width: 36rem) {
-        .doc-level__header {
-            align-items: stretch;
-            flex-direction: column;
-        }
-
-        .doc-level__switch {
-            align-self: flex-start;
-        }
-
-        .doc-pager {
-            grid-template-columns: minmax(0, 1fr);
-        }
-
-        .doc-pager__link--next {
-            align-items: flex-start;
-            text-align: left;
-        }
-
-        .doc-pager--single .doc-pager__link {
-            width: 100%;
-            justify-self: stretch;
-        }
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
     }
 
-    @media (prefers-color-scheme: dark) {
-        .doc-level,
-        .doc-pager {
-            --doc-level-accent: #80c98c;
-            --doc-level-accent-hover: #a0d9a9;
-            --doc-level-border: #3a493d;
-            --doc-level-switch-background: #202a22;
-            --doc-level-selected-background: #303c32;
-            --doc-level-text: #edf2ee;
-            --doc-level-muted: #a8b3aa;
-            --doc-level-focus: #75b7ff;
-        }
+    .doc-level__panel--basic::before {
+        content: "Basic";
     }
 
-    @media print {
-        .doc-level__input,
-        .doc-level__switch,
-        .doc-pager {
-            display: none;
-        }
-
-        .doc-level__panel {
-            display: block;
-        }
-
-        .doc-level__panel--advanced {
-            margin-block-start: 1.5rem;
-            padding-block-start: 1.5rem;
-            border-block-start: 1px solid;
-        }
-
-        .doc-level__panel--basic::before,
-        .doc-level__panel--advanced::before {
-            display: block;
-            margin-block-end: 0.75rem;
-            font-weight: 700;
-        }
-
-        .doc-level__panel--basic::before {
-            content: "Basic";
-        }
-
-        .doc-level__panel--advanced::before {
-            content: "Advanced";
-        }
-    }</style>
-
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with moth</h1><p><code>moth</code> compiles and tools Moth projects. You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.</p><p>Other tooling continues rapid development.</p><p>If you are running the compiler from the repository instead of an installed <code>moth</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> dev .
+cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> check .
+cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> build .</code></pre></section>
+<section class="container"><h2>Commands</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Command</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Use</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Notes</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p> <code>help</code> </p></td>
+ <td style="padding: 0.1em 0.5em; "> Prints the current command list and supported flags.</td>
+ <td style="padding: 0.1em 0.5em; "> Use this when the docs and local compiler may be out of sync.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>--version</code> </p></td>
+ <td style="padding: 0.1em 0.5em; "> Prints the current compiler/tool version.</td>
+ <td style="padding: 0.1em 0.5em; "><p> <code>-v</code> and <code>-V</code> are also accepted.</p></td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>new html</code></p></td>
+ <td style="padding: 0.1em 0.5em; "> Creates a complete HTML project scaffold.</td>
+ <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the default scaffold including <code>src/@page.moth</code>, an empty legacy <code>lib/</code> placeholder, output manifests and an optional .gitignore. The <code>lib/</code> folder has no special meaning in the accepted package design. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</p></td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>check .</code></p></td>
+ <td style="padding: 0.1em 0.5em; "> Runs project discovery, frontend compilation, type checking, HIR lowering and borrow validation without writing build artifacts.</td>
+ <td style="padding: 0.1em 0.5em; "><p> Add <code>--terse</code> for compact one-line diagnostics.</p></td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>dev .</code></p></td>
+ <td style="padding: 0.1em 0.5em; "> Builds the project, starts a local dev server, watches files and reloads the browser when sources change.</td>
+ <td style="padding: 0.1em 0.5em; "> This is the main day-to-day command for working on HTML projects.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>build .</code></p></td>
+ <td style="padding: 0.1em 0.5em; "> Builds the project and writes output files.</td>
+ <td style="padding: 0.1em 0.5em; "><p> Without <code>--release</code>, directory projects write to the configured dev output folder. With <code>--release</code>, they write to the configured release output folder.</p></td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>tests</code></p></td>
+ <td style="padding: 0.1em 0.5em; "> Runs the compiler integration test suite. (developer tool)</td>
+ <td style="padding: 0.1em 0.5em; "><p> Mainly useful when working on the compiler itself. Use <code>--terse</code> for compact output or <code>--backend html</code> / <code>--backend html_wasm</code> to focus one backend profile.</p></td>
+        </tr>
+            
+
+</table></section>
+<section class="container"><h2>Current flags</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Flag</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Applies to</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Effect</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>--release</code></p></td>
+ <td style="padding: 0.1em 0.5em; "><p><code>build</code>, <code>dev</code> </p></td>
+ <td style="padding: 0.1em 0.5em; "> Selects the release build profile and release output folder where supported.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>--html-wasm</code></p></td>
+ <td style="padding: 0.1em 0.5em; "> HTML builds</td>
+ <td style="padding: 0.1em 0.5em; "> Uses the experimental HTML-Wasm backend path. The JavaScript HTML backend currently targets Alpha.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>--terse</code></p></td>
+ <td style="padding: 0.1em 0.5em; "><p><code>check</code>, <code>tests</code></p></td>
+ <td style="padding: 0.1em 0.5em; "> Prints compact diagnostics or test summaries for tools, logs and LLM workflows.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>--force</code></p></td>
+ <td style="padding: 0.1em 0.5em; "><p><code>new html</code> only</p></td>
+ <td style="padding: 0.1em 0.5em; "><p> Allows replacing existing scaffold-owned files after a confirmation warning. Never overwrites <code>.gitignore</code> or unrelated files.</p></td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "><p><code>--host</code>, <code>--port</code>, <code>--poll-interval-ms</code></p></td>
+ <td style="padding: 0.1em 0.5em; "><p><code>dev</code> only</p></td>
+ <td style="padding: 0.1em 0.5em; "> Configures the local dev server. Defaults are `127.0.0.1`, `6342` and `300`.</td>
+        </tr>
+            
+
+</table></section>
+<section class="container"><h2>Create a new HTML project</h2><p>The scaffold creates a default project with config, a starter page, generated output folders, build manifests and an optional .gitignore. The HTML project builder itself has more rules than this page needs to cover. See <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments and generated output details.</p><p>Start a new project:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth new html
+moth new html my<span class='moth-code-operator'>-</span>site
+moth new html <span class='moth-code-operator'>~</span><span class='moth-code-operator'>/</span>projects<span class='moth-code-operator'>/</span>my<span class='moth-code-operator'>-</span>site</code></pre><p>If you omit the path, moth asks for confirmation in the current directory:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>No project path specified. Current directory: /your/path
+Create the new HTML project in this directory? y/N:</code></pre><p>If the target directory already exists, you are given three choices:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>Target directory already exists:
+/path/to/target
+
+What do you want to do?
+  1. Create the project inside this directory
+  2. Create a new child folder for the project inside this directory
+  3. Cancel
+
+Choose 1/2/3:</code></pre><p>If the path contains directories that do not exist, moth asks before creating them:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'><span class='moth-code-struct'>The</span> project target contains directories that <span class='moth-code-keyword'>do</span> not exist<span class='moth-code-operator'>:</span>
+<span class='moth-code-operator'>/</span>path<span class='moth-code-operator'>/</span>to<span class='moth-code-operator'>/</span>new<span class='moth-code-operator'>/</span>site
+
+<span class='moth-code-struct'>Create</span> the missing directories and scaffold the project there<span class='moth-code-operator'>?</span> y<span class='moth-code-operator'>/</span><span class='moth-code-struct'>N</span><span class='moth-code-operator'>:</span></code></pre><p>After the final directory is chosen, moth asks for the project name:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'><span class='moth-code-struct'>Project</span> name <span class='moth-code-parenthesis'>(</span>press <span class='moth-code-struct'>Enter</span> to use project directory name<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span></code></pre><p>Then it asks whether to add a .gitignore with Moth defaults:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'><span class='moth-code-struct'>Add</span> a .gitignore with <span class='moth-code-struct'>Moth</span> defaults<span class='moth-code-operator'>?</span> <span class='moth-code-struct'>Y</span><span class='moth-code-operator'>/</span>n<span class='moth-code-operator'>:</span></code></pre><p>If .gitignore already exists, moth asks whether to append missing defaults instead of overwriting.</p><h3>Generated project structure</h3><p>A scaffolded project looks like this:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>project-root/
+├── config.moth
+├── src/
+│   └── @page.moth
+├── lib/
+├── dev/
+│   └── .moth_manifest
+├── release/
+│   └── .moth_manifest
+└── .gitignore</code></pre><ul><li><code>dev/</code> and <code>release/</code> are output folders.</li><li><code>.moth_manifest</code> files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li><li>The current scaffold creates an empty legacy <code>lib/</code> placeholder. It has no special package meaning. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth new html my<span class='moth-code-operator'>-</span>site <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>force</code></pre><p>It still asks for a second confirmation and never overwrites .gitignore or unrelated files.</p><p>After creation, check and run the project:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>cd my<span class='moth-code-operator'>-</span>site
+moth check .
+moth dev .</code></pre></section>
+<section class="container"><h2>Run the dev server</h2><p><code>dev</code> handles normal day-to-day Moth project work. It builds the project, serves the generated files locally, watches for source changes and sends reload events to the browser.</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth dev .</code></pre><p>By default, open:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>http://127.0.0.1:6342/</code></pre><p>Useful dev-server options:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>port <span class='moth-code-number'>8080</span>
+moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>host <span class='moth-code-number'>0.0.0.0</span>
+moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>poll<span class='moth-code-operator'>-</span>interval<span class='moth-code-operator'>-</span>ms <span class='moth-code-number'>100</span></code></pre><p>When a build fails, fix the reported error and save again. The dev server is designed around fast feedback rather than a manual rebuild loop.</p></section>
+<section class="container"><h2>Build a project</h2><p>Use <code>build</code> when you want files written to disk without running the dev server.</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth build .</code></pre><p>For a release build:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release</code></pre><p>For HTML projects, generated files are written under the configured output folder. The default scaffold currently uses <code>dev</code> for development output and <code>release</code> for release output.</p></section>
+<section class="container"><h2>Check without building</h2><p><code>check</code> gives the fastest correctness signal for editor loops and CI-style validation. It doesn&#39;t write output artifacts, but it runs the shared frontend diagnostics that all backends use.</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth check .</code></pre><p>Use terse mode when another tool will read the output:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth check . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>terse</code></pre><p>Terse diagnostics have a stable compact shape:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>E|type|src/@page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
+W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch</code></pre></section>
+<section class="container"><h2>Reading compiler errors</h2><p>Moth uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>Type Error (ಠ_ಠ) 🔥
+Declaration &#39;count&#39; has incompatible initializer type. Expected &#39;Int&#39;, but found &#39;String&#39;.
+
+  --&gt; src/@page.moth:6:17
+    |
+  6 | count Int = &quot;wrong&quot;
+    |             ^^^^^^^
+  Use an Int value here, or change the declaration type.</code></pre><p>Read diagnostics from top to bottom:</p><ol><li>The kind tells you which part of the compiler rejected the program.</li><li>The message tells you the actual rule that failed.</li><li>The file/line/column points to the primary source location.</li><li>The caret shows the token or expression the compiler is complaining about.</li><li>The guidance lines are suggestions, not a separate error.</li></ol></section>
+<section class="container"><h2>Error kinds</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Kind</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Meaning</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Usual fix</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Syntax Error</td>
+ <td style="padding: 0.1em 0.5em; "> The source text could not be parsed as Moth syntax.</td>
+ <td style="padding: 0.1em 0.5em; "> Check punctuation, block delimiters, template brackets, imports and declaration shape.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Type Error</td>
+ <td style="padding: 0.1em 0.5em; "> The expression type does not match the expected type.</td>
+ <td style="padding: 0.1em 0.5em; "> Check annotations, return types, function arguments, collection element types and contextual casts.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Language Rule Error</td>
+ <td style="padding: 0.1em 0.5em; "> The syntax is valid, but it violates a language rule.</td>
+ <td style="padding: 0.1em 0.5em; "> Check things like mutability, import visibility, unsupported feature surfaces, duplicate names or invalid top-level code.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Missing File or Directory</td>
+ <td style="padding: 0.1em 0.5em; "> The project references a file, directory, import path or output path that cannot be resolved.</td>
+ <td style="padding: 0.1em 0.5em; "> Check spelling, relative paths, `entry_root` and project config.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Malformed Config</td>
+ <td style="padding: 0.1em 0.5em; "> The project config exists but contains unsupported, missing or invalid settings.</td>
+ <td style="padding: 0.1em 0.5em; "> Check `config.moth` and backend-specific config rules.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Borrow Checker Violation</td>
+ <td style="padding: 0.1em 0.5em; "> The program violates Moth's access and ownership rules.</td>
+ <td style="padding: 0.1em 0.5em; "> Check mutable/exclusive access, later uses after possible moves and overlapping borrows.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Dev Server Issue</td>
+ <td style="padding: 0.1em 0.5em; "> The local server could not start, watch, build or serve the project correctly.</td>
+ <td style="padding: 0.1em 0.5em; "> Check port conflicts, host binding, project path, and file permissions.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Compiler Bug / HIR / LIR / WASM Generation Bug</td>
+ <td style="padding: 0.1em 0.5em; "> The compiler hit an internal invariant or unsupported backend path.</td>
+ <td style="padding: 0.1em 0.5em; "> Reduce the input if practical and report it. User code should receive structured errors instead of compiler bugs.</td>
+        </tr>
+            
+
+</table></section>
+<section class="container"><h2>Warnings and future suggestions</h2><p>Warnings are for code that can still compile but deserves attention. Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues and import alias case mismatches.</p><p>Moth separates correctness from style pressure. The future <code>suggest</code> command will become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code. Noisy suggestions such as unused variables, unused imports, unused declarations and more specific style improvements belong there.</p><p>The intended workflow will be:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'>moth check .
+moth suggest .
+moth fmt .</code></pre><p>For now, use <code>check</code> and the compiler&#39;s normal warnings as the practical baseline.</p></section>
+<section class="container"><h2>Planned moth extensions</h2><p><code>moth</code> will become the main Moth project tool, not a thin compiler launcher. Planned additions include:</p><ul><li>a package manager for Moth packages and project dependencies</li><li>a formatter for stable project-wide formatting</li><li><code>suggest</code>, a pedantic style and cleanup command to use alongside <code>check</code></li><li>richer <code>new</code> project options, including more complete config templates</li><li>stronger project maintenance commands as the build system matures</li></ul><p>The short-term rule is simple: <code>dev</code> for fast browser feedback, <code>check</code> for correctness and <code>build</code> when you want output files.</p></section>
+<section class="container"><nav class="doc-pager doc-pager--single" aria-label="Language documentation">
+    <a
+        class="doc-pager__link doc-pager__link--next"
+        href="../language-overview/"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">Language basics</span>
             </a>
 
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
-            >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with moth</h1><p><code>moth</code> compiles and tools Moth projects. You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.</p><p>Other tooling continues rapid development.</p><p>If you are running the compiler from the repository instead of an installed <code>moth</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> dev .
-    cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> check .
-    cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> build .
-    </code></pre></section>
-    <section class="container"><h2>Commands</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
-
-        
-        <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
-             <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Command</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Use</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Notes</th> 
-    </tr>
-
-
-
-                    
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p> <code>help</code> </p></td>
-     <td style="padding: 0.1em 0.5em; "> Prints the current command list and supported flags.</td>
-     <td style="padding: 0.1em 0.5em; "> Use this when the docs and local compiler may be out of sync.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>--version</code> </p></td>
-     <td style="padding: 0.1em 0.5em; "> Prints the current compiler/tool version.</td>
-     <td style="padding: 0.1em 0.5em; "><p> <code>-v</code> and <code>-V</code> are also accepted.</p></td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>new html</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> Creates a complete HTML project scaffold.</td>
-     <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the default scaffold including <code>src/@page.moth</code>, an empty legacy <code>lib/</code> placeholder, output manifests and an optional .gitignore. The <code>lib/</code> folder has no special meaning in the accepted package design. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</p></td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>check .</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> Runs project discovery, frontend compilation, type checking, HIR lowering and borrow validation without writing build artifacts.</td>
-     <td style="padding: 0.1em 0.5em; "><p> Add <code>--terse</code> for compact one-line diagnostics.</p></td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>dev .</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> Builds the project, starts a local dev server, watches files and reloads the browser when sources change.</td>
-     <td style="padding: 0.1em 0.5em; "> This is the main day-to-day command for working on HTML projects.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>build .</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> Builds the project and writes output files.</td>
-     <td style="padding: 0.1em 0.5em; "><p> Without <code>--release</code>, directory projects write to the configured dev output folder. With <code>--release</code>, they write to the configured release output folder.</p></td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>tests</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> Runs the compiler integration test suite. (developer tool)</td>
-     <td style="padding: 0.1em 0.5em; "><p> Mainly useful when working on the compiler itself. Use <code>--terse</code> for compact output or <code>--backend html</code> / <code>--backend html_wasm</code> to focus one backend profile.</p></td>
-            </tr>
-                
-
-    </table></section>
-    <section class="container"><h2>Current flags</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
-
-        
-        <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
-             <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Flag</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Applies to</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Effect</th> 
-    </tr>
-
-
-
-                    
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>--release</code></p></td>
-     <td style="padding: 0.1em 0.5em; "><p><code>build</code>, <code>dev</code> </p></td>
-     <td style="padding: 0.1em 0.5em; "> Selects the release build profile and release output folder where supported.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>--html-wasm</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> HTML builds</td>
-     <td style="padding: 0.1em 0.5em; "> Uses the experimental HTML-Wasm backend path. The JavaScript HTML backend currently targets Alpha.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>--terse</code></p></td>
-     <td style="padding: 0.1em 0.5em; "><p><code>check</code>, <code>tests</code></p></td>
-     <td style="padding: 0.1em 0.5em; "> Prints compact diagnostics or test summaries for tools, logs and LLM workflows.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>--force</code></p></td>
-     <td style="padding: 0.1em 0.5em; "><p><code>new html</code> only</p></td>
-     <td style="padding: 0.1em 0.5em; "><p> Allows replacing existing scaffold-owned files after a confirmation warning. Never overwrites <code>.gitignore</code> or unrelated files.</p></td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "><p><code>--host</code>, <code>--port</code>, <code>--poll-interval-ms</code></p></td>
-     <td style="padding: 0.1em 0.5em; "><p><code>dev</code> only</p></td>
-     <td style="padding: 0.1em 0.5em; "> Configures the local dev server. Defaults are `127.0.0.1`, `6342` and `300`.</td>
-            </tr>
-                
-
-    </table></section>
-    <section class="container"><h2>Create a new HTML project</h2><p>The scaffold creates a default project with config, a starter page, generated output folders, build manifests and an optional .gitignore. The HTML project builder itself has more rules than this page needs to cover. See <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments and generated output details.</p><p>Start a new project:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth new html
-    moth new html my<span class='moth-code-operator'>-</span>site
-    moth new html <span class='moth-code-operator'>~</span><span class='moth-code-operator'>/</span>projects<span class='moth-code-operator'>/</span>my<span class='moth-code-operator'>-</span>site
-    </code></pre><p>If you omit the path, moth asks for confirmation in the current directory:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-            No project path specified. Current directory: /your/path
-            Create the new HTML project in this directory? y/N:
-        </code></pre><p>If the target directory already exists, you are given three choices:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-            Target directory already exists:
-            /path/to/target
-
-            What do you want to do?
-              1. Create the project inside this directory
-              2. Create a new child folder for the project inside this directory
-              3. Cancel
-
-            Choose 1/2/3:
-        </code></pre><p>If the path contains directories that do not exist, moth asks before creating them:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    <span class='moth-code-struct'>The</span> project target contains directories that <span class='moth-code-keyword'>do</span> not exist<span class='moth-code-operator'>:</span>
-    <span class='moth-code-operator'>/</span>path<span class='moth-code-operator'>/</span>to<span class='moth-code-operator'>/</span>new<span class='moth-code-operator'>/</span>site
-
-    <span class='moth-code-struct'>Create</span> the missing directories and scaffold the project there<span class='moth-code-operator'>?</span> y<span class='moth-code-operator'>/</span><span class='moth-code-struct'>N</span><span class='moth-code-operator'>:</span>
-    </code></pre><p>After the final directory is chosen, moth asks for the project name:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    <span class='moth-code-struct'>Project</span> name <span class='moth-code-parenthesis'>(</span>press <span class='moth-code-struct'>Enter</span> to use project directory name<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span>
-    </code></pre><p>Then it asks whether to add a .gitignore with Moth defaults:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    <span class='moth-code-struct'>Add</span> a .gitignore with <span class='moth-code-struct'>Moth</span> defaults<span class='moth-code-operator'>?</span> <span class='moth-code-struct'>Y</span><span class='moth-code-operator'>/</span>n<span class='moth-code-operator'>:</span>
-    </code></pre><p>If .gitignore already exists, moth asks whether to append missing defaults instead of overwriting.</p><h3>Generated project structure</h3><p>A scaffolded project looks like this:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-            project-root/
-            ├── config.moth
-            ├── src/
-            │   └── @page.moth
-            ├── lib/
-            ├── dev/
-            │   └── .moth_manifest
-            ├── release/
-            │   └── .moth_manifest
-            └── .gitignore
-        </code></pre><ul><li><code>dev/</code> and <code>release/</code> are output folders.</li><li><code>.moth_manifest</code> files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li><li>The current scaffold creates an empty legacy <code>lib/</code> placeholder. It has no special package meaning. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth new html my<span class='moth-code-operator'>-</span>site <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>force
-    </code></pre><p>It still asks for a second confirmation and never overwrites .gitignore or unrelated files.</p><p>After creation, check and run the project:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    cd my<span class='moth-code-operator'>-</span>site
-    moth check .
-    moth dev .
-    </code></pre></section>
-    <section class="container"><h2>Run the dev server</h2><p><code>dev</code> handles normal day-to-day Moth project work. It builds the project, serves the generated files locally, watches for source changes and sends reload events to the browser.</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth dev .
-    </code></pre><p>By default, open:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-            http://127.0.0.1:6342/
-        </code></pre><p>Useful dev-server options:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>port <span class='moth-code-number'>8080</span>
-    moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>host <span class='moth-code-number'>0.0.0.0</span>
-    moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>poll<span class='moth-code-operator'>-</span>interval<span class='moth-code-operator'>-</span>ms <span class='moth-code-number'>100</span>
-    </code></pre><p>When a build fails, fix the reported error and save again. The dev server is designed around fast feedback rather than a manual rebuild loop.</p></section>
-    <section class="container"><h2>Build a project</h2><p>Use <code>build</code> when you want files written to disk without running the dev server.</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth build .
-    </code></pre><p>For a release build:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release
-    </code></pre><p>For HTML projects, generated files are written under the configured output folder. The default scaffold currently uses <code>dev</code> for development output and <code>release</code> for release output.</p></section>
-    <section class="container"><h2>Check without building</h2><p><code>check</code> gives the fastest correctness signal for editor loops and CI-style validation. It doesn&#39;t write output artifacts, but it runs the shared frontend diagnostics that all backends use.</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth check .
-    </code></pre><p>Use terse mode when another tool will read the output:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth check . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>terse
-    </code></pre><p>Terse diagnostics have a stable compact shape:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-            E|type|src/@page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
-            W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch
-        </code></pre></section>
-    <section class="container"><h2>Reading compiler errors</h2><p>Moth uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-            Type Error (ಠ_ಠ) 🔥
-            Declaration 'count' has incompatible initializer type. Expected 'Int', but found 'String'.
-
-              --> src/@page.moth:6:17
-                |
-              6 | count Int = "wrong"
-                |             ^^^^^^^
-              Use an Int value here, or change the declaration type.
-        </code></pre><p>Read diagnostics from top to bottom:</p><ol><li>The kind tells you which part of the compiler rejected the program.</li><li>The message tells you the actual rule that failed.</li><li>The file/line/column points to the primary source location.</li><li>The caret shows the token or expression the compiler is complaining about.</li><li>The guidance lines are suggestions, not a separate error.</li></ol></section>
-    <section class="container"><h2>Error kinds</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
-
-        
-        <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
-             <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Kind</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Meaning</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Usual fix</th> 
-    </tr>
-
-
-
-                    
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Syntax Error</td>
-     <td style="padding: 0.1em 0.5em; "> The source text could not be parsed as Moth syntax.</td>
-     <td style="padding: 0.1em 0.5em; "> Check punctuation, block delimiters, template brackets, imports and declaration shape.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Type Error</td>
-     <td style="padding: 0.1em 0.5em; "> The expression type does not match the expected type.</td>
-     <td style="padding: 0.1em 0.5em; "> Check annotations, return types, function arguments, collection element types and contextual casts.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Language Rule Error</td>
-     <td style="padding: 0.1em 0.5em; "> The syntax is valid, but it violates a language rule.</td>
-     <td style="padding: 0.1em 0.5em; "> Check things like mutability, import visibility, unsupported feature surfaces, duplicate names or invalid top-level code.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Missing File or Directory</td>
-     <td style="padding: 0.1em 0.5em; "> The project references a file, directory, import path or output path that cannot be resolved.</td>
-     <td style="padding: 0.1em 0.5em; "> Check spelling, relative paths, `entry_root` and project config.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Malformed Config</td>
-     <td style="padding: 0.1em 0.5em; "> The project config exists but contains unsupported, missing or invalid settings.</td>
-     <td style="padding: 0.1em 0.5em; "> Check `config.moth` and backend-specific config rules.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Borrow Checker Violation</td>
-     <td style="padding: 0.1em 0.5em; "> The program violates Moth's access and ownership rules.</td>
-     <td style="padding: 0.1em 0.5em; "> Check mutable/exclusive access, later uses after possible moves and overlapping borrows.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Dev Server Issue</td>
-     <td style="padding: 0.1em 0.5em; "> The local server could not start, watch, build or serve the project correctly.</td>
-     <td style="padding: 0.1em 0.5em; "> Check port conflicts, host binding, project path, and file permissions.</td>
-            </tr>
-
-    <tr style="border-bottom: 1px dotted grey;">
-                 <td style="padding: 0.1em 0.5em; "> Compiler Bug / HIR / LIR / WASM Generation Bug</td>
-     <td style="padding: 0.1em 0.5em; "> The compiler hit an internal invariant or unsupported backend path.</td>
-     <td style="padding: 0.1em 0.5em; "> Reduce the input if practical and report it. User code should receive structured errors instead of compiler bugs.</td>
-            </tr>
-                
-
-    </table></section>
-    <section class="container"><h2>Warnings and future suggestions</h2><p>Warnings are for code that can still compile but deserves attention. Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues and import alias case mismatches.</p><p>Moth separates correctness from style pressure. The future <code>suggest</code> command will become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code. Noisy suggestions such as unused variables, unused imports, unused declarations and more specific style improvements belong there.</p><p>The intended workflow will be:</p><pre style="
-        padding-left: 1em;
-        border-radius: 5px;
-        max-width: 100%;
-        white-space: pre;
-        overflow-x: auto;
-    "><code class='codeblock'>
-    moth check .
-    moth suggest .
-    moth fmt .
-    </code></pre><p>For now, use <code>check</code> and the compiler&#39;s normal warnings as the practical baseline.</p></section>
-    <section class="container"><h2>Planned moth extensions</h2><p><code>moth</code> will become the main Moth project tool, not a thin compiler launcher. Planned additions include:</p><ul><li>a package manager for Moth packages and project dependencies</li><li>a formatter for stable project-wide formatting</li><li><code>suggest</code>, a pedantic style and cleanup command to use alongside <code>check</code></li><li>richer <code>new</code> project options, including more complete config templates</li><li>stronger project maintenance commands as the build system matures</li></ul><p>The short-term rule is simple: <code>dev</code> for fast browser feedback, <code>check</code> for correctness and <code>build</code> when you want output files.</p></section>
-    <section class="container"><nav class="doc-pager doc-pager--single" aria-label="Language documentation">
-        <a
-            class="doc-pager__link doc-pager__link--next"
-            href="../language-overview/"
-                    rel="next"
-                >
-                    <span class="doc-pager__direction">Next →</span>
-                    <span class="doc-pager__title">Language basics</span>
-                </a>
-
-                
-
-    </nav></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
-
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
-
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
-
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
-
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
-
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
-
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
-
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
-
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
-
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
-
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
-
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
-
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
-
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
-
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
-
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
-
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
-
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
-
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
-
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
-
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
-
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
-
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
-
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
-
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
-
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
-
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
-
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
-
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
-
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
-
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
-
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
-
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
-
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
-
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+            
+
+</nav></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

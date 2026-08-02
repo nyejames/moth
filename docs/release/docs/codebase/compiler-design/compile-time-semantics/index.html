@@ -151,561 +151,558 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
-
-        table {
-            font-size: 0.8rem;
-        }
-
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
-
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
-
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
-
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Compiler design</a> / 08. Compile-time semantics</p><p>Folded constants, concrete generic requests, static trait evidence and explicit casts finish before HIR begins.</p></section>
+<section class="container"><h1>Constants, generics, traits and casts before HIR</h1><p>HIR and backends should not re-solve the same compile-time questions on every function body. Work that can finish early should finish early.</p><p>If a value never changes at runtime, fold it. If a generic call needs a concrete function, request one. If a trait bound needs evidence, resolve it. If a conversion needs a cast, emit an explicit operation.</p><p>AST owns that static work.</p><h2>Folding constants</h2><p><code>greeting_prefix</code> begins as source:</p><pre style=""><code class='codeblock'>greeting_prefix <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello&quot;</span></code></pre><p>After checking and folding, it becomes a <strong>backend-neutral compile-time value</strong>. Exported folded facts copy into the immutable module interface. Consumers never re-parse or re-fold the provider&#39;s template or literal.</p><p>Constants are compile-time declarations and metadata, not runtime top-level statements. Const records may group fully folded struct or anonymous-record constants as field-access-only compile-time data. They are not runtime values to pass around.</p><p>Imported build values and resolved source <code>#Import</code> primitives enter as ordinary folded constants. They create no runtime wrapper type and no special HIR node category.</p><p><strong>Diagram placeholder:</strong> Authored string becomes a backend-neutral compile-time value</p><p><em>Caption: exact semantic handoff, simplified storage.</em> <em>Question: what leaves the runtime program entirely?</em></p><h2>Generic requests</h2><p>A generic template lives in the declaring module as an immutable validated template. At a call site, AST:</p><ol><li>infers concrete arguments from immediate call arguments and immediate expected result context</li><li>resolves required visible trait evidence</li><li>emits a <strong>module-local request</strong> keyed by stable generic identity, canonical concrete types and evidence identities</li></ol><p>The build system aggregates, deduplicates and schedules requests. The compiler materialises each accepted request as a <strong>generated sidecar</strong> beside the base module. Base artefacts stay immutable. Generated functions carry their own HIR, borrow facts and link facts. New concrete code grows beside the original template. The template itself does not mutate.</p><p>HIR and backends never infer generic arguments or consume unresolved template state. Concrete code appears before they look.</p><p><strong>Diagram placeholder:</strong> One call creates a named request which later materialises beside the base module</p><p><em>Caption: accepted architecture.</em> <em>Question: when does generic code become concrete?</em></p><h2>Static trait evidence</h2><p>Traits and conformances are compile-time frontend metadata. AST validates requirements, explicit conformances, evidence visibility and bound-provided receiver calls.</p><p>Static bound calls resolve to <strong>concrete executable targets</strong> before HIR. HIR carries no trait objects, erased dispatch or runtime trait evidence.</p><p>That choice rejects a familiar dynamic path. You cannot box &quot;any <code>Show</code>&quot; and discover methods later. You can write choices for closed heterogeneity and generics with evidence for static reuse.</p><p><strong>Diagram placeholder:</strong> A trait bound resolves before HIR</p><p><em>Caption: simplified static dispatch.</em> <em>Question: what replaces a trait object in this model?</em></p><h2>Coercion and explicit casts</h2><p>Contextual coercion and explicit <code>cast</code> remain different paths.</p><p>Coercion happens when a receiving boundary accepts a value under documented rules. The boundary owner applies it.</p><p>Explicit <code>cast</code> is AST-owned conversion under compiler-defined policy and evidence. Foldable casts fold. Runtime casts become explicit operations. User-defined cast evidence becomes an ordinary direct function call before or during HIR lowering. Cast metadata itself does not tour HIR as a mini language.</p><p>Failures belong at the cast site or boundary with structured diagnostics, not as a quiet backend surprise.</p><p><strong>Diagram placeholder:</strong> Contextual acceptance and explicit conversion take separate paths</p><p><em>Caption: teaching distinction.</em> <em>Question: who requested conversion?</em></p><h2>Numeric ownership</h2><p>Numbers look simple until every layer invents its own rules.</p><p>Accepted ownership splits cleanly:</p><ul><li><strong><code>numeric_text</code></strong> owns lexical grammar and materialisation helpers</li><li><strong>AST</strong> owns semantic numeric typing, constant evaluation, checked failure rules and cast evidence</li><li><strong>HIR</strong> records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority</li><li>compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting</li></ul><p><code>Number</code> and related roadmap work such as <code>NumberN</code> ideas may still be landing. Keep <strong>current</strong> <code>Number</code> and <code>Byte</code> status on the progress matrix separate from the ownership split above. The split is accepted even while surface coverage grows.</p><h2>What can fail here</h2><ul><li>non-foldable constant where a constant was required</li><li>unresolved generic request or missing static evidence</li><li>invalid cast or numeric overflow under checked rules</li><li>unsupported conversion</li></ul><p>Do not re-teach diagnostic transport here. The semantic rejection is the point.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> dynamic trait objects, broad implicit conversion and runtime generic interpretation.</p><p><strong>Choice:</strong> static evidence, compiler-owned casts and concrete requests.</p><p><strong>Benefit:</strong> HIR and backends receive fewer open-ended semantic questions. Parallel targets share one answered story.</p><p><strong>Cost:</strong> less runtime dynamism and more compile-time rejection when evidence is missing.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> AST owns constants, generic inference, traits, casts and concrete requests.</li><li><strong>Current implementation:</strong> label numeric and anonymous-record support from the progress matrix.</li><li><strong>Queued work:</strong> <code>number_type_numeric_plan.md</code> and <code>import_values_anonymous_records_plan.md</code>.</li><li><strong>Deferred or outside scope:</strong> trait objects and broad runtime reflection.</li></ul><h2>Exit state</h2><p>You leave with folded constants, concrete requests, static evidence and finalised cast operations. Next: why the HTML template needs a temporary structural IR before HIR runtime work.</p></section>
+<section class="container"><p><a href="../">Compiler design</a> / <a href="../ast-semantics-and-types">Previous</a> / <a href="../templates-and-tir">Next</a></p></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
 
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
-            >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Compiler design</a> / 08. Compile-time semantics</p><p>Folded constants, concrete generic requests, static trait evidence and explicit casts finish before HIR begins.</p></section>
-    <section class="container"><h1>Constants, generics, traits and casts before HIR</h1><p>HIR and backends should not re-solve the same compile-time questions on every function body. Work that can finish early should finish early.</p><p>If a value never changes at runtime, fold it. If a generic call needs a concrete function, request one. If a trait bound needs evidence, resolve it. If a conversion needs a cast, emit an explicit operation.</p><p>AST owns that static work.</p><h2>Folding constants</h2><p><code>greeting_prefix</code> begins as source:</p><pre style=""><code class='codeblock'>
-    greeting_prefix <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello&quot;</span>
-    </code></pre><p>After checking and folding, it becomes a <strong>backend-neutral compile-time value</strong>. Exported folded facts copy into the immutable module interface. Consumers never re-parse or re-fold the provider&#39;s template or literal.</p><p>Constants are compile-time declarations and metadata, not runtime top-level statements. Const records may group fully folded struct or anonymous-record constants as field-access-only compile-time data. They are not runtime values to pass around.</p><p>Imported build values and resolved source <code>#Import</code> primitives enter as ordinary folded constants. They create no runtime wrapper type and no special HIR node category.</p><p><strong>Diagram placeholder:</strong> Authored string becomes a backend-neutral compile-time value</p><p><em>Caption: exact semantic handoff, simplified storage.</em> <em>Question: what leaves the runtime program entirely?</em></p><h2>Generic requests</h2><p>A generic template lives in the declaring module as an immutable validated template. At a call site, AST:</p><ol><li>infers concrete arguments from immediate call arguments and immediate expected result context</li><li>resolves required visible trait evidence</li><li>emits a <strong>module-local request</strong> keyed by stable generic identity, canonical concrete types and evidence identities</li></ol><p>The build system aggregates, deduplicates and schedules requests. The compiler materialises each accepted request as a <strong>generated sidecar</strong> beside the base module. Base artefacts stay immutable. Generated functions carry their own HIR, borrow facts and link facts. New concrete code grows beside the original template. The template itself does not mutate.</p><p>HIR and backends never infer generic arguments or consume unresolved template state. Concrete code appears before they look.</p><p><strong>Diagram placeholder:</strong> One call creates a named request which later materialises beside the base module</p><p><em>Caption: accepted architecture.</em> <em>Question: when does generic code become concrete?</em></p><h2>Static trait evidence</h2><p>Traits and conformances are compile-time frontend metadata. AST validates requirements, explicit conformances, evidence visibility and bound-provided receiver calls.</p><p>Static bound calls resolve to <strong>concrete executable targets</strong> before HIR. HIR carries no trait objects, erased dispatch or runtime trait evidence.</p><p>That choice rejects a familiar dynamic path. You cannot box &quot;any <code>Show</code>&quot; and discover methods later. You can write choices for closed heterogeneity and generics with evidence for static reuse.</p><p><strong>Diagram placeholder:</strong> A trait bound resolves before HIR</p><p><em>Caption: simplified static dispatch.</em> <em>Question: what replaces a trait object in this model?</em></p><h2>Coercion and explicit casts</h2><p>Contextual coercion and explicit <code>cast</code> remain different paths.</p><p>Coercion happens when a receiving boundary accepts a value under documented rules. The boundary owner applies it.</p><p>Explicit <code>cast</code> is AST-owned conversion under compiler-defined policy and evidence. Foldable casts fold. Runtime casts become explicit operations. User-defined cast evidence becomes an ordinary direct function call before or during HIR lowering. Cast metadata itself does not tour HIR as a mini language.</p><p>Failures belong at the cast site or boundary with structured diagnostics, not as a quiet backend surprise.</p><p><strong>Diagram placeholder:</strong> Contextual acceptance and explicit conversion take separate paths</p><p><em>Caption: teaching distinction.</em> <em>Question: who requested conversion?</em></p><h2>Numeric ownership</h2><p>Numbers look simple until every layer invents its own rules.</p><p>Accepted ownership splits cleanly:</p><ul><li><strong><code>numeric_text</code></strong> owns lexical grammar and materialisation helpers</li><li><strong>AST</strong> owns semantic numeric typing, constant evaluation, checked failure rules and cast evidence</li><li><strong>HIR</strong> records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority</li><li>compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting</li></ul><p><code>Number</code> and related roadmap work such as <code>NumberN</code> ideas may still be landing. Keep <strong>current</strong> <code>Number</code> and <code>Byte</code> status on the progress matrix separate from the ownership split above. The split is accepted even while surface coverage grows.</p><h2>What can fail here</h2><ul><li>non-foldable constant where a constant was required</li><li>unresolved generic request or missing static evidence</li><li>invalid cast or numeric overflow under checked rules</li><li>unsupported conversion</li></ul><p>Do not re-teach diagnostic transport here. The semantic rejection is the point.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> dynamic trait objects, broad implicit conversion and runtime generic interpretation.</p><p><strong>Choice:</strong> static evidence, compiler-owned casts and concrete requests.</p><p><strong>Benefit:</strong> HIR and backends receive fewer open-ended semantic questions. Parallel targets share one answered story.</p><p><strong>Cost:</strong> less runtime dynamism and more compile-time rejection when evidence is missing.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> AST owns constants, generic inference, traits, casts and concrete requests.</li><li><strong>Current implementation:</strong> label numeric and anonymous-record support from the progress matrix.</li><li><strong>Queued work:</strong> <code>number_type_numeric_plan.md</code> and <code>import_values_anonymous_records_plan.md</code>.</li><li><strong>Deferred or outside scope:</strong> trait objects and broad runtime reflection.</li></ul><h2>Exit state</h2><p>You leave with folded constants, concrete requests, static evidence and finalised cast operations. Next: why the HTML template needs a temporary structural IR before HIR runtime work.</p></section>
-    <section class="container"><p><a href="../">Compiler design</a> / <a href="../ast-semantics-and-types">Previous</a> / <a href="../templates-and-tir">Next</a></p></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
 
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
 
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
-
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

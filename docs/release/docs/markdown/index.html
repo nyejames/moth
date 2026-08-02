@@ -151,1098 +151,1085 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3f8f4e;
+    --doc-level-accent-hover: #337740;
+    --doc-level-border: #d7dfd8;
+    --doc-level-switch-background: #f1f5f1;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202722;
+    --doc-level-muted: #687169;
+    --doc-level-focus: #2877d4;
+}
 
-        table {
-            font-size: 0.8rem;
-        }
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
 
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
 
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
 
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
+.doc-level__title {
+    margin: 0;
+}
 
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-    <style>.doc-level,
-    .doc-pager {
-        --doc-level-accent: #3f8f4e;
-        --doc-level-accent-hover: #337740;
-        --doc-level-border: #d7dfd8;
-        --doc-level-switch-background: #f1f5f1;
-        --doc-level-selected-background: #ffffff;
-        --doc-level-text: #202722;
-        --doc-level-muted: #687169;
-        --doc-level-focus: #2877d4;
-    }
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
 
-    .doc-level {
-        min-inline-size: 0;
-        margin: 2rem 0;
-        padding: 0;
-        border: 0;
-        color: var(--doc-level-text);
-    }
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
 
-    .visually-hidden,
-    .doc-level__input {
-        position: absolute;
-        inline-size: 1px;
-        block-size: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-        border: 0;
-    }
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
 
-    .doc-level__header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-block-end: 1.25rem;
-    }
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
 
-    .doc-level__title {
-        margin: 0;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
 
-    .doc-level__switch {
-        display: inline-grid;
-        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
-        gap: 0.2rem;
-        flex: none;
-        padding: 0.22rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        background: var(--doc-level-switch-background);
-    }
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
 
-    .doc-level__option {
-        padding: 0.42rem 0.8rem;
-        border-radius: 0.55rem;
-        color: var(--doc-level-muted);
-        font-size: 0.875rem;
-        font-weight: 650;
-        line-height: 1.3;
-        text-align: center;
-        cursor: pointer;
-        user-select: none;
+.doc-level__panel {
+    display: none;
+}
 
-        transition:
-            color 130ms ease,
-            background-color 130ms ease,
-            box-shadow 130ms ease;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
 
-    .doc-level__option:hover {
-        color: var(--doc-level-accent-hover);
-    }
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
 
-    .doc-level__input--basic:checked
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:checked
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        color: var(--doc-level-accent);
-        background: var(--doc-level-selected-background);
-        box-shadow:
-            0 1px 2px rgb(20 40 24 / 10%),
-            0 0 0 1px rgb(63 143 78 / 8%);
-    }
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
 
-    .doc-level__input--basic:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
 
-    .doc-level__panel {
-        display: none;
-    }
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
 
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
     .doc-level__input--basic:checked
         ~ .doc-level__panel--basic,
     .doc-level__input--advanced:checked
         ~ .doc-level__panel--advanced {
-        display: block;
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
     }
 
     .doc-pager {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
-        margin-block: 3rem 1rem;
-    }
-
-    .doc-pager--single {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .doc-pager--single .doc-pager__link {
-        width: min(100%, 32rem);
-    }
-
-    .doc-pager--single .doc-pager__link--previous {
-        justify-self: start;
-    }
-
-    .doc-pager--single .doc-pager__link--next {
-        justify-self: end;
-    }
-
-    .doc-pager__link {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        min-inline-size: 0;
-        padding: 0.9rem 1rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        color: var(--doc-level-text);
-        text-decoration: none;
-        background: var(--doc-level-selected-background);
-
-        transition:
-            color 130ms ease,
-            border-color 130ms ease,
-            box-shadow 130ms ease;
-    }
-
-    .doc-pager__link:hover {
-        color: var(--doc-level-accent-hover);
-        border-color: var(--doc-level-accent);
-        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
-    }
-
-    .doc-pager__link:focus-visible {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
-
     .doc-pager__link--next {
-        align-items: flex-end;
-        text-align: right;
+        align-items: flex-start;
+        text-align: left;
     }
 
-    .doc-pager__direction {
-        color: var(--doc-level-muted);
-        font-size: 0.8rem;
-        font-weight: 650;
-        letter-spacing: 0.03rem;
-        text-transform: uppercase;
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #80c98c;
+        --doc-level-accent-hover: #a0d9a9;
+        --doc-level-border: #3a493d;
+        --doc-level-switch-background: #202a22;
+        --doc-level-selected-background: #303c32;
+        --doc-level-text: #edf2ee;
+        --doc-level-muted: #a8b3aa;
+        --doc-level-focus: #75b7ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
     }
 
-    .doc-pager__title {
-        font-size: 1rem;
-        font-weight: 650;
+    .doc-level__panel {
+        display: block;
     }
 
-    @media (prefers-reduced-motion: no-preference) {
-        .doc-level__input--basic:checked
-            ~ .doc-level__panel--basic,
-        .doc-level__input--advanced:checked
-            ~ .doc-level__panel--advanced {
-            animation: doc-level-enter 150ms ease-out;
-        }
-
-        @keyframes doc-level-enter {
-            from {
-                opacity: 0;
-                transform: translateY(0.2rem);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
     }
 
-    @media (max-width: 36rem) {
-        .doc-level__header {
-            align-items: stretch;
-            flex-direction: column;
-        }
-
-        .doc-level__switch {
-            align-self: flex-start;
-        }
-
-        .doc-pager {
-            grid-template-columns: minmax(0, 1fr);
-        }
-
-        .doc-pager__link--next {
-            align-items: flex-start;
-            text-align: left;
-        }
-
-        .doc-pager--single .doc-pager__link {
-            width: 100%;
-            justify-self: stretch;
-        }
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
     }
 
-    @media (prefers-color-scheme: dark) {
-        .doc-level,
-        .doc-pager {
-            --doc-level-accent: #80c98c;
-            --doc-level-accent-hover: #a0d9a9;
-            --doc-level-border: #3a493d;
-            --doc-level-switch-background: #202a22;
-            --doc-level-selected-background: #303c32;
-            --doc-level-text: #edf2ee;
-            --doc-level-muted: #a8b3aa;
-            --doc-level-focus: #75b7ff;
-        }
+    .doc-level__panel--basic::before {
+        content: "Basic";
     }
 
-    @media print {
-        .doc-level__input,
-        .doc-level__switch,
-        .doc-pager {
-            display: none;
-        }
-
-        .doc-level__panel {
-            display: block;
-        }
-
-        .doc-level__panel--advanced {
-            margin-block-start: 1.5rem;
-            padding-block-start: 1.5rem;
-            border-block-start: 1px solid;
-        }
-
-        .doc-level__panel--basic::before,
-        .doc-level__panel--advanced::before {
-            display: block;
-            margin-block-end: 0.75rem;
-            font-weight: 700;
-        }
-
-        .doc-level__panel--basic::before {
-            content: "Basic";
-        }
-
-        .doc-level__panel--advanced::before {
-            content: "Advanced";
-        }
-    }</style>
-
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / Plain Markdown</p><h1>Plain Markdown</h1><p>Plain Markdown earns its place as the least magical content format in a Moth project.</p><p>The compiler can import it, render it and hand the result to the HTML builder. It never pretends the file contains Moth code.</p></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Markdown files
+</legend>
 
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="markdown-files-level"
+                id="markdown-files-basic"
+                value="basic"
+                checked
             >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Plain Markdown</p><h1>Plain Markdown</h1><p>Plain Markdown earns its place as the least magical content format in a Moth project.</p><p>The compiler can import it, render it and hand the result to the HTML builder. It never pretends the file contains Moth code.</p></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Markdown files
-    </legend>
 
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="markdown-files-level"
-                    id="markdown-files-basic"
-                    value="basic"
-                    checked
-                >
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="markdown-files-level"
+                id="markdown-files-advanced"
+                value="advanced"
+            >
 
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="markdown-files-level"
-                    id="markdown-files-advanced"
-                    value="advanced"
-                >
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="markdown-files">
+                    Markdown files
+</h2>
 
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="markdown-files">
-                        Markdown files
-    </h2>
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="markdown-files-basic"
+                    >
+                        Basic
+                    </label>
 
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="markdown-files-basic"
-                        >
-                            Basic
-                        </label>
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="markdown-files-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="markdown-files-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A <code>.md</code> file is plain Markdown. The compiler renders it and hands the HTML to the builder.</p><h3>The simplest content file</h3><pre style=""><code class='codeblock'>
-        # Welcome
-
-        This is **plain Markdown**.
-    </code></pre><h3>Why it is portable</h3><p>No Moth syntax is interpreted. The file is pure Markdown. You can use it with any Markdown tool.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A <code>.md</code> file is plain Markdown content. It uses a separate plain-Markdown renderer and is not a moth template file.</p><h3>What it is</h3><p>A <code>.md</code> file is rendered to HTML at compile time and exposed as one generated constant:</p><pre style=""><code class='codeblock'>
-    content <span class='moth-code-operator'>#</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;&lt;rendered html&gt;&quot;</span>
-    </code></pre><p>The renderer is CommonMark-compatible with GFM extensions. It is not the Moth md renderer used by moth template files.</p><h3>What it is not</h3><ul><li>It is not a moth template file. Moth template syntax is not interpreted.</li><li>It has no captures, directives or declarations.</li><li>It does not see same-directory module root constants or <code>@html</code> constants.</li><li>It has no Moth scope at all.</li></ul><h3>Moth syntax is not interpreted</h3><ul><li>Double-dash is Markdown text, not a Moth comment.</li><li>Dollar-prefixed text is text, not a template directive.</li><li>Double-bracket template bodies and single-bracket insertions are text, not template syntax.</li><li>Template delimiters, insertions and directives are literal text.</li></ul><h3>Compile-time imported content</h3><p>The rendered HTML is a compile-time String constant. It folds before the importing file uses it. It is not a runtime value.</p><h3>Output type</h3><p>The exported field is <code>content</code>, a compile-time String constant. It is the only generated member.</p><h3>Target and builder availability</h3><p>Plain Markdown is available in HTML project builds. The renderer is registered by the HTML builder.</p><h3>File ownership and relative path</h3><p>A <code>.md</code> file belongs to the module that contains its directory. It follows the same import path resolution as <code>.moth</code> and <code>.mtf</code> files.</p><h3>Related concepts</h3><ul><li>For import syntax see <a href="#markdown-imports">Markdown imports</a>.</li><li>For renderer features see <a href="#rendering-contract">Rendering contract</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For Moth template files see <a href="../moth-templates/#moth-template-files-files">Moth template files</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Markdown imports
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="markdown-imports-level"
-                    id="markdown-imports-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="markdown-imports-level"
-                    id="markdown-imports-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="markdown-imports">
-                        Markdown imports
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="markdown-imports-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="markdown-imports-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Import a <code>.md</code> file the same way as any other source file.</p><h3>Import and use</h3><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro <span class='moth-code-parenthesis'>{</span>content <span class='moth-code-keyword'>as</span> intro_html<span class='moth-code-parenthesis'>}</span>
-
-    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro_html<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span>
-    </code></pre><p>The <code>content</code> constant is the rendered HTML string.</p><h3>Do not include the extension</h3><p><code>import @docs/intro.md</code> is rejected. Use <code>import @docs/intro</code>.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Plain Markdown content is imported with the same extensionless source import syntax as Moth and moth template source assets.</p><h3>Import syntax</h3><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro
-
-    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro.content<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span>
-    </code></pre><p>A namespace import exposes <code>content</code> as a field. A grouped import brings it directly:</p><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro <span class='moth-code-parenthesis'>{</span>content <span class='moth-code-keyword'>as</span> intro_html<span class='moth-code-parenthesis'>}</span>
-
-    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro_html<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span>
-    </code></pre><h3>Aliases</h3><p>Use <code>as</code> to give the imported content a local name. This is the standard form when multiple content files are imported into the same page.</p><h3>Insertion into templates and pages</h3><p>Insert the imported content into a template body. The caller decides where it appears. Imported content does not become a page fragment automatically.</p><h3>Import path and module visibility</h3><p>Content imports follow the same path resolution and module visibility rules as normal source imports. <code>@intro</code> resolves from the importing file&#39;s owning module root. <code>@docs/intro</code> resolves from the entry root. <code>@./...</code> has no supported meaning. Cross-module imports require the module root&#39;s <code>export:</code> block to re-export the content.</p><h3>No automatic page fragment</h3><p>Importing a <code>.md</code> file and inserting its content into a template does not create a page fragment. Only direct top-level templates in an entry-selected module root become page fragments.</p><h3>Direct extension imports are rejected</h3><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro.md <span class='moth-code-parenthesis'>{</span>content<span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>This is rejected with <code>MOTH-IMPORT-0024</code>. Use <code>import @docs/intro</code> without the <code>.md</code> extension.</p><h3>Dependency tracking</h3><p>Imported content participates in normal dependency tracking. The <code>.md</code> file is compiled before the importing file uses its <code>content</code> constant.</p><h3>Distinction from asset imports</h3><p><code>.md</code> content imports are not asset imports. They produce a compile-time <code>content #String</code> constant, not a tracked asset path. Markdown links and images render literal <code>href</code> and <code>src</code> values. They are not tracked assets and are not rewritten. Use normal Moth asset paths when a file should participate in tracked-asset output.</p><h3>Related concepts</h3><ul><li>For the rendering contract see <a href="#rendering-contract">Rendering contract</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For import path resolution see <a href="../packages/#import-paths">Import paths</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Rendering contract
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="rendering-contract-level"
-                    id="rendering-contract-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="rendering-contract-level"
-                    id="rendering-contract-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="rendering-contract">
-                        Rendering contract
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="rendering-contract-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="rendering-contract-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Plain Markdown supports common formatting through a CommonMark-compatible renderer.</p><h3>Supported forms</h3><ul><li>Headings, paragraphs, emphasis, bold</li><li>Links, ordered and unordered lists, nested lists</li><li>Inline code and fenced code blocks</li><li>Tables, task lists, strikethrough, footnotes</li><li>Raw HTML is preserved</li></ul><h3>One clear limitation</h3><p>Moth template syntax is not interpreted. Dollar-prefixed directives are plain text. Bracket-delimited template bodies are plain text. Use moth template files if you need Moth-aware content.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>The plain Markdown renderer uses a CommonMark-compatible parser with GFM extensions. This is a different renderer from Moth&#39;s md renderer.</p><h3>Supported features</h3><ul><li>Headings: <code>#</code>, <code>##</code>, <code>###</code> and deeper render as <code>&lt;h1&gt;</code>, <code>&lt;h2&gt;</code>, <code>&lt;h3&gt;</code> etc.</li><li>Paragraphs: separated by blank lines, rendered as <code>&lt;p&gt;</code>.</li><li>Emphasis: <code>*italic*</code> renders as <code>&lt;em&gt;</code>, <code>**bold**</code> renders as <code>&lt;strong&gt;</code>.</li><li>Links: standard Markdown link syntax renders as <code>&lt;a href=&quot;...&quot;&gt;</code>.</li><li>Unordered lists: <code>- item</code> renders as <code>&lt;ul&gt;&lt;li&gt;</code>.</li><li>Ordered lists: <code>1. item</code> renders as <code>&lt;ol&gt;&lt;li&gt;</code>.</li><li>Nested lists: indentation creates nested <code>&lt;ul&gt;</code> or <code>&lt;ol&gt;</code>.</li><li>Inline code: single backticks render as <code>&lt;code&gt;</code>.</li><li>Fenced code blocks: triple backticks render as pre and code elements. A language tag adds a class attribute.</li><li>Tables: pipe table syntax renders as <code>&lt;table&gt;</code> with <code>&lt;thead&gt;</code>, <code>&lt;th&gt;</code>, <code>&lt;tbody&gt;</code> and <code>&lt;td&gt;</code>.</li><li>Task lists: bracketed checkbox syntax renders as disabled checkboxes.</li><li>Strikethrough: <code>~~text~~</code> renders as <code>&lt;del&gt;</code>.</li><li>Footnotes: caret-bracketed syntax renders footnote anchors and text.</li><li>Raw HTML: HTML tags in the source are preserved in the output.</li></ul><h3>Unsupported extensions</h3><ul><li>Moth template syntax is not interpreted. Dollar-prefixed directives, double-bracket template bodies and single-bracket insertions are literal text.</li><li>Smart punctuation is disabled. <code>--</code> remains <code>--</code>, not an em dash.</li><li>There is no sanitizer or raw-HTML policy key. Raw HTML is preserved as-is.</li></ul><h3>Ordinary Markdown links versus Moth md links</h3><p>In plain Markdown, links use ordinary Markdown syntax. The href and src values are rendered literally. They are not rewritten or tracked as assets.</p><p>In Moth&#39;s md renderer (used by moth template files), at-path link syntax creates Moth-aware links. This syntax is not available in plain Markdown.</p><h3>Renderer configuration</h3><p>The renderer uses <code>pulldown-cmark</code> with the following options enabled:</p><ul><li><code>ENABLE_TABLES</code></li><li><code>ENABLE_TASKLISTS</code></li><li><code>ENABLE_STRIKETHROUGH</code></li><li><code>ENABLE_FOOTNOTES</code></li><li><code>ENABLE_GFM</code></li></ul><p>Smart punctuation is not enabled. The renderer is registered by the HTML builder.</p><h3>Related concepts</h3><ul><li>For moth template md rendering see <a href="../moth-templates/#implicit-markdown">Implicit Markdown</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For Markdown file structure see <a href="#markdown-files">Markdown files</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Choosing a content format
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="choosing-a-content-format-level"
-                    id="choosing-a-content-format-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="choosing-a-content-format-level"
-                    id="choosing-a-content-format-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="choosing-a-content-format">
-                        Choosing a content format
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="choosing-a-content-format-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="choosing-a-content-format-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Three formats, one choice.</p><h3><code>.md</code> for plain Markdown</h3><p>Use when the content is ordinary Markdown with no Moth syntax needed.</p><h3><code>.mtf</code> for Moth-aware Markdown</h3><p>Use when the content needs compile-time constants, nested templates or builder helpers.</p><h3><code>.moth</code> for full Moth</h3><p>Use when runtime values, control flow, imports or page fragments are needed.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Choose the content format based on what the content needs.</p><h3>Use <code>.md</code> when</h3><ul><li>The content is ordinary Markdown.</li><li>No Moth values, captures or templates are needed.</li><li>Portability matters. The file can be used with any Markdown tool.</li><li>Fenced code blocks, pipe tables or raw HTML preservation are needed.</li><li>The content should not see Moth scope.</li></ul><h3>Use <code>.mtf</code> when</h3><ul><li>The content needs compile-time Moth constants from the same-directory module root.</li><li>Nested templates or builder helpers such as <code>codeblock</code> are needed.</li><li>The <code>$md</code> Markdown subset is sufficient for the content&#39;s formatting needs.</li><li>Moth-aware link syntax <code>@path (label)</code> is useful.</li></ul><h3>Use <code>.moth</code> templates when</h3><ul><li>Runtime values or runtime control flow are needed.</li><li>Full slot and wrapper composition is needed.</li><li>The content is part of broader program logic.</li><li>Imports, declarations or page fragments are needed in the same file.</li></ul><h3>Distinguishing raw asset files</h3><p>Raw asset files such as images, stylesheets or JavaScript files are not content imports. They are tracked assets handled by the builder. Use normal Moth asset paths when a file should participate in tracked-asset output.</p><h3>Distinguishing package source</h3><p>Core packages and project-local source-backed packages are not content formats. They provide typed declarations and functions. See <a href="../packages/#package-origins-and-backing">Package origins and backing</a>.</p><h3>Related concepts</h3><ul><li>For Moth template files see <a href="../moth-templates/#moth-template-files-files">Moth template files</a>.</li><li>For plain Markdown see <a href="#markdown-files">Markdown files</a>.</li><li>For templates see <a href="../templates/#template-basics">Template basics</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><nav class="doc-pager" aria-label="Language documentation">
-        <a
-            class="doc-pager__link doc-pager__link--previous"
-            href="../moth-templates/"
-                    rel="prev"
-                >
-                    <span class="doc-pager__direction">← Previous</span>
-                    <span class="doc-pager__title">Moth template files</span>
-                </a>
-
-                <a
-                    class="doc-pager__link doc-pager__link--next"
-                    href="../design-scope/"
-                    rel="next"
-                >
-                    <span class="doc-pager__direction">Next →</span>
-                    <span class="doc-pager__title">Design scope</span>
-                </a>
-
+            <div class="doc-level__panel doc-level__panel--basic">
                 
 
 
 
-    </nav></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+        <p>A <code>.md</code> file is plain Markdown. The compiler renders it and hands the HTML to the builder.</p><h3>The simplest content file</h3><pre style=""><code class='codeblock'># Welcome
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+This is **plain Markdown**.</code></pre><h3>Why it is portable</h3><p>No Moth syntax is interpreted. The file is pure Markdown. You can use it with any Markdown tool.</p>
+</div>
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>A <code>.md</code> file is plain Markdown content. It uses a separate plain-Markdown renderer and is not a moth template file.</p><h3>What it is</h3><p>A <code>.md</code> file is rendered to HTML at compile time and exposed as one generated constant:</p><pre style=""><code class='codeblock'>content <span class='moth-code-operator'>#</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;&lt;rendered html&gt;&quot;</span></code></pre><p>The renderer is CommonMark-compatible with GFM extensions. It is not the Moth md renderer used by moth template files.</p><h3>What it is not</h3><ul><li>It is not a moth template file. Moth template syntax is not interpreted.</li><li>It has no captures, directives or declarations.</li><li>It does not see same-directory module root constants or <code>@html</code> constants.</li><li>It has no Moth scope at all.</li></ul><h3>Moth syntax is not interpreted</h3><ul><li>Double-dash is Markdown text, not a Moth comment.</li><li>Dollar-prefixed text is text, not a template directive.</li><li>Double-bracket template bodies and single-bracket insertions are text, not template syntax.</li><li>Template delimiters, insertions and directives are literal text.</li></ul><h3>Compile-time imported content</h3><p>The rendered HTML is a compile-time String constant. It folds before the importing file uses it. It is not a runtime value.</p><h3>Output type</h3><p>The exported field is <code>content</code>, a compile-time String constant. It is the only generated member.</p><h3>Target and builder availability</h3><p>Plain Markdown is available in HTML project builds. The renderer is registered by the HTML builder.</p><h3>File ownership and relative path</h3><p>A <code>.md</code> file belongs to the module that contains its directory. It follows the same import path resolution as <code>.moth</code> and <code>.mtf</code> files.</p><h3>Related concepts</h3><ul><li>For import syntax see <a href="#markdown-imports">Markdown imports</a>.</li><li>For renderer features see <a href="#rendering-contract">Rendering contract</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For Moth template files see <a href="../moth-templates/#moth-template-files-files">Moth template files</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Markdown imports
+</legend>
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="markdown-imports-level"
+                id="markdown-imports-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="markdown-imports-level"
+                id="markdown-imports-advanced"
+                value="advanced"
+            >
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="markdown-imports">
+                    Markdown imports
+</h2>
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="markdown-imports-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="markdown-imports-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
+        <p>Import a <code>.md</code> file the same way as any other source file.</p><h3>Import and use</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro <span class='moth-code-parenthesis'>{</span>content <span class='moth-code-keyword'>as</span> intro_html<span class='moth-code-parenthesis'>}</span>
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
+<span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro_html<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span></code></pre><p>The <code>content</code> constant is the rendered HTML string.</p><h3>Do not include the extension</h3><p><code>import @docs/intro.md</code> is rejected. Use <code>import @docs/intro</code>.</p>
+</div>
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Plain Markdown content is imported with the same extensionless source import syntax as Moth and moth template source assets.</p><h3>Import syntax</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+<span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro.content<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span></code></pre><p>A namespace import exposes <code>content</code> as a field. A grouped import brings it directly:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro <span class='moth-code-parenthesis'>{</span>content <span class='moth-code-keyword'>as</span> intro_html<span class='moth-code-parenthesis'>}</span>
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+<span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>intro_html<span class='moth-code-parenthesis'>]</span> <span class='moth-code-parenthesis'>]</span></code></pre><h3>Aliases</h3><p>Use <code>as</code> to give the imported content a local name. This is the standard form when multiple content files are imported into the same page.</p><h3>Insertion into templates and pages</h3><p>Insert the imported content into a template body. The caller decides where it appears. Imported content does not become a page fragment automatically.</p><h3>Import path and module visibility</h3><p>Content imports follow the same path resolution and module visibility rules as normal source imports. <code>@intro</code> resolves from the importing file&#39;s owning module root. <code>@docs/intro</code> resolves from the entry root. <code>@./...</code> has no supported meaning. Cross-module imports require the module root&#39;s <code>export:</code> block to re-export the content.</p><h3>No automatic page fragment</h3><p>Importing a <code>.md</code> file and inserting its content into a template does not create a page fragment. Only direct top-level templates in an entry-selected module root become page fragments.</p><h3>Direct extension imports are rejected</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>docs<span class='moth-code-operator'>/</span>intro.md <span class='moth-code-parenthesis'>{</span>content<span class='moth-code-parenthesis'>}</span></code></pre><p>This is rejected with <code>MOTH-IMPORT-0024</code>. Use <code>import @docs/intro</code> without the <code>.md</code> extension.</p><h3>Dependency tracking</h3><p>Imported content participates in normal dependency tracking. The <code>.md</code> file is compiled before the importing file uses its <code>content</code> constant.</p><h3>Distinction from asset imports</h3><p><code>.md</code> content imports are not asset imports. They produce a compile-time <code>content #String</code> constant, not a tracked asset path. Markdown links and images render literal <code>href</code> and <code>src</code> values. They are not tracked assets and are not rewritten. Use normal Moth asset paths when a file should participate in tracked-asset output.</p><h3>Related concepts</h3><ul><li>For the rendering contract see <a href="#rendering-contract">Rendering contract</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For import path resolution see <a href="../packages/#import-paths">Import paths</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Rendering contract
+</legend>
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="rendering-contract-level"
+                id="rendering-contract-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="rendering-contract-level"
+                id="rendering-contract-advanced"
+                value="advanced"
+            >
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="rendering-contract">
+                    Rendering contract
+</h2>
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="rendering-contract-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="rendering-contract-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
+        <p>Plain Markdown supports common formatting through a CommonMark-compatible renderer.</p><h3>Supported forms</h3><ul><li>Headings, paragraphs, emphasis, bold</li><li>Links, ordered and unordered lists, nested lists</li><li>Inline code and fenced code blocks</li><li>Tables, task lists, strikethrough, footnotes</li><li>Raw HTML is preserved</li></ul><h3>One clear limitation</h3><p>Moth template syntax is not interpreted. Dollar-prefixed directives are plain text. Bracket-delimited template bodies are plain text. Use moth template files if you need Moth-aware content.</p>
+</div>
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>The plain Markdown renderer uses a CommonMark-compatible parser with GFM extensions. This is a different renderer from Moth&#39;s md renderer.</p><h3>Supported features</h3><ul><li>Headings: <code>#</code>, <code>##</code>, <code>###</code> and deeper render as <code>&lt;h1&gt;</code>, <code>&lt;h2&gt;</code>, <code>&lt;h3&gt;</code> etc.</li><li>Paragraphs: separated by blank lines, rendered as <code>&lt;p&gt;</code>.</li><li>Emphasis: <code>*italic*</code> renders as <code>&lt;em&gt;</code>, <code>**bold**</code> renders as <code>&lt;strong&gt;</code>.</li><li>Links: standard Markdown link syntax renders as <code>&lt;a href=&quot;...&quot;&gt;</code>.</li><li>Unordered lists: <code>- item</code> renders as <code>&lt;ul&gt;&lt;li&gt;</code>.</li><li>Ordered lists: <code>1. item</code> renders as <code>&lt;ol&gt;&lt;li&gt;</code>.</li><li>Nested lists: indentation creates nested <code>&lt;ul&gt;</code> or <code>&lt;ol&gt;</code>.</li><li>Inline code: single backticks render as <code>&lt;code&gt;</code>.</li><li>Fenced code blocks: triple backticks render as pre and code elements. A language tag adds a class attribute.</li><li>Tables: pipe table syntax renders as <code>&lt;table&gt;</code> with <code>&lt;thead&gt;</code>, <code>&lt;th&gt;</code>, <code>&lt;tbody&gt;</code> and <code>&lt;td&gt;</code>.</li><li>Task lists: bracketed checkbox syntax renders as disabled checkboxes.</li><li>Strikethrough: <code>~~text~~</code> renders as <code>&lt;del&gt;</code>.</li><li>Footnotes: caret-bracketed syntax renders footnote anchors and text.</li><li>Raw HTML: HTML tags in the source are preserved in the output.</li></ul><h3>Unsupported extensions</h3><ul><li>Moth template syntax is not interpreted. Dollar-prefixed directives, double-bracket template bodies and single-bracket insertions are literal text.</li><li>Smart punctuation is disabled. <code>--</code> remains <code>--</code>, not an em dash.</li><li>There is no sanitizer or raw-HTML policy key. Raw HTML is preserved as-is.</li></ul><h3>Ordinary Markdown links versus Moth md links</h3><p>In plain Markdown, links use ordinary Markdown syntax. The href and src values are rendered literally. They are not rewritten or tracked as assets.</p><p>In Moth&#39;s md renderer (used by moth template files), at-path link syntax creates Moth-aware links. This syntax is not available in plain Markdown.</p><h3>Renderer configuration</h3><p>The renderer uses <code>pulldown-cmark</code> with the following options enabled:</p><ul><li><code>ENABLE_TABLES</code></li><li><code>ENABLE_TASKLISTS</code></li><li><code>ENABLE_STRIKETHROUGH</code></li><li><code>ENABLE_FOOTNOTES</code></li><li><code>ENABLE_GFM</code></li></ul><p>Smart punctuation is not enabled. The renderer is registered by the HTML builder.</p><h3>Related concepts</h3><ul><li>For moth template md rendering see <a href="../moth-templates/#implicit-markdown">Implicit Markdown</a>.</li><li>For choosing between formats see <a href="#choosing-a-content-format">Choosing a content format</a>.</li><li>For Markdown file structure see <a href="#markdown-files">Markdown files</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Choosing a content format
+</legend>
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="choosing-a-content-format-level"
+                id="choosing-a-content-format-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="choosing-a-content-format-level"
+                id="choosing-a-content-format-advanced"
+                value="advanced"
+            >
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="choosing-a-content-format">
+                    Choosing a content format
+</h2>
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="choosing-a-content-format-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="choosing-a-content-format-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
 
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
 
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+        <p>Three formats, one choice.</p><h3><code>.md</code> for plain Markdown</h3><p>Use when the content is ordinary Markdown with no Moth syntax needed.</p><h3><code>.mtf</code> for Moth-aware Markdown</h3><p>Use when the content needs compile-time constants, nested templates or builder helpers.</p><h3><code>.moth</code> for full Moth</h3><p>Use when runtime values, control flow, imports or page fragments are needed.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Choose the content format based on what the content needs.</p><h3>Use <code>.md</code> when</h3><ul><li>The content is ordinary Markdown.</li><li>No Moth values, captures or templates are needed.</li><li>Portability matters. The file can be used with any Markdown tool.</li><li>Fenced code blocks, pipe tables or raw HTML preservation are needed.</li><li>The content should not see Moth scope.</li></ul><h3>Use <code>.mtf</code> when</h3><ul><li>The content needs compile-time Moth constants from the same-directory module root.</li><li>Nested templates or builder helpers such as <code>codeblock</code> are needed.</li><li>The <code>$md</code> Markdown subset is sufficient for the content&#39;s formatting needs.</li><li>Moth-aware link syntax <code>@path (label)</code> is useful.</li></ul><h3>Use <code>.moth</code> templates when</h3><ul><li>Runtime values or runtime control flow are needed.</li><li>Full slot and wrapper composition is needed.</li><li>The content is part of broader program logic.</li><li>Imports, declarations or page fragments are needed in the same file.</li></ul><h3>Distinguishing raw asset files</h3><p>Raw asset files such as images, stylesheets or JavaScript files are not content imports. They are tracked assets handled by the builder. Use normal Moth asset paths when a file should participate in tracked-asset output.</p><h3>Distinguishing package source</h3><p>Core packages and project-local source-backed packages are not content formats. They provide typed declarations and functions. See <a href="../packages/#package-origins-and-backing">Package origins and backing</a>.</p><h3>Related concepts</h3><ul><li>For Moth template files see <a href="../moth-templates/#moth-template-files-files">Moth template files</a>.</li><li>For plain Markdown see <a href="#markdown-files">Markdown files</a>.</li><li>For templates see <a href="../templates/#template-basics">Template basics</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><nav class="doc-pager" aria-label="Language documentation">
+    <a
+        class="doc-pager__link doc-pager__link--previous"
+        href="../moth-templates/"
+                rel="prev"
+            >
+                <span class="doc-pager__direction">← Previous</span>
+                <span class="doc-pager__title">Moth template files</span>
+            </a>
+
+            <a
+                class="doc-pager__link doc-pager__link--next"
+                href="../design-scope/"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">Design scope</span>
+            </a>
+
+            
+
+
+
+</nav></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

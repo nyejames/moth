@@ -151,559 +151,558 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
-
-        table {
-            font-size: 0.8rem;
-        }
-
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
-
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
-
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
-
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Compiler design</a> / 07. AST semantics and types</p><p>Name resolution, type identity and receiving-boundary rules turn ordered shells into typed semantic structure.</p></section>
+<section class="container"><h1>Giving syntax checked meaning</h1><p>Parsed text can look right and still mean nothing the machine should trust. <code>greet(visitor)</code> on the page is a shape. Until name resolution and type checking finish, it is not yet a call with a known callee, argument contract and return type.</p><p>The <strong>AST stage</strong> turns ordered shells and bound visibility into a <strong>typed semantic structure</strong>. That structure owns source meaning for the module.</p><h2>Syntax tree versus semantic tree</h2><p>A <strong>syntax tree</strong> records how tokens grouped: call expression, argument list, identifier nodes.</p><p>A <strong>semantic tree</strong> (still often stored as AST nodes in Moth) adds resolved facts:</p><ul><li>which symbol <code>greet</code> names</li><li>which local <code>visitor</code> names</li><li>argument and return <code>TypeId</code> values</li><li>whether the call is legal at this site</li></ul><p><strong>Name resolution</strong> connects spellings to declarations. <strong>Type checking</strong> checks that operations and values agree under language rules. <strong>Semantic identity</strong> names the underlying declaration or type in a way that survives aliases and module boundaries.</p><p>Before checking, the page call is unresolved shape. After checking, it is a fact later stages may lower without reopening the import list.</p><p><strong>Diagram placeholder:</strong> Unresolved names gain symbol, argument and return facts</p><p><em>Caption: teaching simplification.</em> <em>Question: what does type checking add that parsing refused to invent?</em></p><h2>Environments and visibility</h2><p>AST consumes <strong>bound file visibility</strong>. It may validate semantic use of visible symbols. It does not rebuild imports or rediscover top-level visibility. If a top-level name cannot be found by walking sorted declarations and bound visibility, the missing fact belongs earlier in the pipeline.</p><p>Scopes nest inside bodies. The collision policy does not. All user-visible names share one rule: same-file declarations, source imports, binding imports, aliases, prelude symbols and builtins cannot silently shadow one another.</p><p>Local declarations, imports and reserved interfaces remain distinct origins even when their spellings sit in one lookup table.</p><p><strong>Diagram placeholder:</strong> Two visible declarations trigger one collision result</p><p><em>Caption: accepted visibility policy.</em> <em>Question: who owns a name when two imports want the same spelling?</em></p><h2>Type identity</h2><p>Each compiled module owns one local <strong><code>TypeEnvironment</code></strong>. Inside that module, <strong><code>TypeId</code></strong> equality is the only valid comparison for local semantic decisions.</p><p>Cross-module interfaces use <strong>canonical type identities</strong>, not donor-local indexes. A consumer may intern compact local handles for imported types. Equality across modules still compares canonical identity, never rendered names alone.</p><p>Why refuse donor-local indexes at the boundary? Because module-local numbering is an implementation accident. Stable meaning must survive recompilation order, re-exports and parallel workers.</p><p><code>DataType</code> spellings after resolution are parse or diagnostic helpers. They must not drive executable AST, HIR or backend decisions.</p><p>Access classification stays separate from type identity. Mutability and exclusive access do not manufacture fake type shapes.</p><p><strong>Diagram placeholder:</strong> Local handles point to stable semantic identities</p><p><em>Caption: exact identity principle, simplified storage.</em> <em>Question: why not share donor indexes into the consumer?</em></p><h2>Receiving boundaries and coercion</h2><p>Expression evaluation finds an expression&#39;s <strong>natural type</strong> and stays strict. <strong>Contextual coercion</strong> applies only at explicit <strong>receiving boundaries</strong> owned by the frontend:</p><ul><li>declarations and assignments</li><li>returns</li><li>concrete function parameters</li><li>struct and choice fields</li><li>default values</li><li>typed collection and map entries</li><li>template and string content</li><li>explicit <code>cast</code> targets</li><li>certain <code>then</code> arms with an explicit receiver</li><li>compiler and binding-backed call contracts</li></ul><p>Natural typing asks &quot;what is this?&quot; Contextual coercion asks &quot;may this value enter that slot?&quot; Explicit casts ask &quot;please convert under compiler-owned rules.&quot; Those paths stay separate on purpose. Broad implicit conversion would hide bugs. Forbidding every conversion would drown source in noise.</p><p>On the page, <code>visitor</code> as a <code>String</code> meets <code>greet</code>&#39;s <code>name</code> parameter at a receiving boundary. The constant <code>&quot;Priya&quot;</code> met <code>visitor</code>&#39;s declaration boundary earlier.</p><p><strong>Diagram placeholder:</strong> A contextual boundary permits a documented coercion or requires a cast</p><p><em>Caption: simplified typing flow.</em> <em>Question: where does conversion happen, and who requested it?</em></p><h2>Bodies, blocks and terminality</h2><p>Functions contain statements and expressions. Some constructs produce values: value-producing <code>if</code>, match and block-form <code>catch</code> act as closed receiving constructs rather than free-floating general expressions.</p><p>They are valid only where a receiver is explicit. Every producing path must satisfy the receiving arity. Non-unit success returns must be <strong>terminal</strong> before HIR lowering: control must not fall off the end without producing the promised values.</p><p>AST owns those diagnostics. If HIR later sees a non-unit function that can fall through, AST broke its contract and HIR reports an internal transformation error rather than a casual source shrug.</p><p>HIR will make runtime control flow explicit. AST still owes a body that already makes sense.</p><h2>What can fail here</h2><ul><li>unknown name or collision</li><li>type mismatch, invalid return or non-terminal block</li><li>cross-module type identity mismatch</li><li>exported surfaces that leak private or prohibited identities</li></ul><p>Diagnostic transport and rendering wait for the diagnostics article. The semantic failures belong here.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> infer meaning from rendered type names, allow broad implicit conversion and permit shadowing as a convenience.</p><p><strong>Choice:</strong> stable identities, strict names and narrow receiving-boundary rules.</p><p><strong>Benefit:</strong> later stages consume facts rather than rediscovering source meaning from pretty strings.</p><p><strong>Cost:</strong> source needs explicit disambiguation and casts in more cases.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> AST resolves source meaning and emits typed semantic facts.</li><li><strong>Current implementation:</strong> progress rows for type, coercion and language coverage.</li><li><strong>Queued work:</strong> anonymous record and numeric plans may change examples of type identity, not the ownership boundary.</li><li><strong>Deferred or outside scope:</strong> HIR and backend type reconstruction from source.</li></ul><h2>Exit state</h2><p>You leave with a typed AST, semantic identities and checked executable bodies. Next: which static computations disappear before HIR, and which become explicit data.</p></section>
+<section class="container"><p><a href="../">Compiler design</a> / <a href="../declarations-imports-and-ordering">Previous</a> / <a href="../compile-time-semantics">Next</a></p></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
 
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
-            >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Compiler design</a> / 07. AST semantics and types</p><p>Name resolution, type identity and receiving-boundary rules turn ordered shells into typed semantic structure.</p></section>
-    <section class="container"><h1>Giving syntax checked meaning</h1><p>Parsed text can look right and still mean nothing the machine should trust. <code>greet(visitor)</code> on the page is a shape. Until name resolution and type checking finish, it is not yet a call with a known callee, argument contract and return type.</p><p>The <strong>AST stage</strong> turns ordered shells and bound visibility into a <strong>typed semantic structure</strong>. That structure owns source meaning for the module.</p><h2>Syntax tree versus semantic tree</h2><p>A <strong>syntax tree</strong> records how tokens grouped: call expression, argument list, identifier nodes.</p><p>A <strong>semantic tree</strong> (still often stored as AST nodes in Moth) adds resolved facts:</p><ul><li>which symbol <code>greet</code> names</li><li>which local <code>visitor</code> names</li><li>argument and return <code>TypeId</code> values</li><li>whether the call is legal at this site</li></ul><p><strong>Name resolution</strong> connects spellings to declarations. <strong>Type checking</strong> checks that operations and values agree under language rules. <strong>Semantic identity</strong> names the underlying declaration or type in a way that survives aliases and module boundaries.</p><p>Before checking, the page call is unresolved shape. After checking, it is a fact later stages may lower without reopening the import list.</p><p><strong>Diagram placeholder:</strong> Unresolved names gain symbol, argument and return facts</p><p><em>Caption: teaching simplification.</em> <em>Question: what does type checking add that parsing refused to invent?</em></p><h2>Environments and visibility</h2><p>AST consumes <strong>bound file visibility</strong>. It may validate semantic use of visible symbols. It does not rebuild imports or rediscover top-level visibility. If a top-level name cannot be found by walking sorted declarations and bound visibility, the missing fact belongs earlier in the pipeline.</p><p>Scopes nest inside bodies. The collision policy does not. All user-visible names share one rule: same-file declarations, source imports, binding imports, aliases, prelude symbols and builtins cannot silently shadow one another.</p><p>Local declarations, imports and reserved interfaces remain distinct origins even when their spellings sit in one lookup table.</p><p><strong>Diagram placeholder:</strong> Two visible declarations trigger one collision result</p><p><em>Caption: accepted visibility policy.</em> <em>Question: who owns a name when two imports want the same spelling?</em></p><h2>Type identity</h2><p>Each compiled module owns one local <strong><code>TypeEnvironment</code></strong>. Inside that module, <strong><code>TypeId</code></strong> equality is the only valid comparison for local semantic decisions.</p><p>Cross-module interfaces use <strong>canonical type identities</strong>, not donor-local indexes. A consumer may intern compact local handles for imported types. Equality across modules still compares canonical identity, never rendered names alone.</p><p>Why refuse donor-local indexes at the boundary? Because module-local numbering is an implementation accident. Stable meaning must survive recompilation order, re-exports and parallel workers.</p><p><code>DataType</code> spellings after resolution are parse or diagnostic helpers. They must not drive executable AST, HIR or backend decisions.</p><p>Access classification stays separate from type identity. Mutability and exclusive access do not manufacture fake type shapes.</p><p><strong>Diagram placeholder:</strong> Local handles point to stable semantic identities</p><p><em>Caption: exact identity principle, simplified storage.</em> <em>Question: why not share donor indexes into the consumer?</em></p><h2>Receiving boundaries and coercion</h2><p>Expression evaluation finds an expression&#39;s <strong>natural type</strong> and stays strict. <strong>Contextual coercion</strong> applies only at explicit <strong>receiving boundaries</strong> owned by the frontend:</p><ul><li>declarations and assignments</li><li>returns</li><li>concrete function parameters</li><li>struct and choice fields</li><li>default values</li><li>typed collection and map entries</li><li>template and string content</li><li>explicit <code>cast</code> targets</li><li>certain <code>then</code> arms with an explicit receiver</li><li>compiler and binding-backed call contracts</li></ul><p>Natural typing asks &quot;what is this?&quot; Contextual coercion asks &quot;may this value enter that slot?&quot; Explicit casts ask &quot;please convert under compiler-owned rules.&quot; Those paths stay separate on purpose. Broad implicit conversion would hide bugs. Forbidding every conversion would drown source in noise.</p><p>On the page, <code>visitor</code> as a <code>String</code> meets <code>greet</code>&#39;s <code>name</code> parameter at a receiving boundary. The constant <code>&quot;Priya&quot;</code> met <code>visitor</code>&#39;s declaration boundary earlier.</p><p><strong>Diagram placeholder:</strong> A contextual boundary permits a documented coercion or requires a cast</p><p><em>Caption: simplified typing flow.</em> <em>Question: where does conversion happen, and who requested it?</em></p><h2>Bodies, blocks and terminality</h2><p>Functions contain statements and expressions. Some constructs produce values: value-producing <code>if</code>, match and block-form <code>catch</code> act as closed receiving constructs rather than free-floating general expressions.</p><p>They are valid only where a receiver is explicit. Every producing path must satisfy the receiving arity. Non-unit success returns must be <strong>terminal</strong> before HIR lowering: control must not fall off the end without producing the promised values.</p><p>AST owns those diagnostics. If HIR later sees a non-unit function that can fall through, AST broke its contract and HIR reports an internal transformation error rather than a casual source shrug.</p><p>HIR will make runtime control flow explicit. AST still owes a body that already makes sense.</p><h2>What can fail here</h2><ul><li>unknown name or collision</li><li>type mismatch, invalid return or non-terminal block</li><li>cross-module type identity mismatch</li><li>exported surfaces that leak private or prohibited identities</li></ul><p>Diagnostic transport and rendering wait for the diagnostics article. The semantic failures belong here.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> infer meaning from rendered type names, allow broad implicit conversion and permit shadowing as a convenience.</p><p><strong>Choice:</strong> stable identities, strict names and narrow receiving-boundary rules.</p><p><strong>Benefit:</strong> later stages consume facts rather than rediscovering source meaning from pretty strings.</p><p><strong>Cost:</strong> source needs explicit disambiguation and casts in more cases.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> AST resolves source meaning and emits typed semantic facts.</li><li><strong>Current implementation:</strong> progress rows for type, coercion and language coverage.</li><li><strong>Queued work:</strong> anonymous record and numeric plans may change examples of type identity, not the ownership boundary.</li><li><strong>Deferred or outside scope:</strong> HIR and backend type reconstruction from source.</li></ul><h2>Exit state</h2><p>You leave with a typed AST, semantic identities and checked executable bodies. Next: which static computations disappear before HIR, and which become explicit data.</p></section>
-    <section class="container"><p><a href="../">Compiler design</a> / <a href="../declarations-imports-and-ordering">Previous</a> / <a href="../compile-time-semantics">Next</a></p></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
 
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
 
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
-
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

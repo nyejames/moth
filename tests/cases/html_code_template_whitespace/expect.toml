@@ -1,0 +1,25 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<code class='codeblock'>baseline <span class='moth-code-operator'>=</span> value\n    nested <span class='moth-code-operator'>=</span> baseline\nless_indented <span class='moth-code-operator'>=</span> value\n    final <span class='moth-code-operator'>=</span> value</code>",
+    "<code class='codeblock'>&lt;tag&gt;&amp;&quot;quoted&quot;\n    nested\nless_indented</code>",
+    "<code class='codeblock'>mtf baseline\n    mtf nested\nmtf less indented</code>",
+    "<code class='codeblock'>\n\n\nblank baseline\n    blank nested\nblank less_indented</code>",
+]
+must_not_contain = [
+    "<code class='codeblock'>\n    ",
+    "<code class='codeblock'><tag>",
+]
+must_contain_in_order = [
+    "baseline <span class='moth-code-operator'>=</span> value",
+    "&lt;tag&gt;&amp;&quot;quoted&quot;",
+    "blank baseline",
+    "mtf baseline",
+]

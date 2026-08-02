@@ -15,6 +15,9 @@
 *.js text eol=lf
 *.css text eol=lf
 
+# This fixture intentionally contains whitespace-only lines to test template-boundary trimming.
+tests/cases/html_code_template_whitespace/input/@page.moth whitespace=-trailing-space
+
 # Generated release docs are produced by the build; do not whitespace-check them.
 docs/release/** -whitespace
 

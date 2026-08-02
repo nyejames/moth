@@ -2,11 +2,15 @@
 //!
 //! This module owns both halves of the feature:
 //! - parsing the narrow `$code` / `$code("ext")` directive syntax
-//! - converting compile-time body string runs into highlighted HTML
+//! - converting compile-time body string runs into safe HTML with optional syntax highlighting
+//!
+//! The shared template formatter pipeline owns whitespace normalization before code reaches this
+//! module. This module owns escaping, classification, and the `<code>` wrapper.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
 };
+use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhitespacePassProfile;
 use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
@@ -15,6 +19,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::CharacterParsing;
 use std::sync::Arc;
+
 pub(crate) fn code_formatter_factory(
     argument: Option<&StyleDirectiveArgumentValue>,
 ) -> Result<Formatter, String> {
@@ -104,7 +109,7 @@ impl TemplateFormatter for CodeTemplateFormatter {
                 FormatterInputPiece::Text(text_piece) => {
                     let text = string_table.resolve(text_piece.text);
                     let highlighted = match self.language {
-                        CodeLanguage::Text => text.to_owned(),
+                        CodeLanguage::Text => escape_html(text),
                         _ => highlight_code_html(text, self.language),
                     };
 
@@ -145,7 +150,7 @@ impl TemplateFormatter for CodeTemplateFormatter {
 
 pub(crate) fn code_formatter(language: CodeLanguage) -> Formatter {
     Formatter {
-        pre_format_whitespace_passes: Vec::new(),
+        pre_format_whitespace_passes: vec![TemplateWhitespacePassProfile::default_template_body()],
         formatter: Arc::new(CodeTemplateFormatter { language }),
         post_format_whitespace_passes: Vec::new(),
     }
@@ -154,7 +159,7 @@ pub(crate) fn code_formatter(language: CodeLanguage) -> Formatter {
 /// Converts raw source code into highlighted HTML markup.
 ///
 /// WHAT:
-/// - Strips shared formatting indentation from the code string.
+/// - Operates on input already normalized by the shared template-body whitespace pass.
 /// - Iterates over characters to identify structural boundaries (strings, numbers, comments, symbols, keywords) without a full lexer pass.
 /// - Wraps the matched runs in span classes for CSS styling.
 /// - Operates on individual text pieces; opaque anchors between pieces are preserved structurally by the caller.
@@ -163,12 +168,9 @@ pub(crate) fn code_formatter(language: CodeLanguage) -> Formatter {
 /// - Provides simple syntax highlighting for documentation without the binary weight of a full parsing dependency like syn/tree-sitter.
 /// - Gracefully falls back to plain text for unknown symbols via the `Generic` language profile.
 pub(crate) fn highlight_code_html(source: &str, language: CodeLanguage) -> String {
-    // Normalise indentation first so the highlighted output reflects the code the user
-    // meant to show, not the template indentation needed to keep the source tidy.
-    let normalized_source = dedent_code_block(source);
-    let chars: Vec<char> = normalized_source.chars().collect();
+    let chars: Vec<char> = source.chars().collect();
 
-    let mut highlighted = String::with_capacity(normalized_source.len() + 16);
+    let mut highlighted = String::with_capacity(source.len() + 16);
     let mut word = String::new();
     let mut index = 0usize;
 
@@ -240,73 +242,6 @@ pub(crate) fn highlight_code_html(source: &str, language: CodeLanguage) -> Strin
 
     flush_word(&mut highlighted, &mut word, language);
     highlighted
-}
-
-/// Normalizes the minimum indentation of a block of text.
-///
-/// WHAT:
-/// - Scans a block to find the smallest number of leading whitespace characters across all non-empty lines.
-/// - Returns a new string with that exact minimum shared indentation stripped from the start of every line.
-///
-/// WHY:
-/// - Template strings often inherit the indentation of their surrounding AST scope to keep the user's code visually tidy.
-/// - Preserves the *relative* formatting of code structures within the block while removing the artificial absolute padding.
-fn dedent_code_block(source: &str) -> String {
-    let mut min_indent: Option<usize> = None;
-
-    for line in source.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let indent = line
-            .chars()
-            .take_while(|ch| ch.is_non_newline_whitespace())
-            .count();
-
-        min_indent = Some(match min_indent {
-            Some(existing) => existing.min(indent),
-            None => indent,
-        });
-    }
-
-    let Some(min_indent) = min_indent else {
-        return source.to_string();
-    };
-
-    let mut dedented = String::with_capacity(source.len());
-
-    for (line_index, line) in source.lines().enumerate() {
-        if line_index > 0 {
-            dedented.push('\n');
-        }
-
-        let mut chars = line.chars();
-        let mut removed = 0usize;
-
-        // The template formatter runs on body string slices, which often inherit the
-        // surrounding template indentation. Strip the smallest shared indentation so
-        // the rendered code keeps its intended relative structure instead of the AST
-        // layout indentation.
-        while removed < min_indent {
-            match chars.next() {
-                Some(ch) if ch.is_non_newline_whitespace() => removed += 1,
-                Some(ch) => {
-                    dedented.push(ch);
-                    break;
-                }
-                None => break,
-            }
-        }
-
-        dedented.extend(chars);
-    }
-
-    if source.ends_with('\n') {
-        dedented.push('\n');
-    }
-
-    dedented
 }
 
 fn matches_comment_prefix(chars: &[char], index: usize, prefix: Option<&str>) -> bool {

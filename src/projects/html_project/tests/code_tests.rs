@@ -75,11 +75,11 @@ fn direct_code_highlighter_escapes_html_sensitive_content() {
 }
 
 #[test]
-fn code_formatter_wrapper_preserves_newlines_after_dedent() {
+fn text_code_formatter_escapes_html_without_highlighting() {
     let mut string_table = StringTable::new();
-    let formatter = code_formatter(CodeLanguage::Generic);
+    let formatter = code_formatter(CodeLanguage::Text);
 
-    let id = string_table.intern("    x\n    y");
+    let id = string_table.intern("<tag>&\"quoted\"");
     let input = FormatterInput {
         pieces: vec![FormatterInputPiece::Text(FormatterTextPiece {
             text: id,
@@ -98,5 +98,7 @@ fn code_formatter_wrapper_preserves_newlines_after_dedent() {
 
     assert!(content.starts_with("<code class='codeblock'>"));
     assert!(content.ends_with("</code>"));
-    assert!(content.contains("x\ny"));
+    assert!(content.contains("&lt;tag&gt;&amp;&quot;quoted&quot;"));
+    assert!(!content.contains("<tag>"));
+    assert!(!content.contains("moth-code-"));
 }

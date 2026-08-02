@@ -151,613 +151,606 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
-
-        table {
-            font-size: 0.8rem;
-        }
-
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
-
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
-
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
-
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
-
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
-            >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Memory management</a> / Lifetime regions and escape validation</p><p>Every allocation has exactly one semantic lifetime owner. GC cannot bypass topology validation.</p></section>
-    <section class="container"><h1>Lifetime regions and escape validation</h1><h2>Design contract</h2><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Lifetime-region and escape validation is the mandatory semantic proof that every retained reference is legal under one lifetime owner. It is distinct from optional ownership optimisation.</p><p><strong>Mandatory semantic proof</strong> covers:</p><ul><li>lifetime owner and region legality</li><li>retained-edge outlives relationships</li><li>escape legality</li><li>cycle legality</li><li>external-boundary legality</li></ul><p>User-authored topology that is invalid or cannot be proven legal produces a structured <code>CompilerDiagnostic</code>. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce <code>CompilerError</code>.</p><p><strong>Optional optimisation proof</strong> covers final-use transfer, deterministic drop placement, retain/drop elimination, stack/arena/region allocation, collector elision and ownership specialisation. Failure to prove an optimisation preserves semantics through a conservative representation such as GC. It must not reject the program.</p><p>GC is a permitted runtime representation for a statically legal lifetime topology. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles.</p><p>Implementation of this analysis is deferred. This leaf is the canonical design authority for lifetime topology. Canonical grouped-memory semantics live under <a href="../declared-memory-groups">Declared memory groups</a>. The roadmap file owns implementation sequencing and deferred follow-up only.</p><h2>Terminology</h2><table style="">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Memory management</a> / Lifetime regions and escape validation</p><p>Every allocation has exactly one semantic lifetime owner. GC cannot bypass topology validation.</p></section>
+<section class="container"><h1>Lifetime regions and escape validation</h1><h2>Design contract</h2><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Lifetime-region and escape validation is the mandatory semantic proof that every retained reference is legal under one lifetime owner. It is distinct from optional ownership optimisation.</p><p><strong>Mandatory semantic proof</strong> covers:</p><ul><li>lifetime owner and region legality</li><li>retained-edge outlives relationships</li><li>escape legality</li><li>cycle legality</li><li>external-boundary legality</li></ul><p>User-authored topology that is invalid or cannot be proven legal produces a structured <code>CompilerDiagnostic</code>. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce <code>CompilerError</code>.</p><p><strong>Optional optimisation proof</strong> covers final-use transfer, deterministic drop placement, retain/drop elimination, stack/arena/region allocation, collector elision and ownership specialisation. Failure to prove an optimisation preserves semantics through a conservative representation such as GC. It must not reject the program.</p><p>GC is a permitted runtime representation for a statically legal lifetime topology. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles.</p><p>Implementation of this analysis is deferred. This leaf is the canonical design authority for lifetime topology. Canonical grouped-memory semantics live under <a href="../declared-memory-groups">Declared memory groups</a>. The roadmap file owns implementation sequencing and deferred follow-up only.</p><h2>Terminology</h2><table style="">
+        
+        <tr style="">
             
+            <th scope="col" style=""><p> <strong>Term</strong></p></th><th scope="col" style=""><p> <strong>Definition</strong></p></th>
+        
+</tr>
+
+
+
             <tr style="">
-                
-                <th scope="col" style=""><p> <strong>Term</strong></p></th><th scope="col" style=""><p> <strong>Definition</strong></p></th>
-            
-    </tr>
+             <td style=""><p> Allocation</p></td> <td style=""><p> One runtime storage unit created for a value graph node.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Allocation family</p></td> <td style=""><p> The containing allocation plus projections that remain rooted in it.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Lifetime owner</p></td> <td style=""><p> The one semantic region responsible for an allocation&#39;s lifetime.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Lifetime region</p></td> <td style=""><p> A semantic owner domain with an outlives relation to other regions.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Lexical scope</p></td> <td style=""><p> Name visibility and control-flow exit structure. It does not define allocation lifetime.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Retained reference</p></td> <td style=""><p> A stored reference that survives the immediate operation.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Retained edge</p></td> <td style=""><p> A directed storage relationship from a retaining object to a referenced allocation.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Outlives relation</p></td> <td style=""><p> <code>R_value &gt;= R_container</code> means the referenced region lives at least as long as the retaining region.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Implicit region</p></td> <td style=""><p> A compiler-inferred lifetime owner for ordinary ungrouped allocations.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Declared group</p></td> <td style=""><p> An accepted deferred hard lifetime boundary introduced by <code>group name:</code>.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Builder lifecycle root</p></td> <td style=""><p> A page, mount, request, frame or arena owner supplied by build/runtime architecture.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Physical representation</p></td> <td style=""><p> GC, RC, arena, stack, handle or hybrid storage chosen after topology is validated.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Fresh result root</p></td> <td style=""><p> Newly allocated result root that may retain legal references to older allocations.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Alias result</p></td> <td style=""><p> Result root that is an existing argument, projection, external allocation, or another result.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Independent result graph</p></td> <td style=""><p> New graph with no mutable sharing or retained Moth reference to pre-existing storage.</p></td>
+        </tr>
+        
+</table><p>An allocation family is the containing allocation plus field, element and other projections that remain rooted in it. A projection does not silently become an independent allocation.</p><h2>One semantic lifetime owner</h2><p>Every runtime allocation has exactly one semantic lifetime owner.</p><p>Multiple bindings, fields, elements or returned values may alias one allocation without becoming additional lifetime owners.</p><pre style=""><code class='codeblock'>Page region owns Theme
 
+header.theme ─┐
+footer.theme ──┼── Theme allocation
+theme binding ─┘</code></pre><p>The ownership bit records destruction responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.</p><h2>Stored-edge outlives rule</h2><p>Every allocation has exactly one semantic lifetime owner. An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.</p><p>Formal rule:</p><pre style=""><code class='codeblock'>R_value &gt;= R_container</code></pre><p>where <code>R_value</code> lives at least as long as <code>R_container</code>.</p><p>Valid edges:</p><ul><li>a local retains a longer-lived parameter</li><li>a child-group value retains a parent-group value</li><li>two fields of one page-owned aggregate share one page-owned child</li></ul><p>Invalid edges:</p><ul><li>a longer-lived object retains shorter-lived storage</li><li>a parent retains a child-group value</li><li>a sibling domain retains another independently ending sibling&#39;s value without a common owner</li><li>a returned local outlives its source region without independent storage</li></ul><h2>Shared aliases may escape lexical bindings</h2><p>Shared aliases may outlive the lexical binding that first named the storage.</p><p>Lexical scope does not define allocation lifetime. Escaping or retained aliases do not create unrestricted dynamic shared ownership. They remain under one lifetime owner and must satisfy the stored-edge outlives rule.</p><h2>Implicit lifetime inference</h2><p>An ordinary allocation begins in the narrowest inferred region capable of owning its initial uses. The compiler may widen that allocation only to the nearest existing ancestor on the same ordered owner chain that outlives every retained observer.</p><p>The inference sequence:</p><pre style=""><code class='codeblock'>choose the narrowest initial owner
+-&gt; collect retained observers
+-&gt; widen only when required
+-&gt; choose the nearest existing ancestor on the same owner chain</code></pre><p>Implicit region inference may not silently promote an allocation laterally across independently ending sibling lifetime domains.</p><p>Widening may follow one ordered owner chain only. The compiler must not widen farther than necessary or invent a page-, application- or process-lifetime owner merely to avoid a diagnostic.</p><p>Independently ending sibling lifetime domains do not form one ordered chain.</p><p>Sharing across sibling domains requires one of:</p><ol><li>an already-existing common semantic owner</li><li>an enclosing declared memory group</li><li>a builder-declared common lifecycle</li><li>independent storage created by <code>copy</code></li></ol><p>Declared groups are hard boundaries and cannot be silently widened.</p><h2>Fresh destination allocation and final-use transfer</h2><p>Fresh escaping values should be allocated directly into the destination lifetime where possible.</p><p>Existing values may transfer destruction responsibility only at a proven final use. When later use exists, the outcome is path-dependent, or proof is imprecise, the operation remains a borrow.</p><p>Inferred transfer is optional. When safe transfer is not proven on every relevant path, the operation remains a borrow. Failure to prove an ownership optimisation must not make an otherwise valid source program invalid.</p><p><code>copy place</code> creates independent storage that may be allocated directly into an inferred or declared destination region. See <a href="../access-and-aliasing">Access and aliasing</a> for the complete graph-level copy contract.</p><h2>Interior projections and allocation families</h2><p>Interior projections remain rooted in their containing allocation family. Returning, storing, or escaping a projection retains that family. At a proven final use, analysis may transfer the containing allocation family. A child is independently releasable only when it was already established as a separately owned allocation before the escape.</p><p>A projection does not silently become an independent allocation or independent copy. Returning, storing or escaping a field or element alias retains the base family under the stored-edge rule.</p><p>Field-sensitive allocation splitting may remain as a future compatible optimisation only when the compiler establishes separate child ownership before the alias escapes. It is not retroactive child extraction.</p><h2>Returns and multi-return aliasing</h2><p>Function lifetime summaries cover:</p><ul><li>fresh result roots</li><li>parameter aliases</li><li>projection aliases</li><li>result-to-result aliases</li><li>retained-parameter constraints</li><li>required outlives relationships</li></ul><p>Multiple return values may alias one allocation when they remain under one caller lifetime owner.</p><p>A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination. An alias result remains tied to its existing lifetime owner. An independent result graph may enter an unrelated destination lifetime without retained edges to its source graph.</p><h2>Cycles and strongly connected graphs</h2><p>Cross-region cycles are invalid.</p><p>Every strongly connected allocation graph must belong to one lifetime region.</p><p>Same-region cycles are lifetime-safe. Direct source construction of cyclic reference graphs remains deferred. V1 programs should model cyclic domain graphs through scalar IDs, indexes or keys inside one region when needed.</p><h2>Reactive and builder-owned lifetimes</h2><p>Reactive subscriptions are read-only dependencies, not active borrow lifetimes.</p><p>Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.</p><p>Reactive storage that outlives a lexical function must still satisfy one lifetime owner and the stored-edge outlives rule. A collector-free path may use builder-owned lifecycle regions; a GC path may use ordinary reachability for a topology already proven legal.</p><h2>External lifetime boundaries</h2><p>External bindings use closed semantic boundary profiles. They do not expose arbitrary user-defined lifetime graphs.</p><p><strong>WIT value-only V1 profile.</strong> Moth imports general external Wasm libraries through a value-only WIT component profile. Supported arguments are lowered from shared reads into independent component values, and results are lifted into independent Moth result graphs. No Moth alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary.</p><p><strong>Restricted host-binding profile.</strong> Existing Core, Builder and JavaScript-backed bindings use a restricted host-binding profile. Ordinary Moth values cross by value, host code may not retain references into ordinary Moth storage, and opaque handles represent foreign identities rather than Moth reference types.</p><p>Richer resource-capable profiles are deferred and require a separate complete design. Detail lives in <a href="../runtime-and-backend-lowering">Runtime and backend lowering</a>, <code>docs/build-system-design.md</code> and <code>docs/language-overview.md</code>.</p><h2>Analysis boundary</h2><p>Lifetime-topology legality belongs to a distinct backend-neutral analysis after borrow validation and before target planning.</p><p>Do not invent a numbered Stage 7 for this boundary. Stage 6 remains borrow validation. Lifetime-region and escape validation is an explicit unnumbered analysis after Stage 6.</p><h3>Local per-function and module work</h3><p>Per-function and module analysis produces local allocation, alias, retention, escape, result and outlives constraints plus exported summaries.</p><p>It reads validated HIR and read-only borrow/effect facts. It writes immutable side-table facts and summaries. It does not rewrite HIR. It does not choose JS versus Wasm. It does not choose physical allocation representation. It does not make source syntax decisions.</p><h3>Project and link work</h3><p>Build/link analysis instantiates those summaries over the reachable call graph and builder-supplied lifecycle roots. Local module compilation cannot validate every cross-module or builder-lifecycle relationship by itself.</p><p>Backends receive a validated topology and may not reconsider source legality.</p><h2>Diagnostics are part of the model</h2><p>Lifetime diagnostics are part of the memory model, not an afterthought. They must identify the failed topology and steer the programmer toward direct destination allocation, a common lifetime group, independent storage through <code>copy</code>, or a shorter retained edge.</p><p>High-quality diagnostics are a central reason Moth can reject hidden dynamic shared ownership without exposing source-level RC.</p><p>Lifetime diagnostics must distinguish:</p><ul><li>topology proven invalid</li><li>topology not proven legal by conservative analysis</li><li>invalid group syntax or placement</li><li>non-copyable graph contents</li><li>unsupported external boundary profile</li><li>missing or inconsistent compiler-owned metadata</li></ul><p>User-facing diagnostics use stable codes and structured reason payloads. Internal impossible or inconsistent metadata uses <code>CompilerError</code>.</p><p>Every lifetime diagnostic should identify, where applicable:</p><ul><li>allocation or value origin</li><li>retaining object or escaping use</li><li>relevant source group or builder lifecycle owner</li><li>shorter- and longer-lived regions</li><li>retained-edge or projection path</li><li>external boundary profile</li><li>failed rule</li></ul><p>Remedies must be ranked in this order:</p><ol><li>allocate directly into the required destination region</li><li>place observers under one common group</li><li>create independent storage with <code>copy</code></li><li>shorten the alias or retained edge</li><li>repair package-owned external lifetime metadata</li></ol><p>There is no backend-specific escape from semantic lifetime diagnostics.</p><h2>Conservative precision</h2><p>Stronger future analysis may prove more legal programs or narrower owners, but cannot change the meaning of already-accepted programs.</p><p>Conservative analysis may reject topology it cannot prove legal. That is a source diagnostic, not permission to fall back to GC for an unproven graph.</p><h2>What this analysis must not do</h2><ul><li>Rewrite HIR.</li><li>Decide source access syntax or <code>~</code> validity.</li><li>Decide optional transfer points as source legality.</li><li>Choose target partition or backend.</li><li>Choose GC, RC, arena, stack or handle representation.</li><li>Encode the ownership bit.</li><li>Invent overly broad page or process owners to avoid diagnostics.</li><li>Silently widen declared groups.</li><li>Fold region identity into <code>TypeId</code> or source signatures.</li><li>Let build profile change source legality.</li></ul><h2>Common mistakes</h2><ul><li>Treating GC as a legality escape for invalid or unproven topology.</li><li>Treating every alias as another lifetime owner.</li><li>Treating the ownership bit as uniqueness or observer count.</li><li>Widening laterally across independently ending sibling domains.</li><li>Detaching projections from their containing allocation family.</li><li>Allowing cross-region cycles.</li><li>Folding topology into <code>TypeId</code>.</li><li>Making backend or profile choice affect validity.</li><li>Assigning topology legality to borrow validation alone.</li><li>Claiming implementation exists when this analysis is still deferred.</li></ul><h2>Related reading</h2><ul><li><a href="../">Memory management</a>: top-level memory authority</li><li><a href="../access-and-aliasing">Access and aliasing</a>: shared aliases, copies and aggregate storage</li><li><a href="../borrow-validation">Borrow validation</a>: exclusivity and optional transfer safety</li><li><a href="../declared-memory-groups">Declared memory groups</a>: accepted deferred <code>group</code> / <code>into</code> surface and hard destination lifetimes</li><li><a href="../ownership-and-drops">Ownership and drops</a>: destruction responsibility</li><li><a href="../runtime-and-backend-lowering">Runtime and backend lowering</a>: GC/RC/arena representations and external profiles</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md">Compiler design overview</a>: analysis boundary and artefact lanes</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build-system design</a>: lifecycle roots and link planning</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/grouped-memory-design.md">Grouped memory implementation roadmap</a>: implementation sequencing and deferred investigations</li></ul></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
 
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
 
-                <tr style="">
-                 <td style=""><p> Allocation</p></td> <td style=""><p> One runtime storage unit created for a value graph node.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Allocation family</p></td> <td style=""><p> The containing allocation plus projections that remain rooted in it.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Lifetime owner</p></td> <td style=""><p> The one semantic region responsible for an allocation&#39;s lifetime.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Lifetime region</p></td> <td style=""><p> A semantic owner domain with an outlives relation to other regions.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Lexical scope</p></td> <td style=""><p> Name visibility and control-flow exit structure. It does not define allocation lifetime.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Retained reference</p></td> <td style=""><p> A stored reference that survives the immediate operation.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Retained edge</p></td> <td style=""><p> A directed storage relationship from a retaining object to a referenced allocation.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Outlives relation</p></td> <td style=""><p> <code>R_value &gt;= R_container</code> means the referenced region lives at least as long as the retaining region.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Implicit region</p></td> <td style=""><p> A compiler-inferred lifetime owner for ordinary ungrouped allocations.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Declared group</p></td> <td style=""><p> An accepted deferred hard lifetime boundary introduced by <code>group name:</code>.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Builder lifecycle root</p></td> <td style=""><p> A page, mount, request, frame or arena owner supplied by build/runtime architecture.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Physical representation</p></td> <td style=""><p> GC, RC, arena, stack, handle or hybrid storage chosen after topology is validated.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Fresh result root</p></td> <td style=""><p> Newly allocated result root that may retain legal references to older allocations.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Alias result</p></td> <td style=""><p> Result root that is an existing argument, projection, external allocation, or another result.</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Independent result graph</p></td> <td style=""><p> New graph with no mutable sharing or retained Moth reference to pre-existing storage.</p></td>
-            </tr>
-            
-    </table><p>An allocation family is the containing allocation plus field, element and other projections that remain rooted in it. A projection does not silently become an independent allocation.</p><h2>One semantic lifetime owner</h2><p>Every runtime allocation has exactly one semantic lifetime owner.</p><p>Multiple bindings, fields, elements or returned values may alias one allocation without becoming additional lifetime owners.</p><pre style=""><code class='codeblock'>
-        Page region owns Theme
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
 
-        header.theme ─┐
-        footer.theme ──┼── Theme allocation
-        theme binding ─┘
-    </code></pre><p>The ownership bit records destruction responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.</p><h2>Stored-edge outlives rule</h2><p>Every allocation has exactly one semantic lifetime owner. An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.</p><p>Formal rule:</p><pre style=""><code class='codeblock'>
-        R_value >= R_container
-    </code></pre><p>where <code>R_value</code> lives at least as long as <code>R_container</code>.</p><p>Valid edges:</p><ul><li>a local retains a longer-lived parameter</li><li>a child-group value retains a parent-group value</li><li>two fields of one page-owned aggregate share one page-owned child</li></ul><p>Invalid edges:</p><ul><li>a longer-lived object retains shorter-lived storage</li><li>a parent retains a child-group value</li><li>a sibling domain retains another independently ending sibling&#39;s value without a common owner</li><li>a returned local outlives its source region without independent storage</li></ul><h2>Shared aliases may escape lexical bindings</h2><p>Shared aliases may outlive the lexical binding that first named the storage.</p><p>Lexical scope does not define allocation lifetime. Escaping or retained aliases do not create unrestricted dynamic shared ownership. They remain under one lifetime owner and must satisfy the stored-edge outlives rule.</p><h2>Implicit lifetime inference</h2><p>An ordinary allocation begins in the narrowest inferred region capable of owning its initial uses. The compiler may widen that allocation only to the nearest existing ancestor on the same ordered owner chain that outlives every retained observer.</p><p>The inference sequence:</p><pre style=""><code class='codeblock'>
-        choose the narrowest initial owner
-        -> collect retained observers
-        -> widen only when required
-        -> choose the nearest existing ancestor on the same owner chain
-    </code></pre><p>Implicit region inference may not silently promote an allocation laterally across independently ending sibling lifetime domains.</p><p>Widening may follow one ordered owner chain only. The compiler must not widen farther than necessary or invent a page-, application- or process-lifetime owner merely to avoid a diagnostic.</p><p>Independently ending sibling lifetime domains do not form one ordered chain.</p><p>Sharing across sibling domains requires one of:</p><ol><li>an already-existing common semantic owner</li><li>an enclosing declared memory group</li><li>a builder-declared common lifecycle</li><li>independent storage created by <code>copy</code></li></ol><p>Declared groups are hard boundaries and cannot be silently widened.</p><h2>Fresh destination allocation and final-use transfer</h2><p>Fresh escaping values should be allocated directly into the destination lifetime where possible.</p><p>Existing values may transfer destruction responsibility only at a proven final use. When later use exists, the outcome is path-dependent, or proof is imprecise, the operation remains a borrow.</p><p>Inferred transfer is optional. When safe transfer is not proven on every relevant path, the operation remains a borrow. Failure to prove an ownership optimisation must not make an otherwise valid source program invalid.</p><p><code>copy place</code> creates independent storage that may be allocated directly into an inferred or declared destination region. See <a href="../access-and-aliasing">Access and aliasing</a> for the complete graph-level copy contract.</p><h2>Interior projections and allocation families</h2><p>Interior projections remain rooted in their containing allocation family. Returning, storing, or escaping a projection retains that family. At a proven final use, analysis may transfer the containing allocation family. A child is independently releasable only when it was already established as a separately owned allocation before the escape.</p><p>A projection does not silently become an independent allocation or independent copy. Returning, storing or escaping a field or element alias retains the base family under the stored-edge rule.</p><p>Field-sensitive allocation splitting may remain as a future compatible optimisation only when the compiler establishes separate child ownership before the alias escapes. It is not retroactive child extraction.</p><h2>Returns and multi-return aliasing</h2><p>Function lifetime summaries cover:</p><ul><li>fresh result roots</li><li>parameter aliases</li><li>projection aliases</li><li>result-to-result aliases</li><li>retained-parameter constraints</li><li>required outlives relationships</li></ul><p>Multiple return values may alias one allocation when they remain under one caller lifetime owner.</p><p>A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination. An alias result remains tied to its existing lifetime owner. An independent result graph may enter an unrelated destination lifetime without retained edges to its source graph.</p><h2>Cycles and strongly connected graphs</h2><p>Cross-region cycles are invalid.</p><p>Every strongly connected allocation graph must belong to one lifetime region.</p><p>Same-region cycles are lifetime-safe. Direct source construction of cyclic reference graphs remains deferred. V1 programs should model cyclic domain graphs through scalar IDs, indexes or keys inside one region when needed.</p><h2>Reactive and builder-owned lifetimes</h2><p>Reactive subscriptions are read-only dependencies, not active borrow lifetimes.</p><p>Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.</p><p>Reactive storage that outlives a lexical function must still satisfy one lifetime owner and the stored-edge outlives rule. A collector-free path may use builder-owned lifecycle regions; a GC path may use ordinary reachability for a topology already proven legal.</p><h2>External lifetime boundaries</h2><p>External bindings use closed semantic boundary profiles. They do not expose arbitrary user-defined lifetime graphs.</p><p><strong>WIT value-only V1 profile.</strong> Moth imports general external Wasm libraries through a value-only WIT component profile. Supported arguments are lowered from shared reads into independent component values, and results are lifted into independent Moth result graphs. No Moth alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary.</p><p><strong>Restricted host-binding profile.</strong> Existing Core, Builder and JavaScript-backed bindings use a restricted host-binding profile. Ordinary Moth values cross by value, host code may not retain references into ordinary Moth storage, and opaque handles represent foreign identities rather than Moth reference types.</p><p>Richer resource-capable profiles are deferred and require a separate complete design. Detail lives in <a href="../runtime-and-backend-lowering">Runtime and backend lowering</a>, <code>docs/build-system-design.md</code> and <code>docs/language-overview.md</code>.</p><h2>Analysis boundary</h2><p>Lifetime-topology legality belongs to a distinct backend-neutral analysis after borrow validation and before target planning.</p><p>Do not invent a numbered Stage 7 for this boundary. Stage 6 remains borrow validation. Lifetime-region and escape validation is an explicit unnumbered analysis after Stage 6.</p><h3>Local per-function and module work</h3><p>Per-function and module analysis produces local allocation, alias, retention, escape, result and outlives constraints plus exported summaries.</p><p>It reads validated HIR and read-only borrow/effect facts. It writes immutable side-table facts and summaries. It does not rewrite HIR. It does not choose JS versus Wasm. It does not choose physical allocation representation. It does not make source syntax decisions.</p><h3>Project and link work</h3><p>Build/link analysis instantiates those summaries over the reachable call graph and builder-supplied lifecycle roots. Local module compilation cannot validate every cross-module or builder-lifecycle relationship by itself.</p><p>Backends receive a validated topology and may not reconsider source legality.</p><h2>Diagnostics are part of the model</h2><p>Lifetime diagnostics are part of the memory model, not an afterthought. They must identify the failed topology and steer the programmer toward direct destination allocation, a common lifetime group, independent storage through <code>copy</code>, or a shorter retained edge.</p><p>High-quality diagnostics are a central reason Moth can reject hidden dynamic shared ownership without exposing source-level RC.</p><p>Lifetime diagnostics must distinguish:</p><ul><li>topology proven invalid</li><li>topology not proven legal by conservative analysis</li><li>invalid group syntax or placement</li><li>non-copyable graph contents</li><li>unsupported external boundary profile</li><li>missing or inconsistent compiler-owned metadata</li></ul><p>User-facing diagnostics use stable codes and structured reason payloads. Internal impossible or inconsistent metadata uses <code>CompilerError</code>.</p><p>Every lifetime diagnostic should identify, where applicable:</p><ul><li>allocation or value origin</li><li>retaining object or escaping use</li><li>relevant source group or builder lifecycle owner</li><li>shorter- and longer-lived regions</li><li>retained-edge or projection path</li><li>external boundary profile</li><li>failed rule</li></ul><p>Remedies must be ranked in this order:</p><ol><li>allocate directly into the required destination region</li><li>place observers under one common group</li><li>create independent storage with <code>copy</code></li><li>shorten the alias or retained edge</li><li>repair package-owned external lifetime metadata</li></ol><p>There is no backend-specific escape from semantic lifetime diagnostics.</p><h2>Conservative precision</h2><p>Stronger future analysis may prove more legal programs or narrower owners, but cannot change the meaning of already-accepted programs.</p><p>Conservative analysis may reject topology it cannot prove legal. That is a source diagnostic, not permission to fall back to GC for an unproven graph.</p><h2>What this analysis must not do</h2><ul><li>Rewrite HIR.</li><li>Decide source access syntax or <code>~</code> validity.</li><li>Decide optional transfer points as source legality.</li><li>Choose target partition or backend.</li><li>Choose GC, RC, arena, stack or handle representation.</li><li>Encode the ownership bit.</li><li>Invent overly broad page or process owners to avoid diagnostics.</li><li>Silently widen declared groups.</li><li>Fold region identity into <code>TypeId</code> or source signatures.</li><li>Let build profile change source legality.</li></ul><h2>Common mistakes</h2><ul><li>Treating GC as a legality escape for invalid or unproven topology.</li><li>Treating every alias as another lifetime owner.</li><li>Treating the ownership bit as uniqueness or observer count.</li><li>Widening laterally across independently ending sibling domains.</li><li>Detaching projections from their containing allocation family.</li><li>Allowing cross-region cycles.</li><li>Folding topology into <code>TypeId</code>.</li><li>Making backend or profile choice affect validity.</li><li>Assigning topology legality to borrow validation alone.</li><li>Claiming implementation exists when this analysis is still deferred.</li></ul><h2>Related reading</h2><ul><li><a href="../">Memory management</a>: top-level memory authority</li><li><a href="../access-and-aliasing">Access and aliasing</a>: shared aliases, copies and aggregate storage</li><li><a href="../borrow-validation">Borrow validation</a>: exclusivity and optional transfer safety</li><li><a href="../declared-memory-groups">Declared memory groups</a>: accepted deferred <code>group</code> / <code>into</code> surface and hard destination lifetimes</li><li><a href="../ownership-and-drops">Ownership and drops</a>: destruction responsibility</li><li><a href="../runtime-and-backend-lowering">Runtime and backend lowering</a>: GC/RC/arena representations and external profiles</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md">Compiler design overview</a>: analysis boundary and artefact lanes</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build-system design</a>: lifecycle roots and link planning</li><li><a href="https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/grouped-memory-design.md">Grouped memory implementation roadmap</a>: implementation sequencing and deferred investigations</li></ul></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
-
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
-
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
-
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

@@ -151,1494 +151,1453 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3f8f4e;
+    --doc-level-accent-hover: #337740;
+    --doc-level-border: #d7dfd8;
+    --doc-level-switch-background: #f1f5f1;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202722;
+    --doc-level-muted: #687169;
+    --doc-level-focus: #2877d4;
+}
 
-        table {
-            font-size: 0.8rem;
-        }
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
 
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
 
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
 
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
+.doc-level__title {
+    margin: 0;
+}
 
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-    <style>.doc-level,
-    .doc-pager {
-        --doc-level-accent: #3f8f4e;
-        --doc-level-accent-hover: #337740;
-        --doc-level-border: #d7dfd8;
-        --doc-level-switch-background: #f1f5f1;
-        --doc-level-selected-background: #ffffff;
-        --doc-level-text: #202722;
-        --doc-level-muted: #687169;
-        --doc-level-focus: #2877d4;
-    }
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
 
-    .doc-level {
-        min-inline-size: 0;
-        margin: 2rem 0;
-        padding: 0;
-        border: 0;
-        color: var(--doc-level-text);
-    }
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
 
-    .visually-hidden,
-    .doc-level__input {
-        position: absolute;
-        inline-size: 1px;
-        block-size: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-        border: 0;
-    }
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
 
-    .doc-level__header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-block-end: 1.25rem;
-    }
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
 
-    .doc-level__title {
-        margin: 0;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
 
-    .doc-level__switch {
-        display: inline-grid;
-        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
-        gap: 0.2rem;
-        flex: none;
-        padding: 0.22rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        background: var(--doc-level-switch-background);
-    }
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
 
-    .doc-level__option {
-        padding: 0.42rem 0.8rem;
-        border-radius: 0.55rem;
-        color: var(--doc-level-muted);
-        font-size: 0.875rem;
-        font-weight: 650;
-        line-height: 1.3;
-        text-align: center;
-        cursor: pointer;
-        user-select: none;
+.doc-level__panel {
+    display: none;
+}
 
-        transition:
-            color 130ms ease,
-            background-color 130ms ease,
-            box-shadow 130ms ease;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
 
-    .doc-level__option:hover {
-        color: var(--doc-level-accent-hover);
-    }
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
 
-    .doc-level__input--basic:checked
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:checked
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        color: var(--doc-level-accent);
-        background: var(--doc-level-selected-background);
-        box-shadow:
-            0 1px 2px rgb(20 40 24 / 10%),
-            0 0 0 1px rgb(63 143 78 / 8%);
-    }
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
 
-    .doc-level__input--basic:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
 
-    .doc-level__panel {
-        display: none;
-    }
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
 
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
     .doc-level__input--basic:checked
         ~ .doc-level__panel--basic,
     .doc-level__input--advanced:checked
         ~ .doc-level__panel--advanced {
-        display: block;
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
     }
 
     .doc-pager {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
-        margin-block: 3rem 1rem;
-    }
-
-    .doc-pager--single {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .doc-pager--single .doc-pager__link {
-        width: min(100%, 32rem);
-    }
-
-    .doc-pager--single .doc-pager__link--previous {
-        justify-self: start;
-    }
-
-    .doc-pager--single .doc-pager__link--next {
-        justify-self: end;
-    }
-
-    .doc-pager__link {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        min-inline-size: 0;
-        padding: 0.9rem 1rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        color: var(--doc-level-text);
-        text-decoration: none;
-        background: var(--doc-level-selected-background);
-
-        transition:
-            color 130ms ease,
-            border-color 130ms ease,
-            box-shadow 130ms ease;
-    }
-
-    .doc-pager__link:hover {
-        color: var(--doc-level-accent-hover);
-        border-color: var(--doc-level-accent);
-        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
-    }
-
-    .doc-pager__link:focus-visible {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
-
     .doc-pager__link--next {
-        align-items: flex-end;
-        text-align: right;
+        align-items: flex-start;
+        text-align: left;
     }
 
-    .doc-pager__direction {
-        color: var(--doc-level-muted);
-        font-size: 0.8rem;
-        font-weight: 650;
-        letter-spacing: 0.03rem;
-        text-transform: uppercase;
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #80c98c;
+        --doc-level-accent-hover: #a0d9a9;
+        --doc-level-border: #3a493d;
+        --doc-level-switch-background: #202a22;
+        --doc-level-selected-background: #303c32;
+        --doc-level-text: #edf2ee;
+        --doc-level-muted: #a8b3aa;
+        --doc-level-focus: #75b7ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
     }
 
-    .doc-pager__title {
-        font-size: 1rem;
-        font-weight: 650;
+    .doc-level__panel {
+        display: block;
     }
 
-    @media (prefers-reduced-motion: no-preference) {
-        .doc-level__input--basic:checked
-            ~ .doc-level__panel--basic,
-        .doc-level__input--advanced:checked
-            ~ .doc-level__panel--advanced {
-            animation: doc-level-enter 150ms ease-out;
-        }
-
-        @keyframes doc-level-enter {
-            from {
-                opacity: 0;
-                transform: translateY(0.2rem);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
     }
 
-    @media (max-width: 36rem) {
-        .doc-level__header {
-            align-items: stretch;
-            flex-direction: column;
-        }
-
-        .doc-level__switch {
-            align-self: flex-start;
-        }
-
-        .doc-pager {
-            grid-template-columns: minmax(0, 1fr);
-        }
-
-        .doc-pager__link--next {
-            align-items: flex-start;
-            text-align: left;
-        }
-
-        .doc-pager--single .doc-pager__link {
-            width: 100%;
-            justify-self: stretch;
-        }
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
     }
 
-    @media (prefers-color-scheme: dark) {
-        .doc-level,
-        .doc-pager {
-            --doc-level-accent: #80c98c;
-            --doc-level-accent-hover: #a0d9a9;
-            --doc-level-border: #3a493d;
-            --doc-level-switch-background: #202a22;
-            --doc-level-selected-background: #303c32;
-            --doc-level-text: #edf2ee;
-            --doc-level-muted: #a8b3aa;
-            --doc-level-focus: #75b7ff;
-        }
+    .doc-level__panel--basic::before {
+        content: "Basic";
     }
 
-    @media print {
-        .doc-level__input,
-        .doc-level__switch,
-        .doc-pager {
-            display: none;
-        }
-
-        .doc-level__panel {
-            display: block;
-        }
-
-        .doc-level__panel--advanced {
-            margin-block-start: 1.5rem;
-            padding-block-start: 1.5rem;
-            border-block-start: 1px solid;
-        }
-
-        .doc-level__panel--basic::before,
-        .doc-level__panel--advanced::before {
-            display: block;
-            margin-block-end: 0.75rem;
-            font-weight: 700;
-        }
-
-        .doc-level__panel--basic::before {
-            content: "Basic";
-        }
-
-        .doc-level__panel--advanced::before {
-            content: "Advanced";
-        }
-    }</style>
-
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / Project structure</p><h1>Project structure</h1><p>A Moth project consists of a set of modules, one strict project config and a builder that decides what those modules produce.</p><p>The root filename begins with <code>#</code>, but the name after it carries no importance. The source tells the compiler what counts as public. The builder decides whether the module becomes an artefact.</p></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Project layout
+</legend>
 
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="project-layout-level"
+                id="project-layout-basic"
+                value="basic"
+                checked
             >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Project structure</p><h1>Project structure</h1><p>A Moth project consists of a set of modules, one strict project config and a builder that decides what those modules produce.</p><p>The root filename begins with <code>#</code>, but the name after it carries no importance. The source tells the compiler what counts as public. The builder decides whether the module becomes an artefact.</p></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Project layout
-    </legend>
 
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="project-layout-level"
-                    id="project-layout-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="project-layout-level"
-                    id="project-layout-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="project-layout">
-                        Project layout
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="project-layout-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="project-layout-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A Moth project has one config file, one source root and generated output folders.</p><h3>Where things live</h3><ul><li><code>config.moth</code> at the project root controls build settings.</li><li><code>src/</code> (or whatever <code>entry_root</code> says) holds your source files.</li><li><code>dev/</code> and <code>release/</code> are generated output. Do not edit them.</li></ul><h3>One root file per module directory</h3><p>Each source directory can have one <code>@*.moth</code> file that marks it as a module. The <code>@</code> filename is a convention. <code>@page.moth</code>, <code>@api.moth</code> and <code>@mod.moth</code> all mean the same thing to the compiler.</p><h3>Shared scoped packages</h3><p>A <code>+*.moth</code> file in a source directory marks it as a scoped support package. For example, <code>shared/+package.moth</code> creates <code>@shared</code>. Its owner module, normal sibling modules and their descendants may import it. Other support packages in the same scope and the package&#39;s private implementation subtree cannot.</p><p>The current scaffold creates an empty legacy <code>lib/</code> folder. It has no special meaning in the accepted package design.</p><h3>Outputs are generated</h3><p>The build command creates output folders. They are not source. The builder cleans up stale artifacts automatically.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A Moth project is a directory tree with one strict config file, a source entry root and generated output folders.</p><h3>Project root contents</h3><pre style=""><code class='codeblock'>
-        project-root/
-        ├── config.moth
-        ├── src/
-        │   ├── @site.moth
-        │   ├── shared/
-        │   │   └── +package.moth
-        │   └── pages/
-        │       └── @pages.moth
-        ├── dev/
-        │   └── .moth_manifest
-        ├── release/
-        │   └── .moth_manifest
-        └── .gitignore
-    </code></pre><h3>Directory roles</h3><ul><li><code>config.moth</code> is the only project config file. It lives at the project root and is not module source.</li><li>The configured <code>entry_root</code> (usually <code>src</code>) is the source folder the compiler searches for module roots.</li><li><code>dev/</code> and <code>release/</code> are builder output folders, not source folders. They are generated and managed by the build system.</li><li><code>.moth_manifest</code> files are build-system metadata used for safe stale-output cleanup. They are not source.</li></ul><h3>Structural packages</h3><p>Project-local source-backed packages are structural <code>+*.moth</code> support packages. A <code>+*.moth</code> file in a source directory marks that directory as a scoped support package root named by its containing directory.</p><p>In the example above, <code>shared/+package.moth</code> creates the scoped <code>@shared</code> support package. It is visible to its owner normal module, normal sibling modules and their descendants. It is not imported from its own private implementation subtree or from another support package in the same scope.</p><p>No folder gains package meaning without a <code>+*.moth</code> root. Ordinary directories do not automatically become packages.</p><p>The optional project-root <code>+*.moth</code> facade beside <code>config.moth</code> is a separate mechanism for assembling public descendant surfaces for external consumers. It is not a scoped support package.</p><p>For the full package contract see <a href="../packages/#project-local-packages">Project-local packages</a>.</p><h3>Normal module-root files inside source directories</h3><p>A non-config file whose name starts with <code>@</code> and ends with <code>.moth</code> is a module root. The filename after <code>@</code> has no language-level semantic role. <code>@page.moth</code>, <code>@mod.moth</code>, <code>@api.moth</code> and <code>@anything.moth</code> are all equivalent root filenames.</p><p>The <code>moth new html</code> scaffold generates <code>src/@page.moth</code> as a conventional default. That convention does not make <code>@page.moth</code> a special compiler role. Any <code>@*.moth</code> filename in a source directory marks that directory as a module root.</p><h3>Implementation note</h3><p>The current scaffold still creates an empty <code>lib/</code> folder and the compiler retains legacy <code>package_folders</code> support. These are implementation drift and are not part of the accepted project/package model. See <a href="../progress/">the progress matrix</a> for current status.</p><h3>Source versus output</h3><p>Source directories are owned by the developer. Output folders are generated by the builder and should be treated as build artifacts, not source. The builder owns stale-output cleanup for generated artifacts.</p><h3>Builder-neutral frontend versus builder-owned output</h3><p>The compiler frontend discovers modules, resolves imports, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.</p><p>This separation means the same frontend can later feed other builders. The frontend does not decide which modules produce artifacts. That decision belongs to the builder.</p><h3>Only config.moth has config semantics</h3><p>No other filename has config meaning. <code>@config.moth</code> is a module root, not a config file. Alternate config filenames, compatibility handling and config-specific diagnostics for other names are not supported.</p><h3>Related concepts</h3><ul><li>For config key rules see <a href="#project-config">Project config</a>.</li><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For HTML routes and artifacts see <a href="#html-routing-and-artifacts">HTML routing and artifacts</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Project config
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="project-config-level"
-                    id="project-config-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="project-config-level"
-                    id="project-config-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="project-config">
-                        Project config
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="project-config-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="project-config-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p><strong>Accepted deferred design.</strong> This page teaches the final grouped config shape. The current compiler still uses a transitional flat config format. See <a href="../progress">Progress</a> for current support.</p><p><code>config.moth</code> at the project root controls build settings. It is one self-contained compile-time source file with no source imports.</p><h3>A minimal config</h3><pre style=""><code class='codeblock'>
-    project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;my_project&quot;</span>,
-        entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
-    <span class='moth-code-operator'>|</span>
-
-    html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
-        release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
-    <span class='moth-code-operator'>|</span>
-    </code></pre><h3>Structure</h3><ul><li>One required <code>project</code> record provides project identity and settings.</li><li><code>project.name</code> is required for stable identity.</li><li>Builder sections like <code>html</code> hold builder-specific settings.</li><li>The command selects the builder before config validation. <code>config.moth</code> does not select the builder.</li><li>Only active sections are schema-validated.</li></ul>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p><strong>Accepted deferred design.</strong> This page defines the final grouped project-config contract. The current compiler still uses a transitional flat config shape and legacy <code>package_folders</code> discovery. See <a href="../progress">Progress</a> for current support.</p><p><code>config.moth</code> is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source imports or package resolution.</p><h3>Canonical config</h3><pre style=""><code class='codeblock'>
-    default_channel <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;alpha&quot;</span>
-
-    project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;moth_docs&quot;</span>,
-        version <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>,
-        entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
-        metadata <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-            channel <span class='moth-code-operator'>=</span> default_channel,
-        <span class='moth-code-operator'>|</span>,
-    <span class='moth-code-operator'>|</span>
-
-    html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
-        release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
-    <span class='moth-code-operator'>|</span>
-    </code></pre><h3>Structure</h3><ul><li>One required open <code>project</code> const record provides stable project identity.</li><li><code>project.name</code> is required and must be a valid package-style identifier.</li><li>Private helper constants declared before use are allowed.</li><li>Top-level builder and tooling section records are allowed.</li><li>All sections are folded, but only active sections are schema-validated.</li><li>The active builder project section is required, even when empty.</li><li>Inactive sections are parsed and folded, then discarded.</li><li>Project and entry schemas are separate with no shared fields.</li><li>Project fields may contain folded scalar values, optionals, nested anonymous const records, collections and folded template strings.</li><li>Builder sections use backend-neutral folded values and cannot declare <code>#Import</code>.</li><li>Output settings are builder-owned.</li></ul><h3>Direct project #Import fields</h3><p>A direct primitive or optional field of <code>project</code> may declare a build-input contract using <code>#Import of T</code>. Nested project fields cannot declare imports.</p><p>Accepted imported-value types are <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those types.</p><p>See <a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build system design</a> for the full <code>#Import</code> and <code>@project</code> contract.</p><h3>Rejected in config</h3><ul><li>Every source import, including relative, project, Core, Builder, dependency and binding-backed imports.</li><li>Runtime declarations, mutable bindings, functions, named support types, traits, conformances.</li><li>Standalone templates and top-level const page fragments.</li><li><code>export:</code>.</li></ul><h3>Config is loaded before module discovery</h3><p>The command selects the builder before config schema validation. <code>config.moth</code> does not select the builder. Config is parsed and folded before Stage 0 source-tree indexing begins.</p><h3>Related concepts</h3><ul><li>For the source tree layout see <a href="#project-layout">Project layout</a>.</li><li>For package discovery see <a href="../packages/#project-local-packages">Project-local packages</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Module roots
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="module-roots-level"
-                    id="module-roots-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="module-roots-level"
-                    id="module-roots-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="module-roots">
-                        Module roots
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="module-roots-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="module-roots-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Each source directory can have one <code>@*.moth</code> file that marks it as a module.</p><h3>One root per folder</h3><p>The filename after <code>@</code> does not matter. <code>@page.moth</code>, <code>@mod.moth</code> and <code>@api.moth</code> all mean the same thing. Two <code>@*.moth</code> files in one folder are rejected.</p><h3>Import the module, not the root file</h3><p>Normal module-root files have no direct import form. Import the directory&#39;s public module surface.</p><p>The <code>@</code> in <code>@page.moth</code> marks the file as a module root on disk. The <code>@</code> in <code>import @pages</code> starts an import path. They share the same symbol but are not combined. Do not write <code>import @@pages</code>. The second <code>@</code> is invalid.</p><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span>pages
-    </code></pre><h3>Two roles</h3><p>A module can become a page entry or be imported. The compiler checks its top-level work in both cases, but that work runs only when the builder selects the module as an entry.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A non-config file whose name starts with <code>@</code> and ends with <code>.moth</code> is the module root for its containing directory.</p><h3>Root filename semantics</h3><p>The filename after <code>@</code> has no language-level semantic role. These are all equivalent module root spellings:</p><pre style=""><code class='codeblock'>
-        @page.moth
-        @mod.moth
-        @api.moth
-        @anything.moth
-    </code></pre><p>The compiler treats each one as the module root for its directory. The HTML route comes from the directory position, not from the root filename.</p><h3>One root per directory</h3><p>A source directory may contain at most one non-config <code>@*.moth</code> file. Two or more normal module-root files in one directory are rejected with <code>MOTH-CONFIG-0001</code>.</p><h3>Config files are not module roots</h3><p><code>config.moth</code> is the project config file. It is not a module root, does not produce HIR and does not export declarations. <code>@config.moth</code> is a module root, not a config file. Only plain <code>config.moth</code> without <code>@</code> has config semantics.</p><h3>Direct root-file imports are rejected</h3><p>Normal module-root files have no direct import form. Import the directory&#39;s public module surface.</p><p>The <code>@</code> in <code>@page.moth</code> is a filesystem marker identifying a normal module root. The <code>@</code> in <code>import @pages</code> is the source syntax that introduces an import path. These use the same symbol to visually connect module roots and import roots, but they are not concatenated. The module&#39;s import identity comes from its directory or registered package name. The cosmetic root filename is never an import name.</p><p>Given this structure:</p><pre style=""><code class='codeblock'>
-        src/
-        ├── @site.moth
-        └── pages/
-            ├── @page.moth
-            └── article.moth
-    </code></pre><p>Valid:</p><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span>pages
-    </code></pre><p>Invalid:</p><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span><span class='moth-code-operator'>@</span>pages
-    import <span class='moth-code-operator'>@</span><span class='moth-code-operator'>@</span>page
-    </code></pre><p>Neither <code>@page.moth</code> nor <code>@site.moth</code> is imported directly. Do not add the root file&#39;s leading <code>@</code> to an import path.</p><h3>Normal files belong to the surrounding module</h3><p>Files without <code>@</code> in the same directory as a root file are normal source files within that module. They contribute declarations that the module root can import and export. They do not execute top-level runtime code independently.</p><h3>Active versus imported module roots</h3><p>Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised <code>start</code>. When the builder selects that module as an entry, entry assembly activates <code>start</code> exactly once. Importing the module exposes only its public interface and never activates its root work.</p><ul><li><strong>Entry-selected root</strong>: the builder selects this module as an entry. Entry assembly activates its dormant <code>start</code> and its direct top-level templates become page fragments.</li><li><strong>Imported root</strong>: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by <code>export:</code> are visible through the module boundary.</li></ul><h3>API-only roots</h3><p>A module root with no builder-relevant top-level activity (no runtime code, no const fragments, no runtime fragments) is API-only. It is a valid module root that exports declarations but produces no builder artifact.</p><h3>Migrating older module projects</h3><ul><li>Rename the project config file to plain <code>config.moth</code>.</li><li>Keep one non-config <code>@*.moth</code> root per source directory. Merge old <code>@page.moth</code> and <code>@mod.moth</code> roles when they shared a directory.</li><li>Replace inline <code>export</code> declarations and imports with one strict <code>export:</code> block in the module root.</li><li>Import the module directory or package prefix. Do not import the normal module-root filename directly.</li></ul><h3>Related concepts</h3><ul><li>For the export block see <a href="#public-api">Public API</a>.</li><li>For root activity and page fragments see <a href="#entry-runtime-and-fragments">Active-root runtime and fragments</a>.</li><li>For HTML routes see <a href="#html-routing-and-artifacts">HTML routing and artifacts</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Public API
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="public-api-level"
-                    id="public-api-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="public-api-level"
-                    id="public-api-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="public-api">
-                        Public API
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="public-api-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="public-api-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Declarations are private to their module by default. The <code>export:</code> block marks what other modules can see.</p><h3>A compact export block</h3><pre style=""><code class='codeblock'>
-    private_helper <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;private&quot;</span>
-    ;
-
-    export<span class='moth-code-operator'>:</span>
-        public_name <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
-
-        render <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-            <span class='moth-code-keyword'>return</span> private_helper<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-        ;
-    ;
-    </code></pre><h3>Private by default</h3><p>Files in the same module can see each other&#39;s declarations. Other modules can only see what the <code>export:</code> block makes public.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>The <code>export:</code> block is the only public API marker. It is valid only in a module root file and marks declarations as visible to other modules.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    private_helper <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;private&quot;</span>
-    ;
-
-    export<span class='moth-code-operator'>:</span>
-        public_name <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
-
-        render <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-            <span class='moth-code-keyword'>return</span> private_helper<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-        ;
-    ;
-    </code></pre><h3>Rules</h3><ul><li><code>export:</code> is valid only in a module root file. An <code>export:</code> block in a normal source file is rejected with <code>MOTH-RULE-0077</code>.</li><li>A module root may contain at most one <code>export:</code> block. Duplicate blocks are rejected with <code>MOTH-RULE-0085</code>.</li><li>The block ends with normal Moth <code>;</code>.</li><li>An empty <code>export:</code> block is rejected with <code>MOTH-RULE-0080</code>.</li><li>Items inside the block are ordinary top-level module-root items marked public.</li><li>Items outside the block remain private to the module root file.</li></ul><h3>Allowed inside export:</h3><ul><li>grouped source imports (re-exports)</li><li>grouped external imports</li><li>functions</li><li>structs</li><li>choices</li><li>type aliases</li><li>traits</li><li>compile-time constants using <code>#</code></li></ul><h3>Rejected inside export:</h3><ul><li>runtime bindings</li><li>mutable bindings</li><li>top-level executable statements</li><li>runtime templates</li><li>top-level const page fragments</li><li>trait conformances</li><li>trait incompatibility declarations</li><li>receiver methods as directly exported symbols</li><li>bare namespace imports or exports</li><li>wildcard exports</li><li>export lists</li><li>function alias exports</li><li>nested <code>export:</code> blocks</li><li>all legacy inline <code>export</code> forms</li></ul><p>Runtime statements inside the block are rejected with <code>MOTH-RULE-0080</code>. Legacy inline <code>export</code> syntax (without the <code>:</code> block delimiter) is rejected with <code>MOTH-SYNTAX-0001</code>.</p><h3>Re-exports</h3><p>The export block can re-export grouped imports from other files:</p><pre style=""><code class='codeblock'>
-    export<span class='moth-code-operator'>:</span>
-        import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span>
-            <span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Card,</span>
-            render_card,
-        <span class='moth-code-parenthesis'>}</span>
-
-        import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>
-            <span class='moth-code-struct'>PI,</span>
-            sin,
-        <span class='moth-code-parenthesis'>}</span>
-    ;
-    </code></pre><p>The grouped alias becomes the public name. In this example cross-module consumers can import <code>Card</code>, not <code>CardData</code>, unless the export block lists <code>CardData</code> separately.</p><h3><code>#</code> constants are compile-time, not visibility</h3><p>The <code>#</code> marker on a binding means compile-time constant. It does not control cross-module visibility. Cross-module visibility is controlled exclusively by the <code>export:</code> block.</p><h3>Same-module versus cross-module visibility</h3><ul><li>Normal declarations in any file within a module are visible to other files in the same module by default.</li><li>Cross-module imports can only access declarations marked public by the module root&#39;s <code>export:</code> block.</li><li>Private declarations in the module root file are not available to other modules.</li><li>A module root with no <code>export:</code> block exports nothing.</li></ul><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For re-export syntax see <a href="../packages/#public-reexports">Public re-exports</a>.</li><li>For visibility rules see <a href="../packages/#module-visibility">Module visibility</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Active-root runtime and fragments
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="entry-runtime-and-fragments-level"
-                    id="entry-runtime-and-fragments-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="entry-runtime-and-fragments-level"
-                    id="entry-runtime-and-fragments-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="entry-runtime-and-fragments">
-                        Active-root runtime and fragments
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="entry-runtime-and-fragments-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="entry-runtime-and-fragments-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>The module root file owns your page&#39;s runtime work. Helper files provide declarations.</p><h3>Root activation</h3><p>Top-level runtime code in the module root becomes a dormant <code>start</code>. It runs only when the builder selects that module as an entry. Helper files never run their own top-level code.</p><h3>Page fragments</h3><p>Direct top-level templates in the root become page fragments:</p><ul><li>A const fragment (the <code>#</code> prefix form) folds at compile time and becomes static HTML.</li><li>A runtime fragment (the plain bracket form) runs when the module is activated as an entry and fills a slot in the page.</li></ul><h3>Helpers</h3><p>Helper files define functions, types and constants. They do not own an export block. The root imports them and chooses what becomes public. Do not put page fragments in helper files.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised <code>start</code>. The builder selects which modules become entries. Entry assembly activates <code>start</code> exactly once. Imported modules expose only their public interface and never activate their root work.</p><h3>Entry-activated root runtime</h3><p>The entry-selected module root&#39;s top-level runtime code becomes a dormant compiler-synthesised <code>start</code> function for that module. Entry assembly activates it exactly once. This includes top-level bindings, function calls and other runtime statements.</p><h3>Normal files</h3><p>Normal helper files define reusable declarations. They do not own an export block and cannot contain top-level runtime statements. The module root imports those declarations and decides which names become public.</p><h3>Page fragments</h3><p>Two forms of direct top-level template in a module root become page fragments:</p><ul><li>A const fragment uses the <code>#</code> prefix before the opening bracket. It must fold at compile time and is emitted as static HTML.</li><li>A runtime fragment uses the plain bracket form without <code>#</code>. It is evaluated by the module&#39;s <code>start</code> function when entry assembly activates it, and inserted into the page at runtime.</li></ul><p>Assigned or returned templates are not page fragments by themselves. Only direct top-level templates in the entry-selected module root become fragments.</p><h3>Source order</h3><p>The HTML builder preserves source order between static and runtime fragments. Static fragments are emitted immediately. Runtime fragments use generated slots in the HTML document, then the embedded JavaScript calls the module start function and fills those slots.</p><h3>Imported roots</h3><p>Imported module roots never activate their root runtime. When a module root is imported for its public API, its top-level runtime code, start body and page fragments remain dormant. Only its exported declarations remain available.</p><h3>Do not put page fragments in helper files</h3><p>Helper files should define reusable declarations. The module root should import and use them. Page-producing top-level templates belong in the entry-selected module root only.</p><h3>Related concepts</h3><ul><li>For template semantics see <a href="../templates/#template-basics">Template basics</a>.</li><li>For compile-time templates see <a href="../constants/#const-templates">Const templates</a>.</li><li>For module root roles see <a href="#module-roots">Module roots</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: HTML routing and artifacts
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="html-routing-and-artifacts-level"
-                    id="html-routing-and-artifacts-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="html-routing-and-artifacts-level"
-                    id="html-routing-and-artifacts-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="html-routing-and-artifacts">
-                        HTML routing and artifacts
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="html-routing-and-artifacts-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="html-routing-and-artifacts-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>HTML routes come from directory position, not from the <code>@</code> filename.</p><h3>Directory routes</h3><pre style=""><code class='codeblock'>
-        src/@page.moth  -> index.html
-        src/about/@page.moth  -> about/index.html
-    </code></pre><p>The root module is the home page. Each nested directory gets its own route.</p><h3>API-only modules</h3><p>A module with only exports and no page activity produces no HTML. Not every <code>@*.moth</code> file becomes a page.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>The HTML builder derives routes from directory position under the configured <code>entry_root</code>. The normal module-root filename does not choose the route name.</p><h3>Directory-based routes</h3><p>The module root&#39;s directory determines the HTML output path:</p><pre style=""><code class='codeblock'>
-        src/@page.moth              -> index.html
-        src/docs/@page.moth         -> docs/index.html
-        src/docs/basics/@page.moth  -> docs/basics/index.html
-        src/@home.moth              -> index.html
-        src/@api.moth               -> index.html
-    </code></pre><p>The root module maps to the project index. A nested directory maps to a nested index route. The normal module-root filename (<code>@page.moth</code>, <code>@home.moth</code>, <code>@api.moth</code>) has no effect on the route name.</p><h3>API-only modules</h3><p>A module root with no builder-relevant top-level activity is API-only. It does not emit an HTML artifact merely because a root file exists. Artifact emission requires builder-relevant root activity: runtime code, const fragments or runtime fragments.</p><h3>Builder ownership</h3><p>The HTML builder owns route and artifact policy. The frontend remains builder-neutral. The builder decides:</p><ul><li>which modules produce HTML artifacts</li><li>how routes are derived</li><li>how output files are organised</li><li>whether to reject unsupported reachable features</li></ul><h3>Output folders</h3><p>Output folders are generated and manifest-managed. Builder sections in <code>config.moth</code> own output settings. HTML defaults are development <code>dev</code> and release <code>release</code>. Generated output folders should be treated as build artifacts, not source.</p><h3>Release versus development output</h3><p>The default build writes to the dev folder. The <code>--release</code> flag writes to the output folder. The dev server serves from the dev folder.</p><h3>Entry root artifact requirement</h3><p>The HTML builder requires at least one artifact-producing module root at the configured entry root. If the entry root contains only API-only roots, the build is rejected with <code>MOTH-CONFIG-0001</code>.</p><h3>Experimental Wasm mode</h3><p>In the experimental <code>--html-wasm</code> mode, the builder can emit a route folder containing <code>index.html</code>, <code>page.js</code> and <code>page.wasm</code> instead of a single HTML file with embedded JavaScript.</p><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For root activity see <a href="#entry-runtime-and-fragments">Active-root runtime and fragments</a>.</li><li>For project layout see <a href="#project-layout">Project layout</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Build inputs
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="build-inputs-level"
-                    id="build-inputs-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="build-inputs-level"
-                    id="build-inputs-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="build-inputs">
-                        Build inputs
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="build-inputs-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="build-inputs-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Build inputs let you declare named values that resolve before the compiler processes your source modules. They feed settings like version strings and feature flags into ordinary compile-time constants.</p><p><strong>Accepted deferred syntax.</strong> Build inputs are queued implementation work. The examples below show the accepted end-state contract, not current compiler support. See <a href="../progress">Progress</a> for implementation status.</p><h3>A simple build input</h3><pre style=""><code class='codeblock'>
-    project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;my_project&quot;</span>,
-        version <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>,
-        entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
-    <span class='moth-code-operator'>|</span>
-    </code></pre><p>The <code>#Import of String</code> part tells the build system that <code>version</code> can be overridden from the command line. When no override arrives, the default <code>&quot;0.1.0&quot;</code> applies.</p><h3>Source-level build inputs</h3><p>Any source module can declare its own build input the same way:</p><pre style=""><code class='codeblock'>
-    api_url <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;https://api.example.com&quot;</span>
-    </code></pre><p>The build system validates every contract before module compilation. Same-name contracts must agree on type and default value.</p><h3>Accepted types</h3><p>Build inputs accept <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those types. Defaults must be plain literal values, not expressions or templates.</p><h3>Related concepts</h3><ul><li>For the config file see <a href="#project-config">Project config</a>.</li></ul>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p><strong>Accepted deferred design.</strong> This page defines the final source contract. The current compiler does not yet implement this surface. See <a href="../progress">Progress</a> for current status.</p><p>Build inputs let config and source declare named primitive values that resolve before module AST compilation. They feed project identity, feature flags and environment-specific settings into ordinary compile-time constants.</p><h3>Direct project <code>#Import</code> fields</h3><p>A direct primitive or optional field of <code>project</code> may declare a build-input contract using <code>#Import of T</code>. Nested project fields cannot declare imports.</p><p>Accepted imported-value types are <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those types.</p><pre style=""><code class='codeblock'>
-    project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;moth_docs&quot;</span>,
-        version <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>,
-        channel <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> none,
-        entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
-    <span class='moth-code-operator'>|</span>
-    </code></pre><p><code>#Import</code> is constant-source syntax. It isn&#39;t a source import or a wrapper type.</p><p>A direct project <code>#Import</code> value resolves in this order:</p><ol><li>explicit CLI or programmatic build input</li><li>builder-provided primitive global</li><li>the folded declaration default</li><li>a structured missing-input diagnostic</li></ol><p>Resolution happens during config compilation before Stage 0 applies fields such as <code>entry_root</code>.</p><p>A fixed direct project field is not an import contract. When a same-name source <code>#Import</code> uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree on required or default state and the normalised default value.</p><h3>Source <code>#Import</code> contracts</h3><p>Source <code>#Import</code> is intentionally narrow so every project-wide contract can be validated before module AST compilation.</p><p>A source declaration may use only the accepted primitive or optional types listed for project fields.</p><p>A source default must be self-contained. The only accepted forms are:</p><ul><li>a <code>String</code> literal</li><li>a signed <code>Int</code> literal</li><li>a signed <code>Float</code> literal</li><li>a <code>Bool</code> literal</li><li>a <code>Char</code> literal</li><li><code>none</code> for an optional contract</li><li>a matching primitive literal for an optional contract</li></ul><p>Source defaults cannot contain a name, template, operator expression, call, cast, field projection, collection, record or another imported value. Stage 0 doesn&#39;t run a second general constant evaluator before AST.</p><pre style=""><code class='codeblock'>
-    api_url <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;https://api.example.com&quot;</span>
-    max_retries <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
-    debug_mode <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>Bool</span> <span class='moth-code-operator'>=</span> false
-    </code></pre><h3>Project-wide resolution order</h3><p>Same-name contracts must agree on primitive type, optionality, required or default state and the normalised default value. Different defaults are conflicting contracts.</p><p>The project-wide resolution order is:</p><ol><li>a compatible fixed direct project field, which is authoritative and cannot be overridden</li><li>a resolved direct project <code>#Import</code> field</li><li>explicit CLI or programmatic input for a source-only contract</li><li>a builder-provided primitive global</li><li>the shared source default</li><li>a missing-input diagnostic</li></ol><p>Unknown explicit inputs are diagnosed only after every selected source contract is known.</p><p>The resolved value enters module AST as an ordinary folded constant. It creates no runtime wrapper or HIR category.</p><h3>Related concepts</h3><ul><li>For the config file see <a href="#project-config">Project config</a>.</li><li>For <code>@project</code> see <a href="#entry-config">Entry config</a>.</li><li>For the full build-input contract see <a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build system design</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Entry config
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="entry-config-level"
-                    id="entry-config-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="entry-config-level"
-                    id="entry-config-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="entry-config">
-                        Entry config
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="entry-config-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="entry-config-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Entry config lets each normal module root carry its own builder settings and access project-level values through <code>@project</code>.</p><p><strong>Accepted deferred syntax.</strong> <code>@project</code> and entry-local <code>config:</code> blocks are queued implementation work. The examples below show the accepted end-state contract, not current compiler support. See <a href="../progress">Progress</a> for implementation status.</p><h3>Using <code>@project</code></h3><p>Import <code>@project</code> to read project fields like <code>version</code> or <code>entry_root</code> inside a module:</p><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span>project <span class='moth-code-parenthesis'>{</span> version <span class='moth-code-parenthesis'>}</span>
-
-    footer <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> v<span class='moth-code-parenthesis'>[</span>version<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
-    </code></pre><p><code>@project</code> is never implicitly injected. Import it explicitly when you need it.</p><h3>Entry-local <code>config:</code> blocks</h3><p>A normal module root may contain one optional <code>config:</code> block with builder metadata for that entry:</p><pre style=""><code class='codeblock'>
-    config<span class='moth-code-operator'>:</span>
-        html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-            title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;About&quot;</span>,
-        <span class='moth-code-operator'>|</span>
-    ;
-    </code></pre><p>The block lives at the top level of the root file, outside <code>export:</code> and outside executable bodies. It creates no module symbols or runtime values.</p><h3>Related concepts</h3><ul><li>For build inputs see <a href="#build-inputs">Build inputs</a>.</li></ul>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p><strong>Accepted deferred design.</strong> <code>@project</code>, source <code>#Import</code> and entry-local <code>config:</code> blocks are queued implementation work. This page defines the accepted final contract. The current compiler does not yet implement these surfaces. See <a href="../progress">Progress</a> for current status.</p><p>Entry config covers <code>@project</code> and entry-local <code>config:</code> blocks. Both feed builder metadata and compile-time values into normal module roots.</p><h3><code>@project</code></h3><p>The folded <code>project</code> record produces a specialised immutable <code>ProjectGlobalsInterface</code> under the permanently reserved <code>@project</code> import root.</p><p><code>@project</code> exposes direct project fields as namespace members. It doesn&#39;t expose another value named <code>project</code>.</p><p>Normal project modules and project-owned support packages may explicitly import <code>@project</code>. It is never implicitly injected.</p><p>The following may not claim the <code>@project</code> root:</p><ul><li>child modules</li><li>scoped support packages</li><li>dependency aliases</li><li>Core packages</li><li>Builder packages</li><li>binding-backed packages</li></ul><p><code>@project</code> cannot be directly re-exported.</p><p>Internal project modules may expose declarations derived from project values. The compiler retains project-context provenance on every affected public semantic fact. The external project package facade rejects prohibited project-context exposure.</p><pre style=""><code class='codeblock'>
-    import <span class='moth-code-operator'>@</span>project <span class='moth-code-parenthesis'>{</span> version, entry_root <span class='moth-code-parenthesis'>}</span>
-
-    page_title <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> v<span class='moth-code-parenthesis'>[</span>version<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
-    </code></pre><h3>Entry-local <code>config:</code> blocks</h3><p>An entry <code>config:</code> block is root-local builder metadata. It isn&#39;t an embedded <code>config.moth</code> source file.</p><p>Placement rules:</p><ul><li>valid only at the top level of a normal module root</li><li>at most one block per normal root</li><li>invalid in normal non-root files</li><li>invalid in support roots</li><li>invalid in the project package facade</li><li>invalid inside <code>export:</code></li><li>invalid inside executable bodies</li><li>invalid in <code>config.moth</code></li></ul><p>The block contains section records only. Imports, aliases, helper constants, support types and source <code>#Import</code> declarations live outside the block in the normal root file.</p><p>The block uses the root file&#39;s ordinary compile-time visibility. It may reference:</p><ul><li>imported constants</li><li><code>@project</code></li><li>same-file constants declared before the block</li><li>resolved source <code>#Import</code> constants</li><li>foldable local const-record types</li><li>selected-builder compile-time values available through normal module imports</li></ul><p>Same-file forward references remain invalid.</p><p>The block creates no ordinary module symbol, HIR or project-global value. It cannot contain <code>project</code> or change project-level builder behaviour. It may contain active artefact-builder and tooling-overlay sections.</p><p>Active entry sections are schema-validated. Inactive sections are parsed and folded but not schema-validated.</p><p>Every normal module selected into the current command&#39;s semantic graph has its block validated whether or not an entry activates it. Imported modules never apply their entry metadata to an importer.</p><p>Only active artefact-builder settings contribute entry activity.</p><h3>Related concepts</h3><ul><li>For build inputs see <a href="#build-inputs">Build inputs</a>.</li><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For the full entry config contract see <a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build system design</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Project package facade
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="project-package-facade-level"
-                    id="project-package-facade-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="project-package-facade-level"
-                    id="project-package-facade-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="project-package-facade">
-                        Project package facade
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="project-package-facade-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="project-package-facade-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A project can expose a public package API to other projects through an optional facade file at the project root.</p><h3>What a facade does</h3><p>A <code>+*.moth</code> file beside <code>config.moth</code> becomes the project package facade. It exports declarations that external consumers can import. Without it, the project has no externally consumable package surface.</p><p>The facade rejects top-level runtime work and page fragments. It only exports API declarations. Support roots follow the same rule.</p><h3>How it reaches descendant modules</h3><p>The facade can reference public interfaces of modules below <code>entry_root</code> even though ordinary module visibility wouldn&#39;t allow it. Stage 0 gives the facade a special assembly namespace for this purpose.</p><h3>What the facade cannot do</h3><ul><li>It cannot import <code>@project</code>.</li><li>It cannot expose declarations that depend on project-private context.</li><li>It isn&#39;t visible to internal project modules.</li></ul><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li></ul>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p><strong>Partial implementation.</strong> The source-package and module foundations are partially implemented. The complete external facade and project-context contract remains partial. This page defines the accepted final contract.</p><p>The project package facade exposes a project&#39;s public API to external consumers. It is an API-only module compiled through the ordinary compiler pipeline with project-facade visibility supplied by Stage 0.</p><h3>The facade root</h3><p>One optional project-root <code>+*.moth</code> file beside <code>config.moth</code> defines the external project package facade. The suffix after <code>+</code> is cosmetic.</p><p>The facade may define and export its own legal API-only declarations: functions, structs, choices, type aliases, traits and compile-time constants.</p><h3>Special assembly namespace</h3><p>Stage 0 gives the facade a special assembly namespace rooted at <code>entry_root</code>. Through that namespace it may reference the public interfaces of descendant modules below <code>entry_root</code>, regardless of ordinary lexical module visibility.</p><h3>Facade restrictions</h3><p>The facade:</p><ul><li>never bypasses an <code>export:</code> boundary</li><li>isn&#39;t visible to internal project modules</li><li>cannot import <code>@project</code></li><li>cannot expose a semantic fact that depends on project-private context</li><li>rejects top-level runtime work and page fragments</li><li>has no implicit <code>start</code></li><li>emits no route</li></ul><p>Support roots and the project package facade reject top-level runtime work and page fragments. They don&#39;t merely stay inactive.</p><h3>Project package assembly</h3><p>The compiler produces an immutable facade module artefact and public interface. <code>ProjectPackageAssembly</code> is a separate link plan over:</p><ul><li>the compiled facade artefact</li><li>selected descendant public interfaces</li><li>reachable generated functions</li><li>package runtime requirements permitted by the target</li></ul><p>Assembly never recompiles or mutates the facade.</p><p>A project may be both an application and a package. Without the facade it has no externally consumable Moth package surface.</p><p>The facade package identity comes from <code>project.name</code>.</p><h3>External package eligibility</h3><p>The build system rejects any declaration whose public semantic facts or reachable executable implementation directly or transitively depend on private <code>@project</code>. This includes an exported function that calls a private project-dependent helper.</p><p>The validator doesn&#39;t treat implementation-only dependence as a reusable package specialisation mechanism.</p><h3>Dependency package facades</h3><p>A dependency package exposes its facade and immutable artefacts to consumers. Consumers never see the dependency&#39;s private <code>@project</code>.</p><p>No declaration exposed through a dependency package facade may directly or transitively depend on that dependency&#39;s private <code>@project</code>. Private declarations may use the dependency&#39;s own <code>@project</code> only when no external package export can reach or expose them.</p><p>Imported build-value namespaces are scoped to one project or package compilation boundary. A consuming command&#39;s unqualified CLI or programmatic inputs don&#39;t implicitly satisfy a dependency&#39;s <code>#Import</code> contracts.</p><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For package origins and backing see <a href="../packages/#package-origins-and-backing">Package origins and backing</a>.</li><li>For the full facade contract see <a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build system design</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><nav class="doc-pager" aria-label="Language documentation">
-        <a
-            class="doc-pager__link doc-pager__link--previous"
-            href="../memory/"
-                    rel="prev"
-                >
-                    <span class="doc-pager__direction">← Previous</span>
-                    <span class="doc-pager__title">Memory and lifetimes</span>
-                </a>
-
-                <a
-                    class="doc-pager__link doc-pager__link--next"
-                    href="../packages/"
-                    rel="next"
-                >
-                    <span class="doc-pager__direction">Next →</span>
-                    <span class="doc-pager__title">Packages and imports</span>
-                </a>
-
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="project-layout-level"
+                id="project-layout-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="project-layout">
+                    Project layout
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="project-layout-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="project-layout-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
                 
 
 
 
-    </nav></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+        <p>A Moth project has one config file, one source root and generated output folders.</p><h3>Where things live</h3><ul><li><code>config.moth</code> at the project root controls build settings.</li><li><code>src/</code> (or whatever <code>entry_root</code> says) holds your source files.</li><li><code>dev/</code> and <code>release/</code> are generated output. Do not edit them.</li></ul><h3>One root file per module directory</h3><p>Each source directory can have one <code>@*.moth</code> file that marks it as a module. The <code>@</code> filename is a convention. <code>@page.moth</code>, <code>@api.moth</code> and <code>@mod.moth</code> all mean the same thing to the compiler.</p><h3>Shared scoped packages</h3><p>A <code>+*.moth</code> file in a source directory marks it as a scoped support package. For example, <code>shared/+package.moth</code> creates <code>@shared</code>. Its owner module, normal sibling modules and their descendants may import it. Other support packages in the same scope and the package&#39;s private implementation subtree cannot.</p><p>The current scaffold creates an empty legacy <code>lib/</code> folder. It has no special meaning in the accepted package design.</p><h3>Outputs are generated</h3><p>The build command creates output folders. They are not source. The builder cleans up stale artifacts automatically.</p>
+</div>
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>A Moth project is a directory tree with one strict config file, a source entry root and generated output folders.</p><h3>Project root contents</h3><pre style=""><code class='codeblock'>project-root/
+├── config.moth
+├── src/
+│   ├── @site.moth
+│   ├── shared/
+│   │   └── +package.moth
+│   └── pages/
+│       └── @pages.moth
+├── dev/
+│   └── .moth_manifest
+├── release/
+│   └── .moth_manifest
+└── .gitignore</code></pre><h3>Directory roles</h3><ul><li><code>config.moth</code> is the only project config file. It lives at the project root and is not module source.</li><li>The configured <code>entry_root</code> (usually <code>src</code>) is the source folder the compiler searches for module roots.</li><li><code>dev/</code> and <code>release/</code> are builder output folders, not source folders. They are generated and managed by the build system.</li><li><code>.moth_manifest</code> files are build-system metadata used for safe stale-output cleanup. They are not source.</li></ul><h3>Structural packages</h3><p>Project-local source-backed packages are structural <code>+*.moth</code> support packages. A <code>+*.moth</code> file in a source directory marks that directory as a scoped support package root named by its containing directory.</p><p>In the example above, <code>shared/+package.moth</code> creates the scoped <code>@shared</code> support package. It is visible to its owner normal module, normal sibling modules and their descendants. It is not imported from its own private implementation subtree or from another support package in the same scope.</p><p>No folder gains package meaning without a <code>+*.moth</code> root. Ordinary directories do not automatically become packages.</p><p>The optional project-root <code>+*.moth</code> facade beside <code>config.moth</code> is a separate mechanism for assembling public descendant surfaces for external consumers. It is not a scoped support package.</p><p>For the full package contract see <a href="../packages/#project-local-packages">Project-local packages</a>.</p><h3>Normal module-root files inside source directories</h3><p>A non-config file whose name starts with <code>@</code> and ends with <code>.moth</code> is a module root. The filename after <code>@</code> has no language-level semantic role. <code>@page.moth</code>, <code>@mod.moth</code>, <code>@api.moth</code> and <code>@anything.moth</code> are all equivalent root filenames.</p><p>The <code>moth new html</code> scaffold generates <code>src/@page.moth</code> as a conventional default. That convention does not make <code>@page.moth</code> a special compiler role. Any <code>@*.moth</code> filename in a source directory marks that directory as a module root.</p><h3>Implementation note</h3><p>The current scaffold still creates an empty <code>lib/</code> folder and the compiler retains legacy <code>package_folders</code> support. These are implementation drift and are not part of the accepted project/package model. See <a href="../progress/">the progress matrix</a> for current status.</p><h3>Source versus output</h3><p>Source directories are owned by the developer. Output folders are generated by the builder and should be treated as build artifacts, not source. The builder owns stale-output cleanup for generated artifacts.</p><h3>Builder-neutral frontend versus builder-owned output</h3><p>The compiler frontend discovers modules, resolves imports, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.</p><p>This separation means the same frontend can later feed other builders. The frontend does not decide which modules produce artifacts. That decision belongs to the builder.</p><h3>Only config.moth has config semantics</h3><p>No other filename has config meaning. <code>@config.moth</code> is a module root, not a config file. Alternate config filenames, compatibility handling and config-specific diagnostics for other names are not supported.</p><h3>Related concepts</h3><ul><li>For config key rules see <a href="#project-config">Project config</a>.</li><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For HTML routes and artifacts see <a href="#html-routing-and-artifacts">HTML routing and artifacts</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Project config
+</legend>
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="project-config-level"
+                id="project-config-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="project-config-level"
+                id="project-config-advanced"
+                value="advanced"
+            >
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="project-config">
+                    Project config
+</h2>
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="project-config-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="project-config-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
+        <p><strong>Accepted deferred design.</strong> This page teaches the final grouped config shape. The current compiler still uses a transitional flat config format. See <a href="../progress">Progress</a> for current support.</p><p><code>config.moth</code> at the project root controls build settings. It is one self-contained compile-time source file with no source imports.</p><h3>A minimal config</h3><pre style=""><code class='codeblock'>project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;my_project&quot;</span>,
+    entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
+<span class='moth-code-operator'>|</span>
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
+html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
+    release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
+<span class='moth-code-operator'>|</span></code></pre><h3>Structure</h3><ul><li>One required <code>project</code> record provides project identity and settings.</li><li><code>project.name</code> is required for stable identity.</li><li>Builder sections like <code>html</code> hold builder-specific settings.</li><li>The command selects the builder before config validation. <code>config.moth</code> does not select the builder.</li><li>Only active sections are schema-validated.</li></ul>
+</div>
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><strong>Accepted deferred design.</strong> This page defines the final grouped project-config contract. The current compiler still uses a transitional flat config shape and legacy <code>package_folders</code> discovery. See <a href="../progress">Progress</a> for current support.</p><p><code>config.moth</code> is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source imports or package resolution.</p><h3>Canonical config</h3><pre style=""><code class='codeblock'>default_channel <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;alpha&quot;</span>
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
+project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;moth_docs&quot;</span>,
+    version <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>,
+    entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
+    metadata <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        channel <span class='moth-code-operator'>=</span> default_channel,
+    <span class='moth-code-operator'>|</span>,
+<span class='moth-code-operator'>|</span>
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
+    release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
+<span class='moth-code-operator'>|</span></code></pre><h3>Structure</h3><ul><li>One required open <code>project</code> const record provides stable project identity.</li><li><code>project.name</code> is required and must be a valid package-style identifier.</li><li>Private helper constants declared before use are allowed.</li><li>Top-level builder and tooling section records are allowed.</li><li>All sections are folded, but only active sections are schema-validated.</li><li>The active builder project section is required, even when empty.</li><li>Inactive sections are parsed and folded, then discarded.</li><li>Project and entry schemas are separate with no shared fields.</li><li>Project fields may contain folded scalar values, optionals, nested anonymous const records, collections and folded template strings.</li><li>Builder sections use backend-neutral folded values and cannot declare <code>#Import</code>.</li><li>Output settings are builder-owned.</li></ul><h3>Direct project #Import fields</h3><p>A direct primitive or optional field of <code>project</code> may declare a build-input contract using <code>#Import of T</code>. Nested project fields cannot declare imports.</p><p>Accepted imported-value types are <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those types.</p><p>See <a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build system design</a> for the full <code>#Import</code> and <code>@project</code> contract.</p><h3>Rejected in config</h3><ul><li>Every source import, including relative, project, Core, Builder, dependency and binding-backed imports.</li><li>Runtime declarations, mutable bindings, functions, named support types, traits, conformances.</li><li>Standalone templates and top-level const page fragments.</li><li><code>export:</code>.</li></ul><h3>Config is loaded before module discovery</h3><p>The command selects the builder before config schema validation. <code>config.moth</code> does not select the builder. Config is parsed and folded before Stage 0 source-tree indexing begins.</p><h3>Related concepts</h3><ul><li>For the source tree layout see <a href="#project-layout">Project layout</a>.</li><li>For package discovery see <a href="../packages/#project-local-packages">Project-local packages</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Module roots
+</legend>
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="module-roots-level"
+                id="module-roots-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="module-roots-level"
+                id="module-roots-advanced"
+                value="advanced"
+            >
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="module-roots">
+                    Module roots
+</h2>
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="module-roots-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="module-roots-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
+        <p>Each source directory can have one <code>@*.moth</code> file that marks it as a module.</p><h3>One root per folder</h3><p>The filename after <code>@</code> does not matter. <code>@page.moth</code>, <code>@mod.moth</code> and <code>@api.moth</code> all mean the same thing. Two <code>@*.moth</code> files in one folder are rejected.</p><h3>Import the module, not the root file</h3><p>Normal module-root files have no direct import form. Import the directory&#39;s public module surface.</p><p>The <code>@</code> in <code>@page.moth</code> marks the file as a module root on disk. The <code>@</code> in <code>import @pages</code> starts an import path. They share the same symbol but are not combined. Do not write <code>import @@pages</code>. The second <code>@</code> is invalid.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>pages</code></pre><h3>Two roles</h3><p>A module can become a page entry or be imported. The compiler checks its top-level work in both cases, but that work runs only when the builder selects the module as an entry.</p>
+</div>
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>A non-config file whose name starts with <code>@</code> and ends with <code>.moth</code> is the module root for its containing directory.</p><h3>Root filename semantics</h3><p>The filename after <code>@</code> has no language-level semantic role. These are all equivalent module root spellings:</p><pre style=""><code class='codeblock'>@page.moth
+@mod.moth
+@api.moth
+@anything.moth</code></pre><p>The compiler treats each one as the module root for its directory. The HTML route comes from the directory position, not from the root filename.</p><h3>One root per directory</h3><p>A source directory may contain at most one non-config <code>@*.moth</code> file. Two or more normal module-root files in one directory are rejected with <code>MOTH-CONFIG-0001</code>.</p><h3>Config files are not module roots</h3><p><code>config.moth</code> is the project config file. It is not a module root, does not produce HIR and does not export declarations. <code>@config.moth</code> is a module root, not a config file. Only plain <code>config.moth</code> without <code>@</code> has config semantics.</p><h3>Direct root-file imports are rejected</h3><p>Normal module-root files have no direct import form. Import the directory&#39;s public module surface.</p><p>The <code>@</code> in <code>@page.moth</code> is a filesystem marker identifying a normal module root. The <code>@</code> in <code>import @pages</code> is the source syntax that introduces an import path. These use the same symbol to visually connect module roots and import roots, but they are not concatenated. The module&#39;s import identity comes from its directory or registered package name. The cosmetic root filename is never an import name.</p><p>Given this structure:</p><pre style=""><code class='codeblock'>src/
+├── @site.moth
+└── pages/
+    ├── @page.moth
+    └── article.moth</code></pre><p>Valid:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>pages</code></pre><p>Invalid:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span><span class='moth-code-operator'>@</span>pages
+import <span class='moth-code-operator'>@</span><span class='moth-code-operator'>@</span>page</code></pre><p>Neither <code>@page.moth</code> nor <code>@site.moth</code> is imported directly. Do not add the root file&#39;s leading <code>@</code> to an import path.</p><h3>Normal files belong to the surrounding module</h3><p>Files without <code>@</code> in the same directory as a root file are normal source files within that module. They contribute declarations that the module root can import and export. They do not execute top-level runtime code independently.</p><h3>Active versus imported module roots</h3><p>Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised <code>start</code>. When the builder selects that module as an entry, entry assembly activates <code>start</code> exactly once. Importing the module exposes only its public interface and never activates its root work.</p><ul><li><strong>Entry-selected root</strong>: the builder selects this module as an entry. Entry assembly activates its dormant <code>start</code> and its direct top-level templates become page fragments.</li><li><strong>Imported root</strong>: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by <code>export:</code> are visible through the module boundary.</li></ul><h3>API-only roots</h3><p>A module root with no builder-relevant top-level activity (no runtime code, no const fragments, no runtime fragments) is API-only. It is a valid module root that exports declarations but produces no builder artifact.</p><h3>Migrating older module projects</h3><ul><li>Rename the project config file to plain <code>config.moth</code>.</li><li>Keep one non-config <code>@*.moth</code> root per source directory. Merge old <code>@page.moth</code> and <code>@mod.moth</code> roles when they shared a directory.</li><li>Replace inline <code>export</code> declarations and imports with one strict <code>export:</code> block in the module root.</li><li>Import the module directory or package prefix. Do not import the normal module-root filename directly.</li></ul><h3>Related concepts</h3><ul><li>For the export block see <a href="#public-api">Public API</a>.</li><li>For root activity and page fragments see <a href="#entry-runtime-and-fragments">Active-root runtime and fragments</a>.</li><li>For HTML routes see <a href="#html-routing-and-artifacts">HTML routing and artifacts</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Public API
+</legend>
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="public-api-level"
+                id="public-api-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="public-api-level"
+                id="public-api-advanced"
+                value="advanced"
+            >
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="public-api">
+                    Public API
+</h2>
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="public-api-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="public-api-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
 
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
 
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
+        <p>Declarations are private to their module by default. The <code>export:</code> block marks what other modules can see.</p><h3>A compact export block</h3><pre style=""><code class='codeblock'>private_helper <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;private&quot;</span>
+;
 
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+export<span class='moth-code-operator'>:</span>
+    public_name <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
+
+    render <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> private_helper<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
+    ;
+;</code></pre><h3>Private by default</h3><p>Files in the same module can see each other&#39;s declarations. Other modules can only see what the <code>export:</code> block makes public.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>The <code>export:</code> block is the only public API marker. It is valid only in a module root file and marks declarations as visible to other modules.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>private_helper <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;private&quot;</span>
+;
+
+export<span class='moth-code-operator'>:</span>
+    public_name <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
+
+    render <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+        <span class='moth-code-keyword'>return</span> private_helper<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
+    ;
+;</code></pre><h3>Rules</h3><ul><li><code>export:</code> is valid only in a module root file. An <code>export:</code> block in a normal source file is rejected with <code>MOTH-RULE-0077</code>.</li><li>A module root may contain at most one <code>export:</code> block. Duplicate blocks are rejected with <code>MOTH-RULE-0085</code>.</li><li>The block ends with normal Moth <code>;</code>.</li><li>An empty <code>export:</code> block is rejected with <code>MOTH-RULE-0080</code>.</li><li>Items inside the block are ordinary top-level module-root items marked public.</li><li>Items outside the block remain private to the module root file.</li></ul><h3>Allowed inside export:</h3><ul><li>grouped source imports (re-exports)</li><li>grouped external imports</li><li>functions</li><li>structs</li><li>choices</li><li>type aliases</li><li>traits</li><li>compile-time constants using <code>#</code></li></ul><h3>Rejected inside export:</h3><ul><li>runtime bindings</li><li>mutable bindings</li><li>top-level executable statements</li><li>runtime templates</li><li>top-level const page fragments</li><li>trait conformances</li><li>trait incompatibility declarations</li><li>receiver methods as directly exported symbols</li><li>bare namespace imports or exports</li><li>wildcard exports</li><li>export lists</li><li>function alias exports</li><li>nested <code>export:</code> blocks</li><li>all legacy inline <code>export</code> forms</li></ul><p>Runtime statements inside the block are rejected with <code>MOTH-RULE-0080</code>. Legacy inline <code>export</code> syntax (without the <code>:</code> block delimiter) is rejected with <code>MOTH-SYNTAX-0001</code>.</p><h3>Re-exports</h3><p>The export block can re-export grouped imports from other files:</p><pre style=""><code class='codeblock'>export<span class='moth-code-operator'>:</span>
+    import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span>
+        <span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Card,</span>
+        render_card,
+    <span class='moth-code-parenthesis'>}</span>
+
+    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>
+        <span class='moth-code-struct'>PI,</span>
+        sin,
+    <span class='moth-code-parenthesis'>}</span>
+;</code></pre><p>The grouped alias becomes the public name. In this example cross-module consumers can import <code>Card</code>, not <code>CardData</code>, unless the export block lists <code>CardData</code> separately.</p><h3><code>#</code> constants are compile-time, not visibility</h3><p>The <code>#</code> marker on a binding means compile-time constant. It does not control cross-module visibility. Cross-module visibility is controlled exclusively by the <code>export:</code> block.</p><h3>Same-module versus cross-module visibility</h3><ul><li>Normal declarations in any file within a module are visible to other files in the same module by default.</li><li>Cross-module imports can only access declarations marked public by the module root&#39;s <code>export:</code> block.</li><li>Private declarations in the module root file are not available to other modules.</li><li>A module root with no <code>export:</code> block exports nothing.</li></ul><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For re-export syntax see <a href="../packages/#public-reexports">Public re-exports</a>.</li><li>For visibility rules see <a href="../packages/#module-visibility">Module visibility</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Active-root runtime and fragments
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="entry-runtime-and-fragments-level"
+                id="entry-runtime-and-fragments-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="entry-runtime-and-fragments-level"
+                id="entry-runtime-and-fragments-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="entry-runtime-and-fragments">
+                    Active-root runtime and fragments
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="entry-runtime-and-fragments-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="entry-runtime-and-fragments-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>The module root file owns your page&#39;s runtime work. Helper files provide declarations.</p><h3>Root activation</h3><p>Top-level runtime code in the module root becomes a dormant <code>start</code>. It runs only when the builder selects that module as an entry. Helper files never run their own top-level code.</p><h3>Page fragments</h3><p>Direct top-level templates in the root become page fragments:</p><ul><li>A const fragment (the <code>#</code> prefix form) folds at compile time and becomes static HTML.</li><li>A runtime fragment (the plain bracket form) runs when the module is activated as an entry and fills a slot in the page.</li></ul><h3>Helpers</h3><p>Helper files define functions, types and constants. They do not own an export block. The root imports them and chooses what becomes public. Do not put page fragments in helper files.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised <code>start</code>. The builder selects which modules become entries. Entry assembly activates <code>start</code> exactly once. Imported modules expose only their public interface and never activate their root work.</p><h3>Entry-activated root runtime</h3><p>The entry-selected module root&#39;s top-level runtime code becomes a dormant compiler-synthesised <code>start</code> function for that module. Entry assembly activates it exactly once. This includes top-level bindings, function calls and other runtime statements.</p><h3>Normal files</h3><p>Normal helper files define reusable declarations. They do not own an export block and cannot contain top-level runtime statements. The module root imports those declarations and decides which names become public.</p><h3>Page fragments</h3><p>Two forms of direct top-level template in a module root become page fragments:</p><ul><li>A const fragment uses the <code>#</code> prefix before the opening bracket. It must fold at compile time and is emitted as static HTML.</li><li>A runtime fragment uses the plain bracket form without <code>#</code>. It is evaluated by the module&#39;s <code>start</code> function when entry assembly activates it, and inserted into the page at runtime.</li></ul><p>Assigned or returned templates are not page fragments by themselves. Only direct top-level templates in the entry-selected module root become fragments.</p><h3>Source order</h3><p>The HTML builder preserves source order between static and runtime fragments. Static fragments are emitted immediately. Runtime fragments use generated slots in the HTML document, then the embedded JavaScript calls the module start function and fills those slots.</p><h3>Imported roots</h3><p>Imported module roots never activate their root runtime. When a module root is imported for its public API, its top-level runtime code, start body and page fragments remain dormant. Only its exported declarations remain available.</p><h3>Do not put page fragments in helper files</h3><p>Helper files should define reusable declarations. The module root should import and use them. Page-producing top-level templates belong in the entry-selected module root only.</p><h3>Related concepts</h3><ul><li>For template semantics see <a href="../templates/#template-basics">Template basics</a>.</li><li>For compile-time templates see <a href="../constants/#const-templates">Const templates</a>.</li><li>For module root roles see <a href="#module-roots">Module roots</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: HTML routing and artifacts
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="html-routing-and-artifacts-level"
+                id="html-routing-and-artifacts-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="html-routing-and-artifacts-level"
+                id="html-routing-and-artifacts-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="html-routing-and-artifacts">
+                    HTML routing and artifacts
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="html-routing-and-artifacts-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="html-routing-and-artifacts-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>HTML routes come from directory position, not from the <code>@</code> filename.</p><h3>Directory routes</h3><pre style=""><code class='codeblock'>src/@page.moth  -&gt; index.html
+src/about/@page.moth  -&gt; about/index.html</code></pre><p>The root module is the home page. Each nested directory gets its own route.</p><h3>API-only modules</h3><p>A module with only exports and no page activity produces no HTML. Not every <code>@*.moth</code> file becomes a page.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>The HTML builder derives routes from directory position under the configured <code>entry_root</code>. The normal module-root filename does not choose the route name.</p><h3>Directory-based routes</h3><p>The module root&#39;s directory determines the HTML output path:</p><pre style=""><code class='codeblock'>src/@page.moth              -&gt; index.html
+src/docs/@page.moth         -&gt; docs/index.html
+src/docs/basics/@page.moth  -&gt; docs/basics/index.html
+src/@home.moth              -&gt; index.html
+src/@api.moth               -&gt; index.html</code></pre><p>The root module maps to the project index. A nested directory maps to a nested index route. The normal module-root filename (<code>@page.moth</code>, <code>@home.moth</code>, <code>@api.moth</code>) has no effect on the route name.</p><h3>API-only modules</h3><p>A module root with no builder-relevant top-level activity is API-only. It does not emit an HTML artifact merely because a root file exists. Artifact emission requires builder-relevant root activity: runtime code, const fragments or runtime fragments.</p><h3>Builder ownership</h3><p>The HTML builder owns route and artifact policy. The frontend remains builder-neutral. The builder decides:</p><ul><li>which modules produce HTML artifacts</li><li>how routes are derived</li><li>how output files are organised</li><li>whether to reject unsupported reachable features</li></ul><h3>Output folders</h3><p>Output folders are generated and manifest-managed. Builder sections in <code>config.moth</code> own output settings. HTML defaults are development <code>dev</code> and release <code>release</code>. Generated output folders should be treated as build artifacts, not source.</p><h3>Release versus development output</h3><p>The default build writes to the dev folder. The <code>--release</code> flag writes to the output folder. The dev server serves from the dev folder.</p><h3>Entry root artifact requirement</h3><p>The HTML builder requires at least one artifact-producing module root at the configured entry root. If the entry root contains only API-only roots, the build is rejected with <code>MOTH-CONFIG-0001</code>.</p><h3>Experimental Wasm mode</h3><p>In the experimental <code>--html-wasm</code> mode, the builder can emit a route folder containing <code>index.html</code>, <code>page.js</code> and <code>page.wasm</code> instead of a single HTML file with embedded JavaScript.</p><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For root activity see <a href="#entry-runtime-and-fragments">Active-root runtime and fragments</a>.</li><li>For project layout see <a href="#project-layout">Project layout</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Build inputs
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="build-inputs-level"
+                id="build-inputs-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="build-inputs-level"
+                id="build-inputs-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="build-inputs">
+                    Build inputs
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="build-inputs-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="build-inputs-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>Build inputs let you declare named values that resolve before the compiler processes your source modules. They feed settings like version strings and feature flags into ordinary compile-time constants.</p><p><strong>Accepted deferred syntax.</strong> Build inputs are queued implementation work. The examples below show the accepted end-state contract, not current compiler support. See <a href="../progress">Progress</a> for implementation status.</p><h3>A simple build input</h3><pre style=""><code class='codeblock'>project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;my_project&quot;</span>,
+    version <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>,
+    entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
+<span class='moth-code-operator'>|</span></code></pre><p>The <code>#Import of String</code> part tells the build system that <code>version</code> can be overridden from the command line. When no override arrives, the default <code>&quot;0.1.0&quot;</code> applies.</p><h3>Source-level build inputs</h3><p>Any source module can declare its own build input the same way:</p><pre style=""><code class='codeblock'>api_url <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;https://api.example.com&quot;</span></code></pre><p>The build system validates every contract before module compilation. Same-name contracts must agree on type and default value.</p><h3>Accepted types</h3><p>Build inputs accept <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those types. Defaults must be plain literal values, not expressions or templates.</p><h3>Related concepts</h3><ul><li>For the config file see <a href="#project-config">Project config</a>.</li></ul>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><strong>Accepted deferred design.</strong> This page defines the final source contract. The current compiler does not yet implement this surface. See <a href="../progress">Progress</a> for current status.</p><p>Build inputs let config and source declare named primitive values that resolve before module AST compilation. They feed project identity, feature flags and environment-specific settings into ordinary compile-time constants.</p><h3>Direct project <code>#Import</code> fields</h3><p>A direct primitive or optional field of <code>project</code> may declare a build-input contract using <code>#Import of T</code>. Nested project fields cannot declare imports.</p><p>Accepted imported-value types are <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those types.</p><pre style=""><code class='codeblock'>project <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;moth_docs&quot;</span>,
+    version <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>,
+    channel <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> none,
+    entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
+<span class='moth-code-operator'>|</span></code></pre><p><code>#Import</code> is constant-source syntax. It isn&#39;t a source import or a wrapper type.</p><p>A direct project <code>#Import</code> value resolves in this order:</p><ol><li>explicit CLI or programmatic build input</li><li>builder-provided primitive global</li><li>the folded declaration default</li><li>a structured missing-input diagnostic</li></ol><p>Resolution happens during config compilation before Stage 0 applies fields such as <code>entry_root</code>.</p><p>A fixed direct project field is not an import contract. When a same-name source <code>#Import</code> uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree on required or default state and the normalised default value.</p><h3>Source <code>#Import</code> contracts</h3><p>Source <code>#Import</code> is intentionally narrow so every project-wide contract can be validated before module AST compilation.</p><p>A source declaration may use only the accepted primitive or optional types listed for project fields.</p><p>A source default must be self-contained. The only accepted forms are:</p><ul><li>a <code>String</code> literal</li><li>a signed <code>Int</code> literal</li><li>a signed <code>Float</code> literal</li><li>a <code>Bool</code> literal</li><li>a <code>Char</code> literal</li><li><code>none</code> for an optional contract</li><li>a matching primitive literal for an optional contract</li></ul><p>Source defaults cannot contain a name, template, operator expression, call, cast, field projection, collection, record or another imported value. Stage 0 doesn&#39;t run a second general constant evaluator before AST.</p><pre style=""><code class='codeblock'>api_url <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;https://api.example.com&quot;</span>
+max_retries <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
+debug_mode <span class='moth-code-operator'>#</span><span class='moth-code-struct'>Import</span> of <span class='moth-code-type'>Bool</span> <span class='moth-code-operator'>=</span> false</code></pre><h3>Project-wide resolution order</h3><p>Same-name contracts must agree on primitive type, optionality, required or default state and the normalised default value. Different defaults are conflicting contracts.</p><p>The project-wide resolution order is:</p><ol><li>a compatible fixed direct project field, which is authoritative and cannot be overridden</li><li>a resolved direct project <code>#Import</code> field</li><li>explicit CLI or programmatic input for a source-only contract</li><li>a builder-provided primitive global</li><li>the shared source default</li><li>a missing-input diagnostic</li></ol><p>Unknown explicit inputs are diagnosed only after every selected source contract is known.</p><p>The resolved value enters module AST as an ordinary folded constant. It creates no runtime wrapper or HIR category.</p><h3>Related concepts</h3><ul><li>For the config file see <a href="#project-config">Project config</a>.</li><li>For <code>@project</code> see <a href="#entry-config">Entry config</a>.</li><li>For the full build-input contract see <a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build system design</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Entry config
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="entry-config-level"
+                id="entry-config-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="entry-config-level"
+                id="entry-config-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="entry-config">
+                    Entry config
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="entry-config-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="entry-config-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>Entry config lets each normal module root carry its own builder settings and access project-level values through <code>@project</code>.</p><p><strong>Accepted deferred syntax.</strong> <code>@project</code> and entry-local <code>config:</code> blocks are queued implementation work. The examples below show the accepted end-state contract, not current compiler support. See <a href="../progress">Progress</a> for implementation status.</p><h3>Using <code>@project</code></h3><p>Import <code>@project</code> to read project fields like <code>version</code> or <code>entry_root</code> inside a module:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>project <span class='moth-code-parenthesis'>{</span> version <span class='moth-code-parenthesis'>}</span>
+
+footer <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> v<span class='moth-code-parenthesis'>[</span>version<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span></code></pre><p><code>@project</code> is never implicitly injected. Import it explicitly when you need it.</p><h3>Entry-local <code>config:</code> blocks</h3><p>A normal module root may contain one optional <code>config:</code> block with builder metadata for that entry:</p><pre style=""><code class='codeblock'>config<span class='moth-code-operator'>:</span>
+    html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;About&quot;</span>,
+    <span class='moth-code-operator'>|</span>
+;</code></pre><p>The block lives at the top level of the root file, outside <code>export:</code> and outside executable bodies. It creates no module symbols or runtime values.</p><h3>Related concepts</h3><ul><li>For build inputs see <a href="#build-inputs">Build inputs</a>.</li></ul>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><strong>Accepted deferred design.</strong> <code>@project</code>, source <code>#Import</code> and entry-local <code>config:</code> blocks are queued implementation work. This page defines the accepted final contract. The current compiler does not yet implement these surfaces. See <a href="../progress">Progress</a> for current status.</p><p>Entry config covers <code>@project</code> and entry-local <code>config:</code> blocks. Both feed builder metadata and compile-time values into normal module roots.</p><h3><code>@project</code></h3><p>The folded <code>project</code> record produces a specialised immutable <code>ProjectGlobalsInterface</code> under the permanently reserved <code>@project</code> import root.</p><p><code>@project</code> exposes direct project fields as namespace members. It doesn&#39;t expose another value named <code>project</code>.</p><p>Normal project modules and project-owned support packages may explicitly import <code>@project</code>. It is never implicitly injected.</p><p>The following may not claim the <code>@project</code> root:</p><ul><li>child modules</li><li>scoped support packages</li><li>dependency aliases</li><li>Core packages</li><li>Builder packages</li><li>binding-backed packages</li></ul><p><code>@project</code> cannot be directly re-exported.</p><p>Internal project modules may expose declarations derived from project values. The compiler retains project-context provenance on every affected public semantic fact. The external project package facade rejects prohibited project-context exposure.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>project <span class='moth-code-parenthesis'>{</span> version, entry_root <span class='moth-code-parenthesis'>}</span>
+
+page_title <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> v<span class='moth-code-parenthesis'>[</span>version<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span></code></pre><h3>Entry-local <code>config:</code> blocks</h3><p>An entry <code>config:</code> block is root-local builder metadata. It isn&#39;t an embedded <code>config.moth</code> source file.</p><p>Placement rules:</p><ul><li>valid only at the top level of a normal module root</li><li>at most one block per normal root</li><li>invalid in normal non-root files</li><li>invalid in support roots</li><li>invalid in the project package facade</li><li>invalid inside <code>export:</code></li><li>invalid inside executable bodies</li><li>invalid in <code>config.moth</code></li></ul><p>The block contains section records only. Imports, aliases, helper constants, support types and source <code>#Import</code> declarations live outside the block in the normal root file.</p><p>The block uses the root file&#39;s ordinary compile-time visibility. It may reference:</p><ul><li>imported constants</li><li><code>@project</code></li><li>same-file constants declared before the block</li><li>resolved source <code>#Import</code> constants</li><li>foldable local const-record types</li><li>selected-builder compile-time values available through normal module imports</li></ul><p>Same-file forward references remain invalid.</p><p>The block creates no ordinary module symbol, HIR or project-global value. It cannot contain <code>project</code> or change project-level builder behaviour. It may contain active artefact-builder and tooling-overlay sections.</p><p>Active entry sections are schema-validated. Inactive sections are parsed and folded but not schema-validated.</p><p>Every normal module selected into the current command&#39;s semantic graph has its block validated whether or not an entry activates it. Imported modules never apply their entry metadata to an importer.</p><p>Only active artefact-builder settings contribute entry activity.</p><h3>Related concepts</h3><ul><li>For build inputs see <a href="#build-inputs">Build inputs</a>.</li><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For the full entry config contract see <a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build system design</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Project package facade
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="project-package-facade-level"
+                id="project-package-facade-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="project-package-facade-level"
+                id="project-package-facade-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="project-package-facade">
+                    Project package facade
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="project-package-facade-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="project-package-facade-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>A project can expose a public package API to other projects through an optional facade file at the project root.</p><h3>What a facade does</h3><p>A <code>+*.moth</code> file beside <code>config.moth</code> becomes the project package facade. It exports declarations that external consumers can import. Without it, the project has no externally consumable package surface.</p><p>The facade rejects top-level runtime work and page fragments. It only exports API declarations. Support roots follow the same rule.</p><h3>How it reaches descendant modules</h3><p>The facade can reference public interfaces of modules below <code>entry_root</code> even though ordinary module visibility wouldn&#39;t allow it. Stage 0 gives the facade a special assembly namespace for this purpose.</p><h3>What the facade cannot do</h3><ul><li>It cannot import <code>@project</code>.</li><li>It cannot expose declarations that depend on project-private context.</li><li>It isn&#39;t visible to internal project modules.</li></ul><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li></ul>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><strong>Partial implementation.</strong> The source-package and module foundations are partially implemented. The complete external facade and project-context contract remains partial. This page defines the accepted final contract.</p><p>The project package facade exposes a project&#39;s public API to external consumers. It is an API-only module compiled through the ordinary compiler pipeline with project-facade visibility supplied by Stage 0.</p><h3>The facade root</h3><p>One optional project-root <code>+*.moth</code> file beside <code>config.moth</code> defines the external project package facade. The suffix after <code>+</code> is cosmetic.</p><p>The facade may define and export its own legal API-only declarations: functions, structs, choices, type aliases, traits and compile-time constants.</p><h3>Special assembly namespace</h3><p>Stage 0 gives the facade a special assembly namespace rooted at <code>entry_root</code>. Through that namespace it may reference the public interfaces of descendant modules below <code>entry_root</code>, regardless of ordinary lexical module visibility.</p><h3>Facade restrictions</h3><p>The facade:</p><ul><li>never bypasses an <code>export:</code> boundary</li><li>isn&#39;t visible to internal project modules</li><li>cannot import <code>@project</code></li><li>cannot expose a semantic fact that depends on project-private context</li><li>rejects top-level runtime work and page fragments</li><li>has no implicit <code>start</code></li><li>emits no route</li></ul><p>Support roots and the project package facade reject top-level runtime work and page fragments. They don&#39;t merely stay inactive.</p><h3>Project package assembly</h3><p>The compiler produces an immutable facade module artefact and public interface. <code>ProjectPackageAssembly</code> is a separate link plan over:</p><ul><li>the compiled facade artefact</li><li>selected descendant public interfaces</li><li>reachable generated functions</li><li>package runtime requirements permitted by the target</li></ul><p>Assembly never recompiles or mutates the facade.</p><p>A project may be both an application and a package. Without the facade it has no externally consumable Moth package surface.</p><p>The facade package identity comes from <code>project.name</code>.</p><h3>External package eligibility</h3><p>The build system rejects any declaration whose public semantic facts or reachable executable implementation directly or transitively depend on private <code>@project</code>. This includes an exported function that calls a private project-dependent helper.</p><p>The validator doesn&#39;t treat implementation-only dependence as a reusable package specialisation mechanism.</p><h3>Dependency package facades</h3><p>A dependency package exposes its facade and immutable artefacts to consumers. Consumers never see the dependency&#39;s private <code>@project</code>.</p><p>No declaration exposed through a dependency package facade may directly or transitively depend on that dependency&#39;s private <code>@project</code>. Private declarations may use the dependency&#39;s own <code>@project</code> only when no external package export can reach or expose them.</p><p>Imported build-value namespaces are scoped to one project or package compilation boundary. A consuming command&#39;s unqualified CLI or programmatic inputs don&#39;t implicitly satisfy a dependency&#39;s <code>#Import</code> contracts.</p><h3>Related concepts</h3><ul><li>For module root rules see <a href="#module-roots">Module roots</a>.</li><li>For package origins and backing see <a href="../packages/#package-origins-and-backing">Package origins and backing</a>.</li><li>For the full facade contract see <a href="https://github.com/nyejames/moth/blob/main/docs/build-system-design.md">Build system design</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><nav class="doc-pager" aria-label="Language documentation">
+    <a
+        class="doc-pager__link doc-pager__link--previous"
+        href="../memory/"
+                rel="prev"
+            >
+                <span class="doc-pager__direction">← Previous</span>
+                <span class="doc-pager__title">Memory and lifetimes</span>
+            </a>
+
+            <a
+                class="doc-pager__link doc-pager__link--next"
+                href="../packages/"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">Packages and imports</span>
+            </a>
+
+            
+
+
+
+</nav></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

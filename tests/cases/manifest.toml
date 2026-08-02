@@ -11697,3 +11697,10 @@ path = "facade_reexport_mutable_param_missing_tilde"
 tags = ["integration", "imports", "facade", "functions", "diagnostics"]
 contract = "language.modules.facade_mutable_parameter_requires_explicit_tilde"
 role = "primary"
+
+[[case]]
+id = "html_code_template_whitespace"
+path = "html_code_template_whitespace"
+tags = ["integration", "html", "templates", "formatting"]
+contract = "builder.html.code_template_whitespace_normalization"
+role = "primary"

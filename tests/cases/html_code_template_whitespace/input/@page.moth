@@ -1,0 +1,30 @@
+import @html { codeblock }
+import @snippet
+
+-- The following code block intentionally uses 4-space, empty, and 16-space blank lines; its content baseline is 12 spaces.
+
+#[$md:
+    [codeblock, $code("moth"):
+            baseline = value
+                nested = baseline
+        less_indented = value
+                final = value
+    ]
+
+    [codeblock, $code("text"):
+            <tag>&"quoted"
+                nested
+        less_indented
+    ]
+
+    [codeblock, $code("moth"):
+    
+
+                
+            blank baseline
+                blank nested
+        blank less_indented
+    ]
+
+    [snippet.content]
+]

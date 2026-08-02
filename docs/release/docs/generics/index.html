@@ -151,1348 +151,1285 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3f8f4e;
+    --doc-level-accent-hover: #337740;
+    --doc-level-border: #d7dfd8;
+    --doc-level-switch-background: #f1f5f1;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202722;
+    --doc-level-muted: #687169;
+    --doc-level-focus: #2877d4;
+}
 
-        table {
-            font-size: 0.8rem;
-        }
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
 
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
 
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
 
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
+.doc-level__title {
+    margin: 0;
+}
 
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-    <style>.doc-level,
-    .doc-pager {
-        --doc-level-accent: #3f8f4e;
-        --doc-level-accent-hover: #337740;
-        --doc-level-border: #d7dfd8;
-        --doc-level-switch-background: #f1f5f1;
-        --doc-level-selected-background: #ffffff;
-        --doc-level-text: #202722;
-        --doc-level-muted: #687169;
-        --doc-level-focus: #2877d4;
-    }
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
 
-    .doc-level {
-        min-inline-size: 0;
-        margin: 2rem 0;
-        padding: 0;
-        border: 0;
-        color: var(--doc-level-text);
-    }
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
 
-    .visually-hidden,
-    .doc-level__input {
-        position: absolute;
-        inline-size: 1px;
-        block-size: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-        border: 0;
-    }
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
 
-    .doc-level__header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-block-end: 1.25rem;
-    }
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
 
-    .doc-level__title {
-        margin: 0;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
 
-    .doc-level__switch {
-        display: inline-grid;
-        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
-        gap: 0.2rem;
-        flex: none;
-        padding: 0.22rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        background: var(--doc-level-switch-background);
-    }
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
 
-    .doc-level__option {
-        padding: 0.42rem 0.8rem;
-        border-radius: 0.55rem;
-        color: var(--doc-level-muted);
-        font-size: 0.875rem;
-        font-weight: 650;
-        line-height: 1.3;
-        text-align: center;
-        cursor: pointer;
-        user-select: none;
+.doc-level__panel {
+    display: none;
+}
 
-        transition:
-            color 130ms ease,
-            background-color 130ms ease,
-            box-shadow 130ms ease;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
 
-    .doc-level__option:hover {
-        color: var(--doc-level-accent-hover);
-    }
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
 
-    .doc-level__input--basic:checked
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:checked
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        color: var(--doc-level-accent);
-        background: var(--doc-level-selected-background);
-        box-shadow:
-            0 1px 2px rgb(20 40 24 / 10%),
-            0 0 0 1px rgb(63 143 78 / 8%);
-    }
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
 
-    .doc-level__input--basic:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
 
-    .doc-level__panel {
-        display: none;
-    }
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
 
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
     .doc-level__input--basic:checked
         ~ .doc-level__panel--basic,
     .doc-level__input--advanced:checked
         ~ .doc-level__panel--advanced {
-        display: block;
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
     }
 
     .doc-pager {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
-        margin-block: 3rem 1rem;
-    }
-
-    .doc-pager--single {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .doc-pager--single .doc-pager__link {
-        width: min(100%, 32rem);
-    }
-
-    .doc-pager--single .doc-pager__link--previous {
-        justify-self: start;
-    }
-
-    .doc-pager--single .doc-pager__link--next {
-        justify-self: end;
-    }
-
-    .doc-pager__link {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        min-inline-size: 0;
-        padding: 0.9rem 1rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        color: var(--doc-level-text);
-        text-decoration: none;
-        background: var(--doc-level-selected-background);
-
-        transition:
-            color 130ms ease,
-            border-color 130ms ease,
-            box-shadow 130ms ease;
-    }
-
-    .doc-pager__link:hover {
-        color: var(--doc-level-accent-hover);
-        border-color: var(--doc-level-accent);
-        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
-    }
-
-    .doc-pager__link:focus-visible {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
-
     .doc-pager__link--next {
-        align-items: flex-end;
-        text-align: right;
+        align-items: flex-start;
+        text-align: left;
     }
 
-    .doc-pager__direction {
-        color: var(--doc-level-muted);
-        font-size: 0.8rem;
-        font-weight: 650;
-        letter-spacing: 0.03rem;
-        text-transform: uppercase;
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #80c98c;
+        --doc-level-accent-hover: #a0d9a9;
+        --doc-level-border: #3a493d;
+        --doc-level-switch-background: #202a22;
+        --doc-level-selected-background: #303c32;
+        --doc-level-text: #edf2ee;
+        --doc-level-muted: #a8b3aa;
+        --doc-level-focus: #75b7ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
     }
 
-    .doc-pager__title {
-        font-size: 1rem;
-        font-weight: 650;
+    .doc-level__panel {
+        display: block;
     }
 
-    @media (prefers-reduced-motion: no-preference) {
-        .doc-level__input--basic:checked
-            ~ .doc-level__panel--basic,
-        .doc-level__input--advanced:checked
-            ~ .doc-level__panel--advanced {
-            animation: doc-level-enter 150ms ease-out;
-        }
-
-        @keyframes doc-level-enter {
-            from {
-                opacity: 0;
-                transform: translateY(0.2rem);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
     }
 
-    @media (max-width: 36rem) {
-        .doc-level__header {
-            align-items: stretch;
-            flex-direction: column;
-        }
-
-        .doc-level__switch {
-            align-self: flex-start;
-        }
-
-        .doc-pager {
-            grid-template-columns: minmax(0, 1fr);
-        }
-
-        .doc-pager__link--next {
-            align-items: flex-start;
-            text-align: left;
-        }
-
-        .doc-pager--single .doc-pager__link {
-            width: 100%;
-            justify-self: stretch;
-        }
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
     }
 
-    @media (prefers-color-scheme: dark) {
-        .doc-level,
-        .doc-pager {
-            --doc-level-accent: #80c98c;
-            --doc-level-accent-hover: #a0d9a9;
-            --doc-level-border: #3a493d;
-            --doc-level-switch-background: #202a22;
-            --doc-level-selected-background: #303c32;
-            --doc-level-text: #edf2ee;
-            --doc-level-muted: #a8b3aa;
-            --doc-level-focus: #75b7ff;
-        }
+    .doc-level__panel--basic::before {
+        content: "Basic";
     }
 
-    @media print {
-        .doc-level__input,
-        .doc-level__switch,
-        .doc-pager {
-            display: none;
-        }
-
-        .doc-level__panel {
-            display: block;
-        }
-
-        .doc-level__panel--advanced {
-            margin-block-start: 1.5rem;
-            padding-block-start: 1.5rem;
-            border-block-start: 1px solid;
-        }
-
-        .doc-level__panel--basic::before,
-        .doc-level__panel--advanced::before {
-            display: block;
-            margin-block-end: 0.75rem;
-            font-weight: 700;
-        }
-
-        .doc-level__panel--basic::before {
-            content: "Basic";
-        }
-
-        .doc-level__panel--advanced::before {
-            content: "Advanced";
-        }
-    }</style>
-
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / Generics</p><h1>Generics</h1><p>Generics let one declaration describe a family of concrete types or functions.</p><p>Moth keeps the solving local. Type arguments come from the declaration, the call in front of you and its immediate receiving type.</p></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Generic declarations
+</legend>
 
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="generic-declarations-level"
+                id="generic-declarations-basic"
+                value="basic"
+                checked
             >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Generics</p><h1>Generics</h1><p>Generics let one declaration describe a family of concrete types or functions.</p><p>Moth keeps the solving local. Type arguments come from the declaration, the call in front of you and its immediate receiving type.</p></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Generic declarations
-    </legend>
 
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="generic-declarations-level"
-                    id="generic-declarations-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="generic-declarations-level"
-                    id="generic-declarations-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="generic-declarations">
-                        Generic declarations
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="generic-declarations-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="generic-declarations-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A generic declaration describes a family of types or functions using a placeholder type.</p><h3>A generic struct</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        value <span class='moth-code-struct'>A,</span>
-    <span class='moth-code-operator'>|</span>
-    </code></pre><p><code>A</code> stands for some concrete type. Later you can make a <code>Box of Int</code>, a <code>Box of String</code>, and so on.</p><h3>A generic function</h3><pre style=""><code class='codeblock'>
-    identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> value
-    ;
-    </code></pre><p><code>identity</code> returns whatever type it receives.</p><h3>The placeholder is scoped</h3><p>The parameter name is meaningful only inside that declaration. You cannot use <code>A</code> as a value or refer to it from another declaration.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Generics form declaration-site type abstractions for top-level structs, choices and free functions. A generic parameter acts as a compile-time placeholder that stands for a concrete type selected later.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> value
-    ;
-
-    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        value <span class='moth-code-struct'>A,</span>
-    <span class='moth-code-operator'>|</span>
-
-    <span class='moth-code-struct'>Maybe</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-struct'>Some</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>,
-        <span class='moth-code-struct'>Empty,</span>
-    ;
-    </code></pre><p>Generic parameters follow the declaration name after <code>type</code>. Multiple parameters are separated by commas.</p><h3>Exact contract</h3><ul><li>Generic parameters are introduced with <code>type</code> after the declaration name.</li><li>Supported declaration owners are top-level structs, choices and free functions.</li><li>Parameter names use type-name casing.</li><li>Parameters are scoped to the declaration.</li><li>Parameters are compile-time placeholders, not runtime values.</li><li>Each parameter name must be unique within the declaration.</li><li>Parameters cannot collide with visible concrete types, type aliases, external package types, builtins or other type-position names.</li><li>A generic body may use active parameters in local type annotations.</li><li>Inline parameter sugar such as <code>|value type A|</code> is rejected.</li><li>Generic parameters do not create type values.</li><li>Generic declarations are resolved before HIR.</li></ul><h3>Multiple parameters</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Pair</span> type <span class='moth-code-struct'>A,</span> <span class='moth-code-struct'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        first <span class='moth-code-struct'>A,</span>
-        second <span class='moth-code-struct'>B,</span>
-    <span class='moth-code-operator'>|</span>
-    </code></pre><h3>Unused parameters</h3><p>A generic parameter must be used in the public type shape of the declaration. An unused parameter is rejected.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- Error: parameter &#39;A&#39; is declared but never used</span>
-    identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> value
-    ;
-    </code></pre><h3>No inline parameter sugar</h3><p>Generic parameters belong in the declaration header, not inside ordinary parameter lists.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- Error</span>
-    identity <span class='moth-code-operator'>|</span>value type <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> value
-    ;
-    </code></pre><h3>Compiler stage note</h3><p>Header parsing records generic parameter lists and declaration metadata. AST resolves generic signatures to canonical type identities, validates generic bodies against unconstrained parameters and emits concrete instances before HIR generation. HIR never carries unresolved generic calls.</p><h3>Related concepts</h3><ul><li>For applying concrete type arguments see <a href="#type-application">Type application</a>.</li><li>For call-site inference see <a href="#generic-inference">Generic inference</a>.</li><li>For trait bounds see <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Type application
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="type-application-level"
-                    id="type-application-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="type-application-level"
-                    id="type-application-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="type-application">
-                        Type application
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="type-application-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="type-application-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Use <code>of</code> to choose the concrete type for a generic declaration.</p><h3>One argument</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        value <span class='moth-code-struct'>A,</span>
-    <span class='moth-code-operator'>|</span>
-
-    text_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>Several arguments</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Pair</span> type <span class='moth-code-struct'>A,</span> <span class='moth-code-struct'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        first <span class='moth-code-struct'>A,</span>
-        second <span class='moth-code-struct'>B,</span>
-    <span class='moth-code-operator'>|</span>
-
-    item <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>Concrete aliases</h3><p>When a type would need nested <code>of</code> applications, name an intermediate alias.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span>
-    value <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Concrete generic instances are created with <code>of</code> in type position.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>
-    number_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    text_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span>
-
-    <span class='moth-code-struct'>Pair</span> type <span class='moth-code-struct'>A,</span> <span class='moth-code-struct'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        first <span class='moth-code-struct'>A,</span>
-        second <span class='moth-code-struct'>B,</span>
-    <span class='moth-code-operator'>|</span>
-
-    item <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>Exact contract</h3><ul><li><code>of</code> applies concrete type arguments in type position.</li><li>Argument count must match the generic declaration.</li><li>Each argument must be a valid concrete type.</li><li>Different concrete argument lists produce different semantic types.</li><li>Constructors use ordinary constructor syntax.</li><li>Explicit generic free-function call type arguments are not supported.</li></ul><h3>Nested <code>of</code> boundary</h3><p>Nested inline <code>of</code> applications are rejected. Use a named concrete alias for any nested shape the current compiler rejects.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- Error</span>
-    value <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>Work around the limit with an intermediate alias:</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span>
-    value <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>The collection element exception allows one inline <code>of</code> application inside a collection element annotation, such as <code>{Box of String}</code>. Nested <code>of</code> applications inside a collection element are rejected for the same reason as nested <code>of</code> in any other type position: use a named concrete alias.</p><h3>Concrete generic aliases</h3><p>A type alias may name a fully applied generic instance. The alias remains transparent.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>StringBox</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span>
-
-    box <span class='moth-code-struct'>StringBox</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;docs&quot;</span><span class='moth-code-parenthesis'>)</span>
-    raw <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> box
-    </code></pre><h3>Constructed forms are compiler-owned</h3><p>Public <code>Option of T</code>, <code>Result of T, E</code>, <code>Option.Some</code> and <code>Result.Ok</code> are not language syntax. Options, fallible carriers and collections are compiler-owned constructed forms with their own source syntax.</p><h3>Related concepts</h3><ul><li>For generic declarations see <a href="#generic-declarations">Generic declarations</a>.</li><li>For type aliases see <a href="../aliases/#type-aliases">Type aliases</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Generic inference
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="generic-inference-level"
-                    id="generic-inference-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="generic-inference-level"
-                    id="generic-inference-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="generic-inference">
-                        Generic inference
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="generic-inference-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="generic-inference-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>You call a generic function like any other function. The compiler figures out the concrete type from the immediate context.</p><h3>Inference from an argument</h3><pre style=""><code class='codeblock'>
-    identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> value
-    ;
-
-    value <span class='moth-code-operator'>=</span> identity<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>Because <code>42</code> is an <code>Int</code>, <code>A</code> becomes <code>Int</code> for this call.</p><h3>Inference from the result type</h3><pre style=""><code class='codeblock'>
-    empty type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>A</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    ;
-
-    items <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>The left-hand side says the result is <code>{Int}</code>, so <code>A</code> becomes <code>Int</code>.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Generic function calls use ordinary call syntax. Type arguments are inferred from local evidence only.</p><h3>Inference sources</h3><pre style=""><code class='codeblock'>
-    identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> value
-    ;
-
-    empty type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>A</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    ;
-
-    value <span class='moth-code-operator'>=</span> identity<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    typed_value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> identity<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    items <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>The concrete type for <code>A</code> can come from:</p><ul><li>immediate call arguments</li><li>the immediate expected result type at a closed receiving site</li></ul><h3>What inference does not use</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- Error: T is ambiguous at the declaration site</span>
-    values <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>Inference does not use:</p><ul><li>later mutation</li><li>later reads</li><li>whole-program analysis</li><li>HIR</li><li>borrow validation</li><li>distant return use</li><li>expected parameter context from an outer call into a nested generic call</li></ul><p>Use an intermediate annotation when a nested generic call would otherwise need evidence from its parent call.</p><pre style=""><code class='codeblock'>
-    empty type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>A</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    ;
-
-    consume <span class='moth-code-operator'>|</span>values <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    ;
-
-    <span class='moth-code-comment'>-- Rejected: outer parameter context does not solve the nested call.</span>
-    consume<span class='moth-code-parenthesis'>(</span>empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
-
-    <span class='moth-code-comment'>-- Valid: annotate the nested result first.</span>
-    items <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    consume<span class='moth-code-parenthesis'>(</span>items<span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>Optional and fallible generic returns</h3><p>Generic functions may return optional or fallible values when the concrete envelope is solved by immediate evidence.</p><pre style=""><code class='codeblock'>
-    wrap_optional type <span class='moth-code-struct'>T</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>T</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>T</span><span class='moth-code-operator'>?</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> value
-    ;
-
-    always_fail type <span class='moth-code-struct'>T,</span> <span class='moth-code-struct'>E</span> <span class='moth-code-operator'>|</span>fallback <span class='moth-code-struct'>T,</span> err <span class='moth-code-struct'>E</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>T,</span> <span class='moth-code-struct'>E</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> err
-    ;
-
-    maybe_name <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> wrap_optional<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span>
-
-    value <span class='moth-code-operator'>=</span> always_fail<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>7</span>, <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;bad&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span> then <span class='moth-code-number'>0</span>
-    </code></pre><p>A bare <code>none</code> cannot infer an otherwise unknown parameter by itself.</p><h3>Imported generic functions</h3><p>Visible imported generic functions use the same local inference rules. There is no explicit call-site type argument syntax.</p><h3>Cast boundary</h3><p>Generic inference does not look through <code>cast</code>. The cast target must be selected after the generic call has already been solved.</p><h3>Generic error parameter inference</h3><p>A concrete callee error type does not specialise an otherwise unsolved generic error parameter merely because it appears inside the generic body. Immediate declaration and call-site evidence must still solve the parameter.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- Rejected: E is not solved by the concrete Error inside the body.</span>
-    generic_fail type <span class='moth-code-struct'>E</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>E</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;bad&quot;</span><span class='moth-code-parenthesis'>)</span>
-    ;
-    </code></pre><p>A generic error parameter must be solved by immediate call-site evidence, like any other generic parameter.</p><h3>Explicit call-site syntax is rejected</h3><p>All of these are rejected:</p><pre style=""><code class='codeblock'>
-    identity of <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    identity<span class='moth-code-operator'>&lt;</span><span class='moth-code-type'>Int</span><span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    identity<span class='moth-code-parenthesis'>[</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    identity<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>Related concepts</h3><ul><li>For generic declarations see <a href="#generic-declarations">Generic declarations</a>.</li><li>For concrete instance behaviour see <a href="#generic-instances">Generic instances</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Generic instances
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="generic-instances-level"
-                    id="generic-instances-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="generic-instances-level"
-                    id="generic-instances-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="generic-instances">
-                        Generic instances
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="generic-instances-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="generic-instances-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>When you apply concrete types to a generic declaration, you get a concrete instance.</p><h3>A concrete generic struct</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        value <span class='moth-code-struct'>A,</span>
-    <span class='moth-code-operator'>|</span>
-
-    int_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    string_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p><code>Box of Int</code> and <code>Box of String</code> are different types. You cannot assign one to the other.</p><h3>A concrete generic choice</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Maybe</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-struct'>Some</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>,
-        <span class='moth-code-struct'>Empty,</span>
-    ;
-
-    name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p><code>Maybe of String</code> stores a <code>String</code> payload. <code>Maybe of Int</code> would store an <code>Int</code>.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A concrete generic instance substitutes the generic parameters with concrete type arguments. The resulting type is ordinary: it has fields, constructors and the same access rules as any other type.</p><h3>Field and payload substitution</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        value <span class='moth-code-struct'>A,</span>
-    <span class='moth-code-operator'>|</span>
-
-    int_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    string_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p><code>Box of Int</code> and <code>Box of String</code> are different semantic types. The field <code>value</code> has type <code>Int</code> in the first and <code>String</code> in the second.</p><h3>Generic choices</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Maybe</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-struct'>Some</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>,
-        <span class='moth-code-struct'>Empty,</span>
-    ;
-
-    name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span>
-    missing <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Empty</span>
-    </code></pre><p>Choice payload matching uses the substituted payload types.</p><h3>Instance identity</h3><p>Same constructor plus same concrete arguments yields the same instance type. Different arguments yield incompatible instance types.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        value <span class='moth-code-struct'>A,</span>
-    <span class='moth-code-operator'>|</span>
-
-    a <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span><span class='moth-code-parenthesis'>)</span>
-    b <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>2</span><span class='moth-code-parenthesis'>)</span>
-    <span class='moth-code-comment'>-- c Box of String = a -- would be an error</span>
-    </code></pre><h3>Constructor inference</h3><p>Generic struct and choice constructors infer their concrete type arguments from immediate constructor arguments and from the immediate receiving type. No explicit constructor type arguments are needed or supported.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        value <span class='moth-code-struct'>A,</span>
-    <span class='moth-code-operator'>|</span>
-
-    <span class='moth-code-comment'>-- Inferred from the constructor argument.</span>
-    value <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-
-    <span class='moth-code-comment'>-- Inferred from the receiving type.</span>
-    text_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><h3>Aligned receiver methods</h3><p>A receiver method may be declared on a generic type when the method&#39;s generic parameters align exactly with the receiver constructor&#39;s parameters.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        value <span class='moth-code-struct'>A,</span>
-    <span class='moth-code-operator'>|</span>
-
-    get type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> this.value
-    ;
-
-    box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
-    value <span class='moth-code-operator'>=</span> box.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>Receiver methods on one concrete generic instance remain rejected.</p><h3>Generic bounds and evidence</h3><p>Concrete instantiation with trait bounds requires visible reusable evidence. See <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</p><h3>Deferred and rejected surfaces</h3><ul><li>Recursive generic nominal types are rejected.</li><li>Receiver methods on concrete instances are rejected.</li><li>Generic external package functions and types are deferred.</li></ul><h3>Related concepts</h3><ul><li>For type application see <a href="#type-application">Type application</a>.</li><li>For trait bounds see <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Generic limits
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="generic-limits-level"
-                    id="generic-limits-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="generic-limits-level"
-                    id="generic-limits-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="generic-limits">
-                        Generic limits
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="generic-limits-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="generic-limits-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Generic code can move an unknown type around, but it needs a bound before calling type-specific behaviour.</p><h3>Moving values around</h3><pre style=""><code class='codeblock'>
-    identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> value
-    ;
-    </code></pre><p><code>identity</code> does not need to know anything about <code>A</code>. It returns what it got.</p><h3>Needing a bound</h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-    ;
-
-    render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    ;
-    </code></pre><p><code>render</code> can call <code>.display()</code> because the bound promises that <code>Item</code> provides it.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Unconstrained generic code can move values around but cannot assume type-specific behaviour.</p><h3>What unconstrained generic code may do</h3><ul><li>pass values through</li><li>return them</li><li>store them in generic structs or choices</li><li>forward them to another generic function when immediate evidence solves the call</li><li>use generic parameters in local annotations</li></ul><h3>What unconstrained generic code cannot assume</h3><ul><li>arithmetic</li><li>equality or ordering</li><li>field access</li><li>string-like template interpolation</li><li>external or IO behaviour</li><li>arbitrary receiver methods</li></ul><p>A trait bound may enable the unique receiver behaviour provided by its static contract.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-        display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-    ;
-
-    render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    ;
-    </code></pre><h3>Rejected or deferred current Alpha surfaces</h3><ul><li>explicit call-site generic syntax</li><li>inline generic parameter sugar such as <code>|value type A|</code></li><li>recursive generic types</li><li>receiver methods on concrete instances</li><li>generic external package functions and types</li><li>nested inline <code>of</code> applications beyond the accepted single application</li><li>public <code>Option</code>/<code>Result</code> constructors</li></ul><h3>Outside generic design scope</h3><ul><li>generic function values</li><li>higher-order polymorphism</li><li>type values</li><li>type-returning functions</li><li>type-level <code>#if</code></li><li>compile-time type inspection</li><li><code>where</code> clauses</li><li>file-local evidence-backed bound dispatch</li><li>parameterized aliases</li><li>partial type application</li><li>higher-kinded types</li><li>user const generics beyond fixed collection capacity</li><li>lifetime parameters</li><li>specialization</li><li>associated types</li></ul><p>Deferred surfaces may land in future Alpha iterations. Outside-scope surfaces require an explicit language-philosophy change before they can be added.</p><h3>Related concepts</h3><ul><li>For trait bounds see <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</li><li>For the current implementation status see <a href="../progress">Progress matrix</a>.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><nav class="doc-pager" aria-label="Language documentation">
-        <a
-            class="doc-pager__link doc-pager__link--previous"
-            href="../aliases/"
-                    rel="prev"
-                >
-                    <span class="doc-pager__direction">← Previous</span>
-                    <span class="doc-pager__title">Aliases</span>
-                </a>
-
-                <a
-                    class="doc-pager__link doc-pager__link--next"
-                    href="../traits/"
-                    rel="next"
-                >
-                    <span class="doc-pager__direction">Next →</span>
-                    <span class="doc-pager__title">Traits</span>
-                </a>
-
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="generic-declarations-level"
+                id="generic-declarations-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="generic-declarations">
+                    Generic declarations
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="generic-declarations-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="generic-declarations-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
                 
 
 
 
-    </nav></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+        <p>A generic declaration describes a family of types or functions using a placeholder type.</p><h3>A generic struct</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    value <span class='moth-code-struct'>A,</span>
+<span class='moth-code-operator'>|</span></code></pre><p><code>A</code> stands for some concrete type. Later you can make a <code>Box of Int</code>, a <code>Box of String</code>, and so on.</p><h3>A generic function</h3><pre style=""><code class='codeblock'>identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+;</code></pre><p><code>identity</code> returns whatever type it receives.</p><h3>The placeholder is scoped</h3><p>The parameter name is meaningful only inside that declaration. You cannot use <code>A</code> as a value or refer to it from another declaration.</p>
+</div>
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Generics form declaration-site type abstractions for top-level structs, choices and free functions. A generic parameter acts as a compile-time placeholder that stands for a concrete type selected later.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+;
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+<span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    value <span class='moth-code-struct'>A,</span>
+<span class='moth-code-operator'>|</span>
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+<span class='moth-code-struct'>Maybe</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-struct'>Some</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>,
+    <span class='moth-code-struct'>Empty,</span>
+;</code></pre><p>Generic parameters follow the declaration name after <code>type</code>. Multiple parameters are separated by commas.</p><h3>Exact contract</h3><ul><li>Generic parameters are introduced with <code>type</code> after the declaration name.</li><li>Supported declaration owners are top-level structs, choices and free functions.</li><li>Parameter names use type-name casing.</li><li>Parameters are scoped to the declaration.</li><li>Parameters are compile-time placeholders, not runtime values.</li><li>Each parameter name must be unique within the declaration.</li><li>Parameters cannot collide with visible concrete types, type aliases, external package types, builtins or other type-position names.</li><li>A generic body may use active parameters in local type annotations.</li><li>Inline parameter sugar such as <code>|value type A|</code> is rejected.</li><li>Generic parameters do not create type values.</li><li>Generic declarations are resolved before HIR.</li></ul><h3>Multiple parameters</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Pair</span> type <span class='moth-code-struct'>A,</span> <span class='moth-code-struct'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    first <span class='moth-code-struct'>A,</span>
+    second <span class='moth-code-struct'>B,</span>
+<span class='moth-code-operator'>|</span></code></pre><h3>Unused parameters</h3><p>A generic parameter must be used in the public type shape of the declaration. An unused parameter is rejected.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Error: parameter &#39;A&#39; is declared but never used</span>
+identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+;</code></pre><h3>No inline parameter sugar</h3><p>Generic parameters belong in the declaration header, not inside ordinary parameter lists.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Error</span>
+identity <span class='moth-code-operator'>|</span>value type <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+;</code></pre><h3>Compiler stage note</h3><p>Header parsing records generic parameter lists and declaration metadata. AST resolves generic signatures to canonical type identities, validates generic bodies against unconstrained parameters and emits concrete instances before HIR generation. HIR never carries unresolved generic calls.</p><h3>Related concepts</h3><ul><li>For applying concrete type arguments see <a href="#type-application">Type application</a>.</li><li>For call-site inference see <a href="#generic-inference">Generic inference</a>.</li><li>For trait bounds see <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Type application
+</legend>
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="type-application-level"
+                id="type-application-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="type-application-level"
+                id="type-application-advanced"
+                value="advanced"
+            >
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="type-application">
+                    Type application
+</h2>
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="type-application-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="type-application-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
+        <p>Use <code>of</code> to choose the concrete type for a generic declaration.</p><h3>One argument</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    value <span class='moth-code-struct'>A,</span>
+<span class='moth-code-operator'>|</span>
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
+text_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Several arguments</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Pair</span> type <span class='moth-code-struct'>A,</span> <span class='moth-code-struct'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    first <span class='moth-code-struct'>A,</span>
+    second <span class='moth-code-struct'>B,</span>
+<span class='moth-code-operator'>|</span>
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+item <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Concrete aliases</h3><p>When a type would need nested <code>of</code> applications, name an intermediate alias.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span>
+value <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span></code></pre>
+</div>
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Concrete generic instances are created with <code>of</code> in type position.</p><h3>Syntax</h3><pre style=""><code class='codeblock'>number_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+text_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span>
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+<span class='moth-code-struct'>Pair</span> type <span class='moth-code-struct'>A,</span> <span class='moth-code-struct'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    first <span class='moth-code-struct'>A,</span>
+    second <span class='moth-code-struct'>B,</span>
+<span class='moth-code-operator'>|</span>
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+item <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Exact contract</h3><ul><li><code>of</code> applies concrete type arguments in type position.</li><li>Argument count must match the generic declaration.</li><li>Each argument must be a valid concrete type.</li><li>Different concrete argument lists produce different semantic types.</li><li>Constructors use ordinary constructor syntax.</li><li>Explicit generic free-function call type arguments are not supported.</li></ul><h3>Nested <code>of</code> boundary</h3><p>Nested inline <code>of</code> applications are rejected. Use a named concrete alias for any nested shape the current compiler rejects.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Error</span>
+value <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Work around the limit with an intermediate alias:</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Pair</span> of <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span>
+value <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>StringIntPair</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Pair</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The collection element exception allows one inline <code>of</code> application inside a collection element annotation, such as <code>{Box of String}</code>. Nested <code>of</code> applications inside a collection element are rejected for the same reason as nested <code>of</code> in any other type position: use a named concrete alias.</p><h3>Concrete generic aliases</h3><p>A type alias may name a fully applied generic instance. The alias remains transparent.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>StringBox</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span>
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+box <span class='moth-code-struct'>StringBox</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;docs&quot;</span><span class='moth-code-parenthesis'>)</span>
+raw <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> box</code></pre><h3>Constructed forms are compiler-owned</h3><p>Public <code>Option of T</code>, <code>Result of T, E</code>, <code>Option.Some</code> and <code>Result.Ok</code> are not language syntax. Options, fallible carriers and collections are compiler-owned constructed forms with their own source syntax.</p><h3>Related concepts</h3><ul><li>For generic declarations see <a href="#generic-declarations">Generic declarations</a>.</li><li>For type aliases see <a href="../aliases/#type-aliases">Type aliases</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Generic inference
+</legend>
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="generic-inference-level"
+                id="generic-inference-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="generic-inference-level"
+                id="generic-inference-advanced"
+                value="advanced"
+            >
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="generic-inference">
+                    Generic inference
+</h2>
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="generic-inference-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="generic-inference-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+        <p>You call a generic function like any other function. The compiler figures out the concrete type from the immediate context.</p><h3>Inference from an argument</h3><pre style=""><code class='codeblock'>identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+;
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+value <span class='moth-code-operator'>=</span> identity<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Because <code>42</code> is an <code>Int</code>, <code>A</code> becomes <code>Int</code> for this call.</p><h3>Inference from the result type</h3><pre style=""><code class='codeblock'>empty type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>A</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
+;
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+items <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The left-hand side says the result is <code>{Int}</code>, so <code>A</code> becomes <code>Int</code>.</p>
+</div>
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Generic function calls use ordinary call syntax. Type arguments are inferred from local evidence only.</p><h3>Inference sources</h3><pre style=""><code class='codeblock'>identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+;
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
+empty type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>A</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
+;
 
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
+value <span class='moth-code-operator'>=</span> identity<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+typed_value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> identity<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+items <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The concrete type for <code>A</code> can come from:</p><ul><li>immediate call arguments</li><li>the immediate expected result type at a closed receiving site</li></ul><h3>What inference does not use</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Error: T is ambiguous at the declaration site</span>
+values <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Inference does not use:</p><ul><li>later mutation</li><li>later reads</li><li>whole-program analysis</li><li>HIR</li><li>borrow validation</li><li>distant return use</li><li>expected parameter context from an outer call into a nested generic call</li></ul><p>Use an intermediate annotation when a nested generic call would otherwise need evidence from its parent call.</p><pre style=""><code class='codeblock'>empty type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>A</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
+;
 
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
+consume <span class='moth-code-operator'>|</span>values <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+;
 
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+<span class='moth-code-comment'>-- Rejected: outer parameter context does not solve the nested call.</span>
+consume<span class='moth-code-parenthesis'>(</span>empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
+
+<span class='moth-code-comment'>-- Valid: annotate the nested result first.</span>
+items <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
+consume<span class='moth-code-parenthesis'>(</span>items<span class='moth-code-parenthesis'>)</span></code></pre><h3>Optional and fallible generic returns</h3><p>Generic functions may return optional or fallible values when the concrete envelope is solved by immediate evidence.</p><pre style=""><code class='codeblock'>wrap_optional type <span class='moth-code-struct'>T</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>T</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>T</span><span class='moth-code-operator'>?</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+;
+
+always_fail type <span class='moth-code-struct'>T,</span> <span class='moth-code-struct'>E</span> <span class='moth-code-operator'>|</span>fallback <span class='moth-code-struct'>T,</span> err <span class='moth-code-struct'>E</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>T,</span> <span class='moth-code-struct'>E</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> err
+;
+
+maybe_name <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> wrap_optional<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span>
+
+value <span class='moth-code-operator'>=</span> always_fail<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>7</span>, <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;bad&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span> then <span class='moth-code-number'>0</span></code></pre><p>A bare <code>none</code> cannot infer an otherwise unknown parameter by itself.</p><h3>Imported generic functions</h3><p>Visible imported generic functions use the same local inference rules. There is no explicit call-site type argument syntax.</p><h3>Cast boundary</h3><p>Generic inference does not look through <code>cast</code>. The cast target must be selected after the generic call has already been solved.</p><h3>Generic error parameter inference</h3><p>A concrete callee error type does not specialise an otherwise unsolved generic error parameter merely because it appears inside the generic body. Immediate declaration and call-site evidence must still solve the parameter.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Rejected: E is not solved by the concrete Error inside the body.</span>
+generic_fail type <span class='moth-code-struct'>E</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>E</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;bad&quot;</span><span class='moth-code-parenthesis'>)</span>
+;</code></pre><p>A generic error parameter must be solved by immediate call-site evidence, like any other generic parameter.</p><h3>Explicit call-site syntax is rejected</h3><p>All of these are rejected:</p><pre style=""><code class='codeblock'>identity of <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+identity<span class='moth-code-operator'>&lt;</span><span class='moth-code-type'>Int</span><span class='moth-code-operator'>&gt;</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+identity<span class='moth-code-parenthesis'>[</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+identity<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Related concepts</h3><ul><li>For generic declarations see <a href="#generic-declarations">Generic declarations</a>.</li><li>For concrete instance behaviour see <a href="#generic-instances">Generic instances</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Generic instances
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="generic-instances-level"
+                id="generic-instances-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="generic-instances-level"
+                id="generic-instances-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="generic-instances">
+                    Generic instances
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="generic-instances-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="generic-instances-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>When you apply concrete types to a generic declaration, you get a concrete instance.</p><h3>A concrete generic struct</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    value <span class='moth-code-struct'>A,</span>
+<span class='moth-code-operator'>|</span>
+
+int_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+string_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>Box of Int</code> and <code>Box of String</code> are different types. You cannot assign one to the other.</p><h3>A concrete generic choice</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Maybe</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-struct'>Some</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>,
+    <span class='moth-code-struct'>Empty,</span>
+;
+
+name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>Maybe of String</code> stores a <code>String</code> payload. <code>Maybe of Int</code> would store an <code>Int</code>.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>A concrete generic instance substitutes the generic parameters with concrete type arguments. The resulting type is ordinary: it has fields, constructors and the same access rules as any other type.</p><h3>Field and payload substitution</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    value <span class='moth-code-struct'>A,</span>
+<span class='moth-code-operator'>|</span>
+
+int_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+string_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>Box of Int</code> and <code>Box of String</code> are different semantic types. The field <code>value</code> has type <code>Int</code> in the first and <code>String</code> in the second.</p><h3>Generic choices</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Maybe</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-struct'>Some</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>,
+    <span class='moth-code-struct'>Empty,</span>
+;
+
+name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span>
+missing <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Empty</span></code></pre><p>Choice payload matching uses the substituted payload types.</p><h3>Instance identity</h3><p>Same constructor plus same concrete arguments yields the same instance type. Different arguments yield incompatible instance types.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    value <span class='moth-code-struct'>A,</span>
+<span class='moth-code-operator'>|</span>
+
+a <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span><span class='moth-code-parenthesis'>)</span>
+b <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>2</span><span class='moth-code-parenthesis'>)</span>
+<span class='moth-code-comment'>-- c Box of String = a -- would be an error</span></code></pre><h3>Constructor inference</h3><p>Generic struct and choice constructors infer their concrete type arguments from immediate constructor arguments and from the immediate receiving type. No explicit constructor type arguments are needed or supported.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    value <span class='moth-code-struct'>A,</span>
+<span class='moth-code-operator'>|</span>
+
+<span class='moth-code-comment'>-- Inferred from the constructor argument.</span>
+value <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+
+<span class='moth-code-comment'>-- Inferred from the receiving type.</span>
+text_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Aligned receiver methods</h3><p>A receiver method may be declared on a generic type when the method&#39;s generic parameters align exactly with the receiver constructor&#39;s parameters.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    value <span class='moth-code-struct'>A,</span>
+<span class='moth-code-operator'>|</span>
+
+get type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> this.value
+;
+
+box <span class='moth-code-struct'>Box</span> of <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Box</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>42</span><span class='moth-code-parenthesis'>)</span>
+value <span class='moth-code-operator'>=</span> box.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Receiver methods on one concrete generic instance remain rejected.</p><h3>Generic bounds and evidence</h3><p>Concrete instantiation with trait bounds requires visible reusable evidence. See <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</p><h3>Deferred and rejected surfaces</h3><ul><li>Recursive generic nominal types are rejected.</li><li>Receiver methods on concrete instances are rejected.</li><li>Generic external package functions and types are deferred.</li></ul><h3>Related concepts</h3><ul><li>For type application see <a href="#type-application">Type application</a>.</li><li>For trait bounds see <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Generic limits
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="generic-limits-level"
+                id="generic-limits-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="generic-limits-level"
+                id="generic-limits-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="generic-limits">
+                    Generic limits
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="generic-limits-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="generic-limits-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>Generic code can move an unknown type around, but it needs a bound before calling type-specific behaviour.</p><h3>Moving values around</h3><pre style=""><code class='codeblock'>identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+;</code></pre><p><code>identity</code> does not need to know anything about <code>A</code>. It returns what it got.</p><h3>Needing a bound</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
+;
+
+render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
+;</code></pre><p><code>render</code> can call <code>.display()</code> because the bound promises that <code>Item</code> provides it.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Unconstrained generic code can move values around but cannot assume type-specific behaviour.</p><h3>What unconstrained generic code may do</h3><ul><li>pass values through</li><li>return them</li><li>store them in generic structs or choices</li><li>forward them to another generic function when immediate evidence solves the call</li><li>use generic parameters in local annotations</li></ul><h3>What unconstrained generic code cannot assume</h3><ul><li>arithmetic</li><li>equality or ordering</li><li>field access</li><li>string-like template interpolation</li><li>external or IO behaviour</li><li>arbitrary receiver methods</li></ul><p>A trait bound may enable the unique receiver behaviour provided by its static contract.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
+    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
+;
+
+render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
+;</code></pre><h3>Rejected or deferred current Alpha surfaces</h3><ul><li>explicit call-site generic syntax</li><li>inline generic parameter sugar such as <code>|value type A|</code></li><li>recursive generic types</li><li>receiver methods on concrete instances</li><li>generic external package functions and types</li><li>nested inline <code>of</code> applications beyond the accepted single application</li><li>public <code>Option</code>/<code>Result</code> constructors</li></ul><h3>Outside generic design scope</h3><ul><li>generic function values</li><li>higher-order polymorphism</li><li>type values</li><li>type-returning functions</li><li>type-level <code>#if</code></li><li>compile-time type inspection</li><li><code>where</code> clauses</li><li>file-local evidence-backed bound dispatch</li><li>parameterized aliases</li><li>partial type application</li><li>higher-kinded types</li><li>user const generics beyond fixed collection capacity</li><li>lifetime parameters</li><li>specialization</li><li>associated types</li></ul><p>Deferred surfaces may land in future Alpha iterations. Outside-scope surfaces require an explicit language-philosophy change before they can be added.</p><h3>Related concepts</h3><ul><li>For trait bounds see <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</li><li>For the current implementation status see <a href="../progress">Progress matrix</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><nav class="doc-pager" aria-label="Language documentation">
+    <a
+        class="doc-pager__link doc-pager__link--previous"
+        href="../aliases/"
+                rel="prev"
+            >
+                <span class="doc-pager__direction">← Previous</span>
+                <span class="doc-pager__title">Aliases</span>
+            </a>
+
+            <a
+                class="doc-pager__link doc-pager__link--next"
+                href="../traits/"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">Traits</span>
+            </a>
+
+            
+
+
+
+</nav></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

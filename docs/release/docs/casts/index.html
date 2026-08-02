@@ -151,1181 +151,1146 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3f8f4e;
+    --doc-level-accent-hover: #337740;
+    --doc-level-border: #d7dfd8;
+    --doc-level-switch-background: #f1f5f1;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202722;
+    --doc-level-muted: #687169;
+    --doc-level-focus: #2877d4;
+}
 
-        table {
-            font-size: 0.8rem;
-        }
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
 
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
 
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
 
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
+.doc-level__title {
+    margin: 0;
+}
 
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-    <style>.doc-level,
-    .doc-pager {
-        --doc-level-accent: #3f8f4e;
-        --doc-level-accent-hover: #337740;
-        --doc-level-border: #d7dfd8;
-        --doc-level-switch-background: #f1f5f1;
-        --doc-level-selected-background: #ffffff;
-        --doc-level-text: #202722;
-        --doc-level-muted: #687169;
-        --doc-level-focus: #2877d4;
-    }
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
 
-    .doc-level {
-        min-inline-size: 0;
-        margin: 2rem 0;
-        padding: 0;
-        border: 0;
-        color: var(--doc-level-text);
-    }
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
 
-    .visually-hidden,
-    .doc-level__input {
-        position: absolute;
-        inline-size: 1px;
-        block-size: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-        border: 0;
-    }
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
 
-    .doc-level__header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-block-end: 1.25rem;
-    }
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
 
-    .doc-level__title {
-        margin: 0;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
 
-    .doc-level__switch {
-        display: inline-grid;
-        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
-        gap: 0.2rem;
-        flex: none;
-        padding: 0.22rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        background: var(--doc-level-switch-background);
-    }
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
 
-    .doc-level__option {
-        padding: 0.42rem 0.8rem;
-        border-radius: 0.55rem;
-        color: var(--doc-level-muted);
-        font-size: 0.875rem;
-        font-weight: 650;
-        line-height: 1.3;
-        text-align: center;
-        cursor: pointer;
-        user-select: none;
+.doc-level__panel {
+    display: none;
+}
 
-        transition:
-            color 130ms ease,
-            background-color 130ms ease,
-            box-shadow 130ms ease;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
 
-    .doc-level__option:hover {
-        color: var(--doc-level-accent-hover);
-    }
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
 
-    .doc-level__input--basic:checked
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:checked
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        color: var(--doc-level-accent);
-        background: var(--doc-level-selected-background);
-        box-shadow:
-            0 1px 2px rgb(20 40 24 / 10%),
-            0 0 0 1px rgb(63 143 78 / 8%);
-    }
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
 
-    .doc-level__input--basic:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
 
-    .doc-level__panel {
-        display: none;
-    }
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
 
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
     .doc-level__input--basic:checked
         ~ .doc-level__panel--basic,
     .doc-level__input--advanced:checked
         ~ .doc-level__panel--advanced {
-        display: block;
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
     }
 
     .doc-pager {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
-        margin-block: 3rem 1rem;
-    }
-
-    .doc-pager--single {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .doc-pager--single .doc-pager__link {
-        width: min(100%, 32rem);
-    }
-
-    .doc-pager--single .doc-pager__link--previous {
-        justify-self: start;
-    }
-
-    .doc-pager--single .doc-pager__link--next {
-        justify-self: end;
-    }
-
-    .doc-pager__link {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        min-inline-size: 0;
-        padding: 0.9rem 1rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        color: var(--doc-level-text);
-        text-decoration: none;
-        background: var(--doc-level-selected-background);
-
-        transition:
-            color 130ms ease,
-            border-color 130ms ease,
-            box-shadow 130ms ease;
-    }
-
-    .doc-pager__link:hover {
-        color: var(--doc-level-accent-hover);
-        border-color: var(--doc-level-accent);
-        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
-    }
-
-    .doc-pager__link:focus-visible {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
-
     .doc-pager__link--next {
-        align-items: flex-end;
-        text-align: right;
+        align-items: flex-start;
+        text-align: left;
     }
 
-    .doc-pager__direction {
-        color: var(--doc-level-muted);
-        font-size: 0.8rem;
-        font-weight: 650;
-        letter-spacing: 0.03rem;
-        text-transform: uppercase;
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #80c98c;
+        --doc-level-accent-hover: #a0d9a9;
+        --doc-level-border: #3a493d;
+        --doc-level-switch-background: #202a22;
+        --doc-level-selected-background: #303c32;
+        --doc-level-text: #edf2ee;
+        --doc-level-muted: #a8b3aa;
+        --doc-level-focus: #75b7ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
     }
 
-    .doc-pager__title {
-        font-size: 1rem;
-        font-weight: 650;
+    .doc-level__panel {
+        display: block;
     }
 
-    @media (prefers-reduced-motion: no-preference) {
-        .doc-level__input--basic:checked
-            ~ .doc-level__panel--basic,
-        .doc-level__input--advanced:checked
-            ~ .doc-level__panel--advanced {
-            animation: doc-level-enter 150ms ease-out;
-        }
-
-        @keyframes doc-level-enter {
-            from {
-                opacity: 0;
-                transform: translateY(0.2rem);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
     }
 
-    @media (max-width: 36rem) {
-        .doc-level__header {
-            align-items: stretch;
-            flex-direction: column;
-        }
-
-        .doc-level__switch {
-            align-self: flex-start;
-        }
-
-        .doc-pager {
-            grid-template-columns: minmax(0, 1fr);
-        }
-
-        .doc-pager__link--next {
-            align-items: flex-start;
-            text-align: left;
-        }
-
-        .doc-pager--single .doc-pager__link {
-            width: 100%;
-            justify-self: stretch;
-        }
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
     }
 
-    @media (prefers-color-scheme: dark) {
-        .doc-level,
-        .doc-pager {
-            --doc-level-accent: #80c98c;
-            --doc-level-accent-hover: #a0d9a9;
-            --doc-level-border: #3a493d;
-            --doc-level-switch-background: #202a22;
-            --doc-level-selected-background: #303c32;
-            --doc-level-text: #edf2ee;
-            --doc-level-muted: #a8b3aa;
-            --doc-level-focus: #75b7ff;
-        }
+    .doc-level__panel--basic::before {
+        content: "Basic";
     }
 
-    @media print {
-        .doc-level__input,
-        .doc-level__switch,
-        .doc-pager {
-            display: none;
-        }
-
-        .doc-level__panel {
-            display: block;
-        }
-
-        .doc-level__panel--advanced {
-            margin-block-start: 1.5rem;
-            padding-block-start: 1.5rem;
-            border-block-start: 1px solid;
-        }
-
-        .doc-level__panel--basic::before,
-        .doc-level__panel--advanced::before {
-            display: block;
-            margin-block-end: 0.75rem;
-            font-weight: 700;
-        }
-
-        .doc-level__panel--basic::before {
-            content: "Basic";
-        }
-
-        .doc-level__panel--advanced::before {
-            content: "Advanced";
-        }
-    }</style>
-
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / Casts</p><h1>Casts</h1><p>Casts stay explicit and target-driven. The receiving type says where the value goes. <code>cast</code>, <code>cast!</code> or <code>catch</code> says how the program handles conversion failure.</p><p>This keeps conversion local. You can see the source, target and failure path without asking the compiler to guess from distant code.</p></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Cast syntax
+</legend>
 
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="cast-syntax-level"
+                id="cast-syntax-basic"
+                value="basic"
+                checked
             >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Casts</p><h1>Casts</h1><p>Casts stay explicit and target-driven. The receiving type says where the value goes. <code>cast</code>, <code>cast!</code> or <code>catch</code> says how the program handles conversion failure.</p><p>This keeps conversion local. You can see the source, target and failure path without asking the compiler to guess from distant code.</p></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Cast syntax
-    </legend>
 
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="cast-syntax-level"
-                    id="cast-syntax-basic"
-                    value="basic"
-                    checked
-                >
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="cast-syntax-level"
+                id="cast-syntax-advanced"
+                value="advanced"
+            >
 
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="cast-syntax-level"
-                    id="cast-syntax-advanced"
-                    value="advanced"
-                >
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="cast-syntax">
+                    Cast syntax
+</h2>
 
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="cast-syntax">
-                        Cast syntax
-    </h2>
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="cast-syntax-basic"
+                    >
+                        Basic
+                    </label>
 
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="cast-syntax-basic"
-                        >
-                            Basic
-                        </label>
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="cast-syntax-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="cast-syntax-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A cast converts a value to the type expected by its destination.</p><pre style=""><code class='codeblock'>
-    parse_count <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> cast<span class='moth-code-operator'>!</span> text
-    ;
-
-    ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-number'>3</span>
-    </code></pre><p>Read the first conversion as:</p><p>&gt; Convert <code>text</code> to the <code>Int</code> required by the function&#39;s return slot.</p><p>Use:</p><ul><li><code>cast</code> when the conversion cannot fail</li><li><code>cast!</code> when failure should leave through the function&#39;s error return</li><li><code>cast ... catch:</code> when failure should be handled here</li></ul><p>Moth does not use <code>Int(value)</code> or <code>String(value)</code> as conversion syntax.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p><code>cast</code> performs an explicit conversion to a compiler-supported builtin target.</p><p>The target comes from the immediate typed receiving boundary.</p><pre style=""><code class='codeblock'>
-    parse_count <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> cast<span class='moth-code-operator'>!</span> text
-    ;
-
-    ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-number'>3</span>
-    label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast ratio
-    </code></pre><h3>Forms</h3><pre style=""><code class='codeblock'>
-    value <span class='moth-code-struct'>Target</span> <span class='moth-code-operator'>=</span> cast expression
-    value <span class='moth-code-struct'>Target</span> <span class='moth-code-operator'>=</span> cast<span class='moth-code-operator'>!</span> expression
-
-    value <span class='moth-code-struct'>Target</span> <span class='moth-code-operator'>=</span> cast expression catch<span class='moth-code-operator'>:</span>
-        then fallback
-    ;
-
-    value <span class='moth-code-struct'>Target</span> <span class='moth-code-operator'>=</span> cast expression catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-        then fallback
-    ;
-    </code></pre><ul><li>Plain <code>cast</code> requires infallible evidence.</li><li><code>cast!</code> requires fallible evidence and propagates through the current function&#39;s builtin <code>Error!</code> slot.</li><li><code>cast ... catch:</code> requires fallible evidence and recovers locally.</li><li>Cast syntax does not contain the target in parentheses or after the expression.</li></ul><h3>Removed conversion constructors</h3><p>These scalar conversion forms are invalid:</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
-    <span class='moth-code-type'>Float</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
-    <span class='moth-code-type'>Bool</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
-    <span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
-    <span class='moth-code-struct'>Char</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
-    </code></pre><p><code>Error(...)</code> remains a real builtin constructor:</p><pre style=""><code class='codeblock'>
-    err <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing number&quot;</span>, <span class='moth-code-number'>200</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>Conversion to <code>Error</code> still uses <code>cast</code> when conversion rather than construction is intended:</p><pre style=""><code class='codeblock'>
-    err <span class='moth-code-struct'>Error</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-string'>&quot;Missing number&quot;</span>
-    </code></pre>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Cast targets
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="cast-targets-level"
-                    id="cast-targets-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="cast-targets-level"
-                    id="cast-targets-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="cast-targets">
-                        Cast targets
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="cast-targets-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="cast-targets-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A cast needs a clear destination type.</p><p>These are supported cast targets:</p><ul><li><code>Bool</code></li><li><code>Int</code></li><li><code>String</code></li><li><code>Char</code></li><li><code>Float</code></li><li><code>Error</code></li></ul><p>Not every source type can convert to every target.</p><p>An annotation gives the cast its target:</p><pre style=""><code class='codeblock'>
-    count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast<span class='moth-code-operator'>!</span> text
-    label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast count
-    </code></pre><p>Without that annotation, the compiler cannot know which conversion you want:</p><pre style=""><code class='codeblock'>
-    count <span class='moth-code-operator'>=</span> cast text
-    </code></pre><p>The second form is invalid.</p><p>Casts can also receive a target from a function parameter, return slot, field or another immediate typed destination.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Explicit casts target compiler-supported builtin types:</p><pre style=""><code class='codeblock'>
-        Bool
-        Int
-        String
-        Char
-        Float
-        Error
-    </code></pre><p>A type being a valid target does not mean every source type can convert to it.</p><h3>Builtin cast table</h3><ul><li><code>Int -&gt; Float</code> (infallible): Numeric conversion to finite <code>Float</code></li><li><code>Int -&gt; String</code> (infallible): Base-10 signed integer text</li><li><code>Float -&gt; String</code> (infallible): Moth&#39;s stable Float formatter</li><li><code>Bool -&gt; String</code> (infallible): <code>&quot;true&quot;</code> or <code>&quot;false&quot;</code></li><li><code>Char -&gt; String</code> (infallible): One Unicode scalar as UTF-8 text</li><li><code>Char -&gt; Int</code> (infallible): Unicode scalar code point</li><li><code>String -&gt; Error</code> (infallible): Error message from the text with code <code>0</code></li><li><code>Error -&gt; String</code> (infallible): The error message only</li><li><code>Float -&gt; Int</code> (fallible): Truncate toward zero, then require signed 32-bit range</li><li><code>Int -&gt; Char</code> (fallible): Require a valid Unicode scalar value</li><li><code>String -&gt; Int</code> (fallible): Parse the complete Moth integer text grammar</li><li><code>String -&gt; Float</code> (fallible): Parse the complete numeric grammar and require a finite result</li><li><code>String -&gt; Bool</code> (fallible): Trim surrounding whitespace, then accept exactly lowercase <code>true</code> or <code>false</code></li><li><code>String -&gt; Char</code> (fallible): Require exactly one Unicode scalar</li></ul><p>No other builtin source-target pair is implied by the target list.</p><p>Same-type casts are invalid.</p><h3>Target source</h3><p>The target must come from the immediate typed boundary.</p><p>Valid target boundaries include:</p><ul><li>an annotated declaration or assignment</li><li>an explicit return slot</li><li>a concrete function parameter</li><li>a struct or choice field</li><li>a default value</li><li>a typed collection or map entry</li><li>a <code>then</code> arm whose enclosing value-producing block has an explicit receiver</li></ul><p>Generic parameter slots are not cast targets. Generic inference does not look through <code>cast</code>.</p><p>These positions do not supply cast targets:</p><ul><li>conditions</li><li>loop conditions</li><li>assertions</li><li>template interpolation</li><li>operator operands</li><li>expression statements</li><li>untyped declarations</li></ul><pre style=""><code class='codeblock'>
-    <span class='moth-code-comment'>-- INVALID: these positions do not supply cast targets</span>
-    value <span class='moth-code-operator'>=</span> cast source
-
-    <span class='moth-code-keyword'>if</span> cast value<span class='moth-code-operator'>:</span>
-        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;invalid&quot;</span><span class='moth-code-parenthesis'>)</span>
-    ;
-
-    <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>cast value<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span>
-    </code></pre><p>The forms above are invalid because no immediate builtin target exists.</p><h3>Optional receiving contexts</h3><p>A <code>T?</code> receiving context casts to inner <code>T</code>, then applies normal contextual wrapping to <code>T?</code>.</p><p>Optional source values are not automatically unwrapped.</p><p>In:</p><pre style=""><code class='codeblock'>
-    target <span class='moth-code-struct'>T</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> cast source catch<span class='moth-code-operator'>:</span>
-        then fallback
-    ;
-    </code></pre><p>the recovery handler produces inner <code>T</code>. <code>then none</code> is invalid because recovery happens before optional wrapping.</p><h3>Numeric and text details</h3><ul><li><code>String -&gt; Int</code> and <code>String -&gt; Float</code> consume the whole string.</li><li>Numeric text rejects surrounding whitespace, uppercase exponent markers, unary plus, malformed separators, malformed exponents, <code>NaN</code> and infinity spellings.</li><li><code>String -&gt; Float</code> additionally rejects a grammar-valid non-finite result.</li><li><code>String -&gt; Int</code> and <code>Float -&gt; Int</code> must materialise inside <code>-2147483648</code> through <code>2147483647</code>.</li><li><code>Float -&gt; String</code> normalizes <code>-0.0</code> to <code>0</code> and uses lowercase exponent formatting when exponential notation is required.</li><li>Contextual <code>Int -&gt; Float</code> promotion remains separate from explicit casting, though explicit <code>cast</code> is valid from a naturally <code>Int</code> source to a <code>Float</code> target.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Fallible casts
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="fallible-casts-level"
-                    id="fallible-casts-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="fallible-casts-level"
-                    id="fallible-casts-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="fallible-casts">
-                        Fallible casts
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="fallible-casts-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="fallible-casts-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Some conversions can fail. Text might not contain a number and a <code>Float</code> might not fit inside <code>Int</code>.</p><p>Use <code>cast!</code> when the current function already returns <code>Error!</code>:</p><pre style=""><code class='codeblock'>
-    parse_count <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> cast<span class='moth-code-operator'>!</span> text
-    ;
-    </code></pre><p>Use <code>catch</code> when this part of the program has a sensible fallback:</p><pre style=""><code class='codeblock'>
-    count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast text catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-    </code></pre><p>Choose one path. A cast cannot use <code>!</code> and <code>catch</code> at the same time.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>A fallible cast can propagate through builtin <code>Error!</code> or recover locally.</p><h3>Propagation</h3><pre style=""><code class='codeblock'>
-    parse_count <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> cast<span class='moth-code-operator'>!</span> text
-    ;
-    </code></pre><p><code>cast!</code> requires fallible cast evidence and a compatible builtin <code>Error!</code> return path.</p><h3>Local recovery</h3><pre style=""><code class='codeblock'>
-    count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast text catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-
-    other_count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast text catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-        io.line<span class='moth-code-parenthesis'>(</span>err.message<span class='moth-code-parenthesis'>)</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-    </code></pre><p>A recovery handler must produce the success value required by the receiving site or leave explicitly with <code>return</code> or <code>return!</code>.</p><h3>Rules</h3><ul><li><code>cast! expression catch:</code> is invalid.</li><li>Propagation and local recovery are mutually exclusive.</li><li><code>cast!</code> and <code>cast ... catch:</code> handle only cast failures.</li><li>If the operand itself produces <code>Error!</code>, handle or propagate that operand before applying the cast.</li><li>Optional receiving contexts recover inner <code>T</code>, then wrap the successful or recovered value into <code>T?</code>.</li><li><code>then none</code> is invalid in a cast recovery handler targeting <code>T?</code>.</li></ul><p>Plain <code>cast</code> is not a promise that every source-target pair is infallible. It requires infallible evidence for the selected pair.</p>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Cast evidence
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="cast-evidence-level"
-                    id="cast-evidence-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="cast-evidence-level"
-                    id="cast-evidence-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="cast-evidence">
-                        Cast evidence
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="cast-evidence-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="cast-evidence-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>The compiler already knows the built-in conversions.</p><p>A user-defined struct or choice can opt into a supported target by providing the required method and declaring explicit conformance.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        text <span class='moth-code-struct'>String,</span>
-    <span class='moth-code-operator'>|</span>
-
-    to_string <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> this.text
-    ;
-
-    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
-    </code></pre><p>Now a <code>Label</code> can be cast to <code>String</code> at a typed destination.</p><p>This stays explicit. Matching method names alone do not create cast support.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Compiler-owned static traits prove cast availability.</p><p>Every builtin target has one infallible trait and one fallible trait.</p><ul><li><code>Int</code>: <code>CASTABLE_TO_INT</code> requires <code>to_int |This| -&gt; Int</code>; <code>TRY_CASTABLE_TO_INT</code> requires <code>try_to_int |This| -&gt; Int, Error!</code></li><li><code>Float</code>: <code>CASTABLE_TO_FLOAT</code> requires <code>to_float |This| -&gt; Float</code>; <code>TRY_CASTABLE_TO_FLOAT</code> requires <code>try_to_float |This| -&gt; Float, Error!</code></li><li><code>Bool</code>: <code>CASTABLE_TO_BOOL</code> requires <code>to_bool |This| -&gt; Bool</code>; <code>TRY_CASTABLE_TO_BOOL</code> requires <code>try_to_bool |This| -&gt; Bool, Error!</code></li><li><code>String</code>: <code>CASTABLE_TO_STRING</code> requires <code>to_string |This| -&gt; String</code>; <code>TRY_CASTABLE_TO_STRING</code> requires <code>try_to_string |This| -&gt; String, Error!</code></li><li><code>Char</code>: <code>CASTABLE_TO_CHAR</code> requires <code>to_char |This| -&gt; Char</code>; <code>TRY_CASTABLE_TO_CHAR</code> requires <code>try_to_char |This| -&gt; Char, Error!</code></li><li><code>Error</code>: <code>CASTABLE_TO_ERROR</code> requires <code>to_error |This| -&gt; Error</code>; <code>TRY_CASTABLE_TO_ERROR</code> requires <code>try_to_error |This| -&gt; Error, Error!</code></li></ul><p>The table shows trait requirement signatures. A source-authored implementation uses an ordinary lowercase <code>this</code> receiver of the concrete type.</p><h3>Builtin evidence</h3><p>The compiler registers evidence for the supported builtin source-target table.</p><h3>Source-authored evidence</h3><p>A same-file nominal struct, choice or aligned generic nominal constructor may add evidence for a supported builtin target.</p><p>It must provide the required receiver method and declare explicit conformance.</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-        text <span class='moth-code-struct'>String,</span>
-    <span class='moth-code-operator'>|</span>
-
-    to_string <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span> this.text
-    ;
-
-    <span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
-
-    label <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span>
-    text <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast label
-    </code></pre><h3>Contract</h3><ul><li>Core cast traits resolve without imports.</li><li>They cannot be redeclared.</li><li>They cannot be imported, exported, aliased or shadowed.</li><li>They are static contracts, not ordinary value types.</li><li>Matching method shape alone is not evidence. Explicit conformance is required.</li><li>Same-file nominal source types may provide explicit evidence.</li><li>Aligned generic nominal constructors may provide evidence for their concrete instances.</li><li>Infallible and fallible trait pairs for the same target are incompatible through compiler-owned <code>must not</code> metadata.</li><li>Evidence is resolved before HIR and backend lowering.</li></ul><h3>Outside cast design scope</h3><ul><li>user-defined cast target types</li><li>generic cast target parameters</li><li>external opaque cast targets</li><li>generic cast traits</li><li>broad return-type-directed conversion</li><li>implicit conversion chosen from distant context</li></ul><p>Cast traits prove source evidence only. They do not create a general user conversion framework.</p>
-    </div>
-    </fieldset></section>
-    <section class="container"><nav class="doc-pager" aria-label="Language documentation">
-        <a
-            class="doc-pager__link doc-pager__link--previous"
-            href="../numbers/"
-                    rel="prev"
-                >
-                    <span class="doc-pager__direction">← Previous</span>
-                    <span class="doc-pager__title">Numbers</span>
-                </a>
-
-                <a
-                    class="doc-pager__link doc-pager__link--next"
-                    href="../functions/"
-                    rel="next"
-                >
-                    <span class="doc-pager__direction">Next →</span>
-                    <span class="doc-pager__title">Functions</span>
-                </a>
-
+            <div class="doc-level__panel doc-level__panel--basic">
                 
 
 
 
-    </nav></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+        <p>A cast converts a value to the type expected by its destination.</p><pre style=""><code class='codeblock'>parse_count <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> cast<span class='moth-code-operator'>!</span> text
+;
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-number'>3</span></code></pre><p>Read the first conversion as:</p><p>&gt; Convert <code>text</code> to the <code>Int</code> required by the function&#39;s return slot.</p><p>Use:</p><ul><li><code>cast</code> when the conversion cannot fail</li><li><code>cast!</code> when failure should leave through the function&#39;s error return</li><li><code>cast ... catch:</code> when failure should be handled here</li></ul><p>Moth does not use <code>Int(value)</code> or <code>String(value)</code> as conversion syntax.</p>
+</div>
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><code>cast</code> performs an explicit conversion to a compiler-supported builtin target.</p><p>The target comes from the immediate typed receiving boundary.</p><pre style=""><code class='codeblock'>parse_count <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> cast<span class='moth-code-operator'>!</span> text
+;
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-number'>3</span>
+label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast ratio</code></pre><h3>Forms</h3><pre style=""><code class='codeblock'>value <span class='moth-code-struct'>Target</span> <span class='moth-code-operator'>=</span> cast expression
+value <span class='moth-code-struct'>Target</span> <span class='moth-code-operator'>=</span> cast<span class='moth-code-operator'>!</span> expression
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+value <span class='moth-code-struct'>Target</span> <span class='moth-code-operator'>=</span> cast expression catch<span class='moth-code-operator'>:</span>
+    then fallback
+;
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+value <span class='moth-code-struct'>Target</span> <span class='moth-code-operator'>=</span> cast expression catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+    then fallback
+;</code></pre><ul><li>Plain <code>cast</code> requires infallible evidence.</li><li><code>cast!</code> requires fallible evidence and propagates through the current function&#39;s builtin <code>Error!</code> slot.</li><li><code>cast ... catch:</code> requires fallible evidence and recovers locally.</li><li>Cast syntax does not contain the target in parentheses or after the expression.</li></ul><h3>Removed conversion constructors</h3><p>These scalar conversion forms are invalid:</p><pre style=""><code class='codeblock'><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
+<span class='moth-code-type'>Float</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
+<span class='moth-code-type'>Bool</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
+<span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
+<span class='moth-code-struct'>Char</span><span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span></code></pre><p><code>Error(...)</code> remains a real builtin constructor:</p><pre style=""><code class='codeblock'>err <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing number&quot;</span>, <span class='moth-code-number'>200</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Conversion to <code>Error</code> still uses <code>cast</code> when conversion rather than construction is intended:</p><pre style=""><code class='codeblock'>err <span class='moth-code-struct'>Error</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-string'>&quot;Missing number&quot;</span></code></pre>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Cast targets
+</legend>
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="cast-targets-level"
+                id="cast-targets-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="cast-targets-level"
+                id="cast-targets-advanced"
+                value="advanced"
+            >
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="cast-targets">
+                    Cast targets
+</h2>
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="cast-targets-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="cast-targets-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+        <p>A cast needs a clear destination type.</p><p>These are supported cast targets:</p><ul><li><code>Bool</code></li><li><code>Int</code></li><li><code>String</code></li><li><code>Char</code></li><li><code>Float</code></li><li><code>Error</code></li></ul><p>Not every source type can convert to every target.</p><p>An annotation gives the cast its target:</p><pre style=""><code class='codeblock'>count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast<span class='moth-code-operator'>!</span> text
+label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast count</code></pre><p>Without that annotation, the compiler cannot know which conversion you want:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> cast text</code></pre><p>The second form is invalid.</p><p>Casts can also receive a target from a function parameter, return slot, field or another immediate typed destination.</p>
+</div>
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Explicit casts target compiler-supported builtin types:</p><pre style=""><code class='codeblock'>Bool
+Int
+String
+Char
+Float
+Error</code></pre><p>A type being a valid target does not mean every source type can convert to it.</p><h3>Builtin cast table</h3><ul><li><code>Int -&gt; Float</code> (infallible): Numeric conversion to finite <code>Float</code></li><li><code>Int -&gt; String</code> (infallible): Base-10 signed integer text</li><li><code>Float -&gt; String</code> (infallible): Moth&#39;s stable Float formatter</li><li><code>Bool -&gt; String</code> (infallible): <code>&quot;true&quot;</code> or <code>&quot;false&quot;</code></li><li><code>Char -&gt; String</code> (infallible): One Unicode scalar as UTF-8 text</li><li><code>Char -&gt; Int</code> (infallible): Unicode scalar code point</li><li><code>String -&gt; Error</code> (infallible): Error message from the text with code <code>0</code></li><li><code>Error -&gt; String</code> (infallible): The error message only</li><li><code>Float -&gt; Int</code> (fallible): Truncate toward zero, then require signed 32-bit range</li><li><code>Int -&gt; Char</code> (fallible): Require a valid Unicode scalar value</li><li><code>String -&gt; Int</code> (fallible): Parse the complete Moth integer text grammar</li><li><code>String -&gt; Float</code> (fallible): Parse the complete numeric grammar and require a finite result</li><li><code>String -&gt; Bool</code> (fallible): Trim surrounding whitespace, then accept exactly lowercase <code>true</code> or <code>false</code></li><li><code>String -&gt; Char</code> (fallible): Require exactly one Unicode scalar</li></ul><p>No other builtin source-target pair is implied by the target list.</p><p>Same-type casts are invalid.</p><h3>Target source</h3><p>The target must come from the immediate typed boundary.</p><p>Valid target boundaries include:</p><ul><li>an annotated declaration or assignment</li><li>an explicit return slot</li><li>a concrete function parameter</li><li>a struct or choice field</li><li>a default value</li><li>a typed collection or map entry</li><li>a <code>then</code> arm whose enclosing value-producing block has an explicit receiver</li></ul><p>Generic parameter slots are not cast targets. Generic inference does not look through <code>cast</code>.</p><p>These positions do not supply cast targets:</p><ul><li>conditions</li><li>loop conditions</li><li>assertions</li><li>template interpolation</li><li>operator operands</li><li>expression statements</li><li>untyped declarations</li></ul><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- INVALID: these positions do not supply cast targets</span>
+value <span class='moth-code-operator'>=</span> cast source
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+<span class='moth-code-keyword'>if</span> cast value<span class='moth-code-operator'>:</span>
+    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;invalid&quot;</span><span class='moth-code-parenthesis'>)</span>
+;
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+<span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>cast value<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span></code></pre><p>The forms above are invalid because no immediate builtin target exists.</p><h3>Optional receiving contexts</h3><p>A <code>T?</code> receiving context casts to inner <code>T</code>, then applies normal contextual wrapping to <code>T?</code>.</p><p>Optional source values are not automatically unwrapped.</p><p>In:</p><pre style=""><code class='codeblock'>target <span class='moth-code-struct'>T</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> cast source catch<span class='moth-code-operator'>:</span>
+    then fallback
+;</code></pre><p>the recovery handler produces inner <code>T</code>. <code>then none</code> is invalid because recovery happens before optional wrapping.</p><h3>Numeric and text details</h3><ul><li><code>String -&gt; Int</code> and <code>String -&gt; Float</code> consume the whole string.</li><li>Numeric text rejects surrounding whitespace, uppercase exponent markers, unary plus, malformed separators, malformed exponents, <code>NaN</code> and infinity spellings.</li><li><code>String -&gt; Float</code> additionally rejects a grammar-valid non-finite result.</li><li><code>String -&gt; Int</code> and <code>Float -&gt; Int</code> must materialise inside <code>-2147483648</code> through <code>2147483647</code>.</li><li><code>Float -&gt; String</code> normalizes <code>-0.0</code> to <code>0</code> and uses lowercase exponent formatting when exponential notation is required.</li><li>Contextual <code>Int -&gt; Float</code> promotion remains separate from explicit casting, though explicit <code>cast</code> is valid from a naturally <code>Int</code> source to a <code>Float</code> target.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Fallible casts
+</legend>
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="fallible-casts-level"
+                id="fallible-casts-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="fallible-casts-level"
+                id="fallible-casts-advanced"
+                value="advanced"
+            >
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="fallible-casts">
+                    Fallible casts
+</h2>
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="fallible-casts-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="fallible-casts-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
+        <p>Some conversions can fail. Text might not contain a number and a <code>Float</code> might not fit inside <code>Int</code>.</p><p>Use <code>cast!</code> when the current function already returns <code>Error!</code>:</p><pre style=""><code class='codeblock'>parse_count <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> cast<span class='moth-code-operator'>!</span> text
+;</code></pre><p>Use <code>catch</code> when this part of the program has a sensible fallback:</p><pre style=""><code class='codeblock'>count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast text catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-number'>0</span>
+;</code></pre><p>Choose one path. A cast cannot use <code>!</code> and <code>catch</code> at the same time.</p>
+</div>
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>A fallible cast can propagate through builtin <code>Error!</code> or recover locally.</p><h3>Propagation</h3><pre style=""><code class='codeblock'>parse_count <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> cast<span class='moth-code-operator'>!</span> text
+;</code></pre><p><code>cast!</code> requires fallible cast evidence and a compatible builtin <code>Error!</code> return path.</p><h3>Local recovery</h3><pre style=""><code class='codeblock'>count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast text catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-number'>0</span>
+;
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+other_count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast text catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
+    io.line<span class='moth-code-parenthesis'>(</span>err.message<span class='moth-code-parenthesis'>)</span>
+    then <span class='moth-code-number'>0</span>
+;</code></pre><p>A recovery handler must produce the success value required by the receiving site or leave explicitly with <code>return</code> or <code>return!</code>.</p><h3>Rules</h3><ul><li><code>cast! expression catch:</code> is invalid.</li><li>Propagation and local recovery are mutually exclusive.</li><li><code>cast!</code> and <code>cast ... catch:</code> handle only cast failures.</li><li>If the operand itself produces <code>Error!</code>, handle or propagate that operand before applying the cast.</li><li>Optional receiving contexts recover inner <code>T</code>, then wrap the successful or recovered value into <code>T?</code>.</li><li><code>then none</code> is invalid in a cast recovery handler targeting <code>T?</code>.</li></ul><p>Plain <code>cast</code> is not a promise that every source-target pair is infallible. It requires infallible evidence for the selected pair.</p>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Cast evidence
+</legend>
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="cast-evidence-level"
+                id="cast-evidence-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="cast-evidence-level"
+                id="cast-evidence-advanced"
+                value="advanced"
+            >
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="cast-evidence">
+                    Cast evidence
+</h2>
 
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="cast-evidence-basic"
+                    >
+                        Basic
+                    </label>
 
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="cast-evidence-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>The compiler already knows the built-in conversions.</p><p>A user-defined struct or choice can opt into a supported target by providing the required method and declaring explicit conformance.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    text <span class='moth-code-struct'>String,</span>
+<span class='moth-code-operator'>|</span>
+
+to_string <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> this.text
+;
+
+<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span></code></pre><p>Now a <code>Label</code> can be cast to <code>String</code> at a typed destination.</p><p>This stays explicit. Matching method names alone do not create cast support.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Compiler-owned static traits prove cast availability.</p><p>Every builtin target has one infallible trait and one fallible trait.</p><ul><li><code>Int</code>: <code>CASTABLE_TO_INT</code> requires <code>to_int |This| -&gt; Int</code>; <code>TRY_CASTABLE_TO_INT</code> requires <code>try_to_int |This| -&gt; Int, Error!</code></li><li><code>Float</code>: <code>CASTABLE_TO_FLOAT</code> requires <code>to_float |This| -&gt; Float</code>; <code>TRY_CASTABLE_TO_FLOAT</code> requires <code>try_to_float |This| -&gt; Float, Error!</code></li><li><code>Bool</code>: <code>CASTABLE_TO_BOOL</code> requires <code>to_bool |This| -&gt; Bool</code>; <code>TRY_CASTABLE_TO_BOOL</code> requires <code>try_to_bool |This| -&gt; Bool, Error!</code></li><li><code>String</code>: <code>CASTABLE_TO_STRING</code> requires <code>to_string |This| -&gt; String</code>; <code>TRY_CASTABLE_TO_STRING</code> requires <code>try_to_string |This| -&gt; String, Error!</code></li><li><code>Char</code>: <code>CASTABLE_TO_CHAR</code> requires <code>to_char |This| -&gt; Char</code>; <code>TRY_CASTABLE_TO_CHAR</code> requires <code>try_to_char |This| -&gt; Char, Error!</code></li><li><code>Error</code>: <code>CASTABLE_TO_ERROR</code> requires <code>to_error |This| -&gt; Error</code>; <code>TRY_CASTABLE_TO_ERROR</code> requires <code>try_to_error |This| -&gt; Error, Error!</code></li></ul><p>The table shows trait requirement signatures. A source-authored implementation uses an ordinary lowercase <code>this</code> receiver of the concrete type.</p><h3>Builtin evidence</h3><p>The compiler registers evidence for the supported builtin source-target table.</p><h3>Source-authored evidence</h3><p>A same-file nominal struct, choice or aligned generic nominal constructor may add evidence for a supported builtin target.</p><p>It must provide the required receiver method and declare explicit conformance.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+    text <span class='moth-code-struct'>String,</span>
+<span class='moth-code-operator'>|</span>
+
+to_string <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>return</span> this.text
+;
+
+<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
+
+label <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span>
+text <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast label</code></pre><h3>Contract</h3><ul><li>Core cast traits resolve without imports.</li><li>They cannot be redeclared.</li><li>They cannot be imported, exported, aliased or shadowed.</li><li>They are static contracts, not ordinary value types.</li><li>Matching method shape alone is not evidence. Explicit conformance is required.</li><li>Same-file nominal source types may provide explicit evidence.</li><li>Aligned generic nominal constructors may provide evidence for their concrete instances.</li><li>Infallible and fallible trait pairs for the same target are incompatible through compiler-owned <code>must not</code> metadata.</li><li>Evidence is resolved before HIR and backend lowering.</li></ul><h3>Outside cast design scope</h3><ul><li>user-defined cast target types</li><li>generic cast target parameters</li><li>external opaque cast targets</li><li>generic cast traits</li><li>broad return-type-directed conversion</li><li>implicit conversion chosen from distant context</li></ul><p>Cast traits prove source evidence only. They do not create a general user conversion framework.</p>
+</div>
+</fieldset></section>
+<section class="container"><nav class="doc-pager" aria-label="Language documentation">
+    <a
+        class="doc-pager__link doc-pager__link--previous"
+        href="../numbers/"
+                rel="prev"
+            >
+                <span class="doc-pager__direction">← Previous</span>
+                <span class="doc-pager__title">Numbers</span>
+            </a>
+
+            <a
+                class="doc-pager__link doc-pager__link--next"
+                href="../functions/"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">Functions</span>
+            </a>
+
+            
+
+
+
+</nav></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

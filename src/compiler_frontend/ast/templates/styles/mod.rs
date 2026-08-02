@@ -13,3 +13,6 @@
 pub(crate) mod markdown;
 pub(crate) mod raw;
 pub(crate) mod whitespace;
+
+#[cfg(test)]
+mod tests;

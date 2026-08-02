@@ -151,589 +151,586 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
-
-        table {
-            font-size: 0.8rem;
-        }
-
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
-
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
-
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
-
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
-
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
-            >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Compiler design</a> / 01. What a compiler does</p><p>Between source text and a finished page sits a ladder of representations. This article names the jobs on that ladder and the owners who hold them.</p></section>
-    <section class="container"><h1>What a compiler does</h1><p>You type source. Something emits <code>&lt;p&gt;Hello, Priya!&lt;/p&gt;</code>. Between those two facts sits a chain of transformations. Each step is a bit less like human prose and a bit more like something a machine can use.</p><p>People often shrink that chain to a slogan: &quot;the compiler turns code into machine instructions.&quot; That slogan fails the greeting project early. The page may never touch native machine code. It still needs tokens, types, control-flow graphs, link plans and a builder that writes HTML. That work still counts as compiling.</p><h2>Meaning versus representation</h2><p><strong>Source meaning</strong> answers: what did the author intend under the language rules?</p><p><strong>Target representation</strong> answers: what concrete form will a host execute or display?</p><p><strong>Transformation</strong> answers: how do we move from one to the other without losing the meaning we care about?</p><p>The project tree enters as authored text:</p><pre style=""><code class='codeblock'>
-    compiler_walkthrough/
-    ├── config.moth
-    └── src/
-        ├── @page.moth
-        └── greeting.moth
-    </code></pre><p>Those files hold characters on disk. They do not yet hold a typed call graph, a borrow fact or a Wasm export. Meaning arrives when a stage applies language rules and records the result in a structure later stages trust.</p><p>Think of a seed and a plant. The seed holds a plan. The same plan can grow under different conditions into different adult forms. Source meaning is the plan. Target code is the plant in a particular climate: browser JavaScript, Wasm, an HTML shell. Compilers live in that gap.</p><p><strong>Diagram placeholder:</strong> One source plan becomes different target forms while keeping the same meaning</p><p><em>Caption: teaching analogy for source meaning and target form.</em> <em>Question: which parts of the greeting project still look like source plan, and which already look like a page a browser can show?</em></p><h2>A small vocabulary</h2><p>Words collide in casual talk. Pin them by job.</p><p>A <strong>compiler</strong> reads source under language rules and produces another representation a machine or host can use. That product might be native code, bytecode, JavaScript, Wasm, HTML fragments or a structured artefact a builder will assemble.</p><p>An <strong>interpreter</strong> walks a representation and performs the operations as it goes. It may parse first. Execution still happens inside the interpreter process, not as a finished artefact handed to another runtime.</p><p>A <strong>transpiler</strong> usually means a compiler whose target is another human-authored language at a similar level, such as TypeScript to JavaScript. The word names a common special case, not a third kind of computation.</p><p>A <strong>linker</strong> connects separately compiled pieces. It resolves which functions call which others, which symbols an entry needs and which objects belong in one final image or bundle.</p><p>A <strong>build system</strong> decides <em>what</em> to compile, in which order, with which inputs and where outputs land. It schedules work. It does not replace the language&#39;s type checker.</p><p>Moth splits those jobs on purpose. The compiler library owns semantic meaning for modules. The build system owns project graphs, entry plans and writing files. Backends lower already-validated meaning into JavaScript or Wasm. The HTML builder assembles page-shaped outputs.</p><p><strong>Diagram placeholder:</strong> Three routes from source toward execution with overlapping responsibilities</p><p><em>Caption: teaching simplification, not a complete taxonomy.</em> <em>Question: where does execution happen for Priya&#39;s page?</em></p><h2>Frontend, analysis and backend</h2><p>Compilers often speak of a <strong>frontend</strong>, <strong>middle</strong> analysis and a <strong>backend</strong>. Treat those as responsibilities, not a sacred phase diagram every language must copy.</p><p>The <strong>frontend</strong> faces source text. It tokenises, parses shells, binds names, checks types and builds a typed structure that captures source meaning.</p><p><strong>Analysis</strong> walks that structure to prove properties: terminal control flow, borrow safety, reachability, target capability. Some languages fold analysis into the frontend. Moth keeps several analyses after a first backend-facing IR exists.</p><p>The <strong>backend</strong> faces a concrete target. It lowers validated meaning into JavaScript, Wasm, helpers and glue. It should not reopen source files to rediscover what <code>greet</code> means.</p><p>Moth&#39;s compiler library holds frontend and analysis stages. The project tool and builders sit around that library. Stage 0 graph construction belongs to the build system, even when people call the whole CLI &quot;the compiler.&quot;</p><p><strong>Diagram placeholder:</strong> Owner map for build system, frontend, analysis and backend</p><p><em>Caption: ownership categories from the canonical authorities.</em> <em>Question: who decides which files enter the graph, and who decides whether <code>visitor</code> type-checks?</em></p><h2>Why intermediate representations exist</h2><p>Why not keep one giant syntax tree until the end?</p><p>Because each consumer wants a different kind of clarity. You do not jump from seed to full plant in one step. Roots, stem and leaves each solve a different problem.</p><table style="">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Compiler design</a> / 01. What a compiler does</p><p>Between source text and a finished page sits a ladder of representations. This article names the jobs on that ladder and the owners who hold them.</p></section>
+<section class="container"><h1>What a compiler does</h1><p>You type source. Something emits <code>&lt;p&gt;Hello, Priya!&lt;/p&gt;</code>. Between those two facts sits a chain of transformations. Each step is a bit less like human prose and a bit more like something a machine can use.</p><p>People often shrink that chain to a slogan: &quot;the compiler turns code into machine instructions.&quot; That slogan fails the greeting project early. The page may never touch native machine code. It still needs tokens, types, control-flow graphs, link plans and a builder that writes HTML. That work still counts as compiling.</p><h2>Meaning versus representation</h2><p><strong>Source meaning</strong> answers: what did the author intend under the language rules?</p><p><strong>Target representation</strong> answers: what concrete form will a host execute or display?</p><p><strong>Transformation</strong> answers: how do we move from one to the other without losing the meaning we care about?</p><p>The project tree enters as authored text:</p><pre style=""><code class='codeblock'>compiler_walkthrough/
+├── config.moth
+└── src/
+    ├── @page.moth
+    └── greeting.moth</code></pre><p>Those files hold characters on disk. They do not yet hold a typed call graph, a borrow fact or a Wasm export. Meaning arrives when a stage applies language rules and records the result in a structure later stages trust.</p><p>Think of a seed and a plant. The seed holds a plan. The same plan can grow under different conditions into different adult forms. Source meaning is the plan. Target code is the plant in a particular climate: browser JavaScript, Wasm, an HTML shell. Compilers live in that gap.</p><p><strong>Diagram placeholder:</strong> One source plan becomes different target forms while keeping the same meaning</p><p><em>Caption: teaching analogy for source meaning and target form.</em> <em>Question: which parts of the greeting project still look like source plan, and which already look like a page a browser can show?</em></p><h2>A small vocabulary</h2><p>Words collide in casual talk. Pin them by job.</p><p>A <strong>compiler</strong> reads source under language rules and produces another representation a machine or host can use. That product might be native code, bytecode, JavaScript, Wasm, HTML fragments or a structured artefact a builder will assemble.</p><p>An <strong>interpreter</strong> walks a representation and performs the operations as it goes. It may parse first. Execution still happens inside the interpreter process, not as a finished artefact handed to another runtime.</p><p>A <strong>transpiler</strong> usually means a compiler whose target is another human-authored language at a similar level, such as TypeScript to JavaScript. The word names a common special case, not a third kind of computation.</p><p>A <strong>linker</strong> connects separately compiled pieces. It resolves which functions call which others, which symbols an entry needs and which objects belong in one final image or bundle.</p><p>A <strong>build system</strong> decides <em>what</em> to compile, in which order, with which inputs and where outputs land. It schedules work. It does not replace the language&#39;s type checker.</p><p>Moth splits those jobs on purpose. The compiler library owns semantic meaning for modules. The build system owns project graphs, entry plans and writing files. Backends lower already-validated meaning into JavaScript or Wasm. The HTML builder assembles page-shaped outputs.</p><p><strong>Diagram placeholder:</strong> Three routes from source toward execution with overlapping responsibilities</p><p><em>Caption: teaching simplification, not a complete taxonomy.</em> <em>Question: where does execution happen for Priya&#39;s page?</em></p><h2>Frontend, analysis and backend</h2><p>Compilers often speak of a <strong>frontend</strong>, <strong>middle</strong> analysis and a <strong>backend</strong>. Treat those as responsibilities, not a sacred phase diagram every language must copy.</p><p>The <strong>frontend</strong> faces source text. It tokenises, parses shells, binds names, checks types and builds a typed structure that captures source meaning.</p><p><strong>Analysis</strong> walks that structure to prove properties: terminal control flow, borrow safety, reachability, target capability. Some languages fold analysis into the frontend. Moth keeps several analyses after a first backend-facing IR exists.</p><p>The <strong>backend</strong> faces a concrete target. It lowers validated meaning into JavaScript, Wasm, helpers and glue. It should not reopen source files to rediscover what <code>greet</code> means.</p><p>Moth&#39;s compiler library holds frontend and analysis stages. The project tool and builders sit around that library. Stage 0 graph construction belongs to the build system, even when people call the whole CLI &quot;the compiler.&quot;</p><p><strong>Diagram placeholder:</strong> Owner map for build system, frontend, analysis and backend</p><p><em>Caption: ownership categories from the canonical authorities.</em> <em>Question: who decides which files enter the graph, and who decides whether <code>visitor</code> type-checks?</em></p><h2>Why intermediate representations exist</h2><p>Why not keep one giant syntax tree until the end?</p><p>Because each consumer wants a different kind of clarity. You do not jump from seed to full plant in one step. Roots, stem and leaves each solve a different problem.</p><table style="">
+        
+        <tr style="">
             
+            <th scope="col" style=""><p> Representation</p></th><th scope="col" style=""><p> Ambiguity it removes</p></th>
+        
+</tr>
+
+
+
             <tr style="">
-                
-                <th scope="col" style=""><p> Representation</p></th><th scope="col" style=""><p> Ambiguity it removes</p></th>
-            
-    </tr>
+             <td style=""><p> Raw text</p></td> <td style=""><p> none yet: characters only</p></td>
+        </tr><tr style="">
+             <td style=""><p> Tokens</p></td> <td style=""><p> word and punctuation boundaries</p></td>
+        </tr><tr style="">
+             <td style=""><p> Prepared shells</p></td> <td style=""><p> top-level shape before bodies</p></td>
+        </tr><tr style="">
+             <td style=""><p> Typed AST</p></td> <td style=""><p> names, types and source meaning</p></td>
+        </tr><tr style="">
+             <td style=""><p> HIR</p></td> <td style=""><p> evaluation order and control flow</p></td>
+        </tr><tr style="">
+             <td style=""><p> Target code</p></td> <td style=""><p> host instructions and calling conventions</p></td>
+        </tr>
+        
+</table><p>Raw text still confuses a parser about where one token ends. Tokens still confuse a type checker about which <code>greet</code> you meant. A typed AST still nests expressions so a borrow checker must rediscover evaluation order. HIR still refuses to choose JavaScript versus Wasm spelling.</p><p>Each step deletes one class of question so the next owner can ask a harder one.</p><p><strong>One fact, one owner.</strong> If the AST already folded <code>greeting_prefix</code> to <code>&quot;Hello&quot;</code>, HIR should not re-parse the constant. If HIR already recorded a call edge to <code>greet</code>, the linker should not guess callees from string names in source. Duplication invites drift. Drift invites bugs that only appear on one backend.</p><p><strong>Diagram placeholder:</strong> Representation path from source text to target code</p><p><em>Caption: simplified Moth walkthrough.</em> <em>Question: why keep multiple forms instead of overwriting one tree in place?</em></p><h2>What can fail here</h2><p>Failures arrive in families, not one grey cloud labelled &quot;error.&quot;</p><p><strong>Malformed source</strong> breaks spelling, structure or language rules: a bad escape, an unknown name, a type mismatch.</p><p><strong>Unsupported target capability</strong> means the program makes sense as Moth yet needs something the chosen target cannot host, such as a DOM API on a pure Wasm partition.</p><p><strong>Missing project input</strong> means the build never obtained a required config value or source file before semantic work could start.</p><p>Later articles assign exact diagnostic ownership. Here only the families matter: user source, target contract and project bootstrap fail for different reasons and travel different lanes.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> one target-specific compiler path that thinks in HTML and JavaScript from the first token.</p><p><strong>Choice:</strong> backend-neutral compiler facts, with the build system orchestrating projects and builders.</p><p><strong>Benefit:</strong> multiple builders and targets reuse the same semantic work. A <code>check</code> command can validate without writing a page. A future non-HTML builder can reuse module artefacts.</p><p><strong>Cost:</strong> explicit boundaries and more intermediate data to maintain. You pay in structure so you do not pay in repeated meaning.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> a staged compiler library plus a build-owned project pipeline.</li><li><strong>Current implementation:</strong> follow the progress matrix. Do not treat transitional backend handoff details as permanent law.</li><li><strong>Queued work:</strong> canonical module compilation and mixed-target plans still shape how cleanly some handoffs land.</li><li><strong>Deferred or outside scope:</strong> this article does not teach a universal compiler taxonomy for every language.</li></ul><h2>Exit state</h2><p>You leave with a vocabulary and a representation path. Next: why Moth places language design and build-system design in the same conversation.</p></section>
+<section class="container"><p><a href="../">Compiler design</a> / <a href="../moth-design-choices">Next</a></p></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
 
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
 
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
 
-                <tr style="">
-                 <td style=""><p> Raw text</p></td> <td style=""><p> none yet: characters only</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Tokens</p></td> <td style=""><p> word and punctuation boundaries</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Prepared shells</p></td> <td style=""><p> top-level shape before bodies</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Typed AST</p></td> <td style=""><p> names, types and source meaning</p></td>
-            </tr><tr style="">
-                 <td style=""><p> HIR</p></td> <td style=""><p> evaluation order and control flow</p></td>
-            </tr><tr style="">
-                 <td style=""><p> Target code</p></td> <td style=""><p> host instructions and calling conventions</p></td>
-            </tr>
-            
-    </table><p>Raw text still confuses a parser about where one token ends. Tokens still confuse a type checker about which <code>greet</code> you meant. A typed AST still nests expressions so a borrow checker must rediscover evaluation order. HIR still refuses to choose JavaScript versus Wasm spelling.</p><p>Each step deletes one class of question so the next owner can ask a harder one.</p><p><strong>One fact, one owner.</strong> If the AST already folded <code>greeting_prefix</code> to <code>&quot;Hello&quot;</code>, HIR should not re-parse the constant. If HIR already recorded a call edge to <code>greet</code>, the linker should not guess callees from string names in source. Duplication invites drift. Drift invites bugs that only appear on one backend.</p><p><strong>Diagram placeholder:</strong> Representation path from source text to target code</p><p><em>Caption: simplified Moth walkthrough.</em> <em>Question: why keep multiple forms instead of overwriting one tree in place?</em></p><h2>What can fail here</h2><p>Failures arrive in families, not one grey cloud labelled &quot;error.&quot;</p><p><strong>Malformed source</strong> breaks spelling, structure or language rules: a bad escape, an unknown name, a type mismatch.</p><p><strong>Unsupported target capability</strong> means the program makes sense as Moth yet needs something the chosen target cannot host, such as a DOM API on a pure Wasm partition.</p><p><strong>Missing project input</strong> means the build never obtained a required config value or source file before semantic work could start.</p><p>Later articles assign exact diagnostic ownership. Here only the families matter: user source, target contract and project bootstrap fail for different reasons and travel different lanes.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> one target-specific compiler path that thinks in HTML and JavaScript from the first token.</p><p><strong>Choice:</strong> backend-neutral compiler facts, with the build system orchestrating projects and builders.</p><p><strong>Benefit:</strong> multiple builders and targets reuse the same semantic work. A <code>check</code> command can validate without writing a page. A future non-HTML builder can reuse module artefacts.</p><p><strong>Cost:</strong> explicit boundaries and more intermediate data to maintain. You pay in structure so you do not pay in repeated meaning.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> a staged compiler library plus a build-owned project pipeline.</li><li><strong>Current implementation:</strong> follow the progress matrix. Do not treat transitional backend handoff details as permanent law.</li><li><strong>Queued work:</strong> canonical module compilation and mixed-target plans still shape how cleanly some handoffs land.</li><li><strong>Deferred or outside scope:</strong> this article does not teach a universal compiler taxonomy for every language.</li></ul><h2>Exit state</h2><p>You leave with a vocabulary and a representation path. Next: why Moth places language design and build-system design in the same conversation.</p></section>
-    <section class="container"><p><a href="../">Compiler design</a> / <a href="../moth-design-choices">Next</a></p></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
-
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
-
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
-
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>

@@ -3,6 +3,8 @@
 //! WHAT: merges builder config, page metadata, body HTML, and runtime script HTML into one final
 //!       HTML document.
 //! WHY: JS-only and HTML+Wasm outputs must share one shell policy so they cannot drift.
+//! Rendered HTML fragments remain opaque during assembly so the shell never rewrites
+//! whitespace-sensitive content such as code blocks, scripts, import maps, or head markup.
 
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::page_metadata::HtmlPageMetadata;
@@ -151,14 +153,11 @@ fn render_resolved_document(document: &ResolvedHtmlDocument) -> String {
     }
 
     if let Some(import_map) = &document.import_map_html {
-        html.push_str(&indent_html_block(import_map, "    "));
+        append_rendered_html_fragment(&mut html, import_map);
     }
 
     if !document.head_html.is_empty() {
-        html.push_str(&indent_html_block(&document.head_html, "    "));
-        if !document.head_html.ends_with('\n') {
-            html.push('\n');
-        }
+        append_rendered_html_fragment(&mut html, &document.head_html);
     }
 
     html.push_str("  </head>\n");
@@ -168,13 +167,10 @@ fn render_resolved_document(document: &ResolvedHtmlDocument) -> String {
         escape_html_attribute(&document.body_style)
     );
     if !document.body_html.is_empty() {
-        html.push_str(&indent_html_block(&document.body_html, "    "));
+        append_rendered_html_fragment(&mut html, &document.body_html);
     }
     if !document.script_html.is_empty() {
-        if !html.ends_with('\n') {
-            html.push('\n');
-        }
-        html.push_str(&indent_html_block(&document.script_html, "    "));
+        append_rendered_html_fragment(&mut html, &document.script_html);
     }
     if !html.ends_with('\n') {
         html.push('\n');
@@ -183,6 +179,14 @@ fn render_resolved_document(document: &ResolvedHtmlDocument) -> String {
     html.push_str("</html>\n");
 
     html
+}
+
+fn append_rendered_html_fragment(output: &mut String, fragment: &str) {
+    output.push_str(fragment);
+
+    if !fragment.ends_with('\n') {
+        output.push('\n');
+    }
 }
 
 /// Derive a human-readable title from the validated route path.
@@ -259,20 +263,6 @@ fn extract_route_segment(logical_html_path: &Path) -> Result<Option<String>, Com
         ))
     })?;
     Ok(Some(segment.to_string()))
-}
-
-fn indent_html_block(input: &str, indent: &str) -> String {
-    let mut output = String::new();
-    for line in input.lines() {
-        if line.is_empty() {
-            output.push('\n');
-            continue;
-        }
-        output.push_str(indent);
-        output.push_str(line);
-        output.push('\n');
-    }
-    output
 }
 
 fn escape_html_text(value: &str) -> String {

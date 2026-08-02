@@ -59,16 +59,61 @@ fn renderer_uses_route_title_fallback_before_project_name() {
 
 #[test]
 fn renderer_keeps_script_inside_body() {
+    let script = "<script>const message = `first\n    nested`;\nbootstrap(message)</script>\n";
     let html = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
         "index.html",
         "",
         "<div>content</div>\n",
-        "<script>bootstrap()</script>\n",
+        script,
     );
 
-    assert_fragment_before_body_close(&html, "<script>bootstrap()</script>");
+    assert_fragment_before_body_close(
+        &html,
+        "<script>const message = `first\n    nested`;\nbootstrap(message)</script>",
+    );
+    assert!(html.contains(script));
+}
+
+#[test]
+fn renderer_preserves_whitespace_sensitive_body_content() {
+    let body = "<pre><code>first\n    nested\n</code></pre>";
+    let html = render_shell(
+        &HtmlDocumentConfig::default(),
+        &HtmlPageMetadata::default(),
+        "index.html",
+        "",
+        body,
+        "",
+    );
+
+    assert!(html.contains(body));
+    assert!(!html.contains("    <pre><code>first\n        nested"));
+}
+
+#[test]
+fn renderer_adds_only_missing_fragment_separator_newline() {
+    let ending_with_newline = render_shell(
+        &HtmlDocumentConfig::default(),
+        &HtmlPageMetadata::default(),
+        "index.html",
+        "",
+        "<span>one</span>\n",
+        "",
+    );
+    assert!(ending_with_newline.contains("<span>one</span>\n  </body>"));
+    assert!(!ending_with_newline.contains("<span>one</span>\n\n  </body>"));
+
+    let without_newline = render_shell(
+        &HtmlDocumentConfig::default(),
+        &HtmlPageMetadata::default(),
+        "index.html",
+        "",
+        "<span>two</span>",
+        "",
+    );
+    assert!(without_newline.contains("<span>two</span>\n  </body>"));
 }
 
 #[test]

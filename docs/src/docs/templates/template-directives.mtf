@@ -62,6 +62,9 @@ The HTML project builder adds:
 `$code(language)`:
 
 - highlights a code body
+- removes formatting-only indentation from multiline bodies using the first content line as the baseline
+- preserves indentation relative to that baseline
+- escapes HTML-sensitive characters in `text` mode without applying syntax classes
 - suppresses nested child-template interpretation inside the code content
 
 ### Formatter scope

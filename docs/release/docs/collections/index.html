@@ -151,1255 +151,1196 @@ body {
   vertical-align: inherit;
 }
     </style>
-    <style>@font-face {
-        font-family: "Computer Modern Sans";
-        src: url("/moth/fonts/cmunss.woff2") format("woff2");
-        font-style: normal;
-        letter-spacing: 10em;
-        font-weight: 400;
-        font-display: swap;
-    }body {
-        font-family:
-            "Computer Modern Sans",
-            var(--moth-font-family-sans-serif);
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
 
-        min-height: 100vh;
+    min-height: 100vh;
 
-        background-color:
-            light-dark(
-                hsl(0, 0%, 98%),
-                #080d0c
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
             );
+
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: dark) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(48 92 61 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(25 67 46 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #050d1b 0%,
-                    #0a0a17 48%,
-                    #0d1a31 100%
-                );
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #abd7ed 0%,
+                #eff6ff 23%,
+                #cde3ff 83%,
+                #bac9ff 100%
+            );
 
-            background-repeat: no-repeat;
-        }
+        background-repeat: no-repeat;
     }
+}
 
-    @media (prefers-color-scheme: light) {
-        body {
-            background-image:
-                radial-gradient(
-                    80rem 55rem at 8% -10%,
-                    rgb(0 50 80 / 20%),
-                    transparent 60%
-                ),
-                radial-gradient(
-                    65rem 45rem at 100% 18%,
-                    rgb(0 67 100 / 10%),
-                    transparent 65%
-                ),
-                linear-gradient(
-                    145deg,
-                    #abd7ed 0%,
-                    #eff6ff 23%,
-                    #cde3ff 83%,
-                    #bac9ff 100%
-                );
+a {
+    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+}
 
-            background-repeat: no-repeat;
-        }
-    }
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
 
-    a {
-        color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
-    }
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
 
-    h1 {
-        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-    }
+.container code:not(.codeblock) {
+    color: #c444aff9;
+    font-family: var(--moth-font-family-monospace);
+}
 
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+
+
+@media (min-width: 576px) {
     .container {
-        width: 100%;
-        margin-right: auto;
-        margin-left: auto;
-        padding-right: var(--moth-spacing-small);
-        padding-left: var(--moth-spacing-small);
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
     }
+}
 
-    .container code:not(.codeblock) {
-        color: #c444aff9;
-        font-family: var(--moth-font-family-monospace);
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
     }
+}
 
-    .container pre {
-        max-width: 100%;
-        margin-block: 1.25em;
-        padding: 1em;
-        overflow-x: auto;
-        border-radius: 5px;
-        background-color: #151515e9;
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
     }
 
     table {
-        width: 100%;
-        border-collapse: collapse;
-        max-width: 100%;
+        font-size: 0.8rem;
     }
 
     th,
     td {
-        border: 1px solid;
-        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-        padding: 0.5em 1em;
-        vertical-align: top;
-        text-align: left;
+        padding: 0.4em;
     }
+}
 
-
-
-    @media (min-width: 576px) {
-        .container {
-            max-width: 510px;
-            padding-right: var(--moth-spacing);
-            padding-left: var(--moth-spacing);
-            padding-bottom: var(--moth-spacing);
-        }
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
     }
+}
 
-    @media (min-width: 768px) {
-        .container {
-            max-width: 700px;
-        }
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
     }
+}
 
-    @media (min-width: 1024px) {
-        .container {
-            max-width: 950px;
-        }
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3f8f4e;
+    --doc-level-accent-hover: #337740;
+    --doc-level-border: #d7dfd8;
+    --doc-level-switch-background: #f1f5f1;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202722;
+    --doc-level-muted: #687169;
+    --doc-level-focus: #2877d4;
+}
 
-        table {
-            font-size: 0.8rem;
-        }
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
 
-        th,
-        td {
-            padding: 0.4em;
-        }
-    }
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
 
-    @media (min-width: 1280px) {
-        .container {
-            max-width: 1200px;
-        }
-    }
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
 
-    @media (min-width: 1536px) {
-        .container {
-            max-width: 1450px;
-        }
-    }
+.doc-level__title {
+    margin: 0;
+}
 
-    .moth-nav-1 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom-color: grey;
-        border-bottom-style: solid;
-        border-bottom-width: 1px;
-        padding: 0rem 2rem 0rem 2rem;
-    }</style>
-    <style>.doc-level,
-    .doc-pager {
-        --doc-level-accent: #3f8f4e;
-        --doc-level-accent-hover: #337740;
-        --doc-level-border: #d7dfd8;
-        --doc-level-switch-background: #f1f5f1;
-        --doc-level-selected-background: #ffffff;
-        --doc-level-text: #202722;
-        --doc-level-muted: #687169;
-        --doc-level-focus: #2877d4;
-    }
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
 
-    .doc-level {
-        min-inline-size: 0;
-        margin: 2rem 0;
-        padding: 0;
-        border: 0;
-        color: var(--doc-level-text);
-    }
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
 
-    .visually-hidden,
-    .doc-level__input {
-        position: absolute;
-        inline-size: 1px;
-        block-size: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-        border: 0;
-    }
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
 
-    .doc-level__header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-block-end: 1.25rem;
-    }
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
 
-    .doc-level__title {
-        margin: 0;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
 
-    .doc-level__switch {
-        display: inline-grid;
-        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
-        gap: 0.2rem;
-        flex: none;
-        padding: 0.22rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        background: var(--doc-level-switch-background);
-    }
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
 
-    .doc-level__option {
-        padding: 0.42rem 0.8rem;
-        border-radius: 0.55rem;
-        color: var(--doc-level-muted);
-        font-size: 0.875rem;
-        font-weight: 650;
-        line-height: 1.3;
-        text-align: center;
-        cursor: pointer;
-        user-select: none;
+.doc-level__panel {
+    display: none;
+}
 
-        transition:
-            color 130ms ease,
-            background-color 130ms ease,
-            box-shadow 130ms ease;
-    }
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
 
-    .doc-level__option:hover {
-        color: var(--doc-level-accent-hover);
-    }
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
 
-    .doc-level__input--basic:checked
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:checked
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        color: var(--doc-level-accent);
-        background: var(--doc-level-selected-background);
-        box-shadow:
-            0 1px 2px rgb(20 40 24 / 10%),
-            0 0 0 1px rgb(63 143 78 / 8%);
-    }
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
 
-    .doc-level__input--basic:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--basic,
-    .doc-level__input--advanced:focus-visible
-        ~ .doc-level__header
-        .doc-level__option--advanced {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
 
-    .doc-level__panel {
-        display: none;
-    }
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
 
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
     .doc-level__input--basic:checked
         ~ .doc-level__panel--basic,
     .doc-level__input--advanced:checked
         ~ .doc-level__panel--advanced {
-        display: block;
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
     }
 
     .doc-pager {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
-        margin-block: 3rem 1rem;
-    }
-
-    .doc-pager--single {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .doc-pager--single .doc-pager__link {
-        width: min(100%, 32rem);
-    }
-
-    .doc-pager--single .doc-pager__link--previous {
-        justify-self: start;
-    }
-
-    .doc-pager--single .doc-pager__link--next {
-        justify-self: end;
-    }
-
-    .doc-pager__link {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        min-inline-size: 0;
-        padding: 0.9rem 1rem;
-        border: 1px solid var(--doc-level-border);
-        border-radius: 0.75rem;
-        color: var(--doc-level-text);
-        text-decoration: none;
-        background: var(--doc-level-selected-background);
-
-        transition:
-            color 130ms ease,
-            border-color 130ms ease,
-            box-shadow 130ms ease;
-    }
-
-    .doc-pager__link:hover {
-        color: var(--doc-level-accent-hover);
-        border-color: var(--doc-level-accent);
-        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
-    }
-
-    .doc-pager__link:focus-visible {
-        outline: 3px solid var(--doc-level-focus);
-        outline-offset: 2px;
-    }
-
     .doc-pager__link--next {
-        align-items: flex-end;
-        text-align: right;
+        align-items: flex-start;
+        text-align: left;
     }
 
-    .doc-pager__direction {
-        color: var(--doc-level-muted);
-        font-size: 0.8rem;
-        font-weight: 650;
-        letter-spacing: 0.03rem;
-        text-transform: uppercase;
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #80c98c;
+        --doc-level-accent-hover: #a0d9a9;
+        --doc-level-border: #3a493d;
+        --doc-level-switch-background: #202a22;
+        --doc-level-selected-background: #303c32;
+        --doc-level-text: #edf2ee;
+        --doc-level-muted: #a8b3aa;
+        --doc-level-focus: #75b7ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
     }
 
-    .doc-pager__title {
-        font-size: 1rem;
-        font-weight: 650;
+    .doc-level__panel {
+        display: block;
     }
 
-    @media (prefers-reduced-motion: no-preference) {
-        .doc-level__input--basic:checked
-            ~ .doc-level__panel--basic,
-        .doc-level__input--advanced:checked
-            ~ .doc-level__panel--advanced {
-            animation: doc-level-enter 150ms ease-out;
-        }
-
-        @keyframes doc-level-enter {
-            from {
-                opacity: 0;
-                transform: translateY(0.2rem);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
     }
 
-    @media (max-width: 36rem) {
-        .doc-level__header {
-            align-items: stretch;
-            flex-direction: column;
-        }
-
-        .doc-level__switch {
-            align-self: flex-start;
-        }
-
-        .doc-pager {
-            grid-template-columns: minmax(0, 1fr);
-        }
-
-        .doc-pager__link--next {
-            align-items: flex-start;
-            text-align: left;
-        }
-
-        .doc-pager--single .doc-pager__link {
-            width: 100%;
-            justify-self: stretch;
-        }
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
     }
 
-    @media (prefers-color-scheme: dark) {
-        .doc-level,
-        .doc-pager {
-            --doc-level-accent: #80c98c;
-            --doc-level-accent-hover: #a0d9a9;
-            --doc-level-border: #3a493d;
-            --doc-level-switch-background: #202a22;
-            --doc-level-selected-background: #303c32;
-            --doc-level-text: #edf2ee;
-            --doc-level-muted: #a8b3aa;
-            --doc-level-focus: #75b7ff;
-        }
+    .doc-level__panel--basic::before {
+        content: "Basic";
     }
 
-    @media print {
-        .doc-level__input,
-        .doc-level__switch,
-        .doc-pager {
-            display: none;
-        }
-
-        .doc-level__panel {
-            display: block;
-        }
-
-        .doc-level__panel--advanced {
-            margin-block-start: 1.5rem;
-            padding-block-start: 1.5rem;
-            border-block-start: 1px solid;
-        }
-
-        .doc-level__panel--basic::before,
-        .doc-level__panel--advanced::before {
-            display: block;
-            margin-block-end: 0.75rem;
-            font-weight: 700;
-        }
-
-        .doc-level__panel--basic::before {
-            content: "Basic";
-        }
-
-        .doc-level__panel--advanced::before {
-            content: "Advanced";
-        }
-    }</style>
-
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
+}</style>
   </head>
   <body style="">
-    <nav class="moth-nav-1" aria-label="Primary">
-        <a
-            href="/moth/"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
             style="
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                padding: 0.9rem 0;
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
                 text-decoration: none;
-                font-weight: 700;
-                letter-spacing: 0.04rem;
+                font-weight: 500;
+                padding: 0.35rem 0;
             "
         >
-            <span
-                aria-hidden="true"
-                style="
-                    font-family: var(--moth-font-family-emoji);
-                    font-size: 1.4rem;
-                    line-height: 1;
-                    color: light-dark( #234970, #97b7ef );
-                "
-            >ʚĭɞ</span>
-
+            Docs
         </a>
 
-        <div
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
             style="
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 1rem;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
             "
         >
-            <a
-                href="/moth/docs/"
-                style="
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    text-decoration: none;
-                    font-weight: 500;
-                    padding: 0.35rem 0;
-                "
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
             >
-                Docs
-            </a>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / Collections and maps</p><h1>Collections and maps</h1><p>Collections keep values in order. Maps keep values under keys and remember insertion order too.</p><p>Both use braces because square brackets already have a full-time job building templates.</p><p>One historical note: a fruit example still spells strawberry with one <code>r</code> to confuse old LLMs. Tradition matters.</p></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Collection literals
+</legend>
 
-            <a
-                href="https://github.com/nyejames/moth"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Moth GitHub repository"
-                style="
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
-                    padding: 0.35rem 0;
-                "
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="collection-literals-level"
+                id="collection-literals-basic"
+                value="basic"
+                checked
             >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    width="22"
-                    height="22"
-                    fill="currentColor"
-                    aria-hidden="true"
-                >
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
-                    -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
-                    -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
-                    2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-                    1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
-                    0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-                </svg>
-            </a>
-        </div>
-    </nav>
-    <section class="container"><p><a href="../">Documentation</a> / Collections and maps</p><h1>Collections and maps</h1><p>Collections keep values in order. Maps keep values under keys and remember insertion order too.</p><p>Both use braces because square brackets already have a full-time job building templates.</p><p>One historical note: a fruit example still spells strawberry with one <code>r</code> to confuse old LLMs. Tradition matters.</p></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Collection literals
-    </legend>
 
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="collection-literals-level"
-                    id="collection-literals-basic"
-                    value="basic"
-                    checked
-                >
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="collection-literals-level"
+                id="collection-literals-advanced"
+                value="advanced"
+            >
 
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="collection-literals-level"
-                    id="collection-literals-advanced"
-                    value="advanced"
-                >
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="collection-literals">
+                    Collection literals
+</h2>
 
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="collection-literals">
-                        Collection literals
-    </h2>
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="collection-literals-basic"
+                    >
+                        Basic
+                    </label>
 
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="collection-literals-basic"
-                        >
-                            Basic
-                        </label>
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="collection-literals-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="collection-literals-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Collections use curly braces and keep their values in order.</p><pre style=""><code class='codeblock'>
-    scores <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span>, <span class='moth-code-number'>30</span><span class='moth-code-parenthesis'>}</span>
-    names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>Every item has the same element type.</p><p>An empty collection needs an explicit type:</p><pre style=""><code class='codeblock'>
-    scores <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>Collections start at index <code>0</code>.</p><p>Use collection methods such as <code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> instead of square-bracket indexing.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Collections form ordered, zero-indexed, homogeneous groups.</p><p>Collection types and literals use braces.</p><pre style=""><code class='codeblock'>
-    values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
-    names <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><h3>Literal inference</h3><ul><li>A non-empty literal infers one element type from its items.</li><li>Every item must be compatible with that element type.</li><li>A typed collection receiving site may apply normal contextual coercion to each item.</li><li>A mixed literal such as <code>{1, &quot;bad&quot;}</code> is invalid.</li><li>The element type is fixed when the literal is created.</li></ul><p>An empty literal needs an explicit collection type at its declaration or field default site.</p><pre style=""><code class='codeblock'>
-    values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>The compiler does not infer an empty collection from:</p><ul><li>a later <code>push</code></li><li>later assignment</li><li>a loop</li><li>a function argument</li><li>HIR use</li><li>borrow analysis</li></ul><h3>Collection versus map literals</h3><p>A top-level key/value entry with <code>=</code> makes a non-empty brace literal a map literal.</p><p>Every entry in that literal must then be a key/value pair.</p><p>Collection items and map entries cannot be mixed.</p><h3>Syntax boundaries</h3><ul><li>Collections do not use square-bracket indexing.</li><li>Square brackets belong to templates.</li><li>Element reads and writes use compiler-owned collection members.</li><li><code>~</code> is binding or access mode. It is not part of collection type identity.</li></ul>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Growable collections
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="growable-collections-level"
-                    id="growable-collections-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="growable-collections-level"
-                    id="growable-collections-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="growable-collections">
-                        Growable collections
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="growable-collections-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="growable-collections-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A growable collection can gain and lose items.</p><pre style=""><code class='codeblock'>
-    names <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-
-    <span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
-    ;
-    </code></pre><p>The binding is mutable because the collection changes.</p><p>An immutable collection can still be read:</p><pre style=""><code class='codeblock'>
-    names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
-
-    first <span class='moth-code-operator'>=</span> names.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-string'>&quot;guest&quot;</span>
-    ;
-    </code></pre>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p><code>{T}</code> is a growable collection of <code>T</code>.</p><pre style=""><code class='codeblock'>
-    names <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    values <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><h3>Contract</h3><ul><li>The element type is part of semantic type identity.</li><li>A growable <code>{Int}</code> is not compatible with <code>{String}</code>.</li><li>Growable and fixed collections are different types.</li><li>A mutable binding is required for operations that change the collection.</li><li>An immutable growable collection remains readable but cannot be mutated through that binding.</li><li><code>length()</code> returns the current logical number of items.</li><li>The element type is not widened by later mutation.</li></ul><p><code>push</code> remains fallible and must be handled even for a growable collection. Runtime allocation and backend failures must not become unchecked language behaviour.</p><pre style=""><code class='codeblock'>
-    names <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-
-    <span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;growable push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
-    ;
-    </code></pre><p>Use <a href="../bindings/#mutable-bindings">Mutable bindings</a> for the distinction between mutable storage and one exclusive operation.</p>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Fixed collections
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="fixed-collections-level"
-                    id="fixed-collections-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="fixed-collections-level"
-                    id="fixed-collections-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="fixed-collections">
-                        Fixed collections
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="fixed-collections-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="fixed-collections-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A fixed collection has a maximum number of items in its type.</p><pre style=""><code class='codeblock'>
-    values <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>3</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>This value has length <code>2</code> and capacity <code>3</code>.</p><p>A compile-time constant can name the capacity:</p><pre style=""><code class='codeblock'>
-    capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
-    names <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span>capacity <span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>Different capacities create different types.</p><p>A <code>{4 Int}</code> does not silently become <code>{8 Int}</code> or growable <code>{Int}</code>.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p><code>{N T}</code> is a fixed collection of <code>T</code> with maximum length <code>N</code>.</p><pre style=""><code class='codeblock'>
-    values <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>3</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-parenthesis'>}</span>
-
-    capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
-    scratch <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span>capacity <span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><h3>Type identity</h3><p>Fixed capacity is semantic type identity.</p><p>These are distinct incompatible types:</p><pre style=""><code class='codeblock'>
-        {Int}
-        {4 Int}
-        {8 Int}
-    </code></pre><p>Capacity is not a growable allocation hint.</p><p>There is no implicit conversion:</p><ul><li>from growable to fixed</li><li>from fixed to growable</li><li>between different fixed capacities</li></ul><h3>Capacity syntax</h3><p>Capacity in type position must be:</p><ul><li>a positive <code>Int</code> literal</li><li>a bare visible <code>#Int</code> constant name</li></ul><p>Capacity position is not general expression position.</p><p>Arithmetic, calls, field access, const-record projection, conditionals and nested expressions are invalid there.</p><p>Name the calculation first:</p><pre style=""><code class='codeblock'>
-    base <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
-    larger_capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> base <span class='moth-code-operator'>+</span> <span class='moth-code-number'>2</span>
-    values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span>larger_capacity <span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><h3>Capacity-only shorthand</h3><p>A binding declaration with an immediate non-empty literal may infer the element type:</p><pre style=""><code class='codeblock'>
-    capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
-    labels <span class='moth-code-parenthesis'>{</span>capacity<span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;alpha&quot;</span>, <span class='moth-code-string'>&quot;beta&quot;</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><p><code>{capacity}</code> shorthand is invalid for:</p><ul><li>empty literals</li><li>non-literal initializers</li><li>function signatures</li><li>aliases</li><li>fields</li><li>return slots</li></ul><h3>Empty fixed values</h3><p>An immutable binding cannot be initialised with an empty fixed literal because there is no later mutable owner path to fill it.</p><p>These are valid:</p><ul><li>a mutable empty fixed binding</li><li>a fixed collection field default with an explicit field type</li></ul><p>A fixed literal may contain fewer items than its capacity.</p><p>Its logical length is the number of stored items, not the maximum capacity.</p>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Collection operations
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="collection-operations-level"
-                    id="collection-operations-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="collection-operations-level"
-                    id="collection-operations-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="collection-operations">
-                        Collection operations
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="collection-operations-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="collection-operations-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>Read an item with <code>get</code>:</p><pre style=""><code class='codeblock'>
-    first <span class='moth-code-operator'>=</span> items.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-    </code></pre><p>Change a stored item with <code>set</code>:</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-operator'>~</span>items.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span>, <span class='moth-code-number'>99</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    ;
-    </code></pre><p>Add and remove items with <code>push</code> and <code>remove</code>:</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-operator'>~</span>items.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>40</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    ;
-
-    removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>items.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-    </code></pre><p>Get the current number of items with <code>length()</code>:</p><pre style=""><code class='codeblock'>
-    count <span class='moth-code-operator'>=</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p>Operations that can fail must use <code>!</code> or <code>catch</code>.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Collections use five compiler-owned member operations.</p><h3><code>get</code></h3><pre style=""><code class='codeblock'>
-    value <span class='moth-code-operator'>=</span> items.get<span class='moth-code-parenthesis'>(</span>index<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then fallback
-    ;
-    </code></pre><ul><li>argument: <code>index Int</code></li><li>success: the element value</li><li>failure: builtin <code>Error!</code></li><li>receiver access: shared</li></ul><h3><code>set</code></h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-operator'>~</span>items.set<span class='moth-code-parenthesis'>(</span>index, value<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    ;
-    </code></pre><ul><li>arguments: <code>index Int</code>, then one element value</li><li>success: no value</li><li>failure: builtin <code>Error!</code></li><li>receiver access: mutable</li><li>replaces an existing element only</li><li>does not fill unused fixed capacity</li></ul><h3><code>push</code></h3><pre style=""><code class='codeblock'>
-    <span class='moth-code-operator'>~</span>items.push<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    ;
-    </code></pre><ul><li>argument: one element value</li><li>success: no value</li><li>failure: builtin <code>Error!</code></li><li>receiver access: mutable</li><li>appends after the current last element</li><li>fails when a fixed collection is full</li></ul><h3><code>remove</code></h3><pre style=""><code class='codeblock'>
-    removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>items.remove<span class='moth-code-parenthesis'>(</span>index<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then fallback
-    ;
-    </code></pre><ul><li>argument: <code>index Int</code></li><li>success: the removed element</li><li>failure: builtin <code>Error!</code></li><li>receiver access: mutable</li><li>shifts later elements down</li><li>frees one slot in a fixed collection</li></ul><h3><code>length</code></h3><pre style=""><code class='codeblock'>
-    count <span class='moth-code-operator'>=</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><ul><li>no arguments</li><li>success: <code>Int</code></li><li>infallible</li><li>receiver access: shared</li><li>returns logical length, not fixed capacity</li></ul><h3>Shared rules</h3><ul><li><code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> must use postfix <code>!</code> or <code>catch</code>.</li><li><code>set</code>, <code>push</code> and <code>remove</code> require <code>~receiver</code>.</li><li>Builtin member arguments are positional-only.</li><li>Assignment through <code>get</code> is removed.</li><li>Square-bracket indexing is not supported.</li><li>Invalid indices use the typed error path rather than a silent no-op.</li></ul><p>Error propagation and recovery are specified by <a href="../errors">Errors, options and assertions</a>.</p>
-    </div>
-    </fieldset></section>
-    <section class="container"><fieldset class="doc-level">
-        <legend class="visually-hidden">
-            Choose the explanation level: Hash maps
-    </legend>
-
-    <input
-        class="doc-level__input doc-level__input--basic"
-        type="radio"
-        name="hash-maps-level"
-                    id="hash-maps-basic"
-                    value="basic"
-                    checked
-                >
-
-                <input
-                    class="doc-level__input doc-level__input--advanced"
-                    type="radio"
-                    name="hash-maps-level"
-                    id="hash-maps-advanced"
-                    value="advanced"
-                >
-
-                <header class="doc-level__header">
-                    <h2 class="doc-level__title" id="hash-maps">
-                        Hash maps
-    </h2>
-
-    <div class="doc-level__switch">
-        <label
-            class="doc-level__option doc-level__option--basic"
-            for="hash-maps-basic"
-                        >
-                            Basic
-                        </label>
-
-                        <label
-                            class="doc-level__option doc-level__option--advanced"
-                            for="hash-maps-advanced"
-                        >
-                            Advanced
-                        </label>
-                    </div>
-                </header>
-
-                <div class="doc-level__panel doc-level__panel--basic">
-                    
-
-
-
-            <p>A hash map stores values under keys.</p><pre style=""><code class='codeblock'>
-    scores <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span>
-        <span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>,
-        <span class='moth-code-string'>&quot;Grace&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12</span>,
-    <span class='moth-code-parenthesis'>}</span>
-    </code></pre><p>Use <code>get</code> to read a value:</p><pre style=""><code class='codeblock'>
-    score <span class='moth-code-operator'>=</span> scores.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-    </code></pre><p>Use <code>set</code> and <code>remove</code> through a mutable receiver:</p><pre style=""><code class='codeblock'>
-    <span class='moth-code-operator'>~</span>scores.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Linus&quot;</span>, <span class='moth-code-number'>7</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    ;
-
-    removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-    </code></pre><p>Maps remember insertion order.</p><p><code>length</code> is a property:</p><pre style=""><code class='codeblock'>
-    count <span class='moth-code-operator'>=</span> scores.length
-    </code></pre><p>Builtin keys are limited to <code>String</code>, <code>Int</code>, <code>Bool</code> and <code>Char</code>.</p>
-    </div>
-
-    <div class="doc-level__panel doc-level__panel--advanced">
-        <p>Hash maps form insertion-ordered key/value groups.</p><h3>Types and literals</h3><pre style=""><code class='codeblock'>
-    scores <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>, <span class='moth-code-string'>&quot;Grace&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12</span><span class='moth-code-parenthesis'>}</span>
-    empty_scores <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-    </code></pre><ul><li>A map type is <code>{Key = Value}</code>.</li><li>A map literal contains <code>key = value</code> entries.</li><li>Any top-level <code>=</code> entry makes a non-empty brace literal a map literal.</li><li>Every entry must then be a key/value pair.</li><li>Collection items and map entries cannot be mixed.</li><li>An empty map literal needs an explicit or immediate contextual map type.</li><li>A bare identifier in key position is a variable reference, not string shorthand.</li><li>Map values follow the same runtime-storable rules as collection elements.</li></ul><h3>Key contract</h3><p>Builtin map keys are permanently limited to:</p><ul><li><code>String</code></li><li><code>Int</code></li><li><code>Bool</code></li><li><code>Char</code></li></ul><p>Invalid key families include:</p><ul><li><code>Float</code></li><li>structs</li><li>choices</li><li>collections</li><li>maps</li><li>traits</li><li>functions</li><li>external opaque types</li><li>generic parameters</li></ul><p>The builtin map surface does not expose user-defined <code>HASHABLE</code>, custom hashers or custom comparers.</p><h3>Storage and order</h3><p>Maps own their entry structure. Existing keys and values stored in entries follow the ordinary shared-reference, explicit-copy and inferred-transfer rules.</p><p>Insertion order follows these rules:</p><ol><li>First insertion chooses the entry position.</li><li>Replacing an existing key updates the value without moving the entry.</li><li>Replacement keeps the existing stored key.</li><li>Removing a key removes its entry from the order.</li><li>Re-inserting that key appends a new entry.</li></ol><h3>Operations</h3><p><code>get(key)</code>:</p><ul><li>shared receiver</li><li>fallible</li><li>returns shared access to the stored value</li></ul><p><code>contains(key)</code>:</p><ul><li>shared receiver</li><li>infallible</li><li>returns <code>Bool</code></li></ul><p><code>set(key, value)</code>:</p><ul><li>mutable receiver</li><li>fallible</li><li>inserts or replaces</li><li>returns no old value</li></ul><p><code>remove(key)</code>:</p><ul><li>mutable receiver</li><li>fallible</li><li>removes the entry and returns the removed value under the normal lifetime and ownership rules</li></ul><p><code>clear()</code>:</p><ul><li>mutable receiver</li><li>infallible</li><li>removes every entry</li></ul><p><code>length</code>:</p><ul><li>shared read-only property</li><li>no parentheses</li><li>returns <code>Int</code></li><li>cannot be assigned</li></ul><pre style=""><code class='codeblock'>
-    score <span class='moth-code-operator'>=</span> scores.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-
-    found <span class='moth-code-operator'>=</span> scores.contains<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span>
-
-    <span class='moth-code-operator'>~</span>scores.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Linus&quot;</span>, <span class='moth-code-number'>7</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    ;
-
-    removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-        then <span class='moth-code-number'>0</span>
-    ;
-
-    count <span class='moth-code-operator'>=</span> scores.length
-    <span class='moth-code-operator'>~</span>scores.clear<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-    </code></pre><p><code>get</code>, <code>contains</code> and <code>remove</code> borrow the lookup key.</p><p>A live shared value returned by <code>get</code> prevents mutation of the same map until that shared access is no longer used.</p><h3>Outside the builtin map surface</h3><ul><li>hashset syntax</li><li>map equality</li><li>indexing syntax</li><li>mutable entry APIs</li><li>const maps</li><li>fixed-capacity maps</li><li>specialized map variants</li><li>user-defined key types</li></ul><p>More sophisticated maps belong in ordinary package structs.</p><h3>Inline nesting limit</h3><p>Map types nested more than two levels deep inline are rejected by the parser. Use a named type alias for deeper nesting.</p><p>The current builtin map runtime path is HTML-JS. Targets without map lowering reject reachable map use before backend lowering. Use the progress matrix for current target coverage.</p>
-    </div>
-    </fieldset></section>
-    <section class="container"><nav class="doc-pager" aria-label="Language documentation">
-        <a
-            class="doc-pager__link doc-pager__link--previous"
-            href="../errors/"
-                    rel="prev"
-                >
-                    <span class="doc-pager__direction">← Previous</span>
-                    <span class="doc-pager__title">Errors, options and assertions</span>
-                </a>
-
-                <a
-                    class="doc-pager__link doc-pager__link--next"
-                    href="../templates/"
-                    rel="next"
-                >
-                    <span class="doc-pager__direction">Next →</span>
-                    <span class="doc-pager__title">Templates</span>
-                </a>
-
+            <div class="doc-level__panel doc-level__panel--basic">
                 
 
 
 
-    </nav></section>
-    <script>
-    function __moth_is_ref(value) {
-    return value !== null && typeof value === "object" && value.__moth_ref === true;
-    }
+        <p>Collections use curly braces and keep their values in order.</p><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span>, <span class='moth-code-number'>30</span><span class='moth-code-parenthesis'>}</span>
+names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre><p>Every item has the same element type.</p><p>An empty collection needs an explicit type:</p><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><p>Collections start at index <code>0</code>.</p><p>Use collection methods such as <code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> instead of square-bracket indexing.</p>
+</div>
 
-    function __moth_binding(value) {
-    return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Collections form ordered, zero-indexed, homogeneous groups.</p><p>Collection types and literals use braces.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
+names <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre><h3>Literal inference</h3><ul><li>A non-empty literal infers one element type from its items.</li><li>Every item must be compatible with that element type.</li><li>A typed collection receiving site may apply normal contextual coercion to each item.</li><li>A mixed literal such as <code>{1, &quot;bad&quot;}</code> is invalid.</li><li>The element type is fixed when the literal is created.</li></ul><p>An empty literal needs an explicit collection type at its declaration or field default site.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><p>The compiler does not infer an empty collection from:</p><ul><li>a later <code>push</code></li><li>later assignment</li><li>a loop</li><li>a function argument</li><li>HIR use</li><li>borrow analysis</li></ul><h3>Collection versus map literals</h3><p>A top-level key/value entry with <code>=</code> makes a non-empty brace literal a map literal.</p><p>Every entry in that literal must then be a key/value pair.</p><p>Collection items and map entries cannot be mixed.</p><h3>Syntax boundaries</h3><ul><li>Collections do not use square-bracket indexing.</li><li>Square brackets belong to templates.</li><li>Element reads and writes use compiler-owned collection members.</li><li><code>~</code> is binding or access mode. It is not part of collection type identity.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Growable collections
+</legend>
 
-    function __moth_param_binding(value) {
-    if (!__moth_is_ref(value)) {
-    return __moth_binding(value);
-    }
-    if (value.__moth_kind === "binding") {
-    return value;
-    }
-    const binding = __moth_binding(undefined);
-    binding.__moth_mode = "alias";
-    binding.__moth_target = value;
-    return binding;
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="growable-collections-level"
+                id="growable-collections-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_resolve(ref) {
-    while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
-    ref = ref.__moth_target;
-    }
-    return ref;
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="growable-collections-level"
+                id="growable-collections-advanced"
+                value="advanced"
+            >
 
-    function __moth_read(ref) {
-    const resolved = __moth_resolve(ref);
-    return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="growable-collections">
+                    Growable collections
+</h2>
 
-    function __moth_write(ref, value) {
-    const resolved = __moth_resolve(ref);
-    if (resolved.__moth_kind === "binding") {
-    resolved.__moth_slot.value = value;
-    } else {
-    resolved.__moth_set(value);
-    }
-    return value;
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="growable-collections-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_assign_borrow(binding, ref) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, __moth_read(ref));
-    }
-    binding.__moth_mode = "alias";
-    binding.__moth_target = ref;
-    return binding;
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="growable-collections-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_assign_value(binding, value) {
-    if (binding.__moth_mode === "alias") {
-    return __moth_write(binding, value);
-    }
-    binding.__moth_mode = "slot";
-    binding.__moth_target = null;
-    binding.__moth_slot.value = value;
-    return binding;
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_field(baseRef, field) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[field];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[field] = value;
-    }
-    };
-    }
 
-    function __moth_index(baseRef, index) {
-    return {
-    __moth_ref: true,
-    __moth_kind: "computed",
-    __moth_get() {
-    return __moth_read(baseRef)[index];
-    },
-    __moth_set(value) {
-    __moth_read(baseRef)[index] = value;
-    }
-    };
-    }
 
-    function __moth_clone_value(value) {
-    if (Array.isArray(value)) {
-    return value.map(__moth_clone_value);
-    }
-    if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-    result[key] = __moth_clone_value(value[key]);
-    }
-    return result;
-    }
-    return value;
-    }
+        <p>A growable collection can gain and lose items.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
 
-    function __moth_error_normalize_file(file) {
-    if (typeof file !== "string") {
-    return "";
-    }
-    if (file.startsWith("/")) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    if (/^[A-Za-z]:[\\/]/.test(file)) {
-    const parts = file.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : file;
-    }
-    return file;
-    }
+<span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
+;</code></pre><p>The binding is mutable because the collection changes.</p><p>An immutable collection can still be read:</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-    function __moth_make_error(message, code, location, trace) {
-    return {
-    f_6d657373616765: message,
-    f_636f6465: code,
-    __moth_location: location ?? null,
-    __moth_trace: trace ?? null
-    };
-    }
+first <span class='moth-code-operator'>=</span> names.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-string'>&quot;guest&quot;</span>
+;</code></pre>
+</div>
 
-    function __moth_error_result(message, code) {
-    return { tag: "err", value: __moth_make_error(message, code, null, null) };
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><code>{T}</code> is a growable collection of <code>T</code>.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
+values <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span></code></pre><h3>Contract</h3><ul><li>The element type is part of semantic type identity.</li><li>A growable <code>{Int}</code> is not compatible with <code>{String}</code>.</li><li>Growable and fixed collections are different types.</li><li>A mutable binding is required for operations that change the collection.</li><li>An immutable growable collection remains readable but cannot be mutated through that binding.</li><li><code>length()</code> returns the current logical number of items.</li><li>The element type is not widened by later mutation.</li></ul><p><code>push</code> remains fallible and must be handled even for a growable collection. Runtime allocation and backend failures must not become unchecked language behaviour.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
 
-    function __moth_error_message(error) {
-    const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
-    return typeof message === "string" ? message : String(message ?? "Unknown error");
-    }
+<span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;growable push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
+;</code></pre><p>Use <a href="../bindings/#mutable-bindings">Mutable bindings</a> for the distinction between mutable storage and one exclusive operation.</p>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Fixed collections
+</legend>
 
-    function __moth_error_code(error) {
-    const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
-    return typeof code === "number" ? code : 0;
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="fixed-collections-level"
+                id="fixed-collections-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_error_with_location(error, location) {
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="fixed-collections-level"
+                id="fixed-collections-advanced"
+                value="advanced"
+            >
 
-    function __moth_error_push_trace(error, frame) {
-    const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
-    return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="fixed-collections">
+                    Fixed collections
+</h2>
 
-    function __moth_error_bubble(error, file, line, column, functionName) {
-    const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
-    const location = {
-    file: __moth_error_normalize_file(file),
-    line,
-    column,
-    function: safeFunction === "<unknown>" ? null : safeFunction
-    };
-    const frame = { function: safeFunction, location };
-    const nextLocation = error.__moth_location ?? location;
-    const located = __moth_error_with_location(error, nextLocation);
-    return __moth_error_push_trace(located, frame);
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="fixed-collections-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_result_propagate(result) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    throw { __moth_result_propagate: true, value: result.value };
-    }
-    throw new Error("Expected internal Result carrier during propagation");
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="fixed-collections-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_result_fallback(result, fallback) {
-    if (result && result.tag === "ok") {
-    return result.value;
-    }
-    if (result && result.tag === "err") {
-    return fallback();
-    }
-    throw new Error("Expected internal Result carrier during fallback handling");
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function __moth_fixed_collection(items, fixedCapacity) {
-    return {
-    __moth_kind: "fixed_collection",
-    items: items,
-    fixedCapacity: fixedCapacity,
-    };
-    }
 
-    function __moth_collection_items(collection) {
-    if (Array.isArray(collection)) {
-    return collection;
-    }
-    return collection.items;
-    }
 
-    function __moth_collection_fixed_capacity(collection) {
-    if (Array.isArray(collection)) {
-    return null;
-    }
-    return collection.fixedCapacity;
-    }
+        <p>A fixed collection has a maximum number of items in its type.</p><pre style=""><code class='codeblock'>values <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>3</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-parenthesis'>}</span></code></pre><p>This value has length <code>2</code> and capacity <code>3</code>.</p><p>A compile-time constant can name the capacity:</p><pre style=""><code class='codeblock'>capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
+names <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span>capacity <span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><p>Different capacities create different types.</p><p>A <code>{4 Int}</code> does not silently become <code>{8 Int}</code> or growable <code>{Int}</code>.</p>
+</div>
 
-    function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
-    return true;
-    }
-    if (collection === null || typeof collection !== "object") {
-    return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
-    return false;
-    }
-    if (!Array.isArray(collection.items)) {
-    return false;
-    }
-    return (
-    Number.isInteger(collection.fixedCapacity)
-    && collection.fixedCapacity > 0
-    && collection.items.length <= collection.fixedCapacity
-    );
-    }
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><code>{N T}</code> is a fixed collection of <code>T</code> with maximum length <code>N</code>.</p><pre style=""><code class='codeblock'>values <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>3</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-parenthesis'>}</span>
 
-    function __moth_collection_index_is_valid(collection, index) {
-    const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-    }
+capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
+scratch <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span>capacity <span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><h3>Type identity</h3><p>Fixed capacity is semantic type identity.</p><p>These are distinct incompatible types:</p><pre style=""><code class='codeblock'>{Int}
+{4 Int}
+{8 Int}</code></pre><p>Capacity is not a growable allocation hint.</p><p>There is no implicit conversion:</p><ul><li>from growable to fixed</li><li>from fixed to growable</li><li>between different fixed capacities</li></ul><h3>Capacity syntax</h3><p>Capacity in type position must be:</p><ul><li>a positive <code>Int</code> literal</li><li>a bare visible <code>#Int</code> constant name</li></ul><p>Capacity position is not general expression position.</p><p>Arithmetic, calls, field access, const-record projection, conditionals and nested expressions are invalid there.</p><p>Name the calculation first:</p><pre style=""><code class='codeblock'>base <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
+larger_capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> base <span class='moth-code-operator'>+</span> <span class='moth-code-number'>2</span>
+values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span>larger_capacity <span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><h3>Capacity-only shorthand</h3><p>A binding declaration with an immediate non-empty literal may infer the element type:</p><pre style=""><code class='codeblock'>capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
+labels <span class='moth-code-parenthesis'>{</span>capacity<span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;alpha&quot;</span>, <span class='moth-code-string'>&quot;beta&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre><p><code>{capacity}</code> shorthand is invalid for:</p><ul><li>empty literals</li><li>non-literal initializers</li><li>function signatures</li><li>aliases</li><li>fields</li><li>return slots</li></ul><h3>Empty fixed values</h3><p>An immutable binding cannot be initialised with an empty fixed literal because there is no later mutable owner path to fill it.</p><p>These are valid:</p><ul><li>a mutable empty fixed binding</li><li>a fixed collection field default with an explicit field type</li></ul><p>A fixed literal may contain fewer items than its capacity.</p><p>Its logical length is the number of stored items, not the maximum capacity.</p>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Collection operations
+</legend>
 
-    function __moth_collection_get(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    return { tag: "ok", value: items[index] };
-    }
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="collection-operations-level"
+                id="collection-operations-basic"
+                value="basic"
+                checked
+            >
 
-    function __moth_collection_set(collection, index, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    items[index] = value;
-    return { tag: "ok", value: null };
-    }
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="collection-operations-level"
+                id="collection-operations-advanced"
+                value="advanced"
+            >
 
-    function __moth_collection_push(collection, value) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    const items = __moth_collection_items(collection);
-    const fixedCapacity = __moth_collection_fixed_capacity(collection);
-    if (fixedCapacity !== null && items.length >= fixedCapacity) {
-    return __moth_error_result("Fixed collection capacity exceeded", 102);
-    }
-    items.push(value);
-    return { tag: "ok", value: null };
-    }
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="collection-operations">
+                    Collection operations
+</h2>
 
-    function __moth_collection_remove(collection, index) {
-    if (!__moth_collection_is_valid(collection)) {
-    return __moth_error_result("Collection operation expects an ordered collection", 100);
-    }
-    if (!__moth_collection_index_is_valid(collection, index)) {
-    return __moth_error_result("Collection index out of bounds", 101);
-    }
-    const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
-    return { tag: "ok", value: removed };
-    }
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="collection-operations-basic"
+                    >
+                        Basic
+                    </label>
 
-    function __moth_collection_length(collection) {
-    const items = __moth_collection_items(collection);
-    return items.length;
-    }
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="collection-operations-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
 
-    function __moth_value_to_string(value) {
-    if (value === undefined || value === null) {
-    return "";
-    }
-    return String(value);
-    }
+            <div class="doc-level__panel doc-level__panel--basic">
+                
 
-    function b_fn0() {
-    let b_l0 = __moth_binding(undefined);
 
-    __moth_assign_value(b_l0, []);
-    return __moth_read(b_l0);
-    }
 
-    </script>
-    <script>
-    (function () {
-      if (typeof b_fn0 === "function") b_fn0();
-    })();
-    </script>
+        <p>Read an item with <code>get</code>:</p><pre style=""><code class='codeblock'>first <span class='moth-code-operator'>=</span> items.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-number'>0</span>
+;</code></pre><p>Change a stored item with <code>set</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>items.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span>, <span class='moth-code-number'>99</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+;</code></pre><p>Add and remove items with <code>push</code> and <code>remove</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>items.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>40</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+;
+
+removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>items.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-number'>0</span>
+;</code></pre><p>Get the current number of items with <code>length()</code>:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Operations that can fail must use <code>!</code> or <code>catch</code>.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Collections use five compiler-owned member operations.</p><h3><code>get</code></h3><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> items.get<span class='moth-code-parenthesis'>(</span>index<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then fallback
+;</code></pre><ul><li>argument: <code>index Int</code></li><li>success: the element value</li><li>failure: builtin <code>Error!</code></li><li>receiver access: shared</li></ul><h3><code>set</code></h3><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>items.set<span class='moth-code-parenthesis'>(</span>index, value<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+;</code></pre><ul><li>arguments: <code>index Int</code>, then one element value</li><li>success: no value</li><li>failure: builtin <code>Error!</code></li><li>receiver access: mutable</li><li>replaces an existing element only</li><li>does not fill unused fixed capacity</li></ul><h3><code>push</code></h3><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>items.push<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+;</code></pre><ul><li>argument: one element value</li><li>success: no value</li><li>failure: builtin <code>Error!</code></li><li>receiver access: mutable</li><li>appends after the current last element</li><li>fails when a fixed collection is full</li></ul><h3><code>remove</code></h3><pre style=""><code class='codeblock'>removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>items.remove<span class='moth-code-parenthesis'>(</span>index<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then fallback
+;</code></pre><ul><li>argument: <code>index Int</code></li><li>success: the removed element</li><li>failure: builtin <code>Error!</code></li><li>receiver access: mutable</li><li>shifts later elements down</li><li>frees one slot in a fixed collection</li></ul><h3><code>length</code></h3><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><ul><li>no arguments</li><li>success: <code>Int</code></li><li>infallible</li><li>receiver access: shared</li><li>returns logical length, not fixed capacity</li></ul><h3>Shared rules</h3><ul><li><code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> must use postfix <code>!</code> or <code>catch</code>.</li><li><code>set</code>, <code>push</code> and <code>remove</code> require <code>~receiver</code>.</li><li>Builtin member arguments are positional-only.</li><li>Assignment through <code>get</code> is removed.</li><li>Square-bracket indexing is not supported.</li><li>Invalid indices use the typed error path rather than a silent no-op.</li></ul><p>Error propagation and recovery are specified by <a href="../errors">Errors, options and assertions</a>.</p>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Hash maps
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="hash-maps-level"
+                id="hash-maps-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="hash-maps-level"
+                id="hash-maps-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="hash-maps">
+                    Hash maps
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="hash-maps-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="hash-maps-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>A hash map stores values under keys.</p><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span>
+    <span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>,
+    <span class='moth-code-string'>&quot;Grace&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12</span>,
+<span class='moth-code-parenthesis'>}</span></code></pre><p>Use <code>get</code> to read a value:</p><pre style=""><code class='codeblock'>score <span class='moth-code-operator'>=</span> scores.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-number'>0</span>
+;</code></pre><p>Use <code>set</code> and <code>remove</code> through a mutable receiver:</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>scores.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Linus&quot;</span>, <span class='moth-code-number'>7</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+;
+
+removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-number'>0</span>
+;</code></pre><p>Maps remember insertion order.</p><p><code>length</code> is a property:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> scores.length</code></pre><p>Builtin keys are limited to <code>String</code>, <code>Int</code>, <code>Bool</code> and <code>Char</code>.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>Hash maps form insertion-ordered key/value groups.</p><h3>Types and literals</h3><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>, <span class='moth-code-string'>&quot;Grace&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12</span><span class='moth-code-parenthesis'>}</span>
+empty_scores <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><ul><li>A map type is <code>{Key = Value}</code>.</li><li>A map literal contains <code>key = value</code> entries.</li><li>Any top-level <code>=</code> entry makes a non-empty brace literal a map literal.</li><li>Every entry must then be a key/value pair.</li><li>Collection items and map entries cannot be mixed.</li><li>An empty map literal needs an explicit or immediate contextual map type.</li><li>A bare identifier in key position is a variable reference, not string shorthand.</li><li>Map values follow the same runtime-storable rules as collection elements.</li></ul><h3>Key contract</h3><p>Builtin map keys are permanently limited to:</p><ul><li><code>String</code></li><li><code>Int</code></li><li><code>Bool</code></li><li><code>Char</code></li></ul><p>Invalid key families include:</p><ul><li><code>Float</code></li><li>structs</li><li>choices</li><li>collections</li><li>maps</li><li>traits</li><li>functions</li><li>external opaque types</li><li>generic parameters</li></ul><p>The builtin map surface does not expose user-defined <code>HASHABLE</code>, custom hashers or custom comparers.</p><h3>Storage and order</h3><p>Maps own their entry structure. Existing keys and values stored in entries follow the ordinary shared-reference, explicit-copy and inferred-transfer rules.</p><p>Insertion order follows these rules:</p><ol><li>First insertion chooses the entry position.</li><li>Replacing an existing key updates the value without moving the entry.</li><li>Replacement keeps the existing stored key.</li><li>Removing a key removes its entry from the order.</li><li>Re-inserting that key appends a new entry.</li></ol><h3>Operations</h3><p><code>get(key)</code>:</p><ul><li>shared receiver</li><li>fallible</li><li>returns shared access to the stored value</li></ul><p><code>contains(key)</code>:</p><ul><li>shared receiver</li><li>infallible</li><li>returns <code>Bool</code></li></ul><p><code>set(key, value)</code>:</p><ul><li>mutable receiver</li><li>fallible</li><li>inserts or replaces</li><li>returns no old value</li></ul><p><code>remove(key)</code>:</p><ul><li>mutable receiver</li><li>fallible</li><li>removes the entry and returns the removed value under the normal lifetime and ownership rules</li></ul><p><code>clear()</code>:</p><ul><li>mutable receiver</li><li>infallible</li><li>removes every entry</li></ul><p><code>length</code>:</p><ul><li>shared read-only property</li><li>no parentheses</li><li>returns <code>Int</code></li><li>cannot be assigned</li></ul><pre style=""><code class='codeblock'>score <span class='moth-code-operator'>=</span> scores.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-number'>0</span>
+;
+
+found <span class='moth-code-operator'>=</span> scores.contains<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span>
+
+<span class='moth-code-operator'>~</span>scores.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Linus&quot;</span>, <span class='moth-code-number'>7</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+;
+
+removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+    then <span class='moth-code-number'>0</span>
+;
+
+count <span class='moth-code-operator'>=</span> scores.length
+<span class='moth-code-operator'>~</span>scores.clear<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>get</code>, <code>contains</code> and <code>remove</code> borrow the lookup key.</p><p>A live shared value returned by <code>get</code> prevents mutation of the same map until that shared access is no longer used.</p><h3>Outside the builtin map surface</h3><ul><li>hashset syntax</li><li>map equality</li><li>indexing syntax</li><li>mutable entry APIs</li><li>const maps</li><li>fixed-capacity maps</li><li>specialized map variants</li><li>user-defined key types</li></ul><p>More sophisticated maps belong in ordinary package structs.</p><h3>Inline nesting limit</h3><p>Map types nested more than two levels deep inline are rejected by the parser. Use a named type alias for deeper nesting.</p><p>The current builtin map runtime path is HTML-JS. Targets without map lowering reject reachable map use before backend lowering. Use the progress matrix for current target coverage.</p>
+</div>
+</fieldset></section>
+<section class="container"><nav class="doc-pager" aria-label="Language documentation">
+    <a
+        class="doc-pager__link doc-pager__link--previous"
+        href="../errors/"
+                rel="prev"
+            >
+                <span class="doc-pager__direction">← Previous</span>
+                <span class="doc-pager__title">Errors, options and assertions</span>
+            </a>
+
+            <a
+                class="doc-pager__link doc-pager__link--next"
+                href="../templates/"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">Templates</span>
+            </a>
+
+            
+
+
+
+</nav></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
   </body>
 </html>
