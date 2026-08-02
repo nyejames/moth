@@ -218,13 +218,13 @@ grade_score |score Int| -> String:
     ;
 ;
 
-categorize_string |text String| -> String:
-    if text is:
-        < "a" => return "before-a"
-        < "m" => return "a-to-l"
-        < "z" => return "m-to-y"
-        "z" => return "exactly-z"
-        else => return "z-or-after"
+categorize_code |value Int| -> String:
+    if value is:
+        < 10 => return "before-ten"
+        < 20 => return "ten-to-nineteen"
+        < 26 => return "twenty-to-twenty-five"
+        26 => return "exactly-twenty-six"
+        else => return "after-twenty-six"
     ;
 ;
 
@@ -386,7 +386,7 @@ run_pattern_stress ||:
     io.line([: [compare_to_ten(10)]])
     io.line([: [compare_to_ten(15)]])
     io.line([: [grade_score(85)]])
-    io.line([: [categorize_string("hello")]])
+    io.line([: [categorize_code(18)]])
 
     -- Nested match
     io.line([: [nested_match(10, 5)]])
