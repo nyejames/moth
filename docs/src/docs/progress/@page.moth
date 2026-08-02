@@ -190,7 +190,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Targeted compiler-integrated import, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics, and integration coverage.]
             [: HTML builder / frontend]
-            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates with no explicit directive also default to [$html:<code>$md</code>], and any explicit nested directive overrides that default. They import extensionlessly into [$html:<code>.moth</code>], can be re-exported through a module root's [$html:<code>export:</code>] block, and must fully fold. They are not entries, config files, standalone HTML files, or general source handlers. Implementation gap: the current compiler resolves implicit scope collisions through local-over-HTML precedence rather than the accepted no-shadowing collision model. Stage B of the docs language migration plan removes the overwrite path and registers both surfaces through one visible-name registry.]
+            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates with no explicit directive also default to [$html:<code>$md</code>], and any explicit nested directive overrides that default. They import extensionlessly into [$html:<code>.moth</code>], can be re-exported through a module root's [$html:<code>export:</code>] block, and must fully fold. They are not entries, config files, standalone HTML files, or general source handlers. The active builder declares the source-backed packages that provide implicit template scope, and only modules whose semantic source set contains [$html:<code>.mtf</code>] files receive those provider interfaces. Same-directory constants and builder constants share one visible-name registry, so collisions report both source locations instead of applying precedence.]
         ]
 
         [data:
@@ -230,7 +230,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, and diagnostics coverage.]
             [: JS / HTML]
-            [: Literal patterns, choice variants, payload extraction, relational patterns, guards, and [$html:<code>else =&gt;</code>] arms are supported. Wildcard patterns and no-op body placeholders are rejected. Full relational overlap analysis and nested choice payload patterns remain deferred. Implementation gap: the current compiler still accepts some removed general bare-name capture forms and [$html:<code>String</code>] relational pattern subjects. Accepted design removes general capture from full-match positions and limits relational patterns to [$html:<code>Int</code>], [$html:<code>Float</code>] and [$html:<code>Char</code>]. Stage B of the docs language migration plan removes the obsolete parser and analysis paths.]
+            [: Literal patterns, choice variants, payload extraction, relational patterns, guards, and [$html:<code>else =&gt;</code>] arms are supported. General bare-name capture has been removed from full-match positions, and [$html:<code>String</code>] relational subjects are rejected. Option [$html:<code>|name|</code>] and declared choice payload captures remain valid. Full relational overlap analysis and nested choice payload patterns remain deferred. Relational subjects are limited to [$html:<code>Int</code>], [$html:<code>Float</code>] and [$html:<code>Char</code>].]
         ]
 
         [data:
@@ -246,7 +246,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Broad frontend, HIR, borrow, JS, backend-validation, diagnostics, and integration coverage.]
             [: JS / HTML / backend validation for other targets]
-            [: V1 supports insertion-ordered scalar-keyed maps with [$html:<code>{K = V}</code>] types, map literals, compiler-owned map members, HIR map operations, borrow validation, and JS runtime lowering. Unsupported key families, const maps, equality, language hashsets, and non-JS lowering details remain deferred or outside scope. Implementation gap: the current compiler may apply value-shape checks that create hidden equality or map-key rules based on string construction origin. Accepted design requires uniform content equality and hashing for every runtime [$html:<code>String</code>]. Stage B of the docs language migration plan removes the value-shape checks.]
+            [: V1 supports insertion-ordered scalar-keyed maps with [$html:<code>{K = V}</code>] types, map literals, compiler-owned map members, HIR map operations, borrow validation, and JS runtime lowering. HTML-JS normalizes every String-like key to canonical content, including template-backed keys. Unsupported key families, const maps, equality, language hashsets, and non-JS lowering details remain deferred or outside scope.]
         ]
 
         [data:
@@ -310,7 +310,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Broad quoted-escape, string-content coercion and IO/template rejection coverage, plus targeted external [$html:<code>StringContent</code>] signature coverage.]
             [: Frontend / JS]
-            [: Quoted strings decode only [$html:<code>\\</code>], [$html:<code>\"</code>], [$html:<code>\n</code>], [$html:<code>\r</code>] and [$html:<code>\t</code>]. Invalid escapes are rejected by the tokenizer. Template heads and reusable external string-content signatures accept supported string values. Console helpers such as [$html:<code>io.line(...)</code>] use the same boundary, so complex values must be extracted or interpolated into templates before output. Implementation gap: the current compiler still accepts source [$html:<code>String + String</code>] and compile-time string-add folding. Accepted design rejects source string concatenation with [$html:<code>+</code>]; templates remain the canonical concatenation form. Stage B of the docs language migration plan removes the obsolete typing and folding paths.]
+            [: Quoted strings decode only [$html:<code>\\</code>], [$html:<code>\"</code>], [$html:<code>\n</code>], [$html:<code>\r</code>] and [$html:<code>\t</code>]. Invalid escapes are rejected by the tokenizer. Template heads and reusable external string-content signatures accept supported string values. Console helpers such as [$html:<code>io.line(...)</code>] use the same boundary, so complex values must be extracted or interpolated into templates before output. AST rejects source [$html:<code>String + String</code>] and no longer folds compile-time string addition. Runtime equality compares String content across construction origins; HTML-JS normalizes String-like map keys and HTML-Wasm compares finalized string bytes. Accepted design rejects source string concatenation with [$html:<code>+</code>]; templates remain the canonical concatenation form.]
         ]
 
         [data:
@@ -427,10 +427,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 
         [data:
             [: Core math package]
-            [: Supported]
-            [: Targeted direct, grouped, aliased, namespace, const, arity, type, missing-symbol, and non-imported access coverage.]
-            [: JS / HTML]
-            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It is explicit-import only. Non-JS support is backend-specific and tracked under experimental surfaces. Implementation gap: the current HTML-JS lowering does not enforce the checked numeric contract for non-finite results from math functions. Accepted design requires non-finite results to be rejected. Stage B or a dedicated numeric plan must add the missing boundary checks.]
+            [: Partial]
+            [: Targeted direct, grouped, aliased, namespace, const, arity, type, missing-symbol, non-imported access, finite-result boundary, and HTML-Wasm unsupported-path coverage.]
+            [: JS / HTML-Wasm validation]
+            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It is explicit-import only. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. HTML-Wasm has no lowering for this package.]
         ]
 
         [data:
@@ -438,7 +438,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Targeted runtime, JS helper, arity, type-error, edge-case, unsupported-builder, and Wasm-unsupported coverage.]
             [: JS / HTML]
-            [: [$html:<code>@core/text</code>] exposes string helpers such as length, emptiness, containment, prefix, and suffix checks. Receiver-method forms and non-JS lowerings remain deferred. Implementation gap: the language-level contract defines text.length as counting Unicode scalar values, consistent with Char. The current HTML-JS lowering uses JavaScript UTF-16 code-unit length. Strings containing characters outside the Basic Multilingual Plane report a higher count than the language-level value. Stage B or a dedicated plan must correct the lowering.]
+            [: [$html:<code>@core/text</code>] exposes string helpers such as length, emptiness, containment, prefix, and suffix checks. HTML-JS [$html:<code>text.length</code>] counts Unicode scalar values with the same unit as [$html:<code>Char</code>]. Receiver-method forms and HTML-Wasm lowerings remain deferred.]
         ]
 
         [data:

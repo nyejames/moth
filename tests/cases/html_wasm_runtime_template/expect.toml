@@ -3,6 +3,7 @@ entry = "."
 [backends.html_wasm]
 mode = "success"
 warnings = "forbid"
+rendered_output_contains = ["runtime template", "same=true", "different=true"]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "page.wasm"

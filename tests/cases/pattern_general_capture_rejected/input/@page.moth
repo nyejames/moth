@@ -1,0 +1,8 @@
+-- A bare identifier is not a general match capture. Use else => for a catch-all.
+
+value ~= 5
+
+if value is:
+    captured => [:unreachable]
+    else => [:fallback]
+;

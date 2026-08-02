@@ -514,6 +514,7 @@ impl CompletedSourcePackage {
 fn build_source_provider_imports<'a>(
     consumer_module_id: ModuleId,
     prepared: &PreparedModule,
+    builder_surface: &BuilderSurface,
     provider_bindings: &[ResolvedDependencyEdge],
     provider_store: &'a ModuleProviderStore,
     source_package_imports: &[ResolvedSourcePackageImport],
@@ -552,6 +553,7 @@ fn build_source_provider_imports<'a>(
                         &prepared.string_table,
                     ),
                     from_grouped: import.from_grouped,
+                    implicit_template_scope: false,
                     interface,
                 });
                 continue;
@@ -582,44 +584,46 @@ fn build_source_provider_imports<'a>(
                 importer_source: owned_path_components(importer_source, &prepared.string_table),
                 imported_path: owned_path_components(&import.provider.path, &prepared.string_table),
                 from_grouped: import.from_grouped,
+                implicit_template_scope: false,
                 interface: completed_package.interface()?,
             });
         }
     }
 
-    // Builder source-backed packages such as @html are implicitly available to Moth template
-    // files. Ensure their completed interfaces are in the provider set even when the consumer
-    // module does not import them directly, so the implicit template scope can collect their
-    // constant exports.
-    //
-    // Only packages declared as implicit-scope candidates are injected. The current set is
-    // limited to `@html` because the `.mtf` implicit scope is the only consumer. Other
-    // completed source packages stay out of the provider set unless explicitly imported.
-    let explicit_prefixes: rustc_hash::FxHashSet<String> = imports
-        .iter()
-        .filter_map(|import| import.imported_path.first().cloned())
-        .collect();
+    // Builder source-backed packages are implicitly available only to modules that actually
+    // contain a `.mtf` semantic source. The package capability is supplied by the active
+    // builder surface; generic orchestration must not infer it from a package-name list.
+    let contains_moth_template = prepared.source_files.iter().any(|source_file| {
+        source_file
+            .canonical_os_path
+            .extension()
+            .and_then(OsStr::to_str)
+            .and_then(SourceFileKind::from_extension)
+            == Some(SourceFileKind::MothTemplate)
+    });
 
-    const IMPLICIT_TEMPLATE_SCOPE_PREFIXES: &[&str] = &["html"];
-
-    let implicit_provider_imports: Vec<SourceProviderImport<'a>> = completed_source_packages
-        .iter()
-        .filter(|package| !explicit_prefixes.contains(&package.import_prefix))
-        .filter(|package| {
-            IMPLICIT_TEMPLATE_SCOPE_PREFIXES.contains(&package.import_prefix.as_str())
-        })
-        .map(|package| {
-            let interface = package.interface()?;
-            Ok(SourceProviderImport {
-                importer_source: Vec::new(),
-                imported_path: vec![package.import_prefix.clone()],
-                from_grouped: false,
-                interface,
+    if contains_moth_template {
+        let implicit_provider_imports: Vec<SourceProviderImport<'a>> = completed_source_packages
+            .iter()
+            .filter(|package| {
+                builder_surface
+                    .implicit_template_scope_source_packages
+                    .contains(&package.import_prefix)
             })
-        })
-        .collect::<Result<_, CompilerError>>()?;
+            .map(|package| {
+                let interface = package.interface()?;
+                Ok(SourceProviderImport {
+                    importer_source: Vec::new(),
+                    imported_path: vec![package.import_prefix.clone()],
+                    from_grouped: false,
+                    implicit_template_scope: true,
+                    interface,
+                })
+            })
+            .collect::<Result<_, CompilerError>>()?;
 
-    imports.extend(implicit_provider_imports);
+        imports.extend(implicit_provider_imports);
+    }
 
     Ok(SourceProviderImportSet::new(imports))
 }
@@ -692,6 +696,7 @@ impl DirectoryModuleCompileContext<'_> {
         let source_provider_imports = match build_source_provider_imports(
             module_id,
             &prepared,
+            self.builder_surface,
             self.provider_bindings,
             self.provider_store,
             self.source_package_imports,

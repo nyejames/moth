@@ -1,8 +1,9 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
+rendered_output_contains = ["String equality: true true"]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["console.log", "__moth_read"]
+must_contain = ["console.log", "__moth_read", "function __moth_string_equal("]

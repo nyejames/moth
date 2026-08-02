@@ -205,53 +205,25 @@ fn parse_match_pattern_header(
             .cloned()
             .unwrap_or_else(|| match_context.scope.clone());
 
-        // If the lead token is a bare symbol that is not a known variant name
-        // and is not introducing a qualified variant pattern, treat it as a
-        // general capture pattern that binds the whole choice value.
-        let maybe_capture = if let TokenKind::Symbol(name) = token_stream.current_token_kind() {
-            let name = *name;
-            let is_qualified = token_stream
-                .tokens
-                .get(token_stream.index + 1)
-                .is_some_and(|token| token.kind == TokenKind::DoubleColon);
-            if !is_qualified && !variants.iter().any(|variant| variant.id == name) {
-                Some((name, token_stream.current_location()))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        if let Some((capture_name, capture_location)) = maybe_capture {
-            token_stream.advance();
-            let (arm_scope, pattern) = build_arm_scope_with_capture(
-                match_context,
-                capture_name,
-                &capture_location,
-                scrutinee.type_id,
-                type_interner,
-                string_table,
-            )?;
-            (pattern, None, capture_location.clone(), arm_scope)
-        } else {
-            let parsed = parse_choice_variant_pattern(
-                token_stream,
-                match_context,
-                &nominal_path,
-                &variants,
-                string_table,
-            )?;
-            let matched_choice_variant = Some(parsed.variant);
-            let pattern_location = parsed.location.clone();
-            let (arm_scope, pattern) = build_arm_scope_with_choice_captures(
-                match_context,
-                parsed,
-                type_environment,
-                string_table,
-            )?;
-            (pattern, matched_choice_variant, pattern_location, arm_scope)
-        }
+        // Every bare symbol is resolved as a declared choice variant. Unknown
+        // names receive the direct UnknownVariant diagnostic; no whole-value
+        // capture syntax exists in full matches.
+        let parsed = parse_choice_variant_pattern(
+            token_stream,
+            match_context,
+            &nominal_path,
+            &variants,
+            string_table,
+        )?;
+        let matched_choice_variant = Some(parsed.variant);
+        let pattern_location = parsed.location.clone();
+        let (arm_scope, pattern) = build_arm_scope_with_choice_captures(
+            match_context,
+            parsed,
+            type_environment,
+            string_table,
+        )?;
+        (pattern, matched_choice_variant, pattern_location, arm_scope)
     } else {
         let option_inner_type_id = type_environment.option_inner_type(scrutinee.type_id);
         if let Some(inner_type_id) = option_inner_type_id {
@@ -295,21 +267,6 @@ fn parse_match_pattern_header(
             };
 
             (pattern, None, location, arm_scope)
-        } else if let TokenKind::Symbol(name) = token_stream.current_token_kind()
-            && !option_pattern_constructor_like(token_stream)
-        {
-            let name = *name;
-            let location = token_stream.current_location();
-            token_stream.advance();
-            let (arm_scope, pattern) = build_arm_scope_with_capture(
-                match_context,
-                name,
-                &location,
-                scrutinee.type_id,
-                type_interner,
-                string_table,
-            )?;
-            (pattern, None, location.clone(), arm_scope)
         } else {
             let pattern = parse_non_choice_pattern(
                 token_stream,
@@ -443,60 +400,6 @@ fn build_arm_scope_with_choice_captures(
             location: parsed_pattern.location,
         },
     ))
-}
-
-/// Build a capture arm scope and pattern with a resolved binding path.
-///
-/// WHAT: clones the parent match context and adds a `Declaration` entry for the
-/// general capture binding so the arm guard and body can reference the scrutinee value.
-/// WHY: capture patterns must be scoped to a single arm and participate in normal
-/// no-shadowing rules.
-///
-/// Validates:
-/// - No capture name shadows an existing visible local (Moth no-shadowing rule).
-fn build_arm_scope_with_capture(
-    match_context: &ScopeContext,
-    capture_name: StringId,
-    capture_location: &SourceLocation,
-    capture_type_id: TypeId,
-    type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
-    let mut arm_scope = match_context.clone();
-
-    if let Some(_existing) = arm_scope.get_reference(&capture_name) {
-        return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
-            InvalidMatchPatternReason::CaptureBindingShadowsVariable,
-            None,
-            None,
-            capture_location.clone(),
-        )));
-    }
-
-    let binding_name_str = string_table.resolve(capture_name).to_owned();
-    let binding_path = arm_scope.scope.join_str(&binding_name_str, string_table);
-
-    let capture_data_type = diagnostic_type_spelling(capture_type_id, type_interner.environment());
-    let declaration = Declaration {
-        id: binding_path.clone(),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            capture_location.clone(),
-            capture_type_id,
-            capture_data_type,
-            ValueMode::ImmutableOwned,
-        ),
-    };
-
-    let binding_location = declaration.value.location.clone();
-    arm_scope.add_var(declaration, binding_location);
-
-    let pattern = MatchPattern::Capture {
-        binding_path,
-        location: capture_location.clone(),
-    };
-
-    Ok((arm_scope, pattern))
 }
 
 /// Fetch choice variants for a type, converting environment definitions into

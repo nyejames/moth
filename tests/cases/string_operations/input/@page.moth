@@ -1,14 +1,22 @@
 -- Test string operations in JavaScript backend
--- Validates string literals, concatenation, and escaping
+-- Validates string literals, template interpolation, equality, and escaping
 
 -- Test basic strings
 str1 = "Hello"
 str2 = "World"
-io.line([: [str1 + " " + str2]])
+io.line([: [str1] [str2]])
 
--- Test string concatenation
-greeting = "Hello, " + "World!"
+-- Test template concatenation
+greeting = [:Hello, World!]
 io.line([: [greeting]])
+
+make_same |suffix String| -> String:
+    return [:same[suffix]]
+;
+
+quoted_equals_template = "samex" is make_same("x")
+quoted_differs_from_template = "samex" is not make_same("y")
+io.line([: String equality: [quoted_equals_template] [quoted_differs_from_template]])
 
 -- Test strings with special characters
 newline = "Line 1\nLine 2"
@@ -22,7 +30,7 @@ io.line([: [quote]])
 
 -- Test empty string
 empty = ""
-io.line("Empty string: '" + empty + "'")
+io.line([:Empty string: '[empty]'])
 
 -- Test character literals
 ch1 = 'a'

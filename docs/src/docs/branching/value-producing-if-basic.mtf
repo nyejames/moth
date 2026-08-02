@@ -27,5 +27,4 @@ Use block form when a branch needs more room:
 Both branches must provide the value or leave the function in another valid
 way.
 
-The current compiler has a known issue with block value-producing `if` that
-uses `then`; use the inline form for now.
+The block form with `then` supplies the value to the surrounding assignment.

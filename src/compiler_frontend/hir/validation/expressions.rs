@@ -94,11 +94,6 @@ impl<'a> HirValidator<'a> {
                 }
             }
 
-            HirPattern::Capture => {
-                // Capture patterns have no extra invariants beyond the
-                // registration performed during lowering.
-            }
-
             HirPattern::OptionPresent => {
                 // Present-capture patterns have no embedded expression to validate.
             }
@@ -108,7 +103,7 @@ impl<'a> HirValidator<'a> {
     }
 
     /// WHAT: checks that a relational pattern's inner expression is a literal
-    ///       (int, float, char, or string).
+    ///       (int, float, or char).
     /// WHY: relational patterns compare against compile-time constant values;
     ///      only these literal kinds are valid comparison targets.
     pub(super) fn validate_relational_pattern_expression(
@@ -118,15 +113,11 @@ impl<'a> HirValidator<'a> {
     ) -> Result<(), CompilerError> {
         if !matches!(
             expression.kind,
-            HirExpressionKind::Int(_)
-                | HirExpressionKind::Float(_)
-                | HirExpressionKind::Char(_)
-                | HirExpressionKind::StringLiteral(_)
+            HirExpressionKind::Int(_) | HirExpressionKind::Float(_) | HirExpressionKind::Char(_)
         ) {
-            return Err(self.error_with_hir(
-                "Match relational pattern must be int/float/char/string",
-                anchor,
-            ));
+            return Err(
+                self.error_with_hir("Match relational pattern must be int/float/char", anchor)
+            );
         }
 
         Ok(())
@@ -380,12 +371,8 @@ impl<'a> HirValidator<'a> {
             }
 
             HirExpressionKind::BinOp { op, left, right } => {
-                // String concatenation uses plain BinOp; all other arithmetic must go through
-                // the checked NumericOp path.
-                let string_type = self.type_environment.builtins().string;
-                let is_string_concat =
-                    *op == HirBinOp::Add && (left.ty == string_type || right.ty == string_type);
-                if self.is_arithmetic_binop(*op) && !is_string_concat {
+                // All arithmetic must go through the checked NumericOp path.
+                if self.is_arithmetic_binop(*op) {
                     return Err(self.error_with_hir(
                         format!(
                             "Plain HirBinOp::{op:?} arithmetic must be lowered through HirStatementKind::NumericOp"
@@ -393,6 +380,17 @@ impl<'a> HirValidator<'a> {
                         anchor,
                     ));
                 }
+
+                if *op == HirBinOp::StringAppend {
+                    let string_type = self.type_environment.builtins().string;
+                    if expression.ty != string_type || left.ty != string_type {
+                        return Err(self.error_with_hir(
+                            "HirBinOp::StringAppend must produce a String from a String accumulator",
+                            anchor,
+                        ));
+                    }
+                }
+
                 self.validate_expression(left, anchor)?;
                 self.validate_expression(right, anchor)?;
             }

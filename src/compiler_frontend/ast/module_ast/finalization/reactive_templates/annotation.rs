@@ -1154,7 +1154,6 @@ fn annotate_match_pattern(
 
         MatchPattern::ChoiceVariant { .. }
         | MatchPattern::OptionNone { .. }
-        | MatchPattern::Capture { .. }
         | MatchPattern::OptionPresentCapture { .. } => {}
     }
 

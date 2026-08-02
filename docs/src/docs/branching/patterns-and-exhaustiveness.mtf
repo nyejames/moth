@@ -84,13 +84,11 @@ other full-match pattern positions is invalid syntax.
     ;
 ]
 
-### Implementation gap
-
-The accepted language removes general bare-name capture from every full-match
-position and removes `String` from relational pattern subjects. The current
-compiler still accepts some of these removed forms. Stage B of the language
-documentation plan removes the obsolete parser and analysis paths. See
-@../progress (Progress) for the recorded drift.
+General bare-name capture has been removed from full-match positions, and
+`String` is not a relational pattern subject. Relational patterns remain
+available for `Int`, `Float` and `Char`; option `|name|` and declared choice
+payload captures remain the explicit capture forms. See @../progress (Progress)
+for current backend and coverage status.
 
 ### Choice payload capture contract
 

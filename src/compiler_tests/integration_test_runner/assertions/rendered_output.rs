@@ -42,6 +42,134 @@ pub(super) fn validate_rendered_output(
     validate_rendered_output_fragments(&rendered.combined_output(), expectation)
 }
 
+/// Executes the generated HTML-Wasm bootstrap and validates its hydrated slot output.
+///
+/// WHAT: runs the emitted `page.js` against its sibling `page.wasm` in Node with a small DOM and
+///       fetch adapter, then applies the same rendered-output assertions as HTML mode.
+/// WHY: HTML-Wasm backend tests must observe runtime semantics such as content-based String
+///       equality; Wasm validity and lowering-shape assertions alone cannot prove that behavior.
+pub(super) fn validate_wasm_rendered_output(
+    build_result: &BuildResult,
+    expectation: &RenderedOutputExpectation,
+) -> Option<(String, FailureKind)> {
+    let Some(page_js_file) = super::artifacts::find_output_file(build_result, "page.js") else {
+        return Some((
+            "rendered_output assertion for HTML-Wasm requires 'page.js', but it was not produced."
+                .to_string(),
+            FailureKind::HarnessFailed,
+        ));
+    };
+    let Some(page_js) = super::artifacts::output_text_content(page_js_file, ArtifactKind::Js)
+    else {
+        return Some((
+            "rendered_output assertion for HTML-Wasm requires 'page.js' as a JS artifact."
+                .to_string(),
+            FailureKind::HarnessFailed,
+        ));
+    };
+
+    let Some(page_wasm_file) = super::artifacts::find_output_file(build_result, "page.wasm") else {
+        return Some((
+            "rendered_output assertion for HTML-Wasm requires 'page.wasm', but it was not produced."
+                .to_string(),
+            FailureKind::HarnessFailed,
+        ));
+    };
+    let Some(page_wasm) = super::artifacts::output_wasm_bytes(page_wasm_file) else {
+        return Some((
+            "rendered_output assertion for HTML-Wasm requires 'page.wasm' as a Wasm artifact."
+                .to_string(),
+            FailureKind::HarnessFailed,
+        ));
+    };
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let sequence = RENDER_HARNESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "moth_wasm_render_harness_{}_{}_{}",
+        std::process::id(),
+        unique,
+        sequence
+    ));
+
+    if let Err(error) = std::fs::create_dir(&temp_dir) {
+        return Some((
+            format!("rendered_output: failed to create HTML-Wasm harness directory: {error}"),
+            FailureKind::HarnessFailed,
+        ));
+    }
+
+    let page_js_path = temp_dir.join("page.js");
+    let page_wasm_path = temp_dir.join("page.wasm");
+    let write_result = std::fs::write(&page_js_path, page_js)
+        .and_then(|()| std::fs::write(&page_wasm_path, page_wasm));
+    if let Err(error) = write_result {
+        let _ = std::fs::remove_file(&page_js_path);
+        let _ = std::fs::remove_file(&page_wasm_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+        return Some((
+            format!("rendered_output: failed to write HTML-Wasm harness artifacts: {error}"),
+            FailureKind::HarnessFailed,
+        ));
+    }
+
+    let result = execute_node_wasm_harness(&temp_dir);
+
+    let _ = std::fs::remove_file(&page_js_path);
+    let _ = std::fs::remove_file(&page_wasm_path);
+    let _ = std::fs::remove_dir(&temp_dir);
+
+    let rendered = match result {
+        Ok(output) => output,
+        Err(reason) => return Some((reason, FailureKind::HarnessFailed)),
+    };
+
+    validate_rendered_output_fragments(&rendered.combined_output(), expectation)
+}
+
+fn execute_node_wasm_harness(temp_dir: &Path) -> Result<RenderedOutput, String> {
+    let temp_dir_literal =
+        serde_json::to_string(temp_dir.to_string_lossy().as_ref()).map_err(|error| {
+            format!("rendered_output: failed to encode HTML-Wasm harness path: {error}")
+        })?;
+    let harness = build_node_wasm_harness(&temp_dir_literal);
+    let harness_path = temp_dir.join("harness.js");
+    let result = std::fs::write(&harness_path, harness)
+        .map_err(|error| format!("rendered_output: failed to write Node harness: {error}"))
+        .and_then(|()| {
+            let output = std::process::Command::new("node")
+                .arg(&harness_path)
+                .output()
+                .map_err(|error| {
+                    format!(
+                        "rendered_output: failed to invoke Node for HTML-Wasm output: {error}. \
+                         Ensure 'node' is on PATH to use rendered-output assertions."
+                    )
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!(
+                    "rendered_output: HTML-Wasm Node harness failed:\n{stderr}"
+                ));
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            parse_harness_output(stdout.trim())
+        });
+
+    let _ = std::fs::remove_file(&harness_path);
+    result
+}
+
+#[cfg(test)]
+pub(crate) fn execute_wasm_harness_for_test(temp_dir: &Path) -> Result<RenderedOutput, String> {
+    execute_node_wasm_harness(temp_dir)
+}
+
 /// Validates rendered fragments independently of harness execution.
 ///
 /// WHAT: checks required and forbidden fragments against precomputed rendered output.
@@ -293,6 +421,60 @@ Promise.resolve().then(() => {
 "#;
 
     format!("{prefix}{}\n{suffix}", scripts.join("\n"))
+}
+
+fn build_node_wasm_harness(temp_dir_literal: &str) -> String {
+    format!(
+        r#"const fs = require("fs");
+const path = require("path");
+const __moth_wasm_dir = {temp_dir_literal};
+const __moth_events = [];
+const __moth_slot_by_id = new Map();
+
+console.log = (...args) => __moth_events.push({{ type: 'console', text: args.map(String).join(' ') }});
+function __moth_get_slot(id) {{
+    if (!__moth_slot_by_id.has(id)) {{
+        const slot = {{
+            id,
+            innerHTML: "",
+            textContent: "",
+            insertAdjacentHTML: (_, html) => {{
+                const text = String(html);
+                slot.innerHTML += text;
+                __moth_events.push({{ type: 'fragment_insert', id: String(id), html: text }});
+            }}
+        }};
+        __moth_slot_by_id.set(id, slot);
+    }}
+    return __moth_slot_by_id.get(id);
+}}
+
+globalThis.document = {{
+    getElementById: __moth_get_slot,
+    createTextNode: (text) => ({{ textContent: String(text) }})
+}};
+globalThis.fetch = async (url) => {{
+    const relative_path = String(url).replace(/^\.\//, "");
+    const bytes = fs.readFileSync(path.join(__moth_wasm_dir, relative_path));
+    return {{
+        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    }};
+}};
+
+(async () => {{
+    try {{
+        const page_js = fs.readFileSync(path.join(__moth_wasm_dir, "page.js"), "utf8");
+        const page_completion = (0, eval)(page_js);
+        await page_completion;
+        await Promise.resolve();
+        process.stdout.write(JSON.stringify({{ events: __moth_events }}) + '\n');
+    }} catch (error) {{
+        console.error(error);
+        process.exitCode = 1;
+    }}
+}})();
+"#
+    )
 }
 
 /// Extracts the text content between `<script>` and `</script>` tag pairs.

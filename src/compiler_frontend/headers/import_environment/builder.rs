@@ -24,7 +24,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 use super::{
     ExternalPackageSymbolLookup, ExternalPackageSymbolResolutionInput, FileVisibility,
@@ -339,7 +339,11 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         // 8. Add Moth template's compiler-integrated implicit constant scope.
         // WHY: `.mtf` bodies are synthetic constant initializers, so they need the same
         // file-local visibility maps as authored constants without a user-visible import record.
-        self.register_implicit_moth_template_constant_scope(&mut file_visibility, source_file);
+        self.register_implicit_moth_template_constant_scope(
+            &mut file_visibility,
+            &mut registry,
+            source_file,
+        )?;
 
         // Sort receiver method paths for deterministic lookup ordering.
         // WHY: same method name from different sources must resolve consistently
@@ -697,24 +701,33 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     fn register_implicit_moth_template_constant_scope(
         &mut self,
         file_visibility: &mut FileVisibility,
+        registry: &mut VisibleNameRegistry,
         source_file: &InternedPath,
-    ) {
+    ) -> BuilderResult<()> {
         if !self.is_moth_template_source_file(source_file) {
-            return;
+            return Ok(());
         }
 
-        let mut implicit_constants = FxHashMap::default();
-        self.remove_moth_template_generated_self_constants(file_visibility, source_file);
+        self.remove_moth_template_generated_self_constants(file_visibility, registry, source_file);
 
-        // Layer 1: exported constants from the HTML source-backed package public surface.
-        self.collect_html_public_export_constants(&mut implicit_constants);
+        let mut implicit_constants = Vec::new();
 
-        // Layer 2: exported constants from the exact same-directory module public surface. Later
-        // inserts intentionally replace HTML names so local public-surface constants win on
-        // collisions.
+        // Layer 1: exported constants from every builder-declared source-backed package surface.
+        self.collect_implicit_template_scope_constants(&mut implicit_constants);
+
+        // Layer 2: exported constants from the exact same-directory module public surface. Both
+        // layers pass through the same visible-name registry, so equal spellings are diagnosed
+        // rather than resolved by source-order precedence.
         self.collect_same_directory_public_export_constants(source_file, &mut implicit_constants);
 
-        for (name, path) in implicit_constants {
+        for (name, path, location) in implicit_constants {
+            registry.register(
+                name,
+                VisibleNameBinding::SourceImport {
+                    canonical_path: path.clone(),
+                },
+                Some(location),
+            )?;
             file_visibility
                 .visible_declaration_paths
                 .insert(path.clone());
@@ -722,11 +735,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 .visible_source_names
                 .insert(name, SourceDeclarationTarget::Local(path));
         }
+
+        Ok(())
     }
 
     fn remove_moth_template_generated_self_constants(
         &self,
         file_visibility: &mut FileVisibility,
+        registry: &mut VisibleNameRegistry,
         source_file: &InternedPath,
     ) {
         let Some((content_name, content_path)) = file_visibility
@@ -758,6 +774,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         file_visibility
             .visible_declaration_paths
             .remove(&content_path);
+        registry.remove_same_file_declaration(content_name, &content_path);
         if file_visibility
             .visible_source_names
             .get(&content_name)
@@ -767,79 +784,89 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         }
     }
 
-    fn collect_html_public_export_constants(
+    fn collect_implicit_template_scope_constants(
         &mut self,
-        implicit_constants: &mut FxHashMap<StringId, InternedPath>,
+        implicit_constants: &mut Vec<(StringId, InternedPath, SourceLocation)>,
     ) {
-        // When the @html source package root file headers are in the current module (test
-        // fixtures), the header-built source_package_public_exports map contains the entries.
-        // In production the map key exists with zero entries because the @html headers belong
-        // to a separate compiled module, so fall through to the provider interface path.
-        if let Some(entries) = self
-            .module_symbols
-            .source_package_public_exports
-            .get("html")
-            .filter(|entries| !entries.is_empty())
-        {
-            self.collect_constant_exports(entries, implicit_constants, None);
-            return;
-        }
+        let providers: Vec<_> = self
+            .source_provider_imports
+            .implicit_template_scope_interfaces()
+            .collect();
 
-        // In production, the @html source package is a separate compiled module. Its completed
-        // PublicSemanticInterface is available through the source provider import set. Collect
-        // constant declarations directly from the interface, since the header-built map is empty.
-        let Some(interface) = self.source_provider_imports.interface_for_prefix("html") else {
-            return;
-        };
-
-        for binding in &interface.export_bindings {
-            let Some(declaration) = interface.declaration(binding.origin()) else {
-                continue;
-            };
-
-            if !matches!(
-                declaration.semantics,
-                PublicDeclarationSemantics::Constant(_)
-            ) {
+        for (prefix, interface) in providers {
+            // When a source-package root is prepared in the current module (test fixtures), the
+            // header-built public-export map contains the entries. Production packages expose
+            // the same surface through a completed provider interface.
+            if let Some(entries) = self
+                .module_symbols
+                .source_package_public_exports
+                .get(prefix)
+                .filter(|entries| !entries.is_empty())
+            {
+                self.collect_constant_exports(entries, implicit_constants, None);
                 continue;
             }
 
-            let name_id = self.string_table.intern(binding.public_name());
+            for binding in &interface.export_bindings {
+                let Some(declaration) = interface.declaration(binding.origin()) else {
+                    continue;
+                };
 
-            // The synthetic path serves as the consumer-local identity for this cross-module
-            // constant. Register the declaration record so the constant dependency checker
-            // classifies it as an imported constant rather than a non-constant source reference.
-            let synthetic_path = InternedPath::from_components(vec![name_id]);
-            self.environment
-                .imported_declarations_by_local_path
-                .entry(synthetic_path.clone())
-                .or_insert_with(|| declaration.clone());
-            implicit_constants.insert(name_id, synthetic_path);
+                if !matches!(
+                    declaration.semantics,
+                    PublicDeclarationSemantics::Constant(_)
+                ) {
+                    continue;
+                }
+
+                let name_id = self.string_table.intern(binding.public_name());
+
+                // The synthetic path serves as the consumer-local identity for this
+                // cross-module constant. Include the provider prefix so each selected source
+                // package retains a distinct identity in collision diagnostics.
+                let package_name = self.string_table.intern(prefix);
+                let synthetic_path = InternedPath::from_components(vec![package_name, name_id]);
+                self.environment
+                    .imported_declarations_by_local_path
+                    .entry(synthetic_path.clone())
+                    .or_insert_with(|| declaration.clone());
+                let location = SourceLocation {
+                    scope: InternedPath::from_single_str(&format!("@{prefix}"), self.string_table),
+                    ..SourceLocation::default()
+                };
+                implicit_constants.push((name_id, synthetic_path, location));
+            }
         }
     }
 
     fn collect_same_directory_public_export_constants(
-        &self,
+        &mut self,
         source_file: &InternedPath,
-        implicit_constants: &mut FxHashMap<StringId, InternedPath>,
+        implicit_constants: &mut Vec<(StringId, InternedPath, SourceLocation)>,
     ) {
         let Some(root_file) = self.same_directory_root_file(source_file) else {
             return;
         };
 
-        if let Some(entries) = self.source_package_public_exports_for_file(&root_file) {
-            self.collect_constant_exports(entries, implicit_constants, Some(source_file));
+        if let Some(entries) = self
+            .source_package_public_exports_for_file(&root_file)
+            .cloned()
+        {
+            self.collect_constant_exports(&entries, implicit_constants, Some(source_file));
         }
 
-        if let Some(entries) = self.module_root_public_exports_for_file(&root_file) {
-            self.collect_constant_exports(entries, implicit_constants, Some(source_file));
+        if let Some(entries) = self
+            .module_root_public_exports_for_file(&root_file)
+            .cloned()
+        {
+            self.collect_constant_exports(&entries, implicit_constants, Some(source_file));
         }
     }
 
     fn collect_constant_exports(
-        &self,
+        &mut self,
         entries: &FxHashSet<PublicExportEntry>,
-        implicit_constants: &mut FxHashMap<StringId, InternedPath>,
+        implicit_constants: &mut Vec<(StringId, InternedPath, SourceLocation)>,
         excluded_source_file: Option<&InternedPath>,
     ) {
         for entry in entries {
@@ -857,7 +884,34 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 continue;
             }
 
-            implicit_constants.insert(entry.export_name, path.clone());
+            let location = self.source_location_for_symbol(path);
+            implicit_constants.push((entry.export_name, path.clone(), location));
+        }
+    }
+
+    fn source_location_for_symbol(&mut self, symbol_path: &InternedPath) -> SourceLocation {
+        if let Some(source_file) = self
+            .module_symbols
+            .canonical_source_by_symbol_path
+            .get(symbol_path)
+        {
+            if let Some(canonical_path) = self
+                .module_symbols
+                .canonical_os_path_by_source
+                .get(source_file)
+            {
+                return SourceLocation::from_path(canonical_path, self.string_table);
+            }
+
+            return SourceLocation {
+                scope: source_file.clone(),
+                ..SourceLocation::default()
+            };
+        }
+
+        SourceLocation {
+            scope: symbol_path.clone(),
+            ..SourceLocation::default()
         }
     }
 

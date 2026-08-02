@@ -51,8 +51,7 @@ choice type is rejected.
 
 Payload matching remains available regardless of equality support.
 
-The current compiler does not fully implement option payload equality inside
-choices. Choice variants that carry option payloads may not participate in
-automatic equality even when the inner type supports it. Stage B closes this
-gap. See @../progress (progress matrix) for the current implementation
-status.
+Option payloads participate in choice equality when their inner type supports
+equality. The rule recurses through the option payload instead of treating the
+option as an unsupported constructed type. This applies to both `some` and
+`none` values inside an equality-safe choice payload.

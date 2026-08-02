@@ -38,7 +38,7 @@ impl<'hir> JsEmitter<'hir> {
                 em.with_indent(|inner| {
                     inner.emit_line("if (Array.isArray(entry) && entry.length === 2) {");
                     inner.with_indent(|deepest| {
-                        deepest.emit_line("map.set(entry[0], entry[1]);");
+                        deepest.emit_line("map.set(__moth_map_key(entry[0]), entry[1]);");
                     });
                     inner.emit_line("}");
                 });
@@ -70,6 +70,7 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             });
             emitter.emit_line("}");
+            emitter.emit_line("key = __moth_map_key(key);");
             emitter.emit_line("if (!map.map.has(key)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
@@ -85,7 +86,7 @@ impl<'hir> JsEmitter<'hir> {
         // Infallible helpers do not validate the receiver or return error carriers.
         self.emit_line("function __moth_map_contains(map, key) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("return map.map.has(key);");
+            emitter.emit_line("return map.map.has(__moth_map_key(key));");
         });
         self.emit_line("}");
         self.emit_line("");
@@ -100,7 +101,7 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line("map.map.set(key, value);");
+            emitter.emit_line("map.map.set(__moth_map_key(key), value);");
             emitter.emit_line("return { tag: \"ok\", value: null };");
         });
         self.emit_line("}");
@@ -116,6 +117,7 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             });
             emitter.emit_line("}");
+            emitter.emit_line("key = __moth_map_key(key);");
             emitter.emit_line("if (!map.map.has(key)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(

@@ -1,4 +1,4 @@
-Moth template files are intentionally small. These are the confirmed restrictions and implementation gaps.
+Moth template files are intentionally small. These are the confirmed restrictions and deferred surfaces.
 
 ### Confirmed restrictions
 
@@ -8,7 +8,6 @@ Moth template files are intentionally small. These are the confirmed restriction
 - **No fenced code blocks**: triple-backtick blocks are literal text in `$md`, not `<pre><code>`. Use `codeblock` helpers instead.
 - **No pipe tables**: Markdown pipe table syntax is literal text in `$md`, not `<table>`. Use structured lists or page-owned table components.
 - **No raw backtick strings**: backticks are Markdown inline-code delimiters, not raw string syntax.
-- **No stored named inserts**: the implementation gap for stored named inserts remains. Named inserts passed as loose contributions are rejected.
 - **Template and Markdown child boundaries**: child templates are opaque barriers to the parent formatter. Delimiters cannot pair across child boundaries.
 - **Unsupported runtime control flow**: template `if` and `loop` are available as template directives, but ordinary runtime control flow is not part of the const-required moth template body.
 
@@ -32,10 +31,6 @@ Use a `.moth` template when:
 - full slot and wrapper composition is needed
 - the content is part of broader program logic
 - imports or declarations are needed in the same file
-
-### Implementation gaps
-
-- Stored named inserts remain an implementation gap. See the migration ledger for details.
 
 ### Related concepts
 

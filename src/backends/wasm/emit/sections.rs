@@ -132,7 +132,7 @@ pub(crate) fn build_emit_plan(
     })
 }
 
-pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 14] {
+pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 15] {
     // WHAT: canonical helper declaration order.
     // WHY: helper function indices must be deterministic for stable exports/debug output.
     [
@@ -143,6 +143,7 @@ pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 14] {
         WasmRuntimeHelper::StringFinish,
         WasmRuntimeHelper::StringPtr,
         WasmRuntimeHelper::StringLen,
+        WasmRuntimeHelper::StringEqual,
         WasmRuntimeHelper::StringFromI64,
         WasmRuntimeHelper::VecNew,
         WasmRuntimeHelper::VecPushHandle,
@@ -183,6 +184,10 @@ pub(crate) fn helper_signature(helper: WasmRuntimeHelper) -> WasmLirSignature {
         },
         WasmRuntimeHelper::StringLen => WasmLirSignature {
             params: vec![Handle],
+            results: vec![I32],
+        },
+        WasmRuntimeHelper::StringEqual => WasmLirSignature {
+            params: vec![Handle, Handle],
             results: vec![I32],
         },
         WasmRuntimeHelper::StringFromI64 => WasmLirSignature {
@@ -237,6 +242,7 @@ pub(crate) fn helper_name(helper: WasmRuntimeHelper) -> &'static str {
         WasmRuntimeHelper::StringFinish => "rt_string_finish",
         WasmRuntimeHelper::StringPtr => "rt_string_ptr",
         WasmRuntimeHelper::StringLen => "rt_string_len",
+        WasmRuntimeHelper::StringEqual => "rt_string_equal",
         WasmRuntimeHelper::StringFromI64 => "rt_string_from_i64",
         WasmRuntimeHelper::VecNew => "rt_vec_new",
         WasmRuntimeHelper::VecPushHandle => "rt_vec_push_handle",
@@ -366,6 +372,8 @@ fn module_uses_runtime_helpers(module: &WasmLirModule) -> bool {
                         | WasmLirStmt::StringPushHandle { .. }
                         | WasmLirStmt::StringFromI64 { .. }
                         | WasmLirStmt::StringFinish { .. }
+                        | WasmLirStmt::StringEq { .. }
+                        | WasmLirStmt::StringNe { .. }
                         | WasmLirStmt::VecNew { .. }
                         | WasmLirStmt::VecPushHandle { .. }
                         | WasmLirStmt::DropIfOwned { .. }

@@ -1,5 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "exact"
-warning_codes = ["MOTH-RULE-0022"]
-rendered_output_contains = ["pattern_capture_binds_scrutinee_success result=hello"]

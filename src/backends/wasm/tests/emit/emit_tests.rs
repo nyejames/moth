@@ -527,6 +527,16 @@ fn build_manual_lir_module() -> WasmLirModule {
                 WasmLirStmt::DropIfOwned {
                     value: WasmLirLocalId(9),
                 },
+                WasmLirStmt::StringEq {
+                    dst: WasmLirLocalId(10),
+                    lhs: WasmLirLocalId(5),
+                    rhs: WasmLirLocalId(9),
+                },
+                WasmLirStmt::StringNe {
+                    dst: WasmLirLocalId(11),
+                    lhs: WasmLirLocalId(5),
+                    rhs: WasmLirLocalId(9),
+                },
                 WasmLirStmt::IntEq {
                     dst: WasmLirLocalId(10),
                     lhs: WasmLirLocalId(0),

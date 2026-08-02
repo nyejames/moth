@@ -7,7 +7,6 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind, ReactiveTemplateMetadata,
-    expression_value_shape_for_diagnostic_type,
 };
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
@@ -242,16 +241,13 @@ pub(crate) fn signature_member_to_declaration(
     };
 
     let mut value = if member.default_tokens.is_empty() {
-        let data_type_for_shape = data_type.clone();
-        let mut value = Expression::new(
+        Expression::new(
             ExpressionKind::NoValue,
             member.location.clone(),
             type_id,
             data_type,
             member.value_mode.clone(),
-        );
-        value.value_shape = expression_value_shape_for_diagnostic_type(&data_type_for_shape);
-        value
+        )
     } else {
         parse_signature_default_expression(
             member,

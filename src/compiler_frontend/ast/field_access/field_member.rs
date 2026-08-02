@@ -10,9 +10,7 @@ use super::MemberStepContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, expression_value_shape_for_type_id,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -357,8 +355,6 @@ pub(super) fn parse_field_member_access_typed(
             field.value_mode,
         );
         expression.const_record_state = field.const_record_state;
-        expression.value_shape =
-            expression_value_shape_for_type_id(field.type_id, &expression.diagnostic_type);
         expression
     };
 

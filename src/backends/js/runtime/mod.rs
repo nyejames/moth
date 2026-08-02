@@ -63,7 +63,7 @@ impl<'hir> JsEmitter<'hir> {
     ///   result helpers          — `?` propagation and `or` fallback helpers
     ///   collection helpers      — guarded get/push/remove/length for ordered collections
     ///   map helpers             — guarded get/set/remove and infallible contains/clear/length for ordered maps
-    ///   string helpers          — value-to-string conversion
+    ///   string helpers          — canonical String conversion, equality, and map-key handling
     ///   cast helpers            — numeric and string casting with Result-typed errors
     ///   numeric helpers         — checked i32 and finite f64 arithmetic with trap/Error carriers
     ///   choice helpers          — structural equality for nominal choice carriers

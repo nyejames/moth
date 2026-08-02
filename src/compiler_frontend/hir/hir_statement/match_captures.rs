@@ -87,31 +87,6 @@ impl<'a> HirBuilder<'a> {
                 Ok(local_ids)
             }
 
-            MatchPattern::Capture { binding_path, .. } => {
-                let ty = self.lower_type_id(scrutinee_ast.type_id, location)?;
-                let region = self.current_region_or_error(location)?;
-                let local_id = self.allocate_local_id();
-                let block_id = self.current_block_id_or_error(location)?;
-
-                self.register_local_in_block(
-                    block_id,
-                    HirLocal {
-                        id: local_id,
-                        ty,
-                        mutable: false,
-                        region,
-                        source_info: Some(location.clone()),
-                    },
-                    location,
-                )?;
-
-                self.locals_by_name.insert(binding_path.clone(), local_id);
-                self.side_table
-                    .bind_local_name(local_id, binding_path.clone());
-
-                Ok(vec![local_id])
-            }
-
             MatchPattern::OptionPresentCapture {
                 binding_path,
                 inner_type_id,
@@ -167,21 +142,6 @@ impl<'a> HirBuilder<'a> {
         Ok(substitute_local_expressions(guard, &substitutions))
     }
 
-    /// Replace a single capture local read in a guard with the scrutinee expression.
-    ///
-    /// WHAT: for general capture patterns, the guard evaluates before the arm block runs,
-    /// so any reference to the capture binding must be rewritten to the scrutinee value.
-    pub(super) fn substitute_guard_capture_with_scrutinee(
-        &self,
-        guard: &HirExpression,
-        capture_local: LocalId,
-        scrutinee_hir: &HirExpression,
-    ) -> HirExpression {
-        let mut substitutions = FxHashMap::default();
-        substitutions.insert(capture_local, scrutinee_hir.clone());
-        substitute_local_expressions(guard, &substitutions)
-    }
-
     /// Emit `Assign` statements that materialize choice payload captures at arm entry.
     pub(crate) fn emit_match_arm_capture_assignments(
         &mut self,
@@ -225,21 +185,6 @@ impl<'a> HirBuilder<'a> {
                     )?;
                 }
 
-                Ok(())
-            }
-
-            MatchPattern::Capture { .. } => {
-                if capture_locals.is_empty() {
-                    return Ok(());
-                }
-                let local_id = capture_locals[0];
-                self.emit_statement_kind(
-                    HirStatementKind::Assign {
-                        target: HirPlace::Local(local_id),
-                        value: scrutinee_hir.clone(),
-                    },
-                    location,
-                )?;
                 Ok(())
             }
 
@@ -424,13 +369,6 @@ fn arm_capture_bindings(
             .zip(capture_locals.iter())
             .map(|(capture, &local_id)| (capture.binding_path.clone(), local_id))
             .collect(),
-        MatchPattern::Capture { binding_path, .. } => {
-            if let Some(&local_id) = capture_locals.first() {
-                vec![(binding_path.clone(), local_id)]
-            } else {
-                Vec::new()
-            }
-        }
         MatchPattern::OptionPresentCapture { binding_path, .. } => {
             if let Some(&local_id) = capture_locals.first() {
                 vec![(binding_path.clone(), local_id)]

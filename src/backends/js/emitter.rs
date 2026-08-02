@@ -489,8 +489,7 @@ impl<'hir> JsEmitter<'hir> {
             HirPattern::OptionNone
             | HirPattern::OptionPresent
             | HirPattern::Wildcard
-            | HirPattern::ChoiceVariant { .. }
-            | HirPattern::Capture => {}
+            | HirPattern::ChoiceVariant { .. } => {}
         }
 
         Ok(())
@@ -658,8 +657,7 @@ impl<'hir> JsEmitter<'hir> {
             HirPattern::OptionNone
             | HirPattern::OptionPresent
             | HirPattern::Wildcard
-            | HirPattern::ChoiceVariant { .. }
-            | HirPattern::Capture => false,
+            | HirPattern::ChoiceVariant { .. } => false,
         }
     }
 
@@ -827,8 +825,7 @@ fn collect_pattern_cast_policies(
         HirPattern::OptionNone
         | HirPattern::OptionPresent
         | HirPattern::Wildcard
-        | HirPattern::ChoiceVariant { .. }
-        | HirPattern::Capture => {}
+        | HirPattern::ChoiceVariant { .. } => {}
     }
 }
 

@@ -9,7 +9,7 @@ multiply |x Int, y Int| -> Int:
 ;
 
 greet |name String| -> String:
-    return "Hello, " + name
+    return [:Hello, [name]]
 ;
 
 factorial |n Int| -> Int:

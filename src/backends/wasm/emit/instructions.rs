@@ -196,6 +196,14 @@ pub(crate) fn emit_statement(
             emit_compare(function, *lhs, *rhs, context, false)?;
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
+        WasmLirStmt::StringEq { dst, lhs, rhs } => {
+            emit_string_compare(function, *lhs, *rhs, context, plan, false)?;
+            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
+        }
+        WasmLirStmt::StringNe { dst, lhs, rhs } => {
+            emit_string_compare(function, *lhs, *rhs, context, plan, true)?;
+            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
+        }
         WasmLirStmt::IntAdd { dst, lhs, rhs } => {
             emit_numeric_add(function, *lhs, *rhs, context, NumericAddKind::Int)?;
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
@@ -480,6 +488,37 @@ fn emit_compare(
                 &Instruction::I32Ne
             });
         }
+    }
+
+    Ok(())
+}
+
+fn emit_string_compare(
+    function: &mut Function,
+    lhs: WasmLirLocalId,
+    rhs: WasmLirLocalId,
+    context: &LirBodyEmitContext<'_>,
+    plan: &WasmEmitPlan,
+    negate: bool,
+) -> Result<(), CompilerError> {
+    let lhs_type = local_type(lhs, context, "lhs")?;
+    let rhs_type = local_type(rhs, context, "rhs")?;
+    if lhs_type != WasmAbiType::Handle || rhs_type != WasmAbiType::Handle {
+        return Err(CompilerError::compiler_error(format!(
+            "Wasm emission String comparison requires Handle operands, found lhs {:?}, rhs {:?} in {:?}",
+            lhs_type, rhs_type, context.function_id
+        ))
+        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+    }
+
+    function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
+    function.instruction(&Instruction::LocalGet(local_index(rhs, context)?));
+    function.instruction(&Instruction::Call(helper_index(
+        plan,
+        WasmRuntimeHelper::StringEqual,
+    )?));
+    if negate {
+        function.instruction(&Instruction::I32Eqz);
     }
 
     Ok(())

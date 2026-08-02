@@ -327,6 +327,19 @@ impl<'hir> JsEmitter<'hir> {
             && self.is_choice_type(left)
             && self.is_choice_type(right);
 
+        let is_string_equality = matches!(operator, HirBinOp::Eq | HirBinOp::Ne)
+            && left.ty == self.type_environment.builtins().string
+            && right.ty == self.type_environment.builtins().string;
+
+        if operator == HirBinOp::Add
+            && (left.ty == self.type_environment.builtins().string
+                || right.ty == self.type_environment.builtins().string)
+        {
+            return Err(CompilerError::compiler_error(
+                "JavaScript backend received source String addition instead of a validated numeric Add or StringAppend",
+            ));
+        }
+
         let left = self.lower_expr(left)?;
         let right = self.lower_expr(right)?;
 
@@ -344,7 +357,17 @@ impl<'hir> JsEmitter<'hir> {
             };
         }
 
+        if is_string_equality {
+            let equality = format!("__moth_string_equal({left}, {right})");
+            return match operator {
+                HirBinOp::Eq => Ok(equality),
+                HirBinOp::Ne => Ok(format!("(!{equality})")),
+                _ => unreachable!(),
+            };
+        }
+
         let js_operator = match operator {
+            HirBinOp::StringAppend => "+",
             HirBinOp::Add => "+",
             HirBinOp::Sub => "-",
             HirBinOp::Mul => "*",
@@ -473,6 +496,10 @@ impl<'hir> JsEmitter<'hir> {
         inner_type: TypeId,
         right: String,
     ) -> String {
+        if inner_type == self.type_environment.builtins().string {
+            return format!("__moth_string_equal({left}, {right})");
+        }
+
         if self.is_choice_type_id(inner_type) {
             self.used_choice_equality = true;
             return format!("__moth_choice_eq({left}, {right})");

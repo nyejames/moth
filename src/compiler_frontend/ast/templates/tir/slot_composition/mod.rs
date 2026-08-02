@@ -48,6 +48,7 @@ pub(crate) use overlays::merge_tir_slot_resolution_contexts;
 #[cfg(test)]
 pub(crate) use contributions::route_tir_slot_contributions;
 pub(crate) use contributions::{RoutedTirSlotContributions, TirSlotContributions};
+pub(crate) use helpers::stored_insert_contribution_templates;
 #[cfg(test)]
 pub(crate) use overlays::{
     materialize_tir_slot_resolution_overlay, view_context_from_slot_resolution_overlay,

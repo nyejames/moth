@@ -1323,11 +1323,16 @@ impl TypeEnvironment {
             }
 
             Some(TypeDefinition::Struct(..))
-            | Some(TypeDefinition::Constructed(..))
             | Some(TypeDefinition::Function(..))
             | Some(TypeDefinition::External(..))
             | Some(TypeDefinition::GenericParameter(..))
             | None => false,
+
+            Some(TypeDefinition::Constructed(..)) => {
+                self.option_inner_type(id).is_some_and(|inner| {
+                    self.supports_runtime_equality_with_visited(inner, visited_choices)
+                })
+            }
         }
     }
 

@@ -8,8 +8,7 @@
 
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ExpressionValueShape, FallibleCarrierVariant,
-    FallibleExpressionHandling, expression_value_shape_for_diagnostic_type,
+    Expression, ExpressionKind, FallibleCarrierVariant, FallibleExpressionHandling,
 };
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
@@ -32,18 +31,15 @@ impl Expression {
         // resulting expression can carry the correct provenance flag.
         let type_id = test_builtin_type_id_for_data_type(&data_type);
         let contains_regular_division = rpn.contains_regular_division();
-        let value_shape = expression_value_shape_for_diagnostic_type(&data_type);
 
-        let mut expression = Self::new(
+        Self::new(
             ExpressionKind::Runtime(rpn),
             location,
             type_id,
             data_type,
             value_mode,
         )
-        .with_regular_division_provenance(contains_regular_division);
-        expression.value_shape = value_shape;
-        expression
+        .with_regular_division_provenance(contains_regular_division)
     }
 
     pub fn path(compile_time_paths: CompileTimePaths, location: SourceLocation) -> Self {
@@ -55,15 +51,13 @@ impl Expression {
             .map(|path| PathTypeKind::from(path.kind.clone()))
             .unwrap_or(PathTypeKind::File);
 
-        let mut expression = Self::new(
+        Self::new(
             ExpressionKind::Path(Box::new(compile_time_paths)),
             location,
             builtin_type_ids::STRING,
             DataType::Path(path_type_kind),
             ValueMode::ImmutableOwned,
-        );
-        expression.value_shape = ExpressionValueShape::CompileTimePath;
-        expression
+        )
     }
 
     pub fn reference(

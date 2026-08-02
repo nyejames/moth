@@ -30,8 +30,8 @@ predicates:
 
 `then` sends one or more values from the active branch to the receiver.
 
-The current compiler has a known issue with block value-producing `if` that
-uses `then`; use the inline form for now.
+The block form with `then` is supported at the same closed receiving sites as
+the inline form, including declarations, assignments, multi-bind and returns.
 
 ### Receiving sites
 

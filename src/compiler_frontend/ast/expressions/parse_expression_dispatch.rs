@@ -593,14 +593,13 @@ pub(super) fn dispatch_expression_token(
             let copied_place =
                 parse_copy_place_expression(token_stream, context, type_interner, string_table)?;
 
-            let mut copy_expression = Expression::copy_with_type_id(
+            let copy_expression = Expression::copy_with_type_id(
                 copied_place.place,
                 copied_place.diagnostic_type,
                 copied_place.type_id,
                 copy_location.clone(),
                 state.value_mode.to_owned(),
             );
-            copy_expression.value_shape = copied_place.value_shape;
 
             state
                 .expression

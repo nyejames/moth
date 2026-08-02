@@ -1,0 +1,7 @@
+export:
+    import @intro {
+        content as intro_content,
+    }
+
+    marker #= "project root marker"
+;

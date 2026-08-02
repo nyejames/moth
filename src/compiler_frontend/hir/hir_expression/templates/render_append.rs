@@ -123,7 +123,7 @@ impl<'a> HirBuilder<'a> {
                     location,
                     HirExpressionKind::BinOp {
                         left: Box::new(rendered.clone()),
-                        op: HirBinOp::Add,
+                        op: HirBinOp::StringAppend,
                         right: Box::new(chunk),
                     },
                     string_ty,
@@ -147,7 +147,7 @@ impl<'a> HirBuilder<'a> {
                     location,
                     HirExpressionKind::BinOp {
                         left: Box::new(rendered.clone()),
-                        op: HirBinOp::Add,
+                        op: HirBinOp::StringAppend,
                         right: Box::new(chunk),
                     },
                     string_ty,
@@ -164,7 +164,7 @@ impl<'a> HirBuilder<'a> {
                     location,
                     HirExpressionKind::BinOp {
                         left: Box::new(rendered.clone()),
-                        op: HirBinOp::Add,
+                        op: HirBinOp::StringAppend,
                         right: Box::new(chunk),
                     },
                     string_ty,
@@ -1387,7 +1387,7 @@ impl<'a> HirBuilder<'a> {
             location,
             HirExpressionKind::BinOp {
                 left: Box::new(accumulated),
-                op: HirBinOp::Add,
+                op: HirBinOp::StringAppend,
                 right: Box::new(chunk_as_string),
             },
             string_ty,
@@ -1443,7 +1443,7 @@ impl<'a> HirBuilder<'a> {
             location,
             HirExpressionKind::BinOp {
                 left: Box::new(empty),
-                op: crate::compiler_frontend::hir::operators::HirBinOp::Add,
+                op: crate::compiler_frontend::hir::operators::HirBinOp::StringAppend,
                 right: Box::new(expression),
             },
             string_ty,

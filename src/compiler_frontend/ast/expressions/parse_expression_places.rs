@@ -8,8 +8,7 @@ use super::expression_rpn::ExpressionRpnItem;
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::expression::{
-    ConstRecordState, Expression, ExpressionKind, ExpressionValueShape,
-    expression_value_shape_for_type_id,
+    ConstRecordState, Expression, ExpressionKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     PlaceExpression, PlaceExpressionKind,
@@ -35,7 +34,6 @@ pub(super) struct ParsedCopyPlace {
     pub(super) place: PlaceExpression,
     pub(super) diagnostic_type: DataType,
     pub(super) type_id: TypeId,
-    pub(super) value_shape: ExpressionValueShape,
 }
 
 // WHAT: parses a `~name.<chain>` receiver expression.
@@ -245,7 +243,6 @@ fn parse_copy_place_payload(
                     place,
                     diagnostic_type: copied_expression.diagnostic_type,
                     type_id: copied_expression.type_id,
-                    value_shape: copied_expression.value_shape,
                 })
             }
         }
@@ -371,8 +368,5 @@ pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expre
         place.value_mode.clone(),
     );
     expression.const_record_state = ConstRecordState::RuntimeValue;
-    expression.value_shape =
-        expression_value_shape_for_type_id(place.type_id, &place.diagnostic_type);
-
     expression
 }

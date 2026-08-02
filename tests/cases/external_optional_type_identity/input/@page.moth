@@ -2,7 +2,7 @@ import @test/optional
 
 accept_optional_string |value String?| -> String:
     if value is |text|:
-        return "some " + text
+        return [:some [text]]
     else
         return "none"
     ;

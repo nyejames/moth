@@ -13,6 +13,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
 use crate::builder_surface::source_package_registry::SourcePackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 /// The complete builder surface a backend exposes to a project.
@@ -30,6 +31,13 @@ pub struct BuilderSurface {
     pub external_import_resolution_table: ExternalImportResolutionTable,
     pub builder_runtime_packages: Vec<BuilderRuntimePackageMetadata>,
     pub source_file_kinds: SourceFileKindRegistry,
+    /// Source-backed package prefixes whose constants are implicitly visible in `.mtf` files.
+    ///
+    /// WHAT: records a builder capability rather than making generic build orchestration infer
+    ///       implicit template providers from package names.
+    /// WHY: only the active builder owns the contract that connects a source package to the
+    ///      synthetic `.mtf` constant scope.
+    pub implicit_template_scope_source_packages: BTreeSet<String>,
 }
 
 const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
@@ -67,7 +75,17 @@ impl BuilderSurface {
             external_import_resolution_table: ExternalImportResolutionTable::new(),
             builder_runtime_packages: Vec::new(),
             source_file_kinds: SourceFileKindRegistry::new(),
+            implicit_template_scope_source_packages: BTreeSet::new(),
         }
+    }
+
+    /// Declare a source-backed package whose exported constants enter `.mtf` implicit scope.
+    pub fn register_implicit_template_scope_source_package(
+        &mut self,
+        import_prefix: impl Into<String>,
+    ) {
+        self.implicit_template_scope_source_packages
+            .insert(import_prefix.into());
     }
 
     /// Exposes the currently supported optional core packages for the HTML builder.

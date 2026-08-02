@@ -298,6 +298,7 @@ impl BackendBuilder for HtmlProjectBuilder {
             BuilderSurface::builtin_source_package_root(HTML_SOURCE_PACKAGE_PREFIX),
             crate::builder_surface::PackageOrigin::Builder,
         );
+        builder_surface.register_implicit_template_scope_source_package(HTML_SOURCE_PACKAGE_PREFIX);
 
         builder_surface.expose_html_core_packages();
 

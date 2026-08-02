@@ -103,7 +103,7 @@ fn cast_expression(
 }
 
 #[test]
-fn evaluate_operator_concatenates_string_literals() {
+fn evaluate_operator_rejects_string_concatenation() {
     let mut string_table = StringTable::new();
     let lhs = Expression::string_slice(
         string_table.intern("moth"),
@@ -116,16 +116,15 @@ fn evaluate_operator_concatenates_string_literals() {
         ValueMode::ImmutableOwned,
     );
 
-    let result = lhs
+    let error = lhs
         .evaluate_operator(&rhs, &Operator::Add, &mut string_table)
-        .expect("string concatenation should succeed")
-        .expect("string concatenation should fold");
-
-    assert!(matches!(result.kind, ExpressionKind::StringSlice(_)));
-    let ExpressionKind::StringSlice(interned) = result.kind else {
-        unreachable!("checked above");
-    };
-    assert_eq!(string_table.resolve(interned), "mothball");
+        .expect_err("string concatenation should not fold at compile time");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::InvalidOperatorForType,
+        Some("+"),
+        &string_table,
+    );
 }
 
 #[test]

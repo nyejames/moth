@@ -1,7 +1,7 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "hashmap_runtime has_ada=true has_linus=false insert_len=3 replace_len=3 removed=12 remove_len=2 clear_len=0 missing=99 duplicate=2 duplicate_len=1"
+rendered_output_exact = "hashmap_runtime has_ada=true has_linus=false insert_len=3 replace_len=3 removed=12 remove_len=2 clear_len=0 missing=99 duplicate=2 duplicate_len=1 template_contains=true template_before_set=2 template_after_set=3 template_removed=3 template_length=0"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
@@ -14,6 +14,8 @@ must_contain = [
     "function __moth_map_remove(",
     "function __moth_map_clear(",
     "function __moth_map_length(",
+    "function __moth_map_key(",
+    "__moth_string_value(value)",
 ]
 
 [[backends.html.artifact_assertions]]

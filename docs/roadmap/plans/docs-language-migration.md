@@ -5,17 +5,17 @@
 ```text
 WORK_ID: docs-lang-mig
 WORK_SOURCE: docs/roadmap/plans/docs-language-migration.md
-BASE_REVISION: 63fd418f4dc42ec593c78e58a07299f3e6e58b4e
+BASE_REVISION: 820098759bc896365eb99f2239c2bd1a570132f1
 STATUS: active
-CURRENT_SCOPE: B1 result-binding state and multi-return alias correction
+CURRENT_SCOPE: Stage B interim audit pass 3 after resolving the three required pass-2 corrections
 STAGE_A: complete and accepted
 STAGE_W: complete and accepted
 PRE_B1_CLOSEOUT: complete, full gate green at d82b86d74
-COMPLETED: B1 source syntax removal and JS raw-value return ABI correction; slot-backed result provenance and multi-return summary correction implemented
-NEXT_ACTION: close B1 and begin B2 only after the user resumes the migration
-VALIDATION: just validate green: native/Linux/Windows Clippy, 3,855 Rust tests, 1,819 integration cases, docs check, and benchmark sanity; docs release build green (69 files)
-AUDITS: local final audit green; Codex CLI review checkpoint run read-only until an unsafe mutation probe was interrupted and the fixture was verified restored; implementation-agent auditor timed out without a handoff
-BLOCKERS: none for B1 correction; B2-B7 paused by user
+COMPLETED: B1 source syntax removal and JS raw-value return ABI correction; slot-backed result provenance and multi-return summary correction; B2 String semantics, HIR StringAppend, JS/Wasm content equality and map normalization; B3 pattern-surface removal; B4 template collision registry; B5 accepted language gaps; B6 Core Text and Core Math boundary corrections; B7 builder capability metadata
+NEXT_ACTION: run the fresh Stage B interim auditor, resolve any required findings, then run the full code-bearing gate and mandatory final audit
+VALIDATION: cargo fmt; cargo check -p moth; delayed HTML-Wasm harness unit test passed; executable html_wasm_runtime_template passed; prior focused B2-B7 cases and reason-level B3 diagnostics passed; tests --audit inventory passed; full gate and docs release not yet run
+AUDITS: prior B1 audits remain accepted; B2 AST findings resolved; Stage B interim audit pass 1 produced four findings, all corrected; pass 2 produced three findings, all corrected; fresh pass-3 interim audit and mandatory final audit remain
+BLOCKERS: none; B2-B7 resumed by user
 STAGE_C: blocked until Stage B completes
 ```
 
@@ -108,15 +108,15 @@ Normal sibling modules cannot import each other directly. Shared sibling APIs us
 
 ### Core Text length contract
 
-`@core/text.length` counts Unicode scalar values. The current JS lowering uses UTF-16 code units and does not yet match. Stage B6 closes this gap.
+`@core/text.length` counts Unicode scalar values. HTML-JS uses scalar-value iteration to implement the contract; HTML-Wasm package lowering remains deferred.
 
 ### Core Math checked Float boundary
 
-Every `@core/math` Float result must be finite before ordinary Moth code observes it. The current JS lowering does not enforce this. Stage B6 closes this gap.
+Every `@core/math` Float result must be finite before ordinary Moth code observes it. HTML-JS uses the shared external Float validation boundary; HTML-Wasm package lowering remains deferred.
 
 ### Implicit `.mtf` scope providers
 
-The compiler hard-codes `IMPLICIT_TEMPLATE_SCOPE_PREFIXES` and broadly supplies source providers before `.mtf` use is known. Stage B7 moves this to builder capability metadata.
+The active builder declares which source-backed packages provide implicit `.mtf` scope, and generic orchestration injects those providers only for modules whose semantic source set contains `.mtf` files.
 
 ---
 
@@ -188,7 +188,7 @@ Any accepted semantic correction discovered during Stage A, including a Core Tex
 
 ## B6. Align Core binding results with Moth semantics
 
-The documentation migration established backend-neutral contracts for Core Text and Core Math. Their current JavaScript lowering disagrees.
+The documentation migration established backend-neutral contracts for Core Text and Core Math. Stage B now aligns the HTML-JS lowering with those contracts, while target-specific package lowerings remain tracked as explicit deferrals.
 
 ### Core Text
 
@@ -252,13 +252,13 @@ These corrections belong in Stage B because their contracts were finalised by th
 
 ## B7. Move implicit `.mtf` scope providers to builder capability metadata
 
-The current implicit `@html` provider fix uses a hard-coded prefix list:
+The former implicit `@html` provider fix used a hard-coded prefix list:
 
 ```rust
 const IMPLICIT_TEMPLATE_SCOPE_PREFIXES: &[&str] = &["html"];
 ```
 
-It also injects the provider into consumer modules more broadly than the semantic requirement.
+It also injected the provider into consumer modules more broadly than the semantic requirement. Stage B replaces that path with builder-declared capability metadata and semantic-source-set gating.
 
 Required direction:
 
@@ -280,7 +280,28 @@ Required tests:
 - modules without `.mtf` do not receive the implicit provider
 - production provider-interface path remains covered
 
-This task may land before or after B1, but it must remain a named Stage B item.
+This task remains a named Stage B item and is implemented in the current closeout.
+
+## Stage B completion record
+
+The current Stage B slice completes the planned B2-B7 implementation work:
+
+- B2 unifies source and runtime `String` semantics, including compiler-owned
+  template append, content equality and HTML-JS map-key normalisation.
+- B3 removes general full-match captures and `String` relational patterns while
+  retaining option and declared choice payload captures.
+- B4 registers Moth Template names through one collision-reporting registry.
+- B5 closes option payload equality inside choices, cross-choice predicate
+  diagnostics, nested error-only `return!`, block value-producing `if`, and
+  stored named insert composition.
+- B6 aligns HTML-JS text scalar counting and the shared finite-Float external
+  boundary for Core Math.
+- B7 moves implicit `.mtf` providers to builder capability metadata and gates
+  them on semantic `.mtf` source presence.
+
+HTML-Wasm Core Text and Core Math lowerings, non-JS String map lowering, full
+relational overlap analysis and nested choice payload patterns remain explicit
+target or language follow-ups recorded in the progress matrix and parity ledger.
 
 ## Stage B validation
 

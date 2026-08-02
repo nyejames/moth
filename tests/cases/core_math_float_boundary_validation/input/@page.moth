@@ -1,0 +1,12 @@
+import @core/math {sqrt, exp as exponential}
+import @core/math
+
+finite_direct = sqrt(16.0)
+finite_namespace = math.sqrt(16.0)
+finite_alias = exponential(1.0)
+invalid_sqrt = sqrt(-1.0)
+invalid_exp = math.exp(10000.0)
+invalid_alias_exp = exponential(10000.0)
+
+io.line([:finite=[finite_direct] namespace=[finite_namespace] alias=[finite_alias] invalid=[invalid_sqrt] [invalid_exp] [invalid_alias_exp]])
+entry = "."

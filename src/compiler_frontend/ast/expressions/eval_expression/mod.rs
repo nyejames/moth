@@ -18,8 +18,6 @@ pub(crate) use crate::compiler_frontend::ast::expressions::expression::Expressio
 #[cfg(test)]
 pub(crate) use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 #[cfg(test)]
-pub(crate) use crate::compiler_frontend::ast::expressions::expression::ExpressionValueShape;
-#[cfg(test)]
 pub(crate) use crate::compiler_frontend::value_mode::ValueMode;
 
 #[cfg(test)]

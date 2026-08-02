@@ -64,6 +64,11 @@ pub(crate) fn emit_helper_function(
             // param 0: buffer  |  local 1: result_handle (scratch)
             Function::new(vec![(1, ValType::I32)])
         }
+        WasmRuntimeHelper::StringEqual => {
+            // param 0: lhs handle, param 1: rhs handle
+            // locals 2..7: lhs_ptr, rhs_ptr, lhs_len, rhs_len, index, result
+            Function::new(vec![(6, ValType::I32)])
+        }
         WasmRuntimeHelper::StringFromI64 => {
             // param 0: value_i64 | local 1: buffer_handle
             Function::new(vec![(1, ValType::I32)])
@@ -327,6 +332,84 @@ pub(crate) fn emit_helper_function(
             function.instruction(&Instruction::I32Load(memarg(4)));
             function.instruction(&Instruction::Return);
         }
+        WasmRuntimeHelper::StringEqual => {
+            // WHAT: compare finalized strings by UTF-8 byte content.
+            // WHY: handles are addresses, so identity comparison would make equal strings
+            // compare unequal whenever they were materialized through different allocations.
+            const LHS: u32 = 0;
+            const RHS: u32 = 1;
+            const LHS_PTR: u32 = 2;
+            const RHS_PTR: u32 = 3;
+            const LHS_LEN: u32 = 4;
+            const RHS_LEN: u32 = 5;
+            const INDEX: u32 = 6;
+            const RESULT: u32 = 7;
+
+            // Read the two finalized `{ptr, len}` headers.
+            function.instruction(&Instruction::LocalGet(LHS));
+            function.instruction(&Instruction::I32Load(memarg(0)));
+            function.instruction(&Instruction::LocalSet(LHS_PTR));
+            function.instruction(&Instruction::LocalGet(RHS));
+            function.instruction(&Instruction::I32Load(memarg(0)));
+            function.instruction(&Instruction::LocalSet(RHS_PTR));
+            function.instruction(&Instruction::LocalGet(LHS));
+            function.instruction(&Instruction::I32Load(memarg(4)));
+            function.instruction(&Instruction::LocalSet(LHS_LEN));
+            function.instruction(&Instruction::LocalGet(RHS));
+            function.instruction(&Instruction::I32Load(memarg(4)));
+            function.instruction(&Instruction::LocalSet(RHS_LEN));
+
+            // RESULT is set on every path that leaves the comparison loop.
+            function.instruction(&Instruction::I32Const(0));
+            function.instruction(&Instruction::LocalSet(RESULT));
+
+            // A length mismatch cannot compare equal. Otherwise compare each UTF-8 byte.
+            function.instruction(&Instruction::Block(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::LocalGet(LHS_LEN));
+            function.instruction(&Instruction::LocalGet(RHS_LEN));
+            function.instruction(&Instruction::I32Ne);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::Br(1));
+            function.instruction(&Instruction::End);
+
+            function.instruction(&Instruction::I32Const(0));
+            function.instruction(&Instruction::LocalSet(INDEX));
+            function.instruction(&Instruction::Loop(wasm_encoder::BlockType::Empty));
+
+            // End-of-input after equal lengths means the strings are equal.
+            function.instruction(&Instruction::LocalGet(INDEX));
+            function.instruction(&Instruction::LocalGet(LHS_LEN));
+            function.instruction(&Instruction::I32GeU);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::I32Const(1));
+            function.instruction(&Instruction::LocalSet(RESULT));
+            function.instruction(&Instruction::Br(2));
+            function.instruction(&Instruction::End);
+
+            // Compare one unsigned byte from each UTF-8 content region.
+            function.instruction(&Instruction::LocalGet(LHS_PTR));
+            function.instruction(&Instruction::LocalGet(INDEX));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::I32Load8U(byte_memarg(0)));
+            function.instruction(&Instruction::LocalGet(RHS_PTR));
+            function.instruction(&Instruction::LocalGet(INDEX));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::I32Load8U(byte_memarg(0)));
+            function.instruction(&Instruction::I32Ne);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::Br(2));
+            function.instruction(&Instruction::End);
+
+            function.instruction(&Instruction::LocalGet(INDEX));
+            function.instruction(&Instruction::I32Const(1));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalSet(INDEX));
+            function.instruction(&Instruction::Br(0));
+            function.instruction(&Instruction::End);
+            function.instruction(&Instruction::End);
+            function.instruction(&Instruction::LocalGet(RESULT));
+            function.instruction(&Instruction::Return);
+        }
         WasmRuntimeHelper::StringFromI64 => {
             // WHAT: materialize a string handle from an i64 interpolation chunk.
             // WHY: frontend template coercion currently models numeric->string as `"" + value`.
@@ -390,6 +473,14 @@ fn memarg(offset: u64) -> MemArg {
     MemArg {
         offset,
         align: 2,
+        memory_index: 0,
+    }
+}
+
+fn byte_memarg(offset: u64) -> MemArg {
+    MemArg {
+        offset,
+        align: 0,
         memory_index: 0,
     }
 }

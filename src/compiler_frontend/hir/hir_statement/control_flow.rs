@@ -765,14 +765,6 @@ impl<'a> HirBuilder<'a> {
                     location,
                 )?));
             }
-        } else if matches!(arm.pattern, MatchPattern::Capture { .. }) && !capture_locals.is_empty()
-        {
-            let capture_local = capture_locals[0];
-            return Ok(Some(self.substitute_guard_capture_with_scrutinee(
-                &guard_expr,
-                capture_local,
-                scrutinee_hir,
-            )));
         } else if matches!(arm.pattern, MatchPattern::OptionPresentCapture { .. })
             && !capture_locals.is_empty()
         {
@@ -871,8 +863,6 @@ impl<'a> HirBuilder<'a> {
                 let lowered = self.lower_match_literal_pattern(value)?;
                 Ok(HirPattern::OptionValue { value: lowered })
             }
-
-            MatchPattern::Capture { .. } => Ok(HirPattern::Capture),
 
             MatchPattern::OptionPresentCapture { .. } => Ok(HirPattern::OptionPresent),
 

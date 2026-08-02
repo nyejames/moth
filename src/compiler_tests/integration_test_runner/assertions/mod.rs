@@ -13,6 +13,8 @@ mod wasm;
 
 pub(crate) use goldens::discover_golden_expectation;
 #[cfg(test)]
+pub(crate) use rendered_output::execute_wasm_harness_for_test;
+#[cfg(test)]
 pub(crate) use rendered_output::{
     RuntimeEvent, SlotOutput, extract_script_blocks, parse_harness_output,
 };
@@ -162,11 +164,18 @@ pub(crate) fn validate_success_result(
         return fail(build_result, reason, kind);
     }
 
-    if expectation.rendered_output.is_present()
-        && let Some((reason, kind)) =
+    if expectation.rendered_output.is_present() {
+        let rendered_output_result = if case.backend_id == BackendId::HtmlWasm {
+            rendered_output::validate_wasm_rendered_output(
+                &build_result,
+                &expectation.rendered_output,
+            )
+        } else {
             rendered_output::validate_rendered_output(&build_result, &expectation.rendered_output)
-    {
-        return fail(build_result, reason, kind);
+        };
+        if let Some((reason, kind)) = rendered_output_result {
+            return fail(build_result, reason, kind);
+        }
     }
 
     CaseExecutionResult {

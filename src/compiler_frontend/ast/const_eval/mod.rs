@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::const_values::resolver::classify_template_fro
 #[cfg(test)]
 use crate::compiler_frontend::ast::expressions::expression::FallibleCarrierVariant;
 use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ExpressionValueShape, Operator, type_id_hint_for_diagnostic_type,
+    Expression, ExpressionKind, Operator, type_id_hint_for_diagnostic_type,
 };
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
@@ -99,9 +99,8 @@ pub fn constant_fold(
     string_table: &mut StringTable,
 ) -> Result<Vec<ExpressionRpnItem>, ConstantFoldError> {
     // Fold individual constant sub-expressions while leaving runtime-dependent operands and
-    // operators in place. This keeps RPN ordering and value-shape metadata intact while still
-    // reporting statically known numeric failures that happen to sit inside a larger runtime
-    // expression.
+    // operators in place. This keeps RPN ordering while still reporting statically known
+    // numeric failures that happen to sit inside a larger runtime expression.
     let mut stack: Vec<ExpressionRpnItem> = Vec::with_capacity(output_stack.len());
 
     for item in output_stack {
@@ -964,14 +963,6 @@ impl Expression {
             // String operations
             (ExpressionKind::StringSlice(lhs_val), ExpressionKind::StringSlice(rhs_val)) => {
                 match op {
-                    Operator::Add => {
-                        // Resolve both interned strings, concatenate, and intern the result
-                        let lhs_str = string_table.resolve(*lhs_val);
-                        let rhs_str = string_table.resolve(*rhs_val);
-                        let concatenated = format!("{lhs_str}{rhs_str}");
-                        let interned_result = string_table.get_or_intern(concatenated);
-                        ExpressionKind::StringSlice(interned_result)
-                    }
                     Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
                     Operator::NotEqual => ExpressionKind::Bool(lhs_val != rhs_val),
                     _ => invalid_operator_for_compile_time_type(op, string_table, &self.location)?,
@@ -1000,25 +991,6 @@ impl Expression {
             _ => self.diagnostic_type.to_owned(),
         };
 
-        // Preserve value-shape metadata for string results so folded concatenations do not
-        // accidentally promote template/path-shaped values into plain string operands.
-        let result_value_shape = match &kind {
-            ExpressionKind::StringSlice(_) => {
-                if self.value_shape == ExpressionValueShape::TemplateString
-                    || rhs.value_shape == ExpressionValueShape::TemplateString
-                {
-                    ExpressionValueShape::TemplateString
-                } else if self.value_shape == ExpressionValueShape::PlainStringSlice
-                    && rhs.value_shape == ExpressionValueShape::PlainStringSlice
-                {
-                    ExpressionValueShape::PlainStringSlice
-                } else {
-                    ExpressionValueShape::Ordinary
-                }
-            }
-            _ => ExpressionValueShape::Ordinary,
-        };
-
         let folded_provenance = self
             .synthetic_interface_provenance
             .union(&rhs.synthetic_interface_provenance);
@@ -1031,7 +1003,6 @@ impl Expression {
             value_mode,
         )
         .with_regular_division_provenance(contains_regular_division);
-        result_expression.value_shape = result_value_shape;
         result_expression.synthetic_interface_provenance = folded_provenance;
 
         Ok(Some(result_expression))

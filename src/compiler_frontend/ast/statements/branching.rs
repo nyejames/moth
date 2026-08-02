@@ -405,12 +405,6 @@ pub(crate) fn parse_match_block(
                 }
                 seen_else = true;
 
-                if coverage_tracker.default_after_unconditional_capture_is_unreachable() {
-                    warnings.push(CompilerDiagnostic::unreachable_match_arm(
-                        token_stream.current_location(),
-                    ));
-                }
-
                 else_block = Some(parse_else_arm(
                     token_stream,
                     &match_context,

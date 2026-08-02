@@ -64,7 +64,6 @@ impl MatchExhaustivenessFacts {
 pub(crate) struct MatchArmCoverageTracker {
     facts: MatchExhaustivenessFacts,
     matched_unguarded_literal_patterns: FxHashSet<LiteralPatternKey>,
-    seen_unconditional_capture: bool,
     seen_unguarded_none: bool,
     seen_unguarded_present_capture: bool,
 }
@@ -88,10 +87,6 @@ impl MatchArmCoverageTracker {
         &self.facts
     }
 
-    pub(crate) fn default_after_unconditional_capture_is_unreachable(&self) -> bool {
-        self.seen_unconditional_capture
-    }
-
     pub(crate) fn record_arm(
         &mut self,
         pattern: &MatchPattern,
@@ -107,7 +102,7 @@ impl MatchArmCoverageTracker {
                     | MatchPattern::OptionPresentCapture { .. }
             );
 
-        let mut unreachable = self.seen_unconditional_capture || option_present_arm_after_catch_all;
+        let mut unreachable = option_present_arm_after_catch_all;
 
         if !unreachable {
             if let Some(variant_name) = matched_choice_variant
@@ -127,10 +122,6 @@ impl MatchArmCoverageTracker {
             }
 
             match pattern {
-                MatchPattern::Capture { .. } if guard.is_none() => {
-                    self.seen_unconditional_capture = true;
-                }
-
                 MatchPattern::OptionPresentCapture { .. } if guard.is_none() => {
                     self.seen_unguarded_present_capture = true;
                     self.facts.record_unguarded_pattern(pattern);

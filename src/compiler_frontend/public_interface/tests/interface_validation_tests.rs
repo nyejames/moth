@@ -286,6 +286,7 @@ fn rejects_binding_target_with_wrong_symbol_category_on_consumer_admission() {
         importer_source: vec!["consumer".to_owned()],
         imported_path: vec!["provider".to_owned()],
         from_grouped: true,
+        implicit_template_scope: false,
         interface: &interface,
     }]);
 
@@ -680,6 +681,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
         importer_source: Vec::new(),
         imported_path: Vec::new(),
         from_grouped: true,
+        implicit_template_scope: false,
         interface: &provider,
     }]);
 

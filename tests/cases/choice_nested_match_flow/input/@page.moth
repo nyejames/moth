@@ -13,9 +13,9 @@ if status is:
 ;
 
 if phase is:
-    Run => result = result + "-run"
-    Start => result = result + "-start"
-    End => result = result + "-end"
+    Run => result = [:[result]-run]
+    Start => result = [:[result]-start]
+    End => result = [:[result]-end]
 ;
 
 [:choice_nested_match_flow result=[result]]

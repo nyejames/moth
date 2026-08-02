@@ -345,6 +345,133 @@ fn validator_rejects_plain_numeric_binop() {
     ));
 }
 
+fn append_expression_for_validation(
+    module: &mut HirModule,
+    location: &SourceLocation,
+    left_type: TypeId,
+    result_type: TypeId,
+    int_type: TypeId,
+) -> HirExpression {
+    let entry_block_index = start_entry_block_index(module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let left = HirExpression {
+        id: HirValueId(9010),
+        kind: HirExpressionKind::StringLiteral("prefix".to_owned()),
+        ty: left_type,
+        value_kind: ValueKind::Const,
+        region: entry_region,
+    };
+    module.side_table.map_value(location, left.id, location);
+
+    let right = int_expression(
+        HirValueId(9011),
+        7,
+        int_type,
+        entry_region,
+        location,
+        module,
+    );
+    let expression = HirExpression {
+        id: HirValueId(9012),
+        kind: HirExpressionKind::BinOp {
+            op: HirBinOp::StringAppend,
+            left: Box::new(left),
+            right: Box::new(right),
+        },
+        ty: result_type,
+        value_kind: ValueKind::RValue,
+        region: entry_region,
+    };
+    module
+        .side_table
+        .map_value(location, expression.id, location);
+    expression
+}
+
+#[test]
+fn validator_accepts_internal_string_append_with_scalar_chunk() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let location = test_location(53);
+    let string_type = type_environment.builtins().string;
+    let expression = append_expression_for_validation(
+        &mut module,
+        &location,
+        string_type,
+        string_type,
+        type_environment.builtins().int,
+    );
+    let statement = HirStatement {
+        id: HirNodeId(9013),
+        kind: HirStatementKind::Expr(expression),
+        location: location.clone(),
+    };
+    module.side_table.map_statement(&location, &statement);
+    let entry_block_index = start_entry_block_index(&module);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect("valid StringAppend should pass HIR validation");
+}
+
+#[test]
+fn validator_rejects_string_append_with_non_string_result() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let location = test_location(54);
+    let string_type = type_environment.builtins().string;
+    let expression = append_expression_for_validation(
+        &mut module,
+        &location,
+        string_type,
+        type_environment.builtins().int,
+        type_environment.builtins().int,
+    );
+    let statement = HirStatement {
+        id: HirNodeId(9014),
+        kind: HirStatementKind::Expr(expression),
+        location: location.clone(),
+    };
+    module.side_table.map_statement(&location, &statement);
+    let entry_block_index = start_entry_block_index(&module);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("StringAppend with a non-String result should fail validation");
+    assert!(
+        error
+            .msg
+            .contains("StringAppend must produce a String from a String accumulator")
+    );
+}
+
+#[test]
+fn validator_rejects_string_append_with_non_string_accumulator() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let location = test_location(55);
+    let expression = append_expression_for_validation(
+        &mut module,
+        &location,
+        type_environment.builtins().int,
+        type_environment.builtins().string,
+        type_environment.builtins().int,
+    );
+    let statement = HirStatement {
+        id: HirNodeId(9015),
+        kind: HirStatementKind::Expr(expression),
+        location: location.clone(),
+    };
+    module.side_table.map_statement(&location, &statement);
+    let entry_block_index = start_entry_block_index(&module);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("StringAppend with a non-String accumulator should fail validation");
+    assert!(
+        error
+            .msg
+            .contains("StringAppend must produce a String from a String accumulator")
+    );
+}
+
 #[test]
 fn validator_rejects_plain_numeric_unary_op() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
@@ -396,7 +523,7 @@ fn validator_rejects_plain_numeric_unary_op() {
 }
 
 #[test]
-fn validator_accepts_string_concatenation_binop() {
+fn validator_rejects_plain_string_concatenation_binop() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let location = test_location(53);
     let entry_block_index = start_entry_block_index(&module);
@@ -443,8 +570,13 @@ fn validator_accepts_string_concatenation_binop() {
     module.side_table.map_statement(&location, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept string concatenation as plain BinOp");
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject plain string BinOp");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains(
+        "Plain HirBinOp::Add arithmetic must be lowered through HirStatementKind::NumericOp"
+    ));
 }
 
 fn inject_float_statement(

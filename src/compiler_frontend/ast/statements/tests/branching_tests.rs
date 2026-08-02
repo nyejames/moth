@@ -846,26 +846,18 @@ fn relational_pattern_rejects_bool() {
 }
 
 #[test]
-fn relational_pattern_accepts_string() {
-    let (ast, string_table) = parse_single_file_ast(
+fn relational_pattern_rejects_string() {
+    let diagnostic = parse_single_file_ast_diagnostic(
         "value = \"abc\"\nif value is:\n    < \"def\" => io.line([: [\"before\"]])\n    else => io.line([: [\"fallback\"]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &string_table);
-    let NodeKind::Match { arms, .. } = &body[1].kind else {
-        panic!("expected match statement in start body");
-    };
-
-    assert_eq!(arms.len(), 1);
-    assert!(
-        matches!(
-            arms[0].pattern,
-            MatchPattern::Relational {
-                op: RelationalPatternOp::LessThan,
-                ..
-            }
-        ),
-        "string relational pattern should parse successfully"
+    assert_eq!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidMatchPattern {
+            reason: InvalidMatchPatternReason::ScrutineeTypeUnsupportedForRelational,
+            variant_name: None,
+            scrutinee_name: None,
+        }
     );
 }
 

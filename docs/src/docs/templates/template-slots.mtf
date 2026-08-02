@@ -54,9 +54,20 @@ The remaining loose body content fills the default slot.
 
 ### Stored named inserts
 
-The language intends to support preparing a named insert in a binding and
-passing it as a loose contribution. The current compiler does not yet accept
-this form.
+Named inserts can be prepared in a binding and passed as loose contributions
+through an immediate parent:
+
+[codeblock, $code("moth"):
+    card = [:
+        <h1>[$slot("title")]</h1>
+        [$slot]
+    ]
+    stored_title #= [$insert("title"): Stored title]
+    rendered #= [card: [stored_title] Body]
+]
+
+The stored helper is flattened into the immediate parent's slot-routing
+stream. An insert with no matching immediate parent remains invalid.
 
 ### Runtime contributions
 

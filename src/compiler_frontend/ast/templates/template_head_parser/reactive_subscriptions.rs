@@ -13,7 +13,7 @@ use super::head_expressions::{
     TemplateHeadExpressionContext, push_template_head_reactive_subscription,
 };
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionValueShape};
+use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
@@ -99,7 +99,7 @@ pub(super) fn parse_reactive_subscription(
         )));
     };
 
-    let mut expression = Expression::reference_with_type_id(
+    let expression = Expression::reference_with_type_id(
         reference.id.to_owned(),
         reference.value.diagnostic_type.to_owned(),
         reference.value.type_id,
@@ -108,12 +108,6 @@ pub(super) fn parse_reactive_subscription(
         reference.value.const_record_state,
     )
     .with_reactive_source(source.clone());
-
-    // Preserve explicit source shape (template, path, etc.) over the diagnostic-type
-    // fallback used by the generic reference constructor.
-    if reference.value.value_shape != ExpressionValueShape::Ordinary {
-        expression.value_shape = reference.value.value_shape;
-    }
 
     push_template_head_reactive_subscription(
         expression,

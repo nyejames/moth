@@ -2,6 +2,25 @@ render_fragment || -> String:
     return [:runtime template]
 ;
 
-result = render_fragment()
-[: [result]]
+render_other_fragment || -> String:
+    return [:other template]
+;
+
+first = render_fragment()
+second = render_fragment()
+other = render_other_fragment()
+same = first is second
+different = first is not other
+[: [first]
+    [if same:
+        same=true
+    [else]
+        same=false
+    ]
+    [if different:
+        different=true
+    [else]
+        different=false
+    ]
+]
 #[:entry]

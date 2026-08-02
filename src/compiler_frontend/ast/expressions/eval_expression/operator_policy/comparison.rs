@@ -6,7 +6,7 @@
 
 use super::super::result_type::ExpressionResultType;
 use super::diagnostics::invalid_comparison_types;
-use super::shared::{both_plain_string_slices, is_mixed_int_float};
+use super::shared::is_mixed_int_float;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
@@ -79,8 +79,8 @@ pub(super) fn resolve_comparison_operator_type(
             };
         }
 
-        // Plain string slices support equality only.
-        if both_plain_string_slices(lhs, rhs, type_environment) {
+        // Strings support equality only.
+        if lhs.type_id == builtins.string {
             return match op {
                 Operator::Equality | Operator::NotEqual => Ok(bool_result()),
                 _ => invalid_comparison_types(lhs, rhs, op, location),

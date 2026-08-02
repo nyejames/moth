@@ -5,9 +5,9 @@
 
 use super::super::assertions::{
     RuntimeEvent, SlotOutput, compare_text_golden, discover_golden_expectation,
-    extract_script_blocks, normalize_text_for_comparison, parse_harness_output,
-    validate_failure_result, validate_golden_outputs, validate_rendered_output_fragments,
-    validate_success_result,
+    execute_wasm_harness_for_test, extract_script_blocks, normalize_text_for_comparison,
+    parse_harness_output, validate_failure_result, validate_golden_outputs,
+    validate_rendered_output_fragments, validate_success_result,
 };
 use super::super::types::{
     DiagnosticAssertion, ExactWarningExpectation, GoldenExpectation, RenderedOutputExpectation,
@@ -1194,6 +1194,24 @@ fn rendered_output_extracts_nonempty_script_blocks_in_source_order() {
         extract_script_blocks(html),
         vec!["first".to_owned(), "second".to_owned()]
     );
+}
+
+#[test]
+fn html_wasm_rendered_output_waits_for_bootstrap_completion() {
+    let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+    fs::write(
+        temp_dir.path().join("page.js"),
+        r#"(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    document.getElementById("delayed-slot").insertAdjacentHTML("beforeend", "delayed");
+})();
+"#,
+    )
+    .expect("delayed bootstrap fixture should be written");
+
+    let output = execute_wasm_harness_for_test(temp_dir.path())
+        .expect("HTML-Wasm harness should await delayed bootstrap completion");
+    assert_eq!(output.combined_output(), "delayed");
 }
 
 #[test]

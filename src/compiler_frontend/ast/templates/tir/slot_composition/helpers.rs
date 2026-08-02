@@ -172,6 +172,53 @@ pub(super) fn children_of_node(
     }
 }
 
+/// Returns the direct `$insert(...)` helpers carried by a nested stored-insert
+/// template, when its root contains only insert-contribution nodes.
+///
+/// WHAT: identifies the transparent carrier created by a body reference such as
+///       `[stored_title]` and returns the helper IDs with their authored node
+///       locations.
+/// WHY: the immediate parent owns slot routing. Keeping this structural query
+///      beside the TIR slot-composition helpers prevents the parser and the
+///      post-parse escaped-insert validation from inventing separate shapes.
+pub(crate) fn stored_insert_contribution_templates(
+    store: &TemplateIrStore,
+    template_id: TemplateIrId,
+) -> Result<Option<Vec<(TemplateIrId, SourceLocation)>>, CompilerError> {
+    let template = store.get_template(template_id).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "TIR slot composition: stored insert carrier referenced a missing template.",
+        )
+    })?;
+    let root = store.get_node(template.root).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "TIR slot composition: stored insert carrier referenced a missing root node.",
+        )
+    })?;
+
+    let TemplateIrNodeKind::Sequence { children } = &root.kind else {
+        return Ok(None);
+    };
+    if children.is_empty() {
+        return Ok(None);
+    }
+
+    let mut contributions = Vec::with_capacity(children.len());
+    for child_id in children {
+        let child = store.get_node(*child_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "TIR slot composition: stored insert carrier referenced a missing child node.",
+            )
+        })?;
+        let TemplateIrNodeKind::InsertContribution { template } = child.kind else {
+            return Ok(None);
+        };
+        contributions.push((template, child.location.clone()));
+    }
+
+    Ok(Some(contributions))
+}
+
 /// Returns a template's source location, or an internal error when the template
 /// authority is missing from the store.
 pub(super) fn location_for_template(

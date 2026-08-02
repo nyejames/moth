@@ -15,7 +15,6 @@ use crate::compiler_frontend::hir::ids::{FunctionId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
-use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -38,18 +37,6 @@ fn float_expr(value: f64, location: SourceLocation) -> Expression {
     Expression::float(value, location, ValueMode::ImmutableOwned)
 }
 
-fn string_expr(
-    value: &str,
-    string_table: &mut StringTable,
-    location: SourceLocation,
-) -> Expression {
-    Expression::string_slice(
-        string_table.intern(value),
-        location,
-        ValueMode::ImmutableOwned,
-    )
-}
-
 fn find_single_numeric_op(builder: &HirBuilder<'_>) -> Option<(HirNumericOp, NumericFailureMode)> {
     builder
         .module
@@ -62,10 +49,6 @@ fn find_single_numeric_op(builder: &HirBuilder<'_>) -> Option<(HirNumericOp, Num
             } => Some((*op, *failure_mode)),
             _ => None,
         })
-}
-
-fn has_numeric_op(builder: &HirBuilder<'_>) -> bool {
-    find_single_numeric_op(builder).is_some()
 }
 
 fn set_current_function_return_type(
@@ -291,43 +274,6 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
     assert!(matches!(op, HirNumericOp::IntNeg));
-}
-
-#[test]
-fn string_concatenation_stays_plain_binop() {
-    let mut string_table = StringTable::new();
-    let loc = location(1);
-    let hello = string_expr("hello", &mut string_table, loc.clone());
-    let world = string_expr(" world", &mut string_table, loc.clone());
-
-    let mut builder = setup_builder(&mut string_table);
-
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(hello),
-            runtime_operand_item(world),
-            runtime_operator_item(Operator::Add, loc.clone()),
-        ],
-        builtin_type_ids::STRING,
-        loc.clone(),
-        ValueMode::MutableOwned,
-    );
-
-    let lowered = builder
-        .lower_expression(&expr)
-        .expect("string concatenation lowering should succeed");
-
-    assert!(
-        !has_numeric_op(&builder),
-        "string concat must not use NumericOp"
-    );
-    assert!(matches!(
-        lowered.value.kind,
-        HirExpressionKind::BinOp {
-            op: HirBinOp::Add,
-            ..
-        }
-    ));
 }
 
 #[test]

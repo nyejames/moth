@@ -19,7 +19,7 @@ io.line([: a = [a], b = [b], c = [c]])
 -- String variables
 name = "Alice"
 greeting = "Hello"
-io.line([: [greeting + ", " + name]])
+io.line([:[greeting], [name]])
 
 -- Boolean variables
 flag1 = true

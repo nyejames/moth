@@ -675,12 +675,12 @@ impl<'hir> JsEmitter<'hir> {
                 let scrutinee_temp = self.next_temp_identifier("__match");
                 self.emit_line(&format!("const {scrutinee_temp} = {scrutinee};"));
 
-                // If the last arm is an unguarded wildcard or capture, emit it as `else`
-                // instead of `else if (true)` and skip the unreachable fallback throw.
+                // If the last arm is an unguarded wildcard, emit it as `else` instead of
+                // `else if (true)` and skip the unreachable fallback throw.
                 let has_unconditional_fallback = matches!(
                     arms.last(),
                     Some(HirMatchArm {
-                        pattern: HirPattern::Wildcard | HirPattern::Capture,
+                        pattern: HirPattern::Wildcard,
                         guard: None,
                         ..
                     })
@@ -796,7 +796,6 @@ impl<'hir> JsEmitter<'hir> {
                 )
             }
             HirPattern::Wildcard => "true".to_owned(),
-            HirPattern::Capture => "true".to_owned(),
             HirPattern::OptionPresent => {
                 format!("({scrutinee_expression}).tag === \"some\"")
             }

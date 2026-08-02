@@ -147,7 +147,7 @@ pub(crate) use slot_composition::{
     RoutedTirSlotContributions, TirSlotContributions, TirSlotSchema,
     collect_tir_slot_placeholders_in_order, collect_tir_slot_schema, compose_tir_head_chain,
     compose_tir_head_chain_with_overlays, merge_tir_slot_resolution_contexts,
-    wrap_tir_node_in_wrappers,
+    stored_insert_contribution_templates, wrap_tir_node_in_wrappers,
 };
 
 pub(crate) use construction_context::TemplateConstructionContext;

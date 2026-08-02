@@ -49,11 +49,6 @@ pub enum HirPattern {
         choice_id: ChoiceId,
         variant_index: usize,
     },
-    /// General capture pattern that matches unconditionally.
-    ///
-    /// WHAT: marks an arm that binds the entire scrutinee value.
-    /// The local assignment is emitted separately inside the arm block.
-    Capture,
 }
 
 impl HirMatchArm {
@@ -66,8 +61,7 @@ impl HirMatchArm {
             HirPattern::OptionNone
             | HirPattern::OptionPresent
             | HirPattern::Wildcard
-            | HirPattern::ChoiceVariant { .. }
-            | HirPattern::Capture => {}
+            | HirPattern::ChoiceVariant { .. } => {}
         }
 
         if let Some(guard) = &mut self.guard {

@@ -2621,7 +2621,7 @@ fn block_assigns_string_literal(block: &HirBlock, expected: &str) -> bool {
         };
 
         let HirExpressionKind::BinOp {
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right,
             ..
         } = &value.kind
@@ -2699,7 +2699,7 @@ fn count_block_appends_local_string(block: &HirBlock) -> usize {
             };
 
             let HirExpressionKind::BinOp {
-                op: HirBinOp::Add,
+                op: HirBinOp::StringAppend,
                 right,
                 ..
             } = &value.kind
@@ -2723,7 +2723,7 @@ fn block_assigns_coerced_int_chunk(block: &HirBlock, expected: i32) -> bool {
         };
 
         let HirExpressionKind::BinOp {
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right,
             ..
         } = &value.kind
@@ -2732,7 +2732,7 @@ fn block_assigns_coerced_int_chunk(block: &HirBlock, expected: i32) -> bool {
         };
 
         let HirExpressionKind::BinOp {
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             left,
             right,
         } = &right.kind

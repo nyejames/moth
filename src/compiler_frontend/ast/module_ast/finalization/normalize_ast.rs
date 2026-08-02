@@ -811,7 +811,6 @@ fn normalize_control_flow_templates(
                     } => normalize_expression_templates(expression, context)?,
                     MatchPattern::OptionNone { .. }
                     | MatchPattern::ChoiceVariant { .. }
-                    | MatchPattern::Capture { .. }
                     | MatchPattern::OptionPresentCapture { .. } => {}
                 }
 

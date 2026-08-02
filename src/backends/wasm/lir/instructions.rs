@@ -100,6 +100,18 @@ pub(crate) enum WasmLirStmt {
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    /// Compare finalized String handles by UTF-8 content through the runtime helper.
+    StringEq {
+        dst: WasmLirLocalId,
+        lhs: WasmLirLocalId,
+        rhs: WasmLirLocalId,
+    },
+    /// Compare finalized String handles by UTF-8 content and negate the result.
+    StringNe {
+        dst: WasmLirLocalId,
+        lhs: WasmLirLocalId,
+        rhs: WasmLirLocalId,
+    },
     IntAdd {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,

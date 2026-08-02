@@ -465,7 +465,7 @@ inline_fallback = parse_number("42") catch |err| then err.code
 
 The inline catch binding is local to its fallback expression. First-class public `Result` values are outside language design scope. The special `!` return is only for the error path. Success values use the normal return list.
 
-An error-only function uses `-> Error!` and may fall through normally. A direct top-level `return!` produces its error. Nested-block `return!` in an error-only function remains a current implementation gap.
+An error-only function uses `-> Error!` and may fall through normally. A direct or nested-block `return!` produces its error and terminates the current path.
 
 Automatic checked-numeric recovery is compiler-owned and applies only when the current function's
 fallible return slot is builtin `Error!`. It does not make numeric operators source-visible
@@ -502,7 +502,7 @@ name, score = load_user(id) catch |err|:
 
 Multi-value blocks must produce the receiver arity on every producing path. Multi-bind accepts explicit multi-return function calls and value-producing blocks at closed RHS receiving sites. Regular declarations remain single-target, and user-visible tuple values are not supported.
 
-Inline `if` supports Bool conditions and choice predicates. The block `if ...: then ...` form has a known implementation gap and should not be treated as current-valid syntax.
+Inline `if` supports Bool conditions and choice predicates. The block `if ...: then ...` form is also valid at closed receiving sites such as declarations, assignments, multi-bind and returns.
 
 ```moth
 pair || -> String, Int:
@@ -826,7 +826,16 @@ title = [:
 ]
 ```
 
-Named inserts may be authored directly in an application. Storing a named insert in a binding and passing it later is a current implementation gap.
+Named inserts may be authored directly in an application or stored for a later
+immediate parent:
+
+```moth
+stored_title #= [$insert("title"): Stored title]
+rendered #= [card: [stored_title] Body]
+```
+
+The stored helper is flattened into the parent's slot-routing stream. An
+insert with no matching immediate parent remains invalid.
 
 Nested `$children(...)` wrappers remain scoped to direct children, so row/cell-style helpers can be layered without wrapper leakage.
 
@@ -1593,8 +1602,8 @@ Rules:
 - WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references are deferred beyond the V1 value-only profile.
 
 Initial optional core packages:
-- `@core/math`: `PI`, `TAU`, `E`, and `Float` math helpers.
-- `@core/text`: `length`, `is_empty`, `contains`, `starts_with`, `ends_with`. `text.length` counts Unicode scalar values, matching `Char`, which represents one Unicode scalar. The current JS lowering uses UTF-16 code units and does not yet match the accepted contract.
+- `@core/math`: `PI`, `TAU`, `E`, and `Float` math helpers. HTML-JS validates every single-Float result through the shared finite-result boundary before ordinary Moth code observes it. HTML-Wasm package lowering remains deferred.
+- `@core/text`: `length`, `is_empty`, `contains`, `starts_with`, `ends_with`. `text.length` counts Unicode scalar values, matching `Char`, which represents one Unicode scalar. HTML-JS implements the count with scalar-value iteration; HTML-Wasm package lowering remains deferred.
 - `@core/random`: `random_float`, `random_int`; `random_int(min, max)` is inclusive at both ends and swaps bounds when `min > max`; seeded random is deferred.
 - `@core/time`: opaque `Duration`, `TimeMark`, and `Timestamp` types; monotonic `mark_now`, `elapsed_since`, and `duration_between`; duration construction/conversion helpers; Unix timestamp construction/conversion helpers; and fallible ISO timestamp parsing/formatting.
 

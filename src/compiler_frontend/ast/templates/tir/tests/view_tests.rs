@@ -27,9 +27,7 @@ use super::super::refs::{
 use super::super::store::TemplateIrStore;
 use super::super::summary::TemplateIrSummary;
 use super::super::view::{TemplateTirPhase, TirView};
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ExpressionValueShape,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template::{
@@ -61,7 +59,6 @@ fn bool_expression() -> Expression {
         reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
         contains_regular_division: false,
-        value_shape: ExpressionValueShape::Ordinary,
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
     }
 }
@@ -1199,7 +1196,6 @@ fn bool_expression_with_location(location: &SourceLocation) -> Expression {
         reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
         contains_regular_division: false,
-        value_shape: ExpressionValueShape::Ordinary,
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
     }
 }

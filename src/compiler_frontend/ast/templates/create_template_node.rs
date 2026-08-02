@@ -202,6 +202,7 @@ impl Template {
             control_flow_validation,
             control_context,
             default_style,
+            allow_stored_insert_carrier,
         } = parse_options;
 
         // The parser-local build state accumulates head/body metadata while
@@ -477,10 +478,18 @@ impl Template {
         // `InsertContribution` nodes in the composed tree. These are not
         // orphaned — they were consumed by composition — so the check must not
         // fire on a composed reference.
+        let is_stored_insert_carrier = allow_stored_insert_carrier
+            && crate::compiler_frontend::ast::templates::tir::stored_insert_contribution_templates(
+                &context.template_ir_store.borrow(),
+                tir_reference.root,
+            )
+            .map_err(|error| TemplateError::from(error).into_diagnostic())?
+            .is_some();
         if !matches!(build_state.kind, TemplateType::SlotInsert(_))
             && !template_classification.has_unresolved_slots
             && template_classification.has_slot_insertions
             && !tir_reference.phase.is_at_least(TemplateTirPhase::Composed)
+            && !is_stored_insert_carrier
         {
             return Err(Box::new(CompilerDiagnostic::invalid_template_slot(
                 InvalidTemplateSlotReason::InsertOutsideParentSlot,

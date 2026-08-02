@@ -4,13 +4,12 @@
 //! WHY: struct parsing feeds both type resolution and HIR place lowering.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::{
-    ExpressionKind, ExpressionValueShape,
-};
+use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload, GenericInferenceSubject,
     InvalidFieldAccessReason, InvalidGenericInstantiationReason,
 };
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -43,7 +42,7 @@ fn parses_struct_definitions_with_field_defaults() {
 }
 
 #[test]
-fn struct_optional_string_default_preserves_source_value_shape() {
+fn struct_optional_string_default_preserves_canonical_string_type_id() {
     let (ast, string_table) =
         parse_single_file_ast("Label = |\n    text String? = \"fallback\",\n|\n");
 
@@ -63,10 +62,7 @@ fn struct_optional_string_default_preserves_source_value_shape() {
         panic!("expected struct definition node");
     };
 
-    assert_eq!(
-        fields[0].value.value_shape,
-        ExpressionValueShape::PlainStringSlice
-    );
+    assert_eq!(fields[0].value.type_id, builtin_type_ids::STRING);
 }
 
 #[test]

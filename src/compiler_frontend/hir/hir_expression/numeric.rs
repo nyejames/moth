@@ -444,7 +444,7 @@ impl<'a> HirBuilder<'a> {
     /// Classifies a runtime binary operator and its operand types as a checked numeric operation.
     ///
     /// WHAT: returns the `HirNumericOp` and the scalar result type when the operator is numeric
-    ///       arithmetic. String concatenation and non-numeric operators return `None` so callers can
+    ///       arithmetic. Non-numeric operators return `None` so callers can
     ///       fall back to plain `BinOp`.
     /// WHY: keeps the tree-lowering branch focused on control flow while numeric policy lives here.
     pub(crate) fn classify_checked_numeric_binop(
@@ -455,13 +455,11 @@ impl<'a> HirBuilder<'a> {
     ) -> Option<(HirNumericOp, TypeId)> {
         let int_type = self.type_environment.builtins().int;
         let float_type = self.type_environment.builtins().float;
-        let string_type = self.type_environment.builtins().string;
 
         let left_is_int = left.ty == int_type;
         let left_is_float = left.ty == float_type;
         let right_is_int = right.ty == int_type;
         let right_is_float = right.ty == float_type;
-        let any_operand_is_string = left.ty == string_type || right.ty == string_type;
         let operands_are_numeric =
             (left_is_int || left_is_float) && (right_is_int || right_is_float);
 
@@ -470,9 +468,6 @@ impl<'a> HirBuilder<'a> {
         }
 
         match op {
-            // String concatenation stays as plain HirBinOp::Add.
-            Operator::Add if any_operand_is_string => None,
-
             Operator::Add if left_is_int && right_is_int => Some((HirNumericOp::IntAdd, int_type)),
             Operator::Subtract if left_is_int && right_is_int => {
                 Some((HirNumericOp::IntSub, int_type))

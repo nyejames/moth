@@ -185,6 +185,22 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     (ast, string_table)
 }
 
+fn empty_provider_interface(prefix: &str) -> PublicSemanticInterface {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local(prefix),
+        format!("{prefix}/@mod.moth"),
+        ModuleRootRole::Normal,
+    );
+    PublicSemanticInterface {
+        module_origin,
+        export_bindings: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
 struct MothTemplateScopeFixture {
     _temp_dir: TempDir,
     project_root: PathBuf,
@@ -322,10 +338,15 @@ impl MothTemplateScopeFixture {
         &self,
         prepared_relative_paths: &[&str],
     ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
-        self.compile_module_ast_with_providers(
-            prepared_relative_paths,
-            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
-        )
+        let html_interface = empty_provider_interface("html");
+        let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
+            importer_source: Vec::new(),
+            imported_path: vec!["html".to_owned()],
+            from_grouped: false,
+            implicit_template_scope: true,
+            interface: &html_interface,
+        }]);
+        self.compile_module_ast_with_providers(prepared_relative_paths, &provider_imports)
     }
 
     fn compile_module_ast_with_providers(
@@ -407,10 +428,15 @@ impl MothTemplateScopeFixture {
         ),
         Box<CompilerDiagnostic>,
     > {
-        self.prepare_and_bind_headers_with_providers(
-            prepared_relative_paths,
-            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
-        )
+        let html_interface = empty_provider_interface("html");
+        let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
+            importer_source: Vec::new(),
+            imported_path: vec!["html".to_owned()],
+            from_grouped: false,
+            implicit_template_scope: true,
+            interface: &html_interface,
+        }]);
+        self.prepare_and_bind_headers_with_providers(prepared_relative_paths, &provider_imports)
     }
 
     fn prepare_and_bind_headers_with_providers(
@@ -985,7 +1011,7 @@ fn moth_template_without_same_directory_root_sees_only_html_constants() {
 }
 
 #[test]
-fn same_directory_root_constants_override_html_constants() {
+fn same_directory_root_constants_collide_with_html_constants() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
             "src/docs/@mod.moth",
@@ -993,7 +1019,7 @@ fn same_directory_root_constants_override_html_constants() {
         ),
         ("src/docs/intro.mtf", "[collision]"),
     ]);
-    let (ast, string_table) = fixture.compile_moth_template_ast_ok(
+    let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &[
             "@html/@mod.moth",
@@ -1001,10 +1027,27 @@ fn same_directory_root_constants_override_html_constants() {
             "src/docs/intro.mtf",
         ],
     );
-    let content = folded_content_value(&ast, &string_table);
 
-    assert!(content.contains("local"));
-    assert!(!content.contains("html"));
+    assert!(matches!(
+        diagnostic.kind,
+        DiagnosticKind::Import(
+            crate::compiler_frontend::compiler_messages::ImportDiagnosticKind::ImportNameCollision
+        )
+    ));
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::ImportNameCollision {
+            previous_location: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(diagnostic.labels.len(), 2);
+    assert!(
+        diagnostic
+            .labels
+            .iter()
+            .all(|label| !label.location.scope.is_empty())
+    );
 }
 
 #[test]
@@ -1023,12 +1066,13 @@ fn exported_html_functions_are_not_visible_to_moth_template_body() {
 }
 
 #[test]
-fn moth_template_sees_html_constants_through_provider_interface_without_html_headers() {
-    // Simulates the production path: @html is a separate compiled module whose completed
-    // PublicSemanticInterface is available through SourceProviderImportSet, but whose source
-    // headers are NOT in the consumer module's prepared files. The .mtf implicit scope must
-    // collect constant exports from the provider interface.
-    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant]")]);
+fn moth_template_sees_capability_selected_provider_constants_without_provider_headers() {
+    // Simulates the production path: source-backed providers are separate compiled modules whose
+    // completed interfaces are available through SourceProviderImportSet, but whose source
+    // headers are not in the consumer module's prepared files. The `.mtf` implicit scope must
+    // collect constant exports from every capability-selected provider, not only `@html`.
+    let fixture =
+        MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant] [custom_constant]")]);
 
     let html_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("html"),
@@ -1060,12 +1104,50 @@ fn moth_template_sees_html_constants_through_provider_interface_without_html_hea
         concrete_call_summaries: Vec::new(),
     };
 
-    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        importer_source: Vec::new(),
-        imported_path: vec!["html".to_owned()],
-        from_grouped: false,
-        interface: &html_interface,
-    }]);
+    let custom_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("custom"),
+        "custom".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let custom_constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        custom_origin.clone(),
+        "custom_constant".to_owned(),
+    ));
+    let custom_interface = PublicSemanticInterface {
+        module_origin: custom_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            custom_origin,
+            "custom_constant".to_owned(),
+            custom_constant_origin.clone(),
+        )],
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: custom_constant_origin,
+            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                folded_value: PublicFoldedValue::String("from custom".to_owned()),
+            }),
+        }],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+
+    let provider_imports = SourceProviderImportSet::new(vec![
+        SourceProviderImport {
+            importer_source: Vec::new(),
+            imported_path: vec!["html".to_owned()],
+            from_grouped: false,
+            implicit_template_scope: true,
+            interface: &html_interface,
+        },
+        SourceProviderImport {
+            importer_source: Vec::new(),
+            imported_path: vec!["custom".to_owned()],
+            from_grouped: false,
+            implicit_template_scope: true,
+            interface: &custom_interface,
+        },
+    ]);
 
     let (ast, string_table) = fixture
         .compile_moth_template_ast_with_providers(
@@ -1076,6 +1158,7 @@ fn moth_template_sees_html_constants_through_provider_interface_without_html_hea
         .expect(".mtf body should see @html constant through provider interface");
 
     folded_content_contains(&ast, &string_table, "from html");
+    folded_content_contains(&ast, &string_table, "from custom");
 }
 
 #[test]

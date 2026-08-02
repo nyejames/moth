@@ -4,9 +4,7 @@
 //! WHY: Phase 11 introduces the expression shape before HIR lowering consumes it, so these tests
 //! stay intentionally construction-focused and avoid changing runtime template behavior.
 
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ExpressionValueShape,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
     OwnedRuntimeTemplateNode,
@@ -51,7 +49,6 @@ fn runtime_template_handoff_expression_carries_owned_payload() {
 
     assert_eq!(expression.type_id, builtin_type_ids::STRING);
     assert_eq!(expression.diagnostic_type, DataType::Template);
-    assert_eq!(expression.value_shape, ExpressionValueShape::TemplateString);
     assert!(expression.reactive_template.is_some());
 
     let ExpressionKind::RuntimeTemplateHandoff(handoff) = expression.kind else {
@@ -73,7 +70,6 @@ fn runtime_slot_application_handoff_expression_carries_owned_payload() {
 
     assert_eq!(expression.type_id, builtin_type_ids::STRING);
     assert_eq!(expression.diagnostic_type, DataType::Template);
-    assert_eq!(expression.value_shape, ExpressionValueShape::TemplateString);
     assert!(expression.reactive_template.is_some());
 
     let ExpressionKind::RuntimeSlotApplicationHandoff(handoff) = expression.kind else {

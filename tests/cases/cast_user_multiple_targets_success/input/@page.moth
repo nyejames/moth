@@ -3,11 +3,11 @@ Token = |
 |
 
 to_string |this Token| -> String:
-    return "string:" + this.raw
+    return [:string:[this.raw]]
 ;
 
 to_error |this Token| -> Error:
-    return Error(message = "error:" + this.raw, code = 1)
+    return Error(message = [:error:[this.raw]], code = 1)
 ;
 
 Token must CASTABLE_TO_STRING

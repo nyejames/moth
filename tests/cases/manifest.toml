@@ -2911,32 +2911,11 @@ contract = "language.patterns.match_arm_semicolon_rejected"
 role = "primary"
 
 [[case]]
-id = "pattern_relational_string_less_success"
-path = "pattern_relational_string_less_success"
-tags = ["integration", "language", "pattern-matching", "js-backend"]
-contract = "language.patterns.relational_string_comparison"
+id = "pattern_relational_string_rejected"
+path = "pattern_relational_string_rejected"
+tags = ["integration", "diagnostics", "pattern-matching"]
+contract = "language.patterns.relational_string_rejected"
 role = "primary"
-
-[[case]]
-id = "pattern_relational_string_less_equal_success"
-path = "pattern_relational_string_less_equal_success"
-tags = ["integration", "language", "pattern-matching", "js-backend"]
-contract = "language.patterns.relational_string_comparison"
-role = "boundary"
-
-[[case]]
-id = "pattern_relational_string_greater_success"
-path = "pattern_relational_string_greater_success"
-tags = ["integration", "language", "pattern-matching", "js-backend"]
-contract = "language.patterns.relational_string_comparison"
-role = "boundary"
-
-[[case]]
-id = "pattern_relational_string_greater_equal_success"
-path = "pattern_relational_string_greater_equal_success"
-tags = ["integration", "language", "pattern-matching", "js-backend"]
-contract = "language.patterns.relational_string_comparison"
-role = "boundary"
 
 [[case]]
 id = "pattern_relational_string_mixed_number_rejected"
@@ -2979,13 +2958,6 @@ path = "pattern_diagnostic_invalid_relational_type"
 tags = ["integration", "diagnostics", "pattern-matching"]
 contract = "language.patterns.relational_non_scalar_type_rejected"
 role = "boundary"
-
-[[case]]
-id = "pattern_diagnostic_capture_collision"
-path = "pattern_diagnostic_capture_collision"
-tags = ["integration", "diagnostics", "pattern-matching"]
-contract = "language.patterns.capture_collision_rejected"
-role = "primary"
 
 [[case]]
 id = "pattern_diagnostic_nested_payload_deferred"
@@ -4769,6 +4741,13 @@ contract = "language.results.empty_catch_zero_success_statement_acceptance"
 role = "primary"
 
 [[case]]
+id = "nested_block_return_error_success"
+path = "nested_block_return_error_success"
+tags = ["integration", "results", "errors", "control-flow"]
+contract = "language.errors.nested_block_return_success"
+role = "boundary"
+
+[[case]]
 id = "result_handler_nested_control_flow"
 path = "result_handler_nested_control_flow"
 tags = ["integration", "results", "control-flow"]
@@ -5152,6 +5131,13 @@ id = "string_int_concatenation_rejected"
 path = "string_int_concatenation_rejected"
 tags = ["integration", "diagnostics"]
 contract = "language.strings.string_int_concatenation_rejected"
+role = "primary"
+
+[[case]]
+id = "string_string_concatenation_rejected"
+path = "string_string_concatenation_rejected"
+tags = ["integration", "diagnostics"]
+contract = "language.strings.string_string_concatenation_rejected"
 role = "primary"
 
 [[case]]
@@ -6035,6 +6021,13 @@ path = "template_slots_unknown_insert_target_failure"
 tags = ["integration","templates", "diagnostics"]
 contract = "language.templates.slot_unknown_insert_target_rejected"
 role = "primary"
+
+[[case]]
+id = "template_stored_named_insert_success"
+path = "template_stored_named_insert_success"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.stored_named_insert_acceptance"
+role = "boundary"
 
 [[case]]
 id = "template_named_slots_ignore_surrounding_whitespace"
@@ -8752,6 +8745,13 @@ contract = "language.imports.core_math_external_constants_acceptance"
 role = "primary"
 
 [[case]]
+id = "core_math_float_boundary_validation"
+path = "core_math_float_boundary_validation"
+tags = ["integration", "math", "numeric", "imports", "aliases", "diagnostics"]
+contract = "language.imports.core_math_float_boundary_validation"
+role = "boundary"
+
+[[case]]
 id = "core_math_old_std_namespace_rejected"
 path = "core_math_old_std_namespace_rejected"
 tags = ["integration", "math", "imports", "diagnostics"]
@@ -9536,31 +9536,10 @@ contract = "language.imports.module_facade_exported_symbol_acceptance"
 role = "boundary"
 
 [[case]]
-id = "pattern_capture_binds_scrutinee_success"
-path = "pattern_capture_binds_scrutinee_success"
-tags = ["integration", "language", "pattern-matching"]
-contract = "language.patterns.capture_binds_scrutinee_acceptance"
-role = "primary"
-
-[[case]]
-id = "pattern_capture_arm_scope_only"
-path = "pattern_capture_arm_scope_only"
-tags = ["integration", "language", "pattern-matching"]
-contract = "language.patterns.capture_binding_arm_scoped_rejected"
-role = "primary"
-
-[[case]]
-id = "pattern_capture_guard_success"
-path = "pattern_capture_guard_success"
-tags = ["integration", "language", "pattern-matching"]
-contract = "language.patterns.match_guard_evaluation_acceptance"
-role = "boundary"
-
-[[case]]
-id = "pattern_capture_immutable_binding"
-path = "pattern_capture_immutable_binding"
-tags = ["integration", "language", "pattern-matching", "diagnostics"]
-contract = "language.patterns.capture_binding_immutable_rejected"
+id = "pattern_general_capture_rejected"
+path = "pattern_general_capture_rejected"
+tags = ["integration", "diagnostics", "pattern-matching"]
+contract = "language.patterns.general_capture_rejected"
 role = "primary"
 
 [[case]]
@@ -9569,27 +9548,6 @@ path = "pattern_capture_rejects_underscore"
 tags = ["integration", "language", "pattern-matching", "diagnostics"]
 contract = "language.patterns.wildcard_rejected"
 role = "boundary"
-
-[[case]]
-id = "pattern_capture_name_collision_rejected"
-path = "pattern_capture_name_collision_rejected"
-tags = ["integration", "language", "pattern-matching", "diagnostics"]
-contract = "language.patterns.capture_collision_rejected"
-role = "boundary"
-
-[[case]]
-id = "pattern_capture_after_literal_warning_or_reachable"
-path = "pattern_capture_after_literal_warning_or_reachable"
-tags = ["integration", "language", "pattern-matching"]
-contract = "language.patterns.unreachable_after_catch_all_warned"
-role = "boundary"
-
-[[case]]
-id = "pattern_capture_before_else_makes_else_unreachable_warning"
-path = "pattern_capture_before_else_makes_else_unreachable_warning"
-tags = ["integration", "language", "pattern-matching"]
-contract = "language.patterns.unreachable_after_catch_all_warned"
-role = "primary"
 
 [[case]]
 id = "pattern_duplicate_literal_warning"
@@ -9613,27 +9571,6 @@ contract = "language.patterns.unreachable_after_catch_all_warned"
 role = "boundary"
 
 [[case]]
-id = "pattern_unreachable_after_capture_warning"
-path = "pattern_unreachable_after_capture_warning"
-tags = ["integration", "language", "pattern-matching", "diagnostics", "warnings"]
-contract = "language.patterns.unreachable_after_catch_all_warned"
-role = "boundary"
-
-[[case]]
-id = "pattern_unreachable_combined_warning"
-path = "pattern_unreachable_combined_warning"
-tags = ["integration", "language", "pattern-matching", "diagnostics", "warnings"]
-contract = "language.patterns.duplicate_match_arm_warned"
-role = "boundary"
-
-[[case]]
-id = "pattern_capture_whole_choice_value_success"
-path = "pattern_capture_whole_choice_value_success"
-tags = ["integration", "language", "pattern-matching", "choices"]
-contract = "language.patterns.capture_binds_scrutinee_acceptance"
-role = "boundary"
-
-[[case]]
 id = "pattern_choice_payload_existing_capture_alias_success"
 path = "pattern_choice_payload_existing_capture_alias_success"
 tags = ["integration", "language", "pattern-matching", "choices"]
@@ -9646,13 +9583,6 @@ path = "pattern_nested_choice_payload_pattern_rejected"
 tags = ["integration", "diagnostics", "pattern-matching", "choices"]
 contract = "language.patterns.nested_payload_deferred"
 role = "boundary"
-
-[[case]]
-id = "pattern_capture_does_not_enable_nested_payload"
-path = "pattern_capture_does_not_enable_nested_payload"
-tags = ["integration", "diagnostics", "pattern-matching", "choices"]
-contract = "language.patterns.capture_does_not_enable_nested_pattern_rejected"
-role = "primary"
 
 [[case]]
 id = "pattern_relational_overlap_no_warning"
@@ -10264,6 +10194,13 @@ contract = "language.expressions.value_if_choice_predicate_acceptance"
 role = "primary"
 
 [[case]]
+id = "value_if_cross_choice_predicate_rejected"
+path = "value_if_cross_choice_predicate_rejected"
+tags = ["integration", "language", "value-blocks", "if", "choice", "match", "diagnostics"]
+contract = "language.expressions.value_if_cross_choice_predicate_rejected"
+role = "boundary"
+
+[[case]]
 id = "option_value_if_inline_unwrap"
 path = "option_value_if_inline_unwrap"
 tags = ["integration", "language", "optionals", "value-blocks", "if", "match"]
@@ -10633,6 +10570,20 @@ path = "moth_template_namespace_import_html_parity"
 tags = ["integration", "moth_template", "html", "imports"]
 contract = "language.imports.moth_template_content_import_acceptance"
 role = "primary"
+
+[[case]]
+id = "moth_without_template_implicit_provider_rejected"
+path = "moth_without_template_implicit_provider_rejected"
+tags = ["integration", "moth_template", "html", "diagnostics", "imports"]
+contract = "language.imports.moth_without_template_implicit_provider_rejected"
+role = "boundary"
+
+[[case]]
+id = "moth_template_unrelated_source_package_implicit_rejected"
+path = "moth_template_unrelated_source_package_implicit_rejected"
+tags = ["integration", "moth_template", "html", "diagnostics", "imports", "source-packages"]
+contract = "language.imports.moth_template_unrelated_source_package_implicit_rejected"
+role = "boundary"
 
 [[case]]
 id = "moth_template_grouped_alias_import"

@@ -735,7 +735,6 @@ impl<'a> HirDisplayContext<'a> {
                     self.render_expression(value)
                 )
             }
-            HirPattern::Capture => "capture".to_owned(),
             HirPattern::OptionPresent => "|capture|".to_owned(),
             HirPattern::ChoiceVariant {
                 choice_id,
@@ -1160,6 +1159,7 @@ impl_hir_id_display!(HirValueId, "v");
 impl Display for HirBinOp {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
+            HirBinOp::StringAppend => write!(f, "++"),
             HirBinOp::Add => write!(f, "+"),
             HirBinOp::Sub => write!(f, "-"),
             HirBinOp::Mul => write!(f, "*"),

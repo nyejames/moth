@@ -1,15 +1,14 @@
 //! Arithmetic and non-comparison binary operator typing policy.
 //!
-//! WHAT: resolves result types for arithmetic operators (+, -, *, /, //, %, **) on scalar operands
-//!       and for string concatenation via the `+` operator.
+//! WHAT: resolves result types for arithmetic operators (+, -, *, /, //, %, **) on scalar operands.
 //! WHY: arithmetic rules must stay explicit so implicit broad compatibility cannot quietly
 //!      weaken type safety; mixed numeric promotion is intentionally narrow.
 
 use super::super::result_type::ExpressionResultType;
 use super::diagnostics::invalid_operator_types;
-use super::shared::{both_plain_string_slices, is_mixed_int_float};
+use super::shared::is_mixed_int_float;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::expressions::expression::{ExpressionValueShape, Operator};
+use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 
@@ -67,16 +66,6 @@ pub(super) fn resolve_arithmetic_operator_type(
 
                 _ => invalid_operator_types(lhs, rhs, op, location),
             };
-        }
-
-        // String concatenation is only supported via the `+` operator on plain string slices.
-        // The result is itself a plain string slice so chained concatenation stays well-typed.
-        if both_plain_string_slices(lhs, rhs, type_environment) && matches!(op, Operator::Add) {
-            return Ok(ExpressionResultType::from_type_id_with_shape(
-                builtins.string,
-                type_environment,
-                ExpressionValueShape::PlainStringSlice,
-            ));
         }
     }
 

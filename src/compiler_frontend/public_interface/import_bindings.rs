@@ -18,6 +18,12 @@ pub(crate) struct SourceProviderImport<'a> {
     pub(crate) importer_source: Vec<String>,
     pub(crate) imported_path: Vec<String>,
     pub(crate) from_grouped: bool,
+    /// Marks a provider selected by the active builder for `.mtf` implicit scope.
+    ///
+    /// Explicit source imports remain ordinary provider bindings. The build system sets this
+    /// flag only for capability-selected providers so header binding does not infer implicit
+    /// visibility from a package name or from another file's explicit import.
+    pub(crate) implicit_template_scope: bool,
     pub(crate) interface: &'a PublicSemanticInterface,
 }
 
@@ -101,23 +107,25 @@ impl<'a> SourceProviderImportSet<'a> {
         self.imports.iter().map(|binding| binding.interface)
     }
 
-    /// Find the completed interface for one source package by its import prefix.
+    /// Iterate over source packages selected by the builder for `.mtf` implicit scope.
     ///
-    /// WHAT: returns the `PublicSemanticInterface` for the first provider import whose
-    ///       `imported_path` starts with `prefix`, or `None` when no matching provider exists.
-    /// WHY: the Moth template implicit scope needs the `@html` package's constant exports
-    ///      even when the consumer module does not import `@html` directly. The build system
-    ///      injects builder source package interfaces into the set for this purpose.
-    pub(crate) fn interface_for_prefix(&self, prefix: &str) -> Option<&'a PublicSemanticInterface> {
-        self.imports
-            .iter()
-            .find(|binding| {
-                binding
-                    .imported_path
-                    .first()
-                    .is_some_and(|first| first == prefix)
-            })
-            .map(|binding| binding.interface)
+    /// WHAT: exposes the provider prefix together with its completed interface so header binding
+    ///       can register every capability-selected constant surface.
+    /// WHY: implicit template scope is builder capability metadata, not a hard-coded `@html`
+    ///       special case or a side effect of explicit imports.
+    pub(crate) fn implicit_template_scope_interfaces(
+        &self,
+    ) -> impl Iterator<Item = (&str, &'a PublicSemanticInterface)> + '_ {
+        self.imports.iter().filter_map(|binding| {
+            if !binding.implicit_template_scope {
+                return None;
+            }
+
+            binding
+                .imported_path
+                .first()
+                .map(|prefix| (prefix.as_str(), binding.interface))
+        })
     }
 }
 

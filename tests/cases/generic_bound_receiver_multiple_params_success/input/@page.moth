@@ -26,7 +26,7 @@ Label must DISPLAY_TEXT
 Badge must HAS_NAME
 
 join_rendered type Left is DISPLAY_TEXT, Right is HAS_NAME |left Left, right Right| -> String:
-    return left.display() + ":" + right.name()
+    return [:[left.display()]:[right.name()]]
 ;
 
 [:generic_bound_receiver_multiple_params_success [join_rendered(Label("left"), Badge("right"))]]

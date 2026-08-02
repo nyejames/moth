@@ -67,7 +67,7 @@ pub(super) fn parse_relational_pattern(
 
 /// Ensure the subject type supports relational ordering.
 ///
-/// Only `int`, `float`, `char`, and `string` may appear in relational patterns.
+/// Only `int`, `float`, and `char` may appear in relational patterns.
 fn ensure_relational_subject_type(
     subject_type_id: TypeId,
     location: &SourceLocation,
@@ -78,8 +78,7 @@ fn ensure_relational_subject_type(
 
     let is_ordered_scalar = subject_type_id == builtins.int
         || subject_type_id == builtins.float
-        || subject_type_id == builtins.char
-        || subject_type_id == builtins.string;
+        || subject_type_id == builtins.char;
 
     if !is_ordered_scalar {
         return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(

@@ -19,9 +19,7 @@ use super::super::store::{TemplateIrStore, TemplateWrapperSet};
 use super::super::summary::TemplateIrSummary;
 use super::super::{TemplateTirPhase, TemplateViewContext};
 use super::validation_support::validate_tir_store;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ExpressionValueShape,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -56,7 +54,6 @@ fn bool_expression() -> Expression {
         reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
         contains_regular_division: false,
-        value_shape: ExpressionValueShape::Ordinary,
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
     }
 }

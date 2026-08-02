@@ -18,7 +18,7 @@ Label must DISPLAY_TEXT
 Label must ALT_DISPLAY
 
 join_rendered type Left is DISPLAY_TEXT, Right is ALT_DISPLAY |left Left, right Right| -> String:
-    return left.display() + ":" + right.display()
+    return [:[left.display()]:[right.display()]]
 ;
 
 [:generic_bound_receiver_same_concrete_params_success [join_rendered(Label("same"), Label("same"))]]

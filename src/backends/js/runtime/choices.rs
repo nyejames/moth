@@ -11,8 +11,8 @@ impl<'hir> JsEmitter<'hir> {
     /// Emits the choice structural equality helper.
     ///
     /// WHAT: `__moth_choice_eq` compares two choice carriers by tag and then by every
-    /// payload field. Nested choices are compared recursively; all other supported types
-    /// use `===`.
+    /// payload field. Nested choices recurse and String payloads use the canonical content
+    /// equality helper rather than relying on a backend representation.
     ///
     /// WHY: the frontend only approves choice equality when every payload field supports
     /// structural equality, so the helper can safely assume primitives are `===`-comparable
@@ -29,7 +29,11 @@ impl<'hir> JsEmitter<'hir> {
                 inner.emit_line("var k = keys[i];");
                 inner.emit_line("if (k === \"tag\") continue;");
                 inner.emit_line("var av = a[k], bv = b[k];");
-                inner.emit_line("if (av && typeof av === \"object\" && \"tag\" in av) {");
+                inner.emit_line("if (__moth_string_like(av) || __moth_string_like(bv)) {");
+                inner.with_indent(|deepest| {
+                    deepest.emit_line("if (!__moth_string_equal(av, bv)) return false;");
+                });
+                inner.emit_line("} else if (av && typeof av === \"object\" && \"tag\" in av) {");
                 inner.with_indent(|deepest| {
                     deepest.emit_line("if (!__moth_choice_eq(av, bv)) return false;");
                 });

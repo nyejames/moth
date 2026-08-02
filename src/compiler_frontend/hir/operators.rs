@@ -5,6 +5,8 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HirBinOp {
+    /// Compiler-owned append used only by runtime template lowering.
+    StringAppend,
     Add,
     Sub,
     Mul,

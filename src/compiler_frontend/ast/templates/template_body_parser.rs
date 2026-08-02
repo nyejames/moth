@@ -147,6 +147,12 @@ pub(crate) struct NestedTemplateParseOptions {
     pub(crate) control_flow_validation: TemplateControlFlowValidationMode,
     pub(crate) control_context: TemplateBodyControlContext,
     pub(crate) default_style: Option<Style>,
+    /// Allows a nested template whose sole content is a stored `$insert(...)`
+    /// helper to be flattened into its immediate parent contribution stream.
+    ///
+    /// A standalone escaped insert remains invalid; only the body parser can
+    /// opt into this carrier form because it owns the immediate parent.
+    pub(crate) allow_stored_insert_carrier: bool,
 }
 
 impl NestedTemplateParseOptions {
@@ -156,6 +162,7 @@ impl NestedTemplateParseOptions {
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             control_context: TemplateBodyControlContext::normal(),
             default_style: None,
+            allow_stored_insert_carrier: false,
         }
     }
 
@@ -165,6 +172,7 @@ impl NestedTemplateParseOptions {
             control_flow_validation: TemplateControlFlowValidationMode::ConstRequired,
             control_context: TemplateBodyControlContext::normal(),
             default_style: None,
+            allow_stored_insert_carrier: false,
         }
     }
 
@@ -573,6 +581,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             control_flow_validation: self.control_flow_validation,
             control_context: input.control_context,
             default_style: self.default_style.clone(),
+            allow_stored_insert_carrier: true,
         };
 
         let child_template = Template::new_nested_template(
@@ -601,13 +610,31 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 })?
         };
 
-        match &child_kind {
-            TemplateType::SlotInsert(_) => {
-                record_parser_tir_insert_contribution(construction_context, &child_template);
+        let stored_insert_contributions = {
+            let store = construction_context.store();
+            crate::compiler_frontend::ast::templates::tir::stored_insert_contribution_templates(
+                &store,
+                child_template.tir_reference.root,
+            )
+            .map_err(|error| TemplateError::from(error).into_diagnostic())?
+        };
+
+        if let Some(contributions) = stored_insert_contributions {
+            // A stored named insert is authored as a binding, then referenced
+            // through a nested `[...]` body template. Flatten only the
+            // insert-only carrier so the immediate wrapper owns routing.
+            for (template_id, location) in contributions {
+                construction_context.record_insert_contribution(template_id, location);
             }
-            TemplateType::Comment(_) | TemplateType::SlotDefinition(_) => {}
-            _ => {
-                record_parser_tir_child_template(construction_context, &child_template);
+        } else {
+            match &child_kind {
+                TemplateType::SlotInsert(_) => {
+                    record_parser_tir_insert_contribution(construction_context, &child_template);
+                }
+                TemplateType::Comment(_) | TemplateType::SlotDefinition(_) => {}
+                _ => {
+                    record_parser_tir_child_template(construction_context, &child_template);
+                }
             }
         }
 

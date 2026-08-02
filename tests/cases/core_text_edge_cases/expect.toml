@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["len_empty=0 len_emoji=2 empty_yes=true empty_no=false contains_empty_text=true contains_empty_both=true starts_empty_text=true starts_empty_both=true ends_empty_text=true ends_empty_both=true"]
+rendered_output_contains = ["len_empty=0 len_ascii=3 len_bmp=1 len_emoji=1 len_mixed=3 len_namespace=3 empty_yes=true empty_no=false contains_empty_text=true contains_empty_both=true starts_empty_text=true starts_empty_both=true ends_empty_text=true ends_empty_both=true"]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
@@ -15,7 +15,10 @@ must_contain = [
     "function __moth_text_starts_with(",
     "function __moth_text_ends_with(",
     "__moth_text_length(\"\")",
+    "__moth_text_length(\"abc\")",
+    "__moth_text_length(\"é\")",
     "__moth_text_length(\"😊\")",
+    "__moth_text_length(\"a😊b\")",
 ]
 
 [backends.html_wasm]

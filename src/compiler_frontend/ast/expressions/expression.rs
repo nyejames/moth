@@ -40,27 +40,6 @@ use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterface
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// AST-local classification for the value shape of a string-like expression.
-///
-/// WHAT: distinguishes ordinary values from source constructs that share the `String`
-///      `TypeId` but have different operator policy (plain string slices, compile-time
-///      paths, and template-backed strings).
-/// WHY: string/path/template operator policy must not be inferred from diagnostic-only
-///      `DataType` spelling once canonical `TypeId`s are available.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExpressionValueShape {
-    /// A value with no special string/path/template shape metadata.
-    Ordinary,
-    /// A quoted or raw string slice literal, or a reference/copy to a plain string value.
-    PlainStringSlice,
-    /// A compile-time path value. It has the runtime `String` `TypeId` but does not
-    /// participate in ordinary string operators.
-    CompileTimePath,
-    /// A template expression or a value that directly passes through template-string
-    /// metadata (for example a reactive template parameter).
-    TemplateString,
-}
-
 /// The kind determines the runtime shape and constant-foldability of the value.
 ///
 /// `Runtime` carries a small AST fragment for expressions that could not be folded.
@@ -125,14 +104,6 @@ pub struct Expression {
     /// value comes from `/`, even when constant folding removed the original
     /// operator node.
     pub contains_regular_division: bool,
-
-    /// Explicit value-shape metadata for string-like values.
-    ///
-    /// WHAT: records whether this expression is an ordinary value, a plain string
-    ///      slice, a compile-time path, or a template-backed string.
-    /// WHY: operator policy for `+`, comparisons, and string coercions must be
-    ///      decided on this AST-local fact rather than on `diagnostic_type` spelling.
-    pub value_shape: ExpressionValueShape,
 
     /// Direct synthetic compile-time interface provenance for this value.
     ///
@@ -380,43 +351,6 @@ impl ResolvedCallTypes {
     }
 }
 
-/// Best-effort value-shape hint from diagnostic spelling for parse/header boundaries.
-///
-/// WHAT: maps syntax/display-only `DataType` values to the AST-local value shape that a
-///      freshly-built expression should carry when no richer semantic source shape is available.
-/// WHY: this is a construction-time hint only; operator policy must inspect the resulting
-///      `ExpressionValueShape`, not `DataType`.
-pub(crate) fn expression_value_shape_for_diagnostic_type(
-    data_type: &DataType,
-) -> ExpressionValueShape {
-    match data_type {
-        DataType::StringSlice => ExpressionValueShape::PlainStringSlice,
-        DataType::Template => ExpressionValueShape::TemplateString,
-        DataType::Path(_) => ExpressionValueShape::CompileTimePath,
-        _ => ExpressionValueShape::Ordinary,
-    }
-}
-
-/// Best-effort value-shape hint from semantic type plus diagnostic spelling.
-///
-/// WHAT: preserves plain-string behavior when a conversion boundary has only a
-/// canonical `String` `TypeId` and no richer template/path source shape.
-/// WHY: expression conversions should not accidentally treat source calls or
-/// field reads returning `String` as ordinary values with no string operator
-/// policy.
-pub(crate) fn expression_value_shape_for_type_id(
-    type_id: TypeId,
-    diagnostic_type: &DataType,
-) -> ExpressionValueShape {
-    let value_shape = expression_value_shape_for_diagnostic_type(diagnostic_type);
-
-    if value_shape == ExpressionValueShape::Ordinary && type_id == builtin_type_ids::STRING {
-        return ExpressionValueShape::PlainStringSlice;
-    }
-
-    value_shape
-}
-
 /// Best-effort bridge for parse/header paths that still start from diagnostic spelling.
 ///
 /// WHAT: maps syntax/display-only `DataType` values to builtin TypeId hints when the caller does
@@ -471,7 +405,6 @@ impl Expression {
             reactive_template: None,
             const_record_state: ConstRecordState::RuntimeValue,
             contains_regular_division: false,
-            value_shape: ExpressionValueShape::Ordinary,
             synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
         }
     }
@@ -544,8 +477,7 @@ impl Expression {
             diagnostic_type,
         } = resolved_types;
 
-        let value_shape = expression_value_shape_for_diagnostic_type(&diagnostic_type);
-        let mut expression = Self::new(
+        Self::new(
             kind,
             location,
             expression_type_id,
@@ -555,9 +487,7 @@ impl Expression {
             // If the return signature is a reference (the name of a parameter passed in),
             // then this is a reference to that parameter.
             ValueMode::MutableOwned,
-        );
-        expression.value_shape = value_shape;
-        expression
+        )
     }
 
     /// Wraps an expression-owned runtime RPN stack into a single runtime expression.
@@ -569,23 +499,20 @@ impl Expression {
         value_mode: ValueMode,
     ) -> Self {
         let contains_regular_division = rpn.contains_regular_division();
-        let value_shape = expression_value_shape_for_diagnostic_type(&data_type);
 
         debug_assert!(
             rpn.validate_no_statement_bodies(),
             "Runtime RPN must not carry statement bodies"
         );
 
-        let mut expression = Self::new(
+        Self::new(
             ExpressionKind::Runtime(rpn),
             location,
             type_id,
             data_type,
             value_mode,
         )
-        .with_regular_division_provenance(contains_regular_division);
-        expression.value_shape = value_shape;
-        expression
+        .with_regular_division_provenance(contains_regular_division)
     }
 
     /// Constructs an integer literal expression.
@@ -612,15 +539,13 @@ impl Expression {
 
     /// Constructs a string slice literal expression.
     pub fn string_slice(value: StringId, location: SourceLocation, value_mode: ValueMode) -> Self {
-        let mut expression = Self::scalar_literal(
+        Self::scalar_literal(
             ExpressionKind::StringSlice(value),
             builtin_type_ids::STRING,
             DataType::StringSlice,
             location,
             value_mode,
-        );
-        expression.value_shape = ExpressionValueShape::PlainStringSlice;
-        expression
+        )
     }
 
     /// Constructs a boolean literal expression.
@@ -654,7 +579,6 @@ impl Expression {
         value_mode: ValueMode,
         const_record_state: ConstRecordState,
     ) -> Self {
-        let value_shape = expression_value_shape_for_diagnostic_type(&data_type);
         let mut expression = Self::new(
             ExpressionKind::Reference(id),
             location,
@@ -663,7 +587,6 @@ impl Expression {
             value_mode,
         );
         expression.const_record_state = const_record_state;
-        expression.value_shape = value_shape;
         expression
     }
 
@@ -877,7 +800,6 @@ impl Expression {
         let location = cast.location.clone();
         let diagnostic_type = diagnostic_type_spelling(target_type_id, type_environment);
         let value_mode = cast.source.value_mode.to_owned();
-        let value_shape = expression_value_shape_for_diagnostic_type(&diagnostic_type);
         let synthetic_interface_provenance = cast.source.synthetic_interface_provenance.clone();
 
         let mut expression = Self::new(
@@ -887,7 +809,6 @@ impl Expression {
             diagnostic_type,
             value_mode,
         );
-        expression.value_shape = value_shape;
         expression.synthetic_interface_provenance = synthetic_interface_provenance;
         expression
     }
@@ -906,7 +827,6 @@ impl Expression {
         let reactive_template = value.reactive_template.clone();
         let contains_regular_division = value.contains_regular_division;
         let const_record_state = value.const_record_state;
-        let value_shape = value.value_shape;
         let synthetic_interface_provenance = value.synthetic_interface_provenance.clone();
         let mut expression = Self::new(
             ExpressionKind::Coerced {
@@ -924,7 +844,6 @@ impl Expression {
         expression.const_record_state = const_record_state;
         expression.reactive_source = reactive_source;
         expression.reactive_template = reactive_template;
-        expression.value_shape = value_shape;
         expression.synthetic_interface_provenance = synthetic_interface_provenance;
         expression
     }
@@ -1132,21 +1051,19 @@ impl Expression {
 
     /// Constructs a template expression without provisional reactive metadata.
     ///
-    /// WHAT: records the template value and its source shape while leaving
+    /// WHAT: records the template value while leaving
     /// `reactive_template` unset.
     /// WHY: AST finalization owns the module store and recomputes authoritative
     /// metadata through TIR before normalization and HIR lowering.
     pub fn template(template: Template, value_mode: ValueMode) -> Self {
         let location = template.location.to_owned();
-        let mut expression = Self::new(
+        Self::new(
             ExpressionKind::Template(Box::new(template)),
             location,
             builtin_type_ids::STRING,
             DataType::Template,
             value_mode,
-        );
-        expression.value_shape = ExpressionValueShape::TemplateString;
-        expression
+        )
     }
 
     /// Constructs the final AST-owned payload for an ordinary runtime template.
@@ -1172,7 +1089,6 @@ impl Expression {
             value_mode,
         );
         expression.reactive_template = Some(ReactiveTemplateMetadata::template_backed());
-        expression.value_shape = ExpressionValueShape::TemplateString;
         expression
     }
 
@@ -1198,7 +1114,6 @@ impl Expression {
             value_mode,
         );
         expression.reactive_template = Some(ReactiveTemplateMetadata::template_backed());
-        expression.value_shape = ExpressionValueShape::TemplateString;
         expression
     }
 
@@ -1211,16 +1126,13 @@ impl Expression {
         location: SourceLocation,
         value_mode: ValueMode,
     ) -> Self {
-        let value_shape = expression_value_shape_for_diagnostic_type(&data_type);
-        let mut expression = Self::new(
+        Self::new(
             ExpressionKind::Copy(place),
             location,
             type_id,
             data_type,
             value_mode.as_owned(),
-        );
-        expression.value_shape = value_shape;
-        expression
+        )
     }
 
     /// Internal sentinel used for declarations/signature defaults that do not

@@ -569,9 +569,7 @@ fn debug_validate_match_pattern_type_ids(
         }
 
         // Patterns that carry no nested type identities.
-        MatchPattern::OptionNone { .. }
-        | MatchPattern::Capture { .. }
-        | MatchPattern::OptionPresentCapture { .. } => {}
+        MatchPattern::OptionNone { .. } | MatchPattern::OptionPresentCapture { .. } => {}
     }
 }
 

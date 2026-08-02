@@ -1,0 +1,8 @@
+-- String values support equality but not ordering or relational match patterns.
+
+value ~= "apple"
+
+if value is:
+    < "m" => [:unreachable]
+    else => [:fallback]
+;

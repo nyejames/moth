@@ -25,6 +25,8 @@ pub(crate) enum WasmRuntimeHelper {
     StringPtr,
     /// Read the byte length from a finalized string handle.
     StringLen,
+    /// Compare two finalized string handles by their UTF-8 byte contents.
+    StringEqual,
     /// Convert i64 scalar values into finalized string handles for template interpolation.
     StringFromI64,
     /// Allocate an empty Vec-handle header for `Vec<String>` runtime fragments.

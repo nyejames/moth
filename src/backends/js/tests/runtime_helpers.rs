@@ -973,7 +973,7 @@ fn map_set_stores_and_returns_ok() {
     let helper = helper_source(&source, "__moth_map_set");
 
     assert!(
-        helper.contains("map.map.set(key, value)")
+        helper.contains("map.map.set(__moth_map_key(key), value)")
             && helper.contains("{ tag: \"ok\", value: null }"),
         "__moth_map_set must store via map.map.set and return ok unit carrier"
     );
@@ -1017,7 +1017,8 @@ fn map_contains_is_plain_infallible_helper() {
     let helper = helper_source(&source, "__moth_map_contains");
 
     assert!(
-        helper.contains("return map.map.has(key);") && !helper.contains("__moth_error_result"),
+        helper.contains("return map.map.has(__moth_map_key(key));")
+            && !helper.contains("__moth_error_result"),
         "__moth_map_contains must be a plain infallible helper"
     );
 }

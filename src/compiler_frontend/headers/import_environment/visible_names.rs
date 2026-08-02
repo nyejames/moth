@@ -148,6 +148,30 @@ impl VisibleNameRegistry {
     pub(crate) fn get(&self, name: StringId) -> Option<&VisibleNameBinding> {
         self.names.get(&name).map(|entry| &entry.binding)
     }
+
+    /// Remove a generated same-file declaration that is not part of the source-visible surface.
+    ///
+    /// WHAT: keeps the registry aligned with the visibility maps when synthetic source files
+    ///       hide their generated self constants before implicit providers are registered.
+    /// WHY: the registry is the collision authority; leaving the removed declaration behind
+    ///      would make a hidden implementation detail collide with a valid implicit export.
+    pub(crate) fn remove_same_file_declaration(
+        &mut self,
+        local_name: StringId,
+        declaration_path: &InternedPath,
+    ) {
+        let should_remove = self.names.get(&local_name).is_some_and(|entry| {
+            matches!(
+                &entry.binding,
+                VisibleNameBinding::SameFileDeclaration {
+                    declaration_path: registered_path
+                } if registered_path == declaration_path
+            )
+        });
+        if should_remove {
+            self.names.remove(&local_name);
+        }
+    }
 }
 
 /// Determine whether two bindings refer to the same underlying target.

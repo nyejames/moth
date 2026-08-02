@@ -3,7 +3,7 @@ Cell = |
 |
 
 prefix |s String| -> String:
-    return s + "|"
+    return [:[s]|]
 ;
 
 maybe String? = cast 1

@@ -158,20 +158,22 @@ fn check_and_build_frontends_produce_identical_diagnostics_and_check_writes_no_a
     // --------------------------------------------
     //  Warning parity: success with frontend warnings
     // --------------------------------------------
-    // The capture pattern makes the later arms unreachable, producing three
-    // `MOTH-RULE-0022` warnings. Both `check` and `build_project` succeed.
+    // Repeated literal patterns make the later duplicate arms unreachable,
+    // producing three `MOTH-RULE-0022` warnings. Both `check` and
+    // `build_project` succeed.
     let warning_source = "\
 value ~= \"hello\"
 result ~= \"unset\"
 
 if value is:
-    captured => result = captured
-    \"one\" => result = \"one\"
-    \"two\" => result = \"two\"
+    \"hello\" => result = \"one\"
+    \"hello\" => result = \"two\"
+    \"hello\" => result = \"three\"
+    \"hello\" => result = \"four\"
     else => result = \"other\"
 ;
 
-[:pattern_unreachable_after_capture_warning result=[result]]
+[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 ";
     let warning_root = write_page_project("check_build_parity_warning", warning_source);
 

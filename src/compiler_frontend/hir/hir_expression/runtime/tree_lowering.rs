@@ -157,9 +157,9 @@ impl<'a> HirBuilder<'a> {
                     });
                 }
 
-                // Numeric arithmetic is lowered as a checked NumericOp statement; other
-                // binary operators (comparisons, booleans, string concatenation, ranges)
-                // keep the plain BinOp form.
+                // Numeric arithmetic is lowered as a checked NumericOp statement. Comparisons
+                // and booleans retain plain BinOp form, ranges use the dedicated Range node,
+                // and compiler-owned template appends use HirBinOp::StringAppend.
                 if let Some((numeric_op, numeric_result_ty)) =
                     self.classify_checked_numeric_binop(op, &lowered_left, &lowered_right)
                 {
@@ -252,8 +252,9 @@ impl<'a> HirBuilder<'a> {
     /// WHAT: conservatively treats arithmetic-shaped operators as current-block effects.
     /// WHY: `NumericOp` emission may append statements and, in recoverable contexts, split CFG.
     ///      Parent lowering must flush pending left-side preludes before visiting such a child so
-    ///      source evaluation order remains left-to-right. String `+` is harmlessly conservative:
-    ///      it goes through current-block lowering but still falls back to plain `BinOp`.
+    ///      source evaluation order remains left-to-right. Boolean comparisons remain ordinary
+    ///      binary operations; internal template construction uses the dedicated `StringAppend`
+    ///      operator and follows the same current-block boundary.
     fn operator_emits_checked_numeric_statement(op: &Operator) -> bool {
         matches!(
             op,

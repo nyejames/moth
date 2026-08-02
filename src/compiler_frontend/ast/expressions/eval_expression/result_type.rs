@@ -6,9 +6,7 @@
 
 use super::operator_policy::{resolve_binary_operator_type, resolve_unary_operator_type};
 use super::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionValueShape, Operator, expression_value_shape_for_diagnostic_type,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
@@ -22,15 +20,13 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Resolved type facts carried by the operator typing stack.
 ///
-/// WHAT: keeps canonical `TypeId` next to the value shape needed for operator policy
-///      and the diagnostic spelling needed for readable errors.
-/// WHY: operator compatibility should be decided on semantic IDs and explicit value
-///      shape metadata; `DataType` is retained only for diagnostics.
+/// WHAT: keeps canonical `TypeId` and readable diagnostic type spelling.
+/// WHY: operator compatibility is decided on semantic IDs. `DataType` is retained only for
+///      diagnostics.
 #[derive(Clone)]
 pub(super) struct ExpressionResultType {
     pub(super) diagnostic_type: DataType,
     pub(super) type_id: TypeId,
-    pub(super) value_shape: ExpressionValueShape,
 }
 
 impl ExpressionResultType {
@@ -39,7 +35,6 @@ impl ExpressionResultType {
         Self {
             diagnostic_type: diagnostic_type.to_owned(),
             type_id,
-            value_shape: expression_value_shape_for_diagnostic_type(&diagnostic_type),
         }
     }
 
@@ -47,19 +42,6 @@ impl ExpressionResultType {
         Self {
             diagnostic_type: expression.diagnostic_type.to_owned(),
             type_id: expression.type_id,
-            value_shape: expression.value_shape,
-        }
-    }
-
-    pub(super) fn from_type_id_with_shape(
-        type_id: TypeId,
-        type_environment: &TypeEnvironment,
-        value_shape: ExpressionValueShape,
-    ) -> Self {
-        Self {
-            diagnostic_type: diagnostic_type_spelling(type_id, type_environment),
-            type_id,
-            value_shape,
         }
     }
 }

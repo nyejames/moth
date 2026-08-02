@@ -1,0 +1,18 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "function __moth_float_validate(",
+    "__moth_float_validate(",
+    "Math.sqrt(",
+    "Math.exp(",
+]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]

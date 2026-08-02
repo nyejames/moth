@@ -2,12 +2,12 @@
 //!
 //! WHAT: small predicates and guards used by arithmetic, comparison, and logical
 //!      operator policy modules.
-//! WHY: operator categories share narrow rules (mixed numeric detection, plain-string
-//!      identity, fallible-carrier rejection) that are easier to review in one place.
+//! WHY: operator categories share narrow rules (mixed numeric detection and fallible-carrier
+//!      rejection) that are easier to review in one place.
 
 use super::super::result_type::ExpressionResultType;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::expressions::expression::{ExpressionValueShape, Operator};
+use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleOperandReason, UnsupportedOperatorCategory,
@@ -87,22 +87,4 @@ pub(super) fn is_mixed_int_float(
 
     (lhs.type_id == builtins.int && rhs.type_id == builtins.float)
         || (lhs.type_id == builtins.float && rhs.type_id == builtins.int)
-}
-
-/// Returns `true` when both operands are plain `StringSlice` values.
-///
-/// WHAT: distinguishes ordinary string slices from compile-time paths and template-backed
-///      strings.
-/// WHY: compile-time paths and template values use the runtime `String` TypeId but
-///      intentionally do not participate in ordinary string operators. Keep that value-shape
-///      rule explicit while scalar type identity stays canonical.
-pub(super) fn both_plain_string_slices(
-    lhs: &ExpressionResultType,
-    rhs: &ExpressionResultType,
-    type_environment: &TypeEnvironment,
-) -> bool {
-    lhs.type_id == type_environment.builtins().string
-        && rhs.type_id == type_environment.builtins().string
-        && lhs.value_shape == ExpressionValueShape::PlainStringSlice
-        && rhs.value_shape == ExpressionValueShape::PlainStringSlice
 }

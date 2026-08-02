@@ -117,9 +117,8 @@ fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), 
                             validate_type_id(capture.type_id, &capture.location, context)?;
                         }
                     }
-                    MatchPattern::OptionNone { .. }
-                    | MatchPattern::Capture { .. }
-                    | MatchPattern::OptionPresentCapture { .. } => {}
+                    MatchPattern::OptionNone { .. } | MatchPattern::OptionPresentCapture { .. } => {
+                    }
                 }
 
                 if let Some(guard) = &arm.guard {

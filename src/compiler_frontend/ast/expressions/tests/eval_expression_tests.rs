@@ -3,7 +3,7 @@
 //! WHAT: validates operator precedence, runtime expression node construction, and template
 //!       expression parsing.
 //! WHY: expression parsing is dense and easy to break during refactors; targeted tests catch
-//!      shape drift before it reaches HIR lowering.
+//!      semantic drift before it reaches HIR lowering.
 
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
@@ -25,7 +25,6 @@ use crate::compiler_frontend::paths::compile_time_paths::{
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
@@ -333,6 +332,21 @@ fn string_equality_comparison_resolves_to_bool() {
 }
 
 #[test]
+fn string_equality_accepts_quoted_and_runtime_template_values() {
+    let value = nth_start_declaration_expression(
+        "suffix = \"x\"\ntemplate_value = [:same[suffix]]\nvalue = \"samex\" is template_value\n",
+        2,
+    );
+
+    assert_eq!(value.diagnostic_type, DataType::Bool);
+}
+
+#[test]
+fn string_ordering_comparison_is_rejected() {
+    assert_unsupported_operator("value = \"a\" < \"b\"\n", DiagnosticOperator::LessThan);
+}
+
+#[test]
 fn char_relational_comparison_resolves_to_bool() {
     let value = first_start_declaration_expression("value = 'a' < 'b'\n");
 
@@ -364,24 +378,19 @@ fn fully_constant_boolean_and_comparison_expressions_fold() {
 }
 
 #[test]
-fn string_slice_concatenation_with_variable_resolves_to_string() {
-    let value = first_start_declaration_expression("str1 = \"Hello\"\nvalue = str1 + \" World\"\n");
-
-    assert_eq!(value.diagnostic_type, DataType::StringSlice);
-    assert_eq!(value.value_shape, ExpressionValueShape::PlainStringSlice);
-    assert!(
-        matches!(value.kind, ExpressionKind::StringSlice(_)),
-        "expected folded string concatenation to collapse to a string slice, got {:?}",
-        value.kind
+fn string_slice_concatenation_with_variable_is_rejected() {
+    assert_unsupported_operator(
+        "str1 = \"Hello\"\nvalue = str1 + \" World\"\n",
+        DiagnosticOperator::Add,
     );
 }
 
 #[test]
-fn folded_template_preserves_template_shape() {
+fn folded_template_preserves_template_diagnostic_type() {
     let value = first_start_declaration_expression("value = [:template body]\n");
 
     assert_eq!(value.type_id, builtin_type_ids::STRING);
-    assert_eq!(value.value_shape, ExpressionValueShape::TemplateString);
+    assert_eq!(value.diagnostic_type, DataType::StringSlice);
     assert!(
         matches!(value.kind, ExpressionKind::StringSlice(_)),
         "expected folded template to collapse to a string slice kind, got {:?}",
@@ -390,14 +399,14 @@ fn folded_template_preserves_template_shape() {
 }
 
 #[test]
-fn copied_template_string_preserves_template_shape() {
+fn copied_template_string_preserves_copy_expression_kind() {
     let value = nth_start_declaration_expression(
         "source String = [:template body]\nvalue = copy source\n",
         1,
     );
 
     assert_eq!(value.type_id, builtin_type_ids::STRING);
-    assert_eq!(value.value_shape, ExpressionValueShape::TemplateString);
+    assert_eq!(value.diagnostic_type, DataType::StringSlice);
     assert!(
         matches!(value.kind, ExpressionKind::Copy(_)),
         "expected explicit copy to remain a copy expression, got {:?}",
@@ -406,56 +415,8 @@ fn copied_template_string_preserves_template_shape() {
 }
 
 #[test]
-fn template_shaped_string_operand_is_rejected() {
-    let mut string_table = StringTable::new();
-
-    let mut template_like_string = Expression::string_slice(
-        string_table.get_or_intern(String::from("template text")),
-        SourceLocation::default(),
-        ValueMode::ImmutableOwned,
-    );
-    template_like_string.value_shape = ExpressionValueShape::TemplateString;
-
-    let nodes = vec![
-        ExpressionRpnItem::Operand(Expression::string_slice(
-            string_table.get_or_intern(String::from("plain ")),
-            SourceLocation::default(),
-            ValueMode::ImmutableOwned,
-        )),
-        ExpressionRpnItem::Operand(template_like_string),
-        ExpressionRpnItem::Operator {
-            operator: Operator::Add,
-            location: SourceLocation::default(),
-        },
-    ];
-
-    let context = ScopeContext::new_for_tests(
-        ContextKind::Template,
-        InternedPath::from_single_str("@page.moth", &mut string_table),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
-        Arc::new(ExternalPackageRegistry::new()),
-        vec![],
-        0,
-    );
-
-    let mut current_type = ExpectedType::Infer;
-    let mut type_environment = TypeEnvironment::new();
-    let mut compatibility_cache = TypeCompatibilityCache::new();
-    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-    let error = evaluate_expression(
-        &context,
-        nodes,
-        &mut type_interner,
-        &mut current_type,
-        &ValueMode::ImmutableOwned,
-        &mut string_table,
-    )
-    .expect_err("template-shaped string values should not become plain string operands");
-
-    let crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError::Diagnostic(diagnostic) = error else {
-        panic!("expected an expression type diagnostic");
-    };
-    assert_eq!(diagnostic.kind.code(), "MOTH-TYPE-0003");
+fn template_like_string_operands_reject_add() {
+    let diagnostic = parse_single_file_ast_diagnostic("value = \"left\" + \"right\"\n");
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::UnsupportedOperatorTypes {
@@ -466,20 +427,9 @@ fn template_shaped_string_operand_is_rejected() {
 }
 
 #[test]
-fn function_result_string_concatenation_is_allowed() {
-    let (ast, string_table) =
-        parse_single_file_ast("f || -> String:\n    return \"a\"\n;\nvalue = f() + \"b\"\n");
-    let body = start_function_body(&ast, &string_table);
-    let NodeKind::VariableDeclaration(declaration) = &body[0].kind else {
-        panic!("expected start statement to be a variable declaration");
-    };
-    let value = &declaration.value;
-
-    assert_eq!(value.diagnostic_type, DataType::StringSlice);
-    assert_eq!(value.value_shape, ExpressionValueShape::PlainStringSlice);
-    assert!(
-        matches!(value.kind, ExpressionKind::Runtime(_)),
-        "expected function-result concatenation to stay a runtime expression, got {:?}",
-        value.kind
+fn function_result_string_concatenation_is_rejected() {
+    assert_unsupported_operator(
+        "f || -> String:\n    return \"a\"\n;\nvalue = f() + \"b\"\n",
+        DiagnosticOperator::Add,
     );
 }

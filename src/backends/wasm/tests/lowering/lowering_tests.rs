@@ -191,14 +191,14 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
                 201,
                 HirExpressionKind::BinOp {
                     left: Box::new(string_expression(200, "a", types.string, RegionId(0))),
-                    op: HirBinOp::Add,
+                    op: HirBinOp::StringAppend,
                     right: Box::new(load_local(203, LocalId(0), types.string, RegionId(0))),
                 },
                 types.string,
                 RegionId(0),
                 ValueKind::RValue,
             )),
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right: Box::new(string_expression(204, "b", types.string, RegionId(0))),
         },
         types.string,
@@ -394,7 +394,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
 }
 
 #[test]
-fn lowers_non_runtime_string_add_as_buffer_concat() {
+fn lowers_internal_string_append_as_buffer_concat() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let function_path = InternedPath::from_single_str("render_title", &mut string_table);
@@ -408,7 +408,7 @@ fn lowers_non_runtime_string_add_as_buffer_concat() {
                 types.string,
                 RegionId(0),
             )),
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right: Box::new(load_local(1302, LocalId(0), types.string, RegionId(0))),
         },
         types.string,
@@ -443,7 +443,7 @@ fn lowers_non_runtime_string_add_as_buffer_concat() {
         &string_table,
         &type_environment,
     )
-    .expect("non-runtime string Add should lower to buffer operations");
+    .expect("internal StringAppend should lower to buffer operations");
 
     let lowered = result
         .lir_module
@@ -466,7 +466,7 @@ fn lowers_non_runtime_string_add_as_buffer_concat() {
 }
 
 #[test]
-fn lowers_non_runtime_string_add_with_i64_chunk_via_string_from_i64() {
+fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let function_path = InternedPath::from_single_str("render_runtime_int", &mut string_table);
@@ -475,7 +475,7 @@ fn lowers_non_runtime_string_add_with_i64_chunk_via_string_from_i64() {
         1310,
         HirExpressionKind::BinOp {
             left: Box::new(string_expression(1311, "", types.string, RegionId(0))),
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right: Box::new(load_local(1312, LocalId(0), types.int, RegionId(0))),
         },
         types.string,
@@ -509,7 +509,7 @@ fn lowers_non_runtime_string_add_with_i64_chunk_via_string_from_i64() {
         &string_table,
         &type_environment,
     )
-    .expect("non-runtime string Add should bridge i64 chunks");
+    .expect("internal StringAppend should bridge i64 chunks");
     let lowered = result
         .lir_module
         .functions
@@ -523,6 +523,113 @@ fn lowers_non_runtime_string_add_with_i64_chunk_via_string_from_i64() {
             .iter()
             .any(|statement| matches!(statement, WasmLirStmt::StringFromI64 { .. })),
         "lowered statements should include i64-to-string bridge"
+    );
+}
+
+#[test]
+fn lowers_string_equality_by_content_comparison_operations() {
+    let mut string_table = StringTable::new();
+    let (type_environment, types) = build_type_environment();
+    let function_path = InternedPath::from_single_str("compare_strings", &mut string_table);
+
+    let equal = expression(
+        1320,
+        HirExpressionKind::BinOp {
+            left: Box::new(load_local(1321, LocalId(0), types.string, RegionId(0))),
+            op: HirBinOp::Eq,
+            right: Box::new(load_local(1322, LocalId(1), types.string, RegionId(0))),
+        },
+        types.boolean,
+        RegionId(0),
+        ValueKind::RValue,
+    );
+    let not_equal = expression(
+        1323,
+        HirExpressionKind::BinOp {
+            left: Box::new(load_local(1324, LocalId(0), types.string, RegionId(0))),
+            op: HirBinOp::Ne,
+            right: Box::new(load_local(1325, LocalId(1), types.string, RegionId(0))),
+        },
+        types.boolean,
+        RegionId(0),
+        ValueKind::RValue,
+    );
+    let block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![
+            local(0, types.string, RegionId(0)),
+            local(1, types.string, RegionId(0)),
+            local(2, types.boolean, RegionId(0)),
+            local(3, types.boolean, RegionId(0)),
+        ],
+        statements: vec![
+            statement(
+                1326,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(LocalId(2)),
+                    value: equal,
+                },
+                1326,
+            ),
+            statement(
+                1327,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(LocalId(3)),
+                    value: not_equal,
+                },
+                1327,
+            ),
+        ],
+        terminator: HirTerminator::Return(load_local(1328, LocalId(3), types.boolean, RegionId(0))),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![LocalId(0), LocalId(1)],
+        return_type: types.boolean,
+    };
+    let module = build_module(
+        &mut string_table,
+        vec![(function, function_path, HirFunctionOrigin::Normal)],
+        vec![block],
+        FunctionId(0),
+    );
+
+    let result = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &WasmBackendRequest::default(),
+        &string_table,
+        &type_environment,
+    )
+    .expect("String equality should lower through content comparison operations");
+    let lowered = result
+        .lir_module
+        .functions
+        .iter()
+        .find(|function| function.id == WasmLirFunctionId(0))
+        .expect("lowered function should be present");
+    let statements = &lowered.blocks[0].statements;
+
+    assert!(
+        statements
+            .iter()
+            .any(|statement| matches!(statement, WasmLirStmt::StringEq { .. })),
+        "String equality should not compare handle addresses"
+    );
+    assert!(
+        statements
+            .iter()
+            .any(|statement| matches!(statement, WasmLirStmt::StringNe { .. })),
+        "String inequality should negate content equality"
+    );
+    assert!(
+        !statements.iter().any(|statement| matches!(
+            statement,
+            WasmLirStmt::IntEq { .. } | WasmLirStmt::IntNe { .. }
+        )),
+        "String equality must not use integer handle comparison"
     );
 }
 
@@ -1178,7 +1285,7 @@ fn multi_fragment_template_produces_all_push_operations() {
         1101,
         HirExpressionKind::BinOp {
             left: Box::new(string_expression(1100, "prefix", types.string, RegionId(0))),
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right: Box::new(load_local(1102, LocalId(0), types.string, RegionId(0))),
         },
         types.string,
@@ -1189,7 +1296,7 @@ fn multi_fragment_template_produces_all_push_operations() {
         1103,
         HirExpressionKind::BinOp {
             left: Box::new(inner_concat_1),
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right: Box::new(string_expression(1104, "middle", types.string, RegionId(0))),
         },
         types.string,
@@ -1200,7 +1307,7 @@ fn multi_fragment_template_produces_all_push_operations() {
         1105,
         HirExpressionKind::BinOp {
             left: Box::new(inner_concat_2),
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right: Box::new(load_local(1106, LocalId(1), types.string, RegionId(0))),
         },
         types.string,
@@ -1211,7 +1318,7 @@ fn multi_fragment_template_produces_all_push_operations() {
         1107,
         HirExpressionKind::BinOp {
             left: Box::new(inner_concat_3),
-            op: HirBinOp::Add,
+            op: HirBinOp::StringAppend,
             right: Box::new(string_expression(1108, "suffix", types.string, RegionId(0))),
         },
         types.string,

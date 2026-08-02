@@ -13,7 +13,7 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Blocks and statements | language-overview/blocks-and-statements.mtf | blocks-and-statements-basic.mtf | /docs/language-overview/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Comments and naming | language-overview/comments-and-naming.mtf | comments-and-naming-basic.mtf | /docs/language-overview/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Core values | language-overview/core-values.mtf | core-values-basic.mtf | /docs/language-overview/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Strings and characters | language-overview/strings-and-characters.mtf | strings-and-characters-basic.mtf | /docs/language-overview/ | compiler-design-overview.md | Yes | Compiler drift | String + String accepted by compiler, construction-origin-dependent equality checks, Stage B removes | Complete |
+| Strings and characters | language-overview/strings-and-characters.mtf | strings-and-characters-basic.mtf | /docs/language-overview/ | compiler-design-overview.md | Yes | Partial | Source addition is rejected and equality is content-based across String origins. HTML-JS map keys and HTML-Wasm equality are aligned. Non-JS map lowering remains deferred. | Complete |
 | Values and bindings | bindings/bindings.mtf | bindings-basic.mtf | /docs/bindings/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Mutable bindings | bindings/mutable-bindings.mtf | mutable-bindings-basic.mtf | /docs/bindings/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Shared access | bindings/shared-access.mtf | shared-access-basic.mtf | /docs/bindings/ | memory-management/overview.mtf | Yes | Supported | None | Complete |
@@ -22,7 +22,7 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Numeric types | numbers/numeric-types.mtf | numeric-types-basic.mtf | /docs/numbers/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Numeric literals | numbers/numeric-literals.mtf | numeric-literals-basic.mtf | /docs/numbers/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Operators | numbers/operators.mtf | operators-basic.mtf | /docs/numbers/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Checked arithmetic | numbers/checked-arithmetic.mtf | checked-arithmetic-basic.mtf | /docs/numbers/ | compiler-design-overview.md | Yes | Partial | Math non-finite gap, Stage B or dedicated plan | Complete |
+| Checked arithmetic | numbers/checked-arithmetic.mtf | checked-arithmetic-basic.mtf | /docs/numbers/ | compiler-design-overview.md | Yes | Supported | Runtime arithmetic and the HTML-JS Core Math external Float boundary reject non-finite results. Other Core Math target lowerings remain tracked by the Core math row. | Complete |
 | Cast syntax | casts/cast-syntax.mtf | cast-syntax-basic.mtf | /docs/casts/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Cast targets | casts/cast-targets.mtf | cast-targets-basic.mtf | /docs/casts/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Fallible casts | casts/fallible-casts.mtf | fallible-casts-basic.mtf | /docs/casts/ | compiler-design-overview.md | Yes | Supported | None | Complete |
@@ -30,11 +30,11 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Function declarations | functions/function-declarations.mtf | function-declarations-basic.mtf | /docs/functions/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Parameters and defaults | functions/parameters-and-defaults.mtf | parameters-and-defaults-basic.mtf | /docs/functions/ | compiler-design-overview.md | Yes | Partial | Named calls not yet supported for external builtins | Complete |
 | Calls and access | functions/calls-and-access.mtf | calls-and-access-basic.mtf | /docs/functions/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Returns and multiple values | functions/returns-and-multiple-values.mtf | returns-and-multiple-values-basic.mtf | /docs/functions/ | compiler-design-overview.md | Yes | Compiler drift | Source-authored return aliases still parsed, Stage B removes | Complete |
+| Returns and multiple values | functions/returns-and-multiple-values.mtf | returns-and-multiple-values-basic.mtf | /docs/functions/ | compiler-design-overview.md | Yes | Supported | Source return slots contain the declared types and channels; inferred aliases remain compiler metadata rather than source syntax. | Complete |
 | Statement if | branching/statement-if.mtf | statement-if-basic.mtf | /docs/branching/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Value-producing if | branching/value-producing-if.mtf | value-producing-if-basic.mtf | /docs/branching/ | compiler-design-overview.md | Yes | Partial | Block value-producing if with then deferred | Complete |
+| Value-producing if | branching/value-producing-if.mtf | value-producing-if-basic.mtf | /docs/branching/ | compiler-design-overview.md | Yes | Supported | Block `if ...: then ...` is supported at closed receiving sites. | Complete |
 | Pattern matching | branching/pattern-matching.mtf | pattern-matching-basic.mtf | /docs/branching/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Patterns and exhaustiveness | branching/patterns-and-exhaustiveness.mtf | patterns-and-exhaustiveness-basic.mtf | /docs/branching/ | compiler-design-overview.md | Yes | Compiler drift | Bare-name capture and String relational still accepted, Stage B removes | Complete |
+| Patterns and exhaustiveness | branching/patterns-and-exhaustiveness.mtf | patterns-and-exhaustiveness-basic.mtf | /docs/branching/ | compiler-design-overview.md | Yes | Partial | General full-match capture and String relational subjects are rejected. Full relational overlap analysis and nested choice payload patterns remain deferred. | Complete |
 | Conditional loops | loops/conditional-loops.mtf | conditional-loops-basic.mtf | /docs/loops/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Collection loops | loops/collection-loops.mtf | collection-loops-basic.mtf | /docs/loops/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Range loops | loops/range-loops.mtf | range-loops-basic.mtf | /docs/loops/ | compiler-design-overview.md | Yes | Supported | None | Complete |
@@ -46,9 +46,9 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Choice declarations | choices/choice-declarations.mtf | choice-declarations-basic.mtf | /docs/choices/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Variant construction | choices/variant-construction.mtf | variant-construction-basic.mtf | /docs/choices/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Payload patterns | choices/payload-patterns.mtf | payload-patterns-basic.mtf | /docs/choices/ | compiler-design-overview.md | Yes | Partial | Nested payload patterns deferred | Complete |
-| Choice equality | choices/choice-equality.mtf | choice-equality-basic.mtf | /docs/choices/ | compiler-design-overview.md | Yes | Partial | Option payload equality inside choices not yet validated, Stage B | Complete |
+| Choice equality | choices/choice-equality.mtf | choice-equality-basic.mtf | /docs/choices/ | compiler-design-overview.md | Yes | Partial | Option payload equality now recurses through supported inner types. Struct, collection, map, fallible and external opaque payloads remain unsupported. | Complete |
 | Error values | errors/error-values.mtf | error-values-basic.mtf | /docs/errors/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Error returns | errors/error-returns.mtf | error-returns-basic.mtf | /docs/errors/ | compiler-design-overview.md | Yes | Partial | Nested-block return! in error-only functions not supported | Complete |
+| Error returns | errors/error-returns.mtf | error-returns-basic.mtf | /docs/errors/ | compiler-design-overview.md | Yes | Supported | Nested-block `return!` is supported in error-only functions. | Complete |
 | Propagation | errors/propagation.mtf | propagation-basic.mtf | /docs/errors/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Catch and recovery | errors/catch-and-recovery.mtf | catch-and-recovery-basic.mtf | /docs/errors/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Options | errors/options.mtf | options-basic.mtf | /docs/errors/ | compiler-design-overview.md | Yes | Supported | None | Complete |
@@ -57,10 +57,10 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Growable collections | collections/growable-collections.mtf | growable-collections-basic.mtf | /docs/collections/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Fixed collections | collections/fixed-collections.mtf | fixed-collections-basic.mtf | /docs/collections/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Collection operations | collections/collection-operations.mtf | collection-operations-basic.mtf | /docs/collections/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Hash maps | collections/hash-maps.mtf | hash-maps-basic.mtf | /docs/collections/ | compiler-design-overview.md | Yes | Partial | Construction-origin-dependent string behaviour, Stage B removes | Complete |
+| Hash maps | collections/hash-maps.mtf | hash-maps-basic.mtf | /docs/collections/ | compiler-design-overview.md | Yes | Partial | HTML-JS normalizes all String-like keys by content. Non-JS map lowering and broader key families remain deferred or outside scope. | Complete |
 | Template basics | templates/template-basics.mtf | template-basics-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Template directives | templates/template-directives.mtf | template-directives-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
-| Template slots | templates/template-slots.mtf | template-slots-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Partial | Stored named inserts are accepted design but not implemented. Stage B closes this gap | Complete |
+| Template slots | templates/template-slots.mtf | template-slots-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | Stored named insert carriers flatten through the immediate parent. Orphan inserts remain invalid. | Complete |
 | Child wrappers | templates/child-wrappers.mtf | child-wrappers-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Template control flow | templates/template-control-flow.mtf | template-control-flow-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
 | Markdown formatting | templates/markdown-formatting.mtf | markdown-formatting-basic.mtf | /docs/templates/ | compiler-design-overview.md | Yes | Supported | None | Complete |
@@ -113,7 +113,7 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Moth template files | moth-templates/moth-template-files.mtf | moth-template-files-basic.mtf | /docs/moth-templates/ | build-system-design.md | Yes | Supported | None | Complete |
 | Implicit markdown | moth-templates/implicit-markdown.mtf | implicit-markdown-basic.mtf | /docs/moth-templates/ | build-system-design.md | Yes | Supported | None | Complete |
 | Content imports | moth-templates/content-imports.mtf | content-imports-basic.mtf | /docs/moth-templates/ | build-system-design.md | Yes | Supported | None | Complete |
-| Template scope | moth-templates/template-scope.mtf | template-scope-basic.mtf | /docs/moth-templates/ | build-system-design.md | Yes | Compiler drift | Collision model uses precedence not collision diagnostic, Stage B | Complete |
+| Template scope | moth-templates/template-scope.mtf | template-scope-basic.mtf | /docs/moth-templates/ | build-system-design.md | Yes | Supported | Builder-declared implicit providers are gated by semantic `.mtf` sources, and same-directory and builder constants use one collision-reporting registry. | Complete |
 | Moth template limits | moth-templates/moth-template-limits.mtf | moth-template-limits-basic.mtf | /docs/moth-templates/ | build-system-design.md | Yes | Supported | None | Complete |
 | Plain Markdown files | markdown/markdown-files.mtf | markdown-files-basic.mtf | /docs/markdown/ | build-system-design.md | Yes | Supported | None | Complete |
 | Markdown imports | markdown/markdown-imports.mtf | markdown-imports-basic.mtf | /docs/markdown/ | build-system-design.md | Yes | Supported | None | Complete |
@@ -123,8 +123,8 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Deferred and outside scope | design-scope/deferred-and-outside-scope.mtf | deferred-and-outside-scope-basic.mtf | /docs/design-scope/ | compiler-design-overview.md | Yes | N/A | None | Complete |
 | Excluded language families | design-scope/excluded-language-families.mtf | excluded-language-families-basic.mtf | /docs/design-scope/ | compiler-design-overview.md | Yes | N/A | None | Complete |
 | Core IO | packages/core/io/io.mtf | io-basic.mtf | /docs/packages/core/io/ | build-system-design.md | Yes | Supported | None | Complete |
-| Core math | packages/core/math/math.mtf | math-basic.mtf | /docs/packages/core/math/ | build-system-design.md | Yes | Partial | Non-finite Float gap, Stage B or dedicated plan | Complete |
-| Core text | packages/core/text/text.mtf | text-basic.mtf | /docs/packages/core/text/ | build-system-design.md | Yes | Partial | text.length uses UTF-16 code units, should use Unicode scalar values, Stage B | Complete |
+| Core math | packages/core/math/math.mtf | math-basic.mtf | /docs/packages/core/math/ | build-system-design.md | Yes | Partial | HTML-JS uses the shared finite-Float external boundary. HTML-Wasm package lowering remains deferred. | Complete |
+| Core text | packages/core/text/text.mtf | text-basic.mtf | /docs/packages/core/text/ | build-system-design.md | Yes | Partial | HTML-JS `text.length` counts Unicode scalar values. HTML-Wasm package lowering and receiver methods remain deferred. | Complete |
 | Core random | packages/core/random/random.mtf | random-basic.mtf | /docs/packages/core/random/ | build-system-design.md | Yes | Partial | Seeded random deferred | Complete |
 | Core time | packages/core/time/time.mtf | time-basic.mtf | /docs/packages/core/time/ | build-system-design.md | Yes | Partial | Non-JS lowerings deferred | Complete |
 | Core collections | packages/core/collections/collections.mtf | collections-basic.mtf | /docs/packages/core/collections/ | build-system-design.md | Yes | Partial | Wasm lowering deferred | Complete |
@@ -132,4 +132,4 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | @html package | packages/builder/html/html-helpers.mtf | html-helpers-basic.mtf | /docs/packages/builder/html/ | build-system-design.md | Yes | Partial | Skeleton surface, will grow as standard library matures | Complete |
 | @web/canvas package | packages/builder/canvas/canvas-drawing.mtf | canvas-drawing-basic.mtf | /docs/packages/builder/canvas/ | build-system-design.md | Yes | Partial | Skeleton surface, JS-only, deferred surfaces documented | Complete |
 | WIT value-only imports | packages/external-binding-contracts.mtf | external-binding-contracts-basic.mtf | /docs/packages/ | memory-management/overview.mtf | Yes | Deferred | Accepted design, no implementation | Complete |
-| Progress matrix | progress/@page.moth | N/A | /docs/progress/ | N/A | N/A | N/A | Updated for all Stage A changes | Complete |
+| Progress matrix | progress/@page.moth | N/A | /docs/progress/ | N/A | N/A | N/A | Updated for current Stage A and Stage B implementation status | Complete |

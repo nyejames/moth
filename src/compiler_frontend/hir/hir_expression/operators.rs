@@ -96,15 +96,13 @@ impl<'a> HirBuilder<'a> {
             | HirBinOp::Or => builtin_type_ids::BOOL,
 
             // Checked numeric arithmetic is lowered through `HirStatementKind::NumericOp`, so the
-            // only plain binary operators that still reach this path are comparisons, booleans,
-            // and string concatenation.
+            // only source-level plain binary operators that still reach this path are comparisons
+            // and booleans. Runtime template appends use a distinct compiler-owned operator.
+            HirBinOp::StringAppend => self.type_environment.builtins().string,
             HirBinOp::Add => {
                 let float = self.type_environment.builtins().float;
-                let string = self.type_environment.builtins().string;
 
-                if left == string || right == string {
-                    string
-                } else if left == float || right == float {
+                if left == float || right == float {
                     float
                 } else {
                     left

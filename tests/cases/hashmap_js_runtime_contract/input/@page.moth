@@ -26,17 +26,36 @@ render_hashmap_contract || -> String:
         then 99
     ;
 
-    duplicate {String = Int} = {runtime_duplicate_key() = 1, runtime_duplicate_key() = 2}
+    map_key_source $String = "One"
+    duplicate {String = Int} = {runtime_duplicate_key(map_key_source) = 1, runtime_duplicate_key(map_key_source) = 2}
     duplicate_length = duplicate.length
     duplicate_value = duplicate.get("One") catch:
         then 0
     ;
 
-    return [:hashmap_runtime has_ada=[has_ada_before] has_linus=[has_linus_before] insert_len=[len_after_insert] replace_len=[len_after_replace] removed=[removed] remove_len=[len_after_remove] clear_len=[len_after_clear] missing=[missing] duplicate=[duplicate_value] duplicate_len=[duplicate_length]]
+    template_lookup {String = Int} = {runtime_duplicate_key(map_key_source) = 2}
+    template_key_contains = template_lookup.contains(runtime_duplicate_key(map_key_source))
+    template_key_before_set = template_lookup.get(runtime_duplicate_key(map_key_source)) catch:
+        then 0
+    ;
+
+    template_map ~{String = Int} = {runtime_duplicate_key(map_key_source) = 2}
+    ~template_map.set(runtime_duplicate_key(map_key_source), 3) catch:
+    ;
+    template_key_after_set = template_map.get("One") catch:
+        then 0
+    ;
+    template_remove_map ~{String = Int} = {runtime_duplicate_key(map_key_source) = 3}
+    template_key_removed = ~template_remove_map.remove(runtime_duplicate_key(map_key_source)) catch:
+        then 0
+    ;
+    template_key_length_after_remove = template_remove_map.length
+
+    return [:hashmap_runtime has_ada=[has_ada_before] has_linus=[has_linus_before] insert_len=[len_after_insert] replace_len=[len_after_replace] removed=[removed] remove_len=[len_after_remove] clear_len=[len_after_clear] missing=[missing] duplicate=[duplicate_value] duplicate_len=[duplicate_length] template_contains=[template_key_contains] template_before_set=[template_key_before_set] template_after_set=[template_key_after_set] template_removed=[template_key_removed] template_length=[template_key_length_after_remove]]
 ;
 
-runtime_duplicate_key || -> String:
-    return "One"
+runtime_duplicate_key |key $String| -> String:
+    return [:[$(key)]]
 ;
 
 [:[render_hashmap_contract()]]

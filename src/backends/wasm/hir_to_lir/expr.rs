@@ -191,23 +191,35 @@ fn lower_binary_expression(
     right: &HirExpression,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<ExprLoweringOutput, CompilerError> {
-    if matches!(op, HirBinOp::Add) && should_lower_as_string_concat(context, expression) {
+    if matches!(op, HirBinOp::StringAppend) {
         return lower_string_concat_expression(context, expression, statements);
     }
 
     let lhs_abi = expression_abi(context, left);
     let rhs_abi = expression_abi(context, right);
+    let is_string_equality = matches!(op, HirBinOp::Eq | HirBinOp::Ne)
+        && left.ty == context.module_context.type_environment.builtins().string
+        && right.ty == context.module_context.type_environment.builtins().string;
     let lhs = lower_expression(context, left, statements)?;
     let rhs = lower_expression(context, right, statements)?;
 
     match op {
         HirBinOp::Eq => {
             let dst = context.alloc_temp(WasmAbiType::I32);
-            statements.push(WasmLirStmt::IntEq {
-                dst,
-                lhs: lhs.value,
-                rhs: rhs.value,
-            });
+            let statement = if is_string_equality {
+                WasmLirStmt::StringEq {
+                    dst,
+                    lhs: lhs.value,
+                    rhs: rhs.value,
+                }
+            } else {
+                WasmLirStmt::IntEq {
+                    dst,
+                    lhs: lhs.value,
+                    rhs: rhs.value,
+                }
+            };
+            statements.push(statement);
             Ok(ExprLoweringOutput {
                 value: dst,
                 prefer_move: false,
@@ -215,11 +227,20 @@ fn lower_binary_expression(
         }
         HirBinOp::Ne => {
             let dst = context.alloc_temp(WasmAbiType::I32);
-            statements.push(WasmLirStmt::IntNe {
-                dst,
-                lhs: lhs.value,
-                rhs: rhs.value,
-            });
+            let statement = if is_string_equality {
+                WasmLirStmt::StringNe {
+                    dst,
+                    lhs: lhs.value,
+                    rhs: rhs.value,
+                }
+            } else {
+                WasmLirStmt::IntNe {
+                    dst,
+                    lhs: lhs.value,
+                    rhs: rhs.value,
+                }
+            };
+            statements.push(statement);
             Ok(ExprLoweringOutput {
                 value: dst,
                 prefer_move: false,
@@ -508,19 +529,12 @@ fn binop_unsupported_abi_error(op: &str, abi: WasmAbiType) -> CompilerError {
     ))
 }
 
-fn should_lower_as_string_concat(
-    context: &WasmFunctionLoweringContext<'_, '_>,
-    expression: &HirExpression,
-) -> bool {
-    is_handle_type(context, expression)
-}
-
 fn lower_string_concat_expression(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     expression: &HirExpression,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<ExprLoweringOutput, CompilerError> {
-    // WHAT: lower string `Add` chains into explicit buffer operations.
+    // WHAT: lower compiler-owned StringAppend chains into explicit buffer operations.
     // WHY: both normal functions and runtime fragments should follow the same string-concat path
     // so control-flow-heavy runtime wrappers do not need a second lowering contract.
     let mut chunks = Vec::new();
@@ -584,7 +598,7 @@ fn collect_string_concat_chunks<'a>(
     out: &mut Vec<&'a HirExpression>,
 ) {
     if let HirExpressionKind::BinOp { left, op, right } = &expression.kind
-        && matches!(op, HirBinOp::Add)
+        && matches!(op, HirBinOp::StringAppend)
         && is_handle_type(context, expression)
     {
         collect_string_concat_chunks(context, left, out);

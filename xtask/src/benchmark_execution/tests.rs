@@ -508,9 +508,10 @@ value ~= \"hello\"
 result ~= \"unset\"
 
 if value is:
-    captured => result = captured
     \"one\" => result = \"one\"
-    \"two\" => result = \"two\"
+    \"one\" => result = \"one\"
+    \"one\" => result = \"one\"
+    \"one\" => result = \"one\"
     else => result = \"other\"
 ;
 ",

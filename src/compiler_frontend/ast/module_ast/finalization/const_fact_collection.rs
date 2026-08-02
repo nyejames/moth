@@ -416,7 +416,6 @@ impl<'a> ConstFactCollector<'a> {
 
             MatchPattern::OptionNone { .. }
             | MatchPattern::ChoiceVariant { .. }
-            | MatchPattern::Capture { .. }
             | MatchPattern::OptionPresentCapture { .. } => {}
         }
 

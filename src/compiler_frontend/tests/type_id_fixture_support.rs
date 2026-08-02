@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
 use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
 use crate::compiler_frontend::ast::expressions::expression::{
     ConstRecordState, Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
-    Operator, expression_value_shape_for_type_id,
+    Operator,
 };
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
@@ -320,8 +320,6 @@ pub(crate) fn field_access_node(
         value_mode,
     );
     expression.const_record_state = const_record_state;
-    expression.value_shape =
-        expression_value_shape_for_type_id(type_id, &expression.diagnostic_type);
 
     AstNode {
         kind: NodeKind::ExpressionStatement(expression),

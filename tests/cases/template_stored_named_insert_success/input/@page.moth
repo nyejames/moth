@@ -1,0 +1,5 @@
+layout #= [:<h1>[$slot("title")]</h1><p>[$slot]</p>]
+stored_title #= [$insert("title"): Stored title]
+
+rendered #= [layout: [stored_title] Body]
+io.line([: [rendered]])

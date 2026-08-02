@@ -105,7 +105,7 @@ pub(crate) fn invalid_match_pattern_message(
             "Literal match patterns currently support only literal int, float, bool, char, and string values.".to_string()
         }
         InvalidMatchPatternReason::ScrutineeTypeUnsupportedForRelational => {
-            "Relational match patterns are only supported for ordered scalar types: Int, Float, Char, and String.".to_string()
+            "Relational match patterns are only supported for ordered scalar types: Int, Float, and Char.".to_string()
         }
         InvalidMatchPatternReason::UnitVariantHasPayload => {
             format!("Unit variant {variant_text} cannot have payload captures. Use '<variant> =>' without parentheses.")

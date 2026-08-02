@@ -47,9 +47,8 @@ A function may declare only an error slot:
 - The arrow is required: `-> Error!`.
 - No success return value is required.
 - Normal fallthrough is valid when no error is returned.
-- In the current compiler `return!` inside a nested block of an error-only
-  function is not yet supported. Use a direct top-level `return!` or a function
-  that also returns a success value.
+- A nested block may use `return!` too. The statement leaves through the
+  enclosing error-only function's error channel and terminates that path.
 
 [codeblock, $code("moth"):
     Failure = |
