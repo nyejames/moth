@@ -12,8 +12,9 @@ use super::super::types::{
 use super::super::{
     BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, SummaryCounts, TestCaseSpec,
 };
-use crate::build_system::build::{BuildResult, CleanupPolicy, FileKind, OutputFile, Project};
-use crate::compiler_frontend::FrontendBuildProfile;
+use crate::build_system::BuildProfile;
+use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
+use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
@@ -149,12 +150,17 @@ fn build_result_with_warning(
                 FileKind::Html(String::from("<html></html>")),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![warning],
         string_table,
+        output_owner: OutputOwner {
+            builder: BuilderKind::Html,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
     }
 }
 

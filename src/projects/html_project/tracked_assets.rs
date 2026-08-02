@@ -9,7 +9,7 @@
 //! and which directory-like links remain plain rendered URLs.
 
 use crate::build_system::build::{FileKind, Module, OutputFile};
-use crate::build_system::output_cleanup::validate_relative_output_path;
+use crate::build_system::output::validate_relative_output_path;
 use crate::build_system::utils::file_error_messages;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{

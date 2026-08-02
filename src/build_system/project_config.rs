@@ -7,6 +7,9 @@
 mod parsing;
 mod validation;
 
+pub(crate) use validation::validate_directory_output_settings;
+
+use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -19,14 +22,14 @@ use std::path::Path;
 //  Config Parse Services
 // -------------------------
 
-/// Focused frontend services passed into config parsing so `config.moth` can import from core and
-/// Core or Builder packages.
+/// Focused frontend services passed into config parsing so `config.moth` can use the selected
+/// compiler and builder capability metadata.
 ///
 /// WHAT: bundles the style directives and the complete builder surface (external packages,
 /// source-backed packages, and config keys) that config parsing needs.
-/// WHY: `bootstrap_project_build` already computes `BuilderSurface` before config loading; threading
-/// it through config parsing lets imports resolve against builder/core surfaces instead of an
-/// empty default registry.
+/// WHY: `bootstrap_project_build` already computes `BuilderSurface` before config loading. Threading
+/// it through config parsing keeps selected capability metadata available while config import
+/// syntax remains rejected by the config parser.
 pub(crate) struct ProjectConfigParseServices<'a> {
     pub style_directives: &'a StyleDirectiveRegistry,
     pub frontend_surface: &'a BuilderSurface,
@@ -44,7 +47,7 @@ pub fn load_project_config(
     config: &mut Config,
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     let load_total_start = crate::timing::start_pipeline_timing();
 
     let config_path = config.config_file_path();
@@ -55,7 +58,7 @@ pub fn load_project_config(
 
     if !config_exists {
         log_stage_timing("config.load_total", load_total_start);
-        return Ok(());
+        return validate_directory_output_settings_if_needed(config, string_table);
     }
 
     let parse_start = crate::timing::start_pipeline_timing();
@@ -92,7 +95,7 @@ pub(crate) fn parse_project_config_file(
     config_path: &Path,
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     // 1. Run the specialized config parser.
     let mut parsed_config = parsing::parse_config_file(config_path, services, string_table)?;
     let mut errors = std::mem::take(&mut parsed_config.errors);
@@ -108,19 +111,40 @@ pub(crate) fn parse_project_config_file(
     }
 
     // 3. Validate directory output settings after all config values are applied.
-    if let Err(mut output_errors) =
-        validation::validate_directory_output_settings(config, string_table)
-    {
-        errors.append(&mut output_errors);
-    }
+    let validated_output_settings = if config.entry_dir.is_dir() {
+        match validate_directory_output_settings(config, string_table) {
+            Ok(settings) => Some(settings),
+            Err(mut output_errors) => {
+                errors.append(&mut output_errors);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // 4. Aggregate all errors into one CompilerMessages payload.
     if errors.is_empty() {
-        Ok(())
+        Ok(validated_output_settings)
     } else {
         Err(CompilerMessages::from_diagnostics(
             errors,
             string_table.clone(),
         ))
     }
+}
+
+fn validate_directory_output_settings_if_needed(
+    config: &Config,
+    string_table: &mut StringTable,
+) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
+    if !config.entry_dir.is_dir() {
+        return Ok(None);
+    }
+
+    validate_directory_output_settings(config, string_table)
+        .map(Some)
+        .map_err(|diagnostics| {
+            CompilerMessages::from_diagnostics(diagnostics, string_table.clone())
+        })
 }

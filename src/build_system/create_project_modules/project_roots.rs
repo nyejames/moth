@@ -9,6 +9,7 @@
 //! from the single source-tree traversal so entry classification and dependency ordering have one
 //! structural owner instead of a parallel entry-candidate path.
 
+use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -28,7 +29,7 @@ use super::source_package_discovery::{
     build_source_package_boundary_indexes, discover_project_local_source_packages,
     merge_source_packages,
 };
-use super::source_tree_index::SourceTreeIndex;
+use super::source_tree_index::{SourceTreeIndex, SourceTreeProjectContext};
 
 /// Canonical roots used to construct project-aware path resolution.
 pub(super) struct ProjectRootResolution {
@@ -64,6 +65,7 @@ pub(super) fn build_project_path_resolver(
     let binding_packages = ExternalPackageRegistry::new();
     build_project_path_resolver_with_index(
         config,
+        None,
         builder_source_packages,
         source_file_kinds,
         &external_import_providers,
@@ -79,6 +81,7 @@ pub(super) fn build_project_path_resolver(
 /// this in one owner keeps config interpretation out of later module inventory and frontend paths.
 pub(super) fn build_project_path_resolver_with_index(
     config: &Config,
+    validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     builder_source_packages: &SourcePackageRegistry,
     source_file_kinds: &SourceFileKindRegistry,
     external_import_providers: &ExternalImportProviderRegistry,
@@ -109,7 +112,10 @@ pub(super) fn build_project_path_resolver_with_index(
     let entry_root = roots.entry_root.clone();
     let source_tree_index = SourceTreeIndex::discover(
         entry_root.clone(),
-        &roots.project_root,
+        SourceTreeProjectContext {
+            project_root: &roots.project_root,
+            validated_output_settings,
+        },
         config,
         &merged_packages,
         source_file_kinds,

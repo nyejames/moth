@@ -10,12 +10,12 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+use crate::build_system::BuildProfile;
 use crate::build_system::build::{
     BuildBootstrap, ProjectBuilder, bootstrap_project_build, collect_frontend_warnings,
 };
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
-use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -23,8 +23,8 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 
 /// Build profile selector for frontend benchmarks.
 ///
-/// WHAT: a narrow, public copy of the internal `FrontendBuildProfile` so the
-/// benchmark API does not expose private compiler types.
+/// WHAT: a narrow public selector that converts into the build-system `BuildProfile` at the
+/// benchmark boundary without exposing internal compiler types in the benchmark API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrontendBenchmarkBuildProfile {
     Dev,
@@ -129,6 +129,7 @@ pub fn run_frontend_benchmark(
         style_directives,
         mut string_table,
         mut frontend_surface,
+        validated_directory_output_settings,
     } = match bootstrap_project_build(&project_builder, valid_path) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
@@ -141,14 +142,15 @@ pub fn run_frontend_benchmark(
         }
     };
 
-    let flags = match options.build_profile {
-        FrontendBenchmarkBuildProfile::Release => vec![Flag::Release],
-        FrontendBenchmarkBuildProfile::Dev => vec![],
+    let build_profile = match options.build_profile {
+        FrontendBenchmarkBuildProfile::Release => BuildProfile::Release,
+        FrontendBenchmarkBuildProfile::Dev => BuildProfile::Dev,
     };
 
     let messages = match compile_project_frontend(
         &mut config,
-        &flags,
+        build_profile,
+        validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
         &mut string_table,

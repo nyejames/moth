@@ -4,12 +4,15 @@ use super::{
     DevBuildExecutor, ProjectBuildExecutor, build_once, dev_server_error_messages,
     run_builds_until_stable, run_single_build_cycle,
 };
+use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    self, BackendBuilder, BuildResult, CleanupPolicy, FileKind, OutputFile, Project,
-    ProjectBuilder, WriteMode, WriteOptions,
+    BackendBuilder, BuildResult, FileKind, OutputFile, Project, ProjectBuilder,
+};
+use crate::build_system::output::{
+    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, ValidatedOutputPlan,
+    WriteMode, WriteOptions, write_project_outputs,
 };
 use crate::builder_surface::BuilderSurface;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, ErrorType, SourceLocation,
 };
@@ -21,6 +24,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
+use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::{Config, ProjectConfigError};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,6 +40,13 @@ fn unused_variable_warning(name: StringId, location: SourceLocation) -> Compiler
     )
 }
 
+fn test_build_output_owner() -> OutputOwner {
+    OutputOwner {
+        builder: BuilderKind::Html,
+        profile: BuildProfile::Dev,
+    }
+}
+
 fn html_build_result() -> BuildResult {
     BuildResult {
         project: Project {
@@ -44,12 +55,14 @@ fn html_build_result() -> BuildResult {
                 FileKind::Html(String::from("<html><body>Hello</body></html>")),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
         string_table: StringTable::new(),
+        output_owner: test_build_output_owner(),
+        directory_output_plan: None,
     }
 }
 
@@ -78,12 +91,14 @@ fn multi_page_html_build_result() -> BuildResult {
                 ),
             ],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
         },
         config: Config::new(PathBuf::from("project")),
         warnings: vec![],
         string_table: StringTable::new(),
+        output_owner: test_build_output_owner(),
+        directory_output_plan: None,
     }
 }
 
@@ -95,12 +110,14 @@ fn html_build_result_without_entry_page() -> BuildResult {
                 FileKind::Html(String::from("<html><body>Hello</body></html>")),
             )],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
         string_table: StringTable::new(),
+        output_owner: test_build_output_owner(),
+        directory_output_plan: None,
     }
 }
 
@@ -118,12 +135,40 @@ fn html_build_result_with_warning() -> BuildResult {
                 FileKind::Html(String::from("<html><body>Hello</body></html>")),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![warning],
         string_table,
+        output_owner: test_build_output_owner(),
+        directory_output_plan: None,
+    }
+}
+
+fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResult {
+    let owner = test_build_output_owner();
+    BuildResult {
+        project: Project {
+            output_files: vec![OutputFile::new(
+                PathBuf::from("index.html"),
+                FileKind::Html(String::from("<html><body>Directory</body></html>")),
+            )],
+            entry_page_rel: Some(PathBuf::from("index.html")),
+            cleanup_policy: CleanupPolicy::html(),
+            warnings: vec![],
+        },
+        config: Config::new(project_root.to_path_buf()),
+        warnings: vec![],
+        string_table: StringTable::new(),
+        output_owner: owner,
+        directory_output_plan: Some(ValidatedOutputPlan {
+            output_root: project_root.join(output_folder),
+            project_root: project_root.to_path_buf(),
+            entry_root: project_root.to_path_buf(),
+            owner,
+            setting_location: SourceLocation::default(),
+        }),
     }
 }
 
@@ -157,9 +202,8 @@ impl FakeExecutor {
 impl DevBuildExecutor for FakeExecutor {
     fn build_and_write(
         &mut self,
-        _entry_file: &Path,
+        entry_file: &Path,
         _flags: &[crate::compiler_frontend::Flag],
-        output_dir: &Path,
     ) -> Result<BuildResult, CompilerMessages> {
         let call_index = self.call_count.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(ref callback) = self.on_call {
@@ -174,11 +218,24 @@ impl DevBuildExecutor for FakeExecutor {
 
         match response {
             Ok(build_result) => {
-                build::write_project_outputs(
+                let project_root = entry_file
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
+                    OutputPlan::Directory(plan.clone())
+                } else {
+                    OutputPlan::SingleFile(SingleFileOutputPlan {
+                        output_root: project_root.join("dev"),
+                        project_root: Some(project_root),
+                        owner: build_result.output_owner,
+                        setting_location: SourceLocation::default(),
+                    })
+                };
+                write_project_outputs(
                     &build_result.project,
                     &WriteOptions {
-                        output_root: output_dir.to_path_buf(),
-                        project_entry_dir: None,
+                        output_plan,
                         write_mode: WriteMode::AlwaysWrite,
                     },
                     &build_result.string_table,
@@ -197,6 +254,7 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
         &self,
         _project_compilation: crate::build_system::build::ProjectCompilation,
         config: &Config,
+        _build_profile: BuildProfile,
         _flags: &[crate::compiler_frontend::Flag],
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
@@ -206,7 +264,7 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
                 FileKind::Js(String::from("console.log('broken');")),
             )],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic([".js"], FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::generic([".js"]),
             warnings: vec![unused_variable_warning(
                 string_table.get_or_intern("x".to_string()),
                 SourceLocation::from_path(&config.entry_dir, string_table),
@@ -259,6 +317,50 @@ fn successful_build_marks_state_ok_and_uses_declared_entry_page() {
     assert!(output_dir.join("index.html").exists());
     assert!(output_dir.join("docs/basics/index.html").exists());
 
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
+    let root = temp_dir("dev_output_plan_change");
+    fs::create_dir_all(&root).expect("should create temp root");
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+    let mut executor = FakeExecutor::new(vec![
+        Ok(directory_build_result(&root, "dev")),
+        Ok(directory_build_result(&root, "preview")),
+    ]);
+
+    let first_report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    assert!(first_report.build_ok);
+    assert_eq!(
+        state
+            .build_state
+            .lock()
+            .expect("build state should not be poisoned")
+            .output_dir,
+        fs::canonicalize(&root)
+            .expect("test root should canonicalize")
+            .join("dev")
+    );
+
+    let second_report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    assert!(second_report.build_ok);
+    let build_state = state
+        .build_state
+        .lock()
+        .expect("build state should not be poisoned");
+    let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
+    assert_eq!(build_state.output_dir, canonical_root.join("preview"));
+    assert_eq!(
+        second_report
+            .watch_scope
+            .expect("successful rebuild should return a watch scope")
+            .output_dir,
+        canonical_root.join("preview")
+    );
+    assert!(root.join("preview/index.html").exists());
+
+    drop(build_state);
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
@@ -425,15 +527,9 @@ fn dev_server_error_messages_use_dev_server_error_type() {
 fn successful_build_with_warnings_preserves_structured_success_messages() {
     let root = temp_dir("success_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
-    let output_dir = root.join("dev");
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result_with_warning())]);
 
-    let outcome = build_once(
-        &mut executor,
-        &root.join("main.moth"),
-        &Vec::new(),
-        &output_dir,
-    );
+    let outcome = build_once(&mut executor, &root.join("main.moth"), &Vec::new());
 
     assert!(outcome.build_succeeded);
     let messages = outcome
@@ -454,15 +550,9 @@ fn successful_build_with_warnings_preserves_structured_success_messages() {
 fn successful_build_without_warnings_has_no_success_messages() {
     let root = temp_dir("success_no_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
-    let output_dir = root.join("dev");
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result())]);
 
-    let outcome = build_once(
-        &mut executor,
-        &root.join("main.moth"),
-        &Vec::new(),
-        &output_dir,
-    );
+    let outcome = build_once(&mut executor, &root.join("main.moth"), &Vec::new());
 
     assert!(outcome.build_succeeded);
     assert!(
@@ -517,12 +607,11 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let root = temp_dir("write_failure_preserves_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
     let entry_file = root.join("main.moth");
-    let output_dir = root.join("dev");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
     let mut executor =
         ProjectBuildExecutor::new(ProjectBuilder::new(Box::new(InvalidOutputWarningBuilder)));
-    let messages = match executor.build_and_write(&entry_file, &[], &output_dir) {
+    let messages = match executor.build_and_write(&entry_file, &[]) {
         Ok(_) => panic!("invalid output path should fail writing"),
         Err(messages) => messages,
     };
@@ -544,6 +633,42 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
             .to_path_buf(&messages.string_table),
         entry_file
     );
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn project_build_executor_writes_the_validated_directory_plan() {
+    let root = temp_dir("project_executor_directory_plan");
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\ndev_folder #= \"preview\"\noutput_folder #= \"release\"\n",
+    )
+    .expect("should write project config");
+    fs::write(
+        source_root.join("@page.moth"),
+        "#[:<h1>Directory Executor</h1>]\n",
+    )
+    .expect("should write page source");
+
+    let mut executor =
+        ProjectBuildExecutor::new(ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())));
+    let build_result = executor
+        .build_and_write(&root, &[])
+        .expect("directory dev build should succeed");
+
+    assert_eq!(
+        build_result
+            .directory_output_plan
+            .as_ref()
+            .expect("directory build should return its output plan")
+            .output_root,
+        root.join("preview")
+    );
+    assert!(root.join("preview/index.html").exists());
+    assert!(!root.join("dev/index.html").exists());
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }

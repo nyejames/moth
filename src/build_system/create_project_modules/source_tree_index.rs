@@ -16,6 +16,7 @@
 use super::module_identity::{
     ModuleId, ModuleIdentityRecord, ModuleIdentityTable, module_root_role_for_file_name,
 };
+use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
@@ -73,22 +74,23 @@ pub(crate) struct SourceTreeSkipPolicy {
     configured_directories: Vec<PathBuf>,
 }
 
-impl SourceTreeSkipPolicy {
-    fn from_config(project_root: &Path, entry_root: &Path, config: &Config) -> Self {
-        let mut configured_directories = Vec::new();
-        for configured_folder in [&config.dev_folder, &config.release_folder] {
-            let configured_path = if configured_folder.is_absolute() {
-                configured_folder.clone()
-            } else {
-                project_root.join(configured_folder)
-            };
+/// Validated project-level inputs shared by source-tree discovery and output-policy exclusion.
+pub(super) struct SourceTreeProjectContext<'a> {
+    pub(super) project_root: &'a Path,
+    pub(super) validated_output_settings: Option<&'a ValidatedDirectoryOutputSettings>,
+}
 
-            if let Ok(canonical_path) = fs::canonicalize(configured_path)
-                && canonical_path != entry_root
-            {
-                configured_directories.push(canonical_path);
-            }
-        }
+impl SourceTreeSkipPolicy {
+    fn from_validated_output_settings(
+        entry_root: &Path,
+        validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
+    ) -> Self {
+        let mut configured_directories = validated_output_settings
+            .into_iter()
+            .flat_map(|settings| [&settings.dev.resolved_path, &settings.release.resolved_path])
+            .filter_map(|configured_path| fs::canonicalize(configured_path).ok())
+            .filter(|canonical_path| canonical_path != entry_root)
+            .collect::<Vec<_>>();
 
         configured_directories.sort();
         configured_directories.dedup();
@@ -430,17 +432,24 @@ impl SourceTreeIndex {
     /// order, and per-module owned and unrooted collections store only `SourceId`s.
     pub(super) fn discover(
         entry_root: PathBuf,
-        project_root: &Path,
+        project_context: SourceTreeProjectContext<'_>,
         config: &Config,
         source_packages: &SourcePackageRegistry,
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerMessages> {
+        let SourceTreeProjectContext {
+            project_root,
+            validated_output_settings,
+        } = project_context;
         let boundary = SourceTreeBoundary {
             entry_root: entry_root.clone(),
             package_identity: StablePackageIdentity::project_local(&config.project_name),
-            skip_policy: SourceTreeSkipPolicy::from_config(project_root, &entry_root, config),
+            skip_policy: SourceTreeSkipPolicy::from_validated_output_settings(
+                &entry_root,
+                validated_output_settings,
+            ),
             kind: SourceTreeBoundaryKind::Project {
                 project_root,
                 source_packages,
@@ -890,7 +899,10 @@ impl SourceTreeIndex {
 
         Self::discover(
             canonical_root.clone(),
-            &canonical_root,
+            SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             config,
             source_packages,
             source_file_kinds,

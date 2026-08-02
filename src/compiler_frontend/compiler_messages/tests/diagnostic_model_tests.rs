@@ -10,17 +10,18 @@ use super::{
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
     InvalidExpressionReason, InvalidFallibleHandlingReason, InvalidFallibleOperandReason,
     InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportClauseReason,
-    InvalidMapTypeReason, InvalidReceiverCallReason, InvalidSignatureMemberReason,
-    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
-    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason,
-    InvalidTypeAnnotationReason, MissingWhitespace, NameNamespace, NumberLiteralErrorReason,
-    PathKind, ReceiverCallKind, RuleDiagnosticKind, SymbolicSpacingConstruct, SymbolicSpacingError,
-    SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory, is_well_formed_reason_key,
+    InvalidMapTypeReason, InvalidOutputFolderReason, InvalidReceiverCallReason,
+    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, MissingWhitespace, NameNamespace,
+    NumberLiteralErrorReason, PathKind, ReceiverCallKind, RuleDiagnosticKind,
+    SymbolicSpacingConstruct, SymbolicSpacingError, SyntaxDiagnosticKind, TypeAnnotationContext,
+    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
+    UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, dev_server, terminal, terse,
+    DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
 };
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
@@ -277,6 +278,51 @@ fn unsupported_backend_feature_exposes_stable_reason_key() {
     assert_eq!(
         diagnostic.identity().reason_key,
         Some("unsupported_backend_feature.hashmap_operation")
+    );
+}
+
+#[test]
+fn non_utf8_output_folder_reason_has_stable_identity_and_rendering() {
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("config.moth", &mut string_table);
+    let reason = InvalidConfigReason::InvalidOutputFolder {
+        folder: None,
+        reason: InvalidOutputFolderReason::NonUtf8,
+    };
+    let diagnostic = CompilerDiagnostic::new(
+        DiagnosticKind::Config(ConfigDiagnosticKind::InvalidConfig),
+        location(source_path),
+        DiagnosticPayload::InvalidConfig {
+            key: None,
+            reason: reason.clone(),
+        },
+    );
+
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("invalid_config.invalid_output_folder.non_utf8")
+    );
+    assert_eq!(
+        invalid_config_message(None, &reason, &string_table),
+        "'config' must use valid UTF-8 portable path components."
+    );
+}
+
+#[test]
+fn output_folder_collision_rendering_preserves_both_authored_spellings() {
+    let mut string_table = StringTable::new();
+    let reason = InvalidConfigReason::OutputFoldersNotDistinct {
+        dev_folder: string_table.intern("Build"),
+        release_folder: string_table.intern("build"),
+    };
+
+    assert_eq!(
+        invalid_config_message(
+            Some(string_table.intern("dev_folder")),
+            &reason,
+            &string_table
+        ),
+        "Development and release output folders 'Build' and 'build' resolve to the same portable path and must be distinct."
     );
 }
 

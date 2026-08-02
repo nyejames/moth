@@ -48,8 +48,9 @@ ACCEPTANCE_CRITERIA:
 - complete full validation, docs and benchmark gates with zero known migration-fixture failures
 VALIDATION_STATE:
 - latest recorded checkpoint passes native/Linux/Windows Clippy, 3,834 workspace tests, 17 CLI tests, 500 package tests and all 1,812 integration executions
-- just validate reaches the known docs module-root-relative import migration blocker
-- bench-ci reaches the same docs blocker plus two benchmark fixtures using removed @./ source imports
+- just validate and bench-ci pass the docs module-root-relative import migration and benchmark
+  fixture import corrections; the remaining Phase 5 closeout work is architectural rather than a
+  migration-fixture blocker
 - this review is repository-aware and read-only; the full validation suite was not rerun by the reviewer
 DOCS_IMPACT: compiler and build-system architecture remain unchanged; the active plan is replaced and the downstream HTML-Wasm plan still needs a separate refresh for the removed flat handoff and old start-reachability wording
 BLOCKERS_OR_OPEN_DECISIONS: no semantic design blocker; the only open implementation boundary is how far generated call-summary reanalysis can be narrowed without redesigning the borrow checker
@@ -116,7 +117,8 @@ The remaining problems are implementation-boundary and hot-path problems:
 7. generated/private call-summary convergence reruns whole base modules and all sidecars until stable rather than scheduling only affected dependency components
 8. prepared source projection clones source text and complete token streams despite one canonical semantic owner
 9. `frontend_orchestration.rs` mixes preparation policy, semantic compilation, materialisation, sidecar scheduling and summary convergence in one oversized file
-10. docs and benchmark fixtures still block the full validation tail after source import fallback removal
+10. the former docs and benchmark fixture blockers are resolved; remaining closeout work is the
+    bounded deletion audit and architecture-focused validation
 
 These are closeout findings. They do not justify restoring donor compilation, path fallback or eager generic materialisation.
 
@@ -533,11 +535,11 @@ Tests should stay with their production owner. Move tests rather than duplicatin
 
 Goal: close Phase 5 with one green production path and no known validation tail.
 
-Migrate the remaining fixtures required by current semantics:
+Confirm the fixture migrations required by current semantics remain in place:
 
-- fix the docs `styles/docs/navbar` import through the module-root-relative namespace
-- replace removed benchmark `@./` source imports with their canonical module-root-relative or provider-owned form
-- update expected diagnostics changed by intentional fallback removal
+- the docs `styles/docs/navbar` import uses the module-root-relative namespace
+- removed benchmark `@./` source imports use their canonical module-root-relative or provider-owned form
+- expected diagnostics reflect intentional fallback removal
 
 Run the deletion audit:
 

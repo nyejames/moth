@@ -3,9 +3,10 @@
 //! WHAT: validates CLI input, runs the initial dev build, starts the watcher/build loop,
 //! and serves HTTP/SSE traffic for hot reload.
 
-use crate::build_system::build::{
-    ProjectBuilder, bootstrap_project_build, resolve_directory_output_plan,
-};
+use crate::build_system::BuildProfile;
+use crate::build_system::build::{ProjectBuilder, bootstrap_project_build};
+use crate::build_system::create_project_modules::resolve_project_entry_root;
+use crate::build_system::output::OutputOwner;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
@@ -150,7 +151,21 @@ pub(crate) fn resolve_dev_runtime_paths(
     }
 
     let bootstrap = bootstrap_project_build(builder, entry_target.to_path_buf())?;
-    let plan = resolve_directory_output_plan(&bootstrap.config, flags);
+    let Some(validated_output_settings) = bootstrap.validated_directory_output_settings else {
+        return Err(dev_server_error_messages(
+            entry_target,
+            "Directory output settings were not available after bootstrap validation.",
+        ));
+    };
+    let owner = OutputOwner {
+        builder: builder.backend.builder_kind(),
+        profile: BuildProfile::from_flags(flags),
+    };
+    let plan = validated_output_settings.select(
+        bootstrap.config.entry_dir.clone(),
+        resolve_project_entry_root(&bootstrap.config),
+        owner,
+    );
     let output_dir = plan.output_root.canonicalize().unwrap_or(plan.output_root);
     Ok(DevRuntimePaths {
         watch_scope: watch::WatchScope::derive(entry_target, Some(&bootstrap.config), &output_dir),

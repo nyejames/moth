@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::backends::js::test_symbol_helpers::expected_dev_function_name;
+use crate::build_system::BuildProfile;
 use crate::build_system::build::ModuleExternalImport;
 use crate::build_system::build::ResolvedConstFragment;
 use crate::build_system::build::{
@@ -39,7 +40,13 @@ fn build_with_test_modules(
         .collect();
     let project_compilation = ProjectCompilation::from_successful_modules(modules)
         .expect("test modules should assemble entries");
-    builder.build_backend(project_compilation, config, flags, &mut string_table)
+    builder.build_backend(
+        project_compilation,
+        config,
+        BuildProfile::from_flags(flags),
+        flags,
+        &mut string_table,
+    )
 }
 
 fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
@@ -238,6 +245,7 @@ fn emits_const_fragment_and_calls_start() {
         .build_backend(
             project_compilation(vec![module]),
             &Config::new(entry_path),
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -316,6 +324,7 @@ fn js_runtime_asset_emitted_verbatim() {
         .build_backend(
             project_compilation(vec![module]),
             &config,
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -380,6 +389,7 @@ fn js_runtime_asset_deduped_across_modules() {
         .build_backend(
             project_compilation(vec![module_a, module_b]),
             &config,
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -438,6 +448,7 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
         .build_backend(
             project_compilation(vec![module]),
             &config,
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -485,6 +496,7 @@ fn non_js_runtime_asset_is_ignored() {
         .build_backend(
             project_compilation(vec![module]),
             &config,
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -608,6 +620,7 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
         .build_backend(
             project_compilation(vec![homepage, api_only]),
             &config,
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -632,6 +645,7 @@ fn single_file_api_only_build_can_emit_no_artifacts() {
         .build_backend(
             project_compilation(vec![api_only]),
             &Config::new(entry_path),
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -810,6 +824,7 @@ fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
         .build_backend(
             project_compilation(vec![homepage, docs_page]),
             &config,
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -887,6 +902,7 @@ fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
         .build_backend(
             project_compilation(vec![homepage, blog_page]),
             &config,
+            BuildProfile::Dev,
             &[],
             &mut string_table,
         )
@@ -955,6 +971,7 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
     let error = match builder.build_backend(
         project_compilation(vec![homepage, docs_page]),
         &config,
+        BuildProfile::Dev,
         &[],
         &mut string_table,
     ) {
@@ -1002,6 +1019,7 @@ fn build_backend_rejects_tracked_asset_output_that_matches_generated_html() {
     let error = match builder.build_backend(
         project_compilation(vec![homepage]),
         &config,
+        BuildProfile::Dev,
         &[],
         &mut string_table,
     ) {

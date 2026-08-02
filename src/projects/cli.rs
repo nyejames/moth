@@ -5,8 +5,11 @@
 
 use crate::build_system::build;
 use crate::build_system::build::BuildResult;
+use crate::build_system::output::{
+    OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
+};
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
@@ -155,10 +158,9 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
     let start = Instant::now();
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
-        Ok(build_result) => {
-            let (output_root, project_entry_dir) = if build_result.config.entry_dir.is_dir() {
-                let plan = build::resolve_directory_output_plan(&build_result.config, flags);
-                (plan.output_root, plan.project_entry_dir)
+        Ok(mut build_result) => {
+            let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
+                OutputPlan::Directory(plan.clone())
             } else {
                 let output_root = match env::current_dir() {
                     Ok(path) => path,
@@ -174,7 +176,7 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                         return CommandStatus::Failure;
                     }
                 };
-                let project_entry_dir =
+                let project_root =
                     match single_file_project_entry_dir(&build_result.config.entry_dir) {
                         Ok(path) => path,
                         Err(error) => {
@@ -185,16 +187,23 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                         }
                     };
 
-                (output_root, Some(project_entry_dir))
+                OutputPlan::SingleFile(SingleFileOutputPlan {
+                    output_root,
+                    project_root: Some(project_root),
+                    owner: build_result.output_owner,
+                    setting_location: SourceLocation::from_path(
+                        &build_result.config.entry_dir,
+                        &mut build_result.string_table,
+                    ),
+                })
             };
 
             let output_write_start = crate::timing::start_pipeline_timing();
-            let write_result = build::write_project_outputs(
+            let write_result = write_project_outputs(
                 &build_result.project,
-                &build::WriteOptions {
-                    output_root,
-                    project_entry_dir,
-                    write_mode: build::WriteMode::AlwaysWrite,
+                &WriteOptions {
+                    output_plan,
+                    write_mode: WriteMode::AlwaysWrite,
                 },
                 &build_result.string_table,
             );

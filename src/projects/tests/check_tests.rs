@@ -6,6 +6,10 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::{
     display_line_number, relative_display_path_from_root, resolve_source_file_path,
 };
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -41,6 +45,67 @@ fn check_compiles_single_file_without_writing_artifacts() {
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[cfg(unix)]
+#[test]
+fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
+    use std::os::unix::fs::symlink;
+
+    for (case_name, target_name, expected_reason) in [
+        (
+            "sibling",
+            "outside",
+            InvalidOutputFolderReason::ResolvesOutsideProjectRoot,
+        ),
+        (
+            "entry",
+            "src",
+            InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
+        ),
+    ] {
+        let root = temp_dir(&format!("check_output_symlink_{case_name}"));
+        let source_root = root.join("src");
+        let outside = temp_dir(&format!("check_output_symlink_target_{case_name}"));
+        fs::create_dir_all(&source_root).expect("should create source root");
+        fs::create_dir_all(&outside).expect("should create outside root");
+        let output_root = root.join("dev");
+        if target_name == "src" {
+            symlink(&source_root, &output_root).expect("should create entry-root symlink");
+        } else {
+            symlink(&outside, &output_root).expect("should create sibling symlink");
+        }
+        fs::write(
+            root.join("config.moth"),
+            "entry_root #= \"src\"\ndev_folder #= \"dev\"\noutput_folder #= \"release\"\n",
+        )
+        .expect("should write config");
+        fs::write(source_root.join("@page.moth"), "#[:<h1>Check</h1>]\n")
+            .expect("should write source");
+
+        let outcome = execute_check(
+            root.to_str()
+                .expect("temporary project path should be valid UTF-8"),
+        );
+        assert!(outcome.messages.has_errors());
+        assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidConfig {
+                    reason: InvalidConfigReason::InvalidOutputFolder {
+                        reason,
+                        ..
+                    },
+                    ..
+                } if *reason == expected_reason
+            )
+        }));
+        assert!(!outside.join("index.html").exists());
+        assert!(!source_root.join("index.html").exists());
+
+        fs::remove_dir_all(&root).expect("should remove project root");
+        fs::remove_dir_all(&outside).expect("should remove target root");
+    }
 }
 
 /// Stable source-facing identity for one frontend diagnostic.

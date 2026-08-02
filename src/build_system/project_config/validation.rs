@@ -6,7 +6,8 @@
 //! audit and extend.
 
 use crate::build_system::output::{
-    ValidatedOutputFolder, classify_output_folder, output_path_identity,
+    ValidatedDirectoryOutputSettings, ValidatedOutputFolder, canonical_output_root_for_identity,
+    classify_output_folder, output_path_identity, validate_output_folder_containment,
 };
 use crate::build_system::project_config::parsing::ParsedConfigFile;
 
@@ -49,9 +50,10 @@ pub(super) fn validate_and_apply_config_ast(
     let mut seen_config_keys = HashSet::new();
 
     // Only top-level compile-time constant declarations authored in `config.moth` are config keys.
-    // Imported package constants and types are support surface, not entries. The authored scope
-    // is the exact interned identity the parser used for tokenization, so membership is checked by
-    // direct interned equality rather than by converting paths back to `PathBuf`.
+    // Config files are self-contained: imported declarations are never config entries. The
+    // authored scope is the exact interned identity the parser used for tokenization, so
+    // membership is checked by direct interned equality rather than by converting paths back to
+    // `PathBuf`.
     let authored_scope = &parsed_config.authored_scope;
 
     // 1. Extract authored top-level compile-time constants.
@@ -739,7 +741,7 @@ fn key_identity_location<'a>(
 pub(crate) fn validate_directory_output_settings(
     config: &Config,
     string_table: &mut StringTable,
-) -> Result<(), Vec<CompilerDiagnostic>> {
+) -> Result<ValidatedDirectoryOutputSettings, Vec<CompilerDiagnostic>> {
     let mut errors = Vec::new();
 
     let project_root = &config.entry_dir;
@@ -773,12 +775,16 @@ pub(crate) fn validate_directory_output_settings(
     );
 
     // Only check distinctness when both folders individually passed validation.
-    if let (Some(dev), Some(release)) = (dev, release) {
-        validate_output_folders_distinct(&dev, &release, config, string_table, &mut errors);
+    if let (Some(dev), Some(release)) = (&dev, &release) {
+        validate_output_folders_distinct(dev, release, config, string_table, &mut errors);
     }
 
+    let (Some(dev), Some(release)) = (dev, release) else {
+        return Err(errors);
+    };
+
     if errors.is_empty() {
-        Ok(())
+        Ok(ValidatedDirectoryOutputSettings { dev, release })
     } else {
         Err(errors)
     }
@@ -797,7 +803,24 @@ fn validate_one_output_folder(
     let location = config.setting_location_or_config_file(key, string_table);
 
     match classify_output_folder(folder, project_root, resolved_entry_root) {
-        Ok(valid) => Some(valid),
+        Ok(mut valid) => {
+            if let Err(reason) =
+                validate_output_folder_containment(&valid, project_root, resolved_entry_root)
+            {
+                let folder_id = Some(string_table.intern(&folder.to_string_lossy()));
+                errors.push(output_folder_diagnostic(
+                    key,
+                    folder_id,
+                    reason,
+                    location,
+                    string_table,
+                ));
+                return None;
+            }
+
+            valid.location = location;
+            Some(valid)
+        }
         Err(reason) => {
             let folder_id = (!matches!(reason, InvalidOutputFolderReason::Empty))
                 .then(|| string_table.intern(&folder.to_string_lossy()));
@@ -827,13 +850,18 @@ fn validate_output_folders_distinct(
     let release_identity = output_path_identity(&release.relative_path)
         .expect("release folder was already validated as a relative output path");
 
-    if dev_identity == release_identity {
+    let canonical_roots_match = canonical_output_root_for_identity(&dev.resolved_path)
+        .ok()
+        .zip(canonical_output_root_for_identity(&release.resolved_path).ok())
+        .is_some_and(|(dev_root, release_root)| dev_root == release_root);
+
+    if dev_identity == release_identity || canonical_roots_match {
         let location = config.setting_location_or_config_file("dev_folder", string_table);
         errors.push(CompilerDiagnostic::invalid_config_reason(
             Some(string_table.intern("dev_folder")),
             InvalidConfigReason::OutputFoldersNotDistinct {
-                dev_folder: string_table.intern(&dev.relative_path.to_string_lossy()),
-                release_folder: string_table.intern(&release.relative_path.to_string_lossy()),
+                dev_folder: string_table.intern(&config.dev_folder.to_string_lossy()),
+                release_folder: string_table.intern(&config.release_folder.to_string_lossy()),
             },
             location,
         ));

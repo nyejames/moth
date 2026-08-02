@@ -1,6 +1,6 @@
 //! Scaffold templates for `moth new html`.
 //!
-//! WHAT: Owns the generated content for `config.moth`, `src/@page.moth`, manifests, and `.gitignore`.
+//! WHAT: Owns the generated content for `config.moth`, `src/@page.moth`, and `.gitignore`.
 //! WHY: Centralises template strings so they are not scattered through write logic.
 
 /// Escape a string for use in a Moth config string literal.
@@ -51,11 +51,6 @@ page_head #= [$html:
     Use **moth dev** to start the development server and see your changes to this page in real time!
 ]
 "#
-}
-
-/// Return the empty HTML build manifest content.
-pub fn manifest_template() -> &'static str {
-    "# moth-manifest v4\n# builder: html\n# profile: dev\n# managed_extensions: .html,.js,.wasm\n"
 }
 
 /// Return the default `.gitignore` content for a new HTML project.

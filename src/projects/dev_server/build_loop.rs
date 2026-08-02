@@ -3,9 +3,13 @@
 //! This module delegates compilation and artifact writing to the core build APIs, then translates
 //! build outcomes into dev-server state updates and SSE reload broadcasts.
 
-use crate::build_system::build::{self, BuildResult, ProjectBuilder, WriteMode, WriteOptions};
+use crate::build_system::build::{self, BuildResult, ProjectBuilder};
+use crate::build_system::output::{
+    OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
+};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::display_messages::print_compiler_messages;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
@@ -49,6 +53,7 @@ struct BuildOutcome {
     success_messages: Option<CompilerMessages>,
     failed_build: Option<BuildFailure>,
     watch_scope: Option<watch::WatchScope>,
+    output_dir: Option<PathBuf>,
 }
 
 enum BuildFailure {
@@ -65,7 +70,6 @@ pub trait DevBuildExecutor: Send {
         &mut self,
         entry_file: &Path,
         flags: &[Flag],
-        output_dir: &Path,
     ) -> Result<BuildResult, CompilerMessages>;
 }
 
@@ -84,7 +88,6 @@ impl DevBuildExecutor for ProjectBuildExecutor {
         &mut self,
         entry_file: &Path,
         flags: &[Flag],
-        output_dir: &Path,
     ) -> Result<BuildResult, CompilerMessages> {
         let entry_path = entry_file.to_str().ok_or_else(|| {
             dev_server_error_messages(
@@ -93,18 +96,29 @@ impl DevBuildExecutor for ProjectBuildExecutor {
             )
         })?;
 
-        let build_result = build::build_project(&self.builder, entry_path, flags)?;
-        let project_entry_dir = entry_file
-            .parent()
-            .filter(|parent| parent.is_dir())
-            .map(Path::to_path_buf)
-            .or_else(|| Some(entry_file.to_path_buf()))
-            .filter(|path| path.is_dir());
-        if let Err(mut messages) = build::write_project_outputs(
+        let mut build_result = build::build_project(&self.builder, entry_path, flags)?;
+        let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
+            OutputPlan::Directory(plan.clone())
+        } else {
+            let project_root = entry_file
+                .parent()
+                .filter(|parent| parent.is_dir())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| entry_file.to_path_buf());
+            OutputPlan::SingleFile(SingleFileOutputPlan {
+                output_root: project_root.join("dev"),
+                project_root: Some(project_root),
+                owner: build_result.output_owner,
+                setting_location: SourceLocation::from_path(
+                    entry_file,
+                    &mut build_result.string_table,
+                ),
+            })
+        };
+        if let Err(mut messages) = write_project_outputs(
             &build_result.project,
             &WriteOptions {
-                output_root: output_dir.to_path_buf(),
-                project_entry_dir,
+                output_plan,
                 write_mode: WriteMode::SkipUnchanged,
             },
             &build_result.string_table,
@@ -123,12 +137,7 @@ pub fn run_single_build_cycle(
     entry_file: &Path,
     flags: &[Flag],
 ) -> BuildCycleReport {
-    let output_dir = match state.build_state.lock() {
-        Ok(guard) => guard.output_dir.clone(),
-        Err(_) => PathBuf::from("dev"),
-    };
-
-    let build_outcome = build_once(executor, entry_file, flags, &output_dir);
+    let build_outcome = build_once(executor, entry_file, flags);
     let project_root = dev_server_project_root(entry_file);
     let BuildOutcome {
         build_succeeded,
@@ -138,6 +147,7 @@ pub fn run_single_build_cycle(
         success_messages,
         failed_build,
         watch_scope,
+        output_dir,
     } = build_outcome;
 
     let version = {
@@ -159,6 +169,9 @@ pub fn run_single_build_cycle(
         if build_succeeded {
             build_state.last_error_html = None;
             build_state.entry_page_rel = entry_page_rel;
+            if let Some(output_dir) = output_dir {
+                build_state.output_dir = output_dir;
+            }
             if let Some(html_site_config) = html_site_config {
                 build_state.html_site_config = html_site_config;
             }
@@ -323,9 +336,8 @@ fn build_once(
     executor: &mut dyn DevBuildExecutor,
     entry_file: &Path,
     flags: &[Flag],
-    output_dir: &Path,
 ) -> BuildOutcome {
-    let mut build_result = match executor.build_and_write(entry_file, flags, output_dir) {
+    let mut build_result = match executor.build_and_write(entry_file, flags) {
         Ok(build_result) => build_result,
         Err(messages) => {
             return BuildOutcome {
@@ -336,13 +348,27 @@ fn build_once(
                 success_messages: None,
                 failed_build: Some(BuildFailure::CompilerMessages(messages)),
                 watch_scope: None,
+                output_dir: None,
             };
         }
     };
+    let output_dir = build_result
+        .directory_output_plan
+        .as_ref()
+        .map(|plan| canonical_output_dir(&plan.output_root))
+        .unwrap_or_else(|| {
+            canonical_output_dir(
+                &entry_file
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("dev"),
+            )
+        });
     let watch_scope = watch::WatchScope::derive(
         &build_result.config.entry_dir,
         Some(&build_result.config),
-        output_dir,
+        &output_dir,
     );
 
     let html_site_config =
@@ -358,6 +384,7 @@ fn build_once(
                     success_messages: None,
                     failed_build: Some(BuildFailure::CompilerMessages(messages)),
                     watch_scope: Some(watch_scope),
+                    output_dir: Some(output_dir),
                 };
             }
         };
@@ -393,6 +420,7 @@ fn build_once(
             success_messages,
             failed_build: None,
             watch_scope: Some(watch_scope),
+            output_dir: Some(output_dir),
         }
     } else {
         BuildOutcome {
@@ -410,8 +438,15 @@ fn build_once(
                 ),
             }),
             watch_scope: Some(watch_scope),
+            output_dir: Some(output_dir),
         }
     }
+}
+
+fn canonical_output_dir(output_dir: &Path) -> PathBuf {
+    output_dir
+        .canonicalize()
+        .unwrap_or_else(|_| output_dir.to_path_buf())
 }
 
 fn dev_server_project_root(entry_file: &Path) -> PathBuf {

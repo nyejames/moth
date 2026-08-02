@@ -55,12 +55,13 @@ pub(crate) use crate::projects::settings;
 pub(crate) use std::fs;
 
 use crate::build_system::build::ProjectFrontendCompilation;
+use crate::build_system::output::ValidatedDirectoryOutputSettings;
 
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::{Flag, FrontendBuildProfile};
 
 use crate::build_system::BuildProfile;
 use crate::builder_surface::BuilderSurface;
@@ -76,7 +77,8 @@ use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 /// WHY: separating the two flows keeps each path readable as orchestration over named steps.
 pub fn compile_project_frontend(
     config: &mut Config,
-    flags: &[Flag],
+    build_profile: BuildProfile,
+    validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
@@ -86,7 +88,7 @@ pub fn compile_project_frontend(
     // it safely from Rayon workers.
     reset_frontend_counters();
 
-    let build_profile = match BuildProfile::from_flags(flags) {
+    let frontend_build_profile = match build_profile {
         BuildProfile::Dev => FrontendBuildProfile::Dev,
         BuildProfile::Release => FrontendBuildProfile::Release,
     };
@@ -98,7 +100,8 @@ pub fn compile_project_frontend(
     let result = if config.entry_dir.is_dir() {
         compilation::compile_directory_frontend(
             config,
-            build_profile,
+            frontend_build_profile,
+            validated_output_settings,
             style_directives,
             builder_surface,
             string_table,
@@ -106,7 +109,7 @@ pub fn compile_project_frontend(
     } else if let Some(extension) = config.entry_dir.extension() {
         compilation::compile_single_file_frontend(
             config,
-            build_profile,
+            frontend_build_profile,
             style_directives,
             builder_surface,
             extension,

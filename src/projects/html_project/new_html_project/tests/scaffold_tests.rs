@@ -45,12 +45,7 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
     let project_dir = temp.path().to_path_buf();
 
     // Scaffold-owned files are the exact conflict set, in declared order.
-    for file in [
-        "config.moth",
-        "src/@page.moth",
-        "dev/.moth_manifest",
-        "release/.moth_manifest",
-    ] {
+    for file in ["config.moth", "src/@page.moth"] {
         if let Some(parent) = project_dir.join(file).parent() {
             fs::create_dir_all(parent).unwrap();
         }
@@ -58,12 +53,7 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
     }
     assert_eq!(
         find_scaffold_conflicts(&project_dir),
-        vec![
-            "config.moth",
-            "src/@page.moth",
-            "dev/.moth_manifest",
-            "release/.moth_manifest",
-        ]
+        vec!["config.moth", "src/@page.moth",]
     );
 
     // Scaffold-owned directories and a user .gitignore are never conflicts.
@@ -202,24 +192,14 @@ fn creates_full_default_scaffold_and_reports_every_path() {
     assert!(project_dir.join("config.moth").exists());
     assert!(project_dir.join("src/@page.moth").exists());
     assert!(project_dir.join("lib").exists());
-    assert!(project_dir.join("dev/.moth_manifest").exists());
-    assert!(project_dir.join("release/.moth_manifest").exists());
+    assert!(!project_dir.join("dev/.moth_manifest").exists());
+    assert!(!project_dir.join("release/.moth_manifest").exists());
     assert!(project_dir.join(".gitignore").exists());
 
     // The default scaffold creates every path and replaces, updates, or skips nothing.
     assert!(report.created.contains(&PathBuf::from("config.moth")));
     assert!(report.created.contains(&PathBuf::from("src/@page.moth")));
     assert!(report.created.contains(&PathBuf::from("lib")));
-    assert!(
-        report
-            .created
-            .contains(&PathBuf::from("dev/.moth_manifest"))
-    );
-    assert!(
-        report
-            .created
-            .contains(&PathBuf::from("release/.moth_manifest"))
-    );
     assert!(report.created.contains(&PathBuf::from(".gitignore")));
     assert!(report.replaced.is_empty());
     assert!(report.updated.is_empty());
@@ -246,14 +226,6 @@ fn generated_files_exactly_match_templates() {
     assert_eq!(
         fs::read_to_string(project_dir.join("src/@page.moth")).unwrap(),
         start_page_scaffolding::page_template()
-    );
-    assert_eq!(
-        fs::read_to_string(project_dir.join("dev/.moth_manifest")).unwrap(),
-        start_page_scaffolding::manifest_template()
-    );
-    assert_eq!(
-        fs::read_to_string(project_dir.join("release/.moth_manifest")).unwrap(),
-        start_page_scaffolding::manifest_template()
     );
 }
 
@@ -362,8 +334,12 @@ fn force_replaces_scaffold_owned_files_only() {
     fs::create_dir(project_dir.join("release")).unwrap();
     fs::write(project_dir.join("config.moth"), b"old config").unwrap();
     fs::write(project_dir.join("src/@page.moth"), b"old page").unwrap();
-    fs::write(project_dir.join("dev/.moth_manifest"), b"old manifest").unwrap();
-    fs::write(project_dir.join("release/.moth_manifest"), b"old manifest").unwrap();
+    fs::write(project_dir.join("dev/user-output.js"), b"old dev output").unwrap();
+    fs::write(
+        project_dir.join("release/user-output.js"),
+        b"old release output",
+    )
+    .unwrap();
     fs::write(project_dir.join("user-file.txt"), b"keep me").unwrap();
 
     let target = named_target(project_dir.clone(), "Test Site", true);
@@ -373,15 +349,13 @@ fn force_replaces_scaffold_owned_files_only() {
 
     assert!(report.replaced.contains(&PathBuf::from("config.moth")));
     assert!(report.replaced.contains(&PathBuf::from("src/@page.moth")));
-    assert!(
-        report
-            .replaced
-            .contains(&PathBuf::from("dev/.moth_manifest"))
+    assert_eq!(
+        fs::read(project_dir.join("dev/user-output.js")).unwrap(),
+        b"old dev output"
     );
-    assert!(
-        report
-            .replaced
-            .contains(&PathBuf::from("release/.moth_manifest"))
+    assert_eq!(
+        fs::read(project_dir.join("release/user-output.js")).unwrap(),
+        b"old release output"
     );
 
     let user_content = fs::read_to_string(project_dir.join("user-file.txt")).unwrap();

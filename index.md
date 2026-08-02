@@ -23,7 +23,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [dev_server](src/projects/dev_server/): HTTP/SSE/watch rebuild loop. kw: serve, hot reload.
     - [html_project](src/projects/html_project/): HTML builder and HTML-Wasm integration. kw: shell, assets, wasm.
 - [builder boundary above frontend](src/build_system/): kw — config, modules, artifacts, cleanup.
-    - [build.rs](src/build_system/build.rs): build_project, BuildResult, current `Module` container with explicit executable, link-fact and compiler-metadata lanes, output writing.
+    - [build.rs](src/build_system/build.rs): build_project, BuildResult, current `Module` container with explicit executable, link-fact and compiler-metadata lanes, compiler/backend orchestration.
     - [project_config.rs](src/build_system/project_config.rs) + [project_config/](src/build_system/project_config/): config.moth parse/validate through frontend+AST.
     - [path_validation.rs](src/build_system/path_validation.rs): project path policy checks.
     - [utils.rs](src/build_system/utils.rs): shared builder helpers.
@@ -36,7 +36,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [project_structure_diagnostics.rs](src/build_system/create_project_modules/project_structure_diagnostics.rs): structured layout, root and name-conflict diagnostics; project and package collision discovery lives in `source_tree_index.rs`.
         - [project_roots.rs](src/build_system/create_project_modules/project_roots.rs): project/entry roots.
         - [source_discovery_error.rs](src/build_system/create_project_modules/source_discovery_error.rs): diagnostic boundary.
-    - [output_cleanup.rs](src/build_system/output_cleanup.rs): stale output manifest cleanup.
+    - [output](src/build_system/output/): validated output plans, portable path policy, prepared artifact writing, write orchestration, and stale manifest cleanup.
 - [builder surface](src/builder_surface/): core packages, external import providers and package metadata.
     - [core_packages/](src/builder_surface/core_packages/): prelude, io, math, collections, text, random and time.
     - [external_import_providers/](src/builder_surface/external_import_providers/): provider registry and resolution table.

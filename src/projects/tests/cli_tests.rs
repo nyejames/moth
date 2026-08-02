@@ -2,11 +2,12 @@
 
 use super::{
     Command, build_warnings_messages, compact_whitespace, get_command, help_build_flag_entries,
-    integration_run_status, is_standalone_version_request,
+    integration_run_status, is_standalone_version_request, run_build_command,
 };
-use crate::build_system::build::{BuildResult, CleanupPolicy, FileKind, OutputFile, Project};
+use crate::build_system::BuildProfile;
+use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
+use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
 };
@@ -15,10 +16,12 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions,
 };
+use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::command_status::CommandStatus;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use crate::projects::settings::Config;
+use std::fs;
 use std::path::PathBuf;
 
 fn args(values: &[&str]) -> Vec<String> {
@@ -48,6 +51,34 @@ fn build_command_uses_current_directory_when_path_is_missing() {
             flags: Vec::new(),
         }
     );
+}
+
+#[test]
+fn build_command_writes_the_validated_directory_output_plan() {
+    let root = temp_dir("cli_directory_output_plan");
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\ndev_folder #= \"preview\"\noutput_folder #= \"release\"\n",
+    )
+    .expect("should write project config");
+    fs::write(
+        source_root.join("@page.moth"),
+        "#[:<h1>CLI Directory Plan</h1>]\n",
+    )
+    .expect("should write page source");
+
+    let status = run_build_command(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &[],
+    );
+    assert_eq!(status, CommandStatus::Success);
+    assert!(root.join("preview/index.html").exists());
+    assert!(!root.join("dev/index.html").exists());
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
@@ -702,12 +733,17 @@ fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult 
                 FileKind::Html(String::from("<html></html>")),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings,
         string_table: StringTable::new(),
+        output_owner: OutputOwner {
+            builder: BuilderKind::Html,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
     }
 }
 

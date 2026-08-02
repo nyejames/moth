@@ -3,21 +3,43 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use super::*;
-use crate::build_system::build::{FileKind, OutputFile, WriteMode};
-use crate::build_system::output_cleanup::{
-    BuilderKind, ManifestLimitedSafeModeReason, ManifestLoadResult,
+use crate::build_system::BuildProfile;
+use crate::build_system::build::{FileKind, OutputFile};
+use crate::build_system::output::manifest::{
+    BuildManifest, ManifestReadResult, ManifestRecoveryReason,
 };
-use crate::compiler_frontend::FrontendBuildProfile;
+use crate::build_system::output::{BuilderKind, OutputOwner, WriteMode, WriteOptions};
+use crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages;
+use crate::compiler_frontend::compiler_messages::render::resolve_source_file_path;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::build_system::output_cleanup::{
-    BUILD_MANIFEST_FILENAME, read_build_manifest, validate_output_root_is_safe,
-    write_build_manifest,
+use crate::build_system::output::manifest::{
+    BUILD_MANIFEST_FILENAME, read_build_manifest, remove_manifest_tracked_stale_artifacts,
+    validate_output_root_is_safe, write_build_manifest,
 };
 use crate::compiler_tests::test_support::temp_dir;
 use std::collections::{BTreeSet, HashSet};
+
+fn html_owner(profile: BuildProfile) -> OutputOwner {
+    OutputOwner {
+        builder: BuilderKind::Html,
+        profile,
+    }
+}
+
+fn read_html_manifest(root: &Path) -> ManifestReadResult {
+    read_build_manifest(root, &html_cleanup_policy())
+}
+
+fn valid_manifest(paths: Vec<PathBuf>, profile: BuildProfile) -> ManifestReadResult {
+    ManifestReadResult::Valid(BuildManifest {
+        paths,
+        owner: html_owner(profile),
+        managed_extensions: html_active_extensions(),
+    })
+}
 
 #[test]
 fn cleanup_manifest_diff_removes_stale_managed_files() {
@@ -115,15 +137,14 @@ fn cleanup_manifest_diff_removes_stale_tracked_byte_assets_from_manifest() {
     .expect("build A should succeed");
 
     assert_eq!(
-        read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::Valid {
-            paths: vec![
+        read_html_manifest(&output_root),
+        valid_manifest(
+            vec![
                 PathBuf::from("assets/logo.png"),
                 PathBuf::from("index.html")
             ],
-            builder_kind: BuilderKind::Html,
-            build_profile: FrontendBuildProfile::Dev,
-        }
+            BuildProfile::Dev,
+        )
     );
     assert!(output_root.join("assets/logo.png").exists());
 
@@ -162,11 +183,11 @@ fn cleanup_missing_manifest_preserves_stale_html_route_alias() {
     )
     .expect("should write stale alias");
 
-    let manifest = read_build_manifest(&output_root, &html_cleanup_policy());
+    let manifest = read_html_manifest(&output_root);
     assert_eq!(
         manifest,
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::Missing,
+        ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::Missing,
         }
     );
 
@@ -222,12 +243,8 @@ fn cleanup_first_build_writes_manifest_without_removing() {
     );
 
     assert_eq!(
-        read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::Valid {
-            paths: vec![PathBuf::from("index.html")],
-            builder_kind: BuilderKind::Html,
-            build_profile: FrontendBuildProfile::Dev,
-        }
+        read_html_manifest(&output_root),
+        valid_manifest(vec![PathBuf::from("index.html")], BuildProfile::Dev)
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
@@ -277,6 +294,87 @@ fn cleanup_removes_empty_parent_directories_after_deleting_managed_files() {
 }
 
 #[test]
+fn cleanup_preserves_current_explicit_directory_after_removing_stale_child() {
+    let root = temp_dir("cleanup_explicit_directory");
+    fs::create_dir_all(&root).expect("should create temp root");
+    let project_dir = root.join("project");
+    fs::create_dir_all(&project_dir).expect("should create project dir");
+    let output_root = project_dir.join("dev");
+    fs::create_dir_all(output_root.join("assets")).expect("should create assets directory");
+    fs::write(output_root.join("assets/stale.js"), "stale").expect("should write stale asset");
+
+    let manifest_paths: HashSet<PathBuf> = [PathBuf::from("assets/stale.js")].into_iter().collect();
+    write_build_manifest(
+        &output_root.join(BUILD_MANIFEST_FILENAME),
+        &manifest_paths,
+        html_owner(BuildProfile::Dev),
+        &html_cleanup_policy(),
+        WriteMode::AlwaysWrite,
+        &StringTable::new(),
+    )
+    .expect("should write valid prior manifest");
+
+    let project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("assets"),
+            FileKind::Directory,
+        )],
+        None,
+    );
+    write_project_outputs(
+        &project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect("directory-only build should succeed");
+
+    assert!(
+        output_root.join("assets").is_dir(),
+        "a current explicit directory must survive stale child cleanup"
+    );
+    assert!(!output_root.join("assets/stale.js").exists());
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[cfg(unix)]
+#[test]
+fn stale_cleanup_preserves_non_regular_nodes() {
+    use std::os::unix::net::UnixListener;
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time should be after epoch")
+        .as_nanos();
+    let root = PathBuf::from(format!(
+        "/tmp/moth_socket_{}_{}",
+        std::process::id(),
+        unique
+    ));
+    fs::create_dir_all(&root).expect("should create temp root");
+    let socket_path = root.join("stale.sock");
+    let listener = UnixListener::bind(&socket_path).expect("should create stale socket");
+    let stale_path = PathBuf::from("stale.sock");
+
+    let report = remove_manifest_tracked_stale_artifacts(
+        &root,
+        &HashSet::new(),
+        &HashSet::new(),
+        std::slice::from_ref(&stale_path),
+    );
+
+    assert!(
+        socket_path.exists(),
+        "stale special nodes must not be unlinked"
+    );
+    assert_eq!(report.removed_paths, Vec::<PathBuf>::new());
+    assert_eq!(report.retained_paths, vec![stale_path]);
+
+    drop(listener);
+    fs::remove_file(&socket_path).expect("should remove test socket");
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
 fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
     let root = temp_dir("cleanup_preserves_parent_dirs");
     fs::create_dir_all(&root).expect("should create temp root");
@@ -295,13 +393,14 @@ fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
         .into_iter()
         .collect();
     write_build_manifest(
-        &output_root,
+        &output_root.join(BUILD_MANIFEST_FILENAME),
         &manifest_paths,
+        html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
         &StringTable::new(),
     )
-    .expect("should write v3 manifest");
+    .expect("should write v4 manifest");
 
     let project = html_project(
         vec![OutputFile::new(
@@ -338,7 +437,8 @@ fn validate_output_root_rejects_dangerous_paths() {
     ];
 
     for dangerous in dangerous_paths {
-        let result = validate_output_root_is_safe(&dangerous, &project_dir, &StringTable::new());
+        let result =
+            validate_output_root_is_safe(&dangerous, &project_dir, None, &StringTable::new());
         assert!(
             result.is_err(),
             "should reject dangerous path: {}",
@@ -352,7 +452,7 @@ fn validate_output_root_accepts_project_subdirectory() {
     let root = temp_dir("validate_accept");
     fs::create_dir_all(root.join("dev")).expect("should create output dir");
 
-    let result = validate_output_root_is_safe(&root.join("dev"), &root, &StringTable::new());
+    let result = validate_output_root_is_safe(&root.join("dev"), &root, None, &StringTable::new());
     assert!(
         result.is_ok(),
         "should accept output root inside project directory"
@@ -362,7 +462,7 @@ fn validate_output_root_accepts_project_subdirectory() {
 }
 
 #[test]
-fn cleanup_unreadable_manifest_enters_limited_safe_mode_and_preserves_existing_files() {
+fn cleanup_unreadable_manifest_enters_recoverable_mode_and_preserves_existing_files() {
     let root = temp_dir("cleanup_garbage_manifest");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
@@ -388,9 +488,9 @@ fn cleanup_unreadable_manifest_enters_limited_safe_mode_and_preserves_existing_f
     .expect("should write unrelated html file");
 
     assert_eq!(
-        read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::Unreadable,
+        read_html_manifest(&output_root),
+        ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::Unreadable,
         }
     );
 
@@ -474,9 +574,9 @@ fn unsupported_manifest_preserves_existing_files_until_next_cleanup() {
     .expect("should write unsupported manifest");
 
     assert_eq!(
-        read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::UnsupportedVersion,
+        read_html_manifest(&output_root),
+        ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::UnsupportedVersion,
         },
     );
 
@@ -503,35 +603,7 @@ fn unsupported_manifest_preserves_existing_files_until_next_cleanup() {
     );
     assert!(
         output_root.join("notes.txt").exists(),
-        "limited safe mode must preserve non-managed file types"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
-}
-
-#[test]
-fn read_build_manifest_rejects_builder_mismatch_in_v4_manifest() {
-    let root = temp_dir("cleanup_builder_mismatch");
-    fs::create_dir_all(&root).expect("should create temp root");
-
-    let paths: HashSet<PathBuf> = [PathBuf::from("index.html")].into_iter().collect();
-    write_build_manifest(
-        &root,
-        &paths,
-        &generic_cleanup_policy(),
-        WriteMode::AlwaysWrite,
-        &StringTable::new(),
-    )
-    .expect("should write manifest");
-
-    assert_eq!(
-        read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::BuilderMismatch {
-                manifest_builder_kind: BuilderKind::Generic,
-                active_builder_kind: BuilderKind::Html,
-            },
-        }
+        "recoverable mode must preserve non-managed file types"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
@@ -574,12 +646,8 @@ fn read_build_manifest_accepts_equivalent_managed_extensions_in_different_order(
     write_v4_manifest_text(&root, "html", "dev", ".wasm,.html,.js", &["index.html"]);
 
     assert_eq!(
-        read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::Valid {
-            paths: vec![PathBuf::from("index.html")],
-            builder_kind: BuilderKind::Html,
-            build_profile: FrontendBuildProfile::Dev,
-        }
+        read_html_manifest(&root),
+        valid_manifest(vec![PathBuf::from("index.html")], BuildProfile::Dev)
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
@@ -594,12 +662,8 @@ fn read_build_manifest_normalizes_managed_extension_case_and_leading_dot() {
     write_v4_manifest_text(&root, "html", "dev", "HTML,js,.WASM", &["index.html"]);
 
     assert_eq!(
-        read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::Valid {
-            paths: vec![PathBuf::from("index.html")],
-            builder_kind: BuilderKind::Html,
-            build_profile: FrontendBuildProfile::Dev,
-        }
+        read_html_manifest(&root),
+        valid_manifest(vec![PathBuf::from("index.html")], BuildProfile::Dev)
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
@@ -618,12 +682,13 @@ fn read_build_manifest_rejects_missing_managed_extension() {
     write_v4_manifest_text(&root, "html", "dev", ".html,.js", &["index.html"]);
 
     assert_eq!(
-        read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::ManagedExtensionsMismatch {
+        read_html_manifest(&root),
+        ManifestReadResult::RecoverableWithOwner {
+            reason: ManifestRecoveryReason::ManagedExtensionsMismatch {
                 manifest_extensions,
                 active_extensions: html_active_extensions(),
             },
+            owner: html_owner(BuildProfile::Dev),
         }
     );
 
@@ -649,12 +714,13 @@ fn read_build_manifest_rejects_extra_managed_extension() {
     );
 
     assert_eq!(
-        read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::ManagedExtensionsMismatch {
+        read_html_manifest(&root),
+        ManifestReadResult::RecoverableWithOwner {
+            reason: ManifestRecoveryReason::ManagedExtensionsMismatch {
                 manifest_extensions,
                 active_extensions: html_active_extensions(),
             },
+            owner: html_owner(BuildProfile::Dev),
         }
     );
 
@@ -662,18 +728,319 @@ fn read_build_manifest_rejects_extra_managed_extension() {
 }
 
 #[test]
-fn read_build_manifest_rejects_malformed_v3_metadata() {
+fn read_v4_recovery_retains_known_owner_after_extension_metadata_damage() {
+    let cases = [
+        (
+            "missing",
+            "# moth-manifest v4\n# builder: html\n# profile: release\nindex.html\n",
+            ManifestRecoveryReason::InvalidMetadata,
+        ),
+        (
+            "malformed",
+            "# moth-manifest v4\n# builder: html\n# profile: release\n# managed_extensions: .html,,.js\nindex.html\n",
+            ManifestRecoveryReason::InvalidMetadata,
+        ),
+        (
+            "blank",
+            "# moth-manifest v4\n# builder: html\n# profile: release\n# managed_extensions:\nindex.html\n",
+            ManifestRecoveryReason::InvalidMetadata,
+        ),
+    ];
+
+    for (case_name, manifest_text, reason) in cases {
+        let root = temp_dir(&format!("cleanup_owner_recovery_{case_name}"));
+        fs::create_dir_all(&root).expect("should create temp root");
+        fs::write(root.join(BUILD_MANIFEST_FILENAME), manifest_text)
+            .expect("should write damaged v4 manifest");
+
+        assert_eq!(
+            read_html_manifest(&root),
+            ManifestReadResult::RecoverableWithOwner {
+                reason,
+                owner: html_owner(BuildProfile::Release),
+            },
+            "known builder/profile ownership must survive recoverable metadata damage"
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp dir");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn stale_cleanup_retains_paths_with_dangling_symlink_components() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_dir("cleanup_dangling_symlink");
+    fs::create_dir_all(&root).expect("should create output root");
+    symlink(root.join("real"), root.join("alias")).expect("should create dangling alias");
+
+    let stale_path = PathBuf::from("alias/stale.html");
+    let report = remove_manifest_tracked_stale_artifacts(
+        &root,
+        &HashSet::new(),
+        &HashSet::new(),
+        std::slice::from_ref(&stale_path),
+    );
+
+    assert!(report.removed_paths.is_empty());
+    assert_eq!(report.ignored_paths, vec![stale_path]);
+    assert!(
+        fs::symlink_metadata(root.join("alias"))
+            .expect("dangling alias should remain")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(!root.join("real").exists());
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn foreign_profile_in_recoverable_v4_manifest_fails_without_mutation() {
+    let manifest_variants = [
+        (
+            "missing",
+            "# moth-manifest v4\n# builder: html\n# profile: release\nindex.html\n",
+        ),
+        (
+            "malformed",
+            "# moth-manifest v4\n# builder: html\n# profile: release\n# managed_extensions: .html,,.js\nindex.html\n",
+        ),
+        (
+            "blank",
+            "# moth-manifest v4\n# builder: html\n# profile: release\n# managed_extensions:\nindex.html\n",
+        ),
+    ];
+
+    for (case_name, manifest_text) in manifest_variants {
+        let root = temp_dir(&format!("cleanup_foreign_recovery_{case_name}"));
+        let project_dir = root.join("project");
+        let output_root = project_dir.join("dev");
+        fs::create_dir_all(&output_root).expect("should create output root");
+        fs::write(output_root.join("index.html"), "existing")
+            .expect("should write existing output");
+        fs::write(output_root.join(BUILD_MANIFEST_FILENAME), manifest_text)
+            .expect("should write damaged v4 manifest");
+        let previous_output = fs::read(output_root.join("index.html")).expect("output exists");
+        let previous_manifest =
+            fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest exists");
+
+        let project = html_project(
+            vec![OutputFile::new(
+                PathBuf::from("index.html"),
+                FileKind::Html(String::from("<html>dev</html>")),
+            )],
+            Some(PathBuf::from("index.html")),
+        );
+        let messages = write_project_outputs(
+            &project,
+            &always_write_options(output_root.clone(), Some(project_dir.clone())),
+        )
+        .expect_err("foreign profile ownership must fail before mutation");
+        assert!(matches!(
+            &messages
+                .error_diagnostics()
+                .next()
+                .expect("owner conflict diagnostic should exist")
+                .payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
+                ..
+            }
+        ));
+        assert_eq!(
+            fs::read(output_root.join("index.html")).expect("output should remain"),
+            previous_output
+        );
+        assert_eq!(
+            fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
+            previous_manifest
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp dir");
+    }
+}
+
+#[test]
+fn foreign_profile_with_invalid_utf8_path_record_fails_without_mutation() {
+    let root = temp_dir("cleanup_foreign_invalid_utf8_path");
+    let project_dir = root.join("project");
+    let output_root = project_dir.join("dev");
+    fs::create_dir_all(&output_root).expect("should create output root");
+    fs::write(output_root.join("index.html"), "existing").expect("should write existing output");
+    let manifest_bytes = b"# moth-manifest v4\n# builder: html\n# profile: release\n# managed_extensions: .html,.js,.wasm\nindex.html\ninvalid-\xFF-path.js\n";
+    fs::write(output_root.join(BUILD_MANIFEST_FILENAME), manifest_bytes)
+        .expect("should write invalid-utf8 manifest");
+    let previous_output = fs::read(output_root.join("index.html")).expect("output exists");
+    let previous_manifest =
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest exists");
+
+    let project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>dev</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    let messages = write_project_outputs(
+        &project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect_err("foreign owner must fail even when a path record is not UTF-8");
+    assert!(matches!(
+        &messages
+            .error_diagnostics()
+            .next()
+            .expect("owner conflict diagnostic should exist")
+            .payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
+            ..
+        }
+    ));
+    assert_eq!(
+        fs::read(output_root.join("index.html")).expect("output should remain"),
+        previous_output
+    );
+    assert_eq!(
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
+        previous_manifest
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn case_variant_manifest_paths_enter_recoverable_mode_with_owner() {
+    let root = temp_dir("cleanup_case_variant_manifest_reader");
+    fs::create_dir_all(&root).expect("should create temp root");
+
+    write_v4_manifest_text(
+        &root,
+        "html",
+        "dev",
+        ".html,.js,.wasm",
+        &["Pages/app.js", "pages/app.js"],
+    );
+
+    assert_eq!(
+        read_html_manifest(&root),
+        ManifestReadResult::RecoverableWithOwner {
+            reason: ManifestRecoveryReason::InvalidMetadata,
+            owner: html_owner(BuildProfile::Dev),
+        }
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn matching_owner_with_case_variant_manifest_paths_preserves_stale_files() {
+    let root = temp_dir("cleanup_case_variant_manifest_matching_owner");
+    let project_dir = root.join("project");
+    let output_root = project_dir.join("dev");
+    fs::create_dir_all(output_root.join("Pages")).expect("should create output directory");
+    fs::write(output_root.join("Pages/app.js"), "keep me").expect("should write stale output");
+    write_v4_manifest_text(
+        &output_root,
+        "html",
+        "dev",
+        ".html,.js,.wasm",
+        &["Pages/app.js", "pages/app.js"],
+    );
+
+    let project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>Home</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    write_project_outputs(
+        &project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect("matching owner should rebuild without deleting ambiguous stale paths");
+
+    assert_eq!(
+        fs::read(output_root.join("Pages/app.js")).expect("ambiguous stale output should remain"),
+        b"keep me"
+    );
+    assert_eq!(
+        read_html_manifest(&output_root),
+        valid_manifest(vec![PathBuf::from("index.html")], BuildProfile::Dev)
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn foreign_owner_with_case_variant_manifest_paths_fails_without_mutation() {
+    let root = temp_dir("cleanup_case_variant_manifest_foreign_owner");
+    let project_dir = root.join("project");
+    let output_root = project_dir.join("dev");
+    fs::create_dir_all(output_root.join("Pages")).expect("should create output directory");
+    fs::write(output_root.join("Pages/app.js"), "keep me").expect("should write stale output");
+    write_v4_manifest_text(
+        &output_root,
+        "html",
+        "release",
+        ".html,.js,.wasm",
+        &["Pages/app.js", "pages/app.js"],
+    );
+    let previous_output = fs::read(output_root.join("Pages/app.js")).expect("output should exist");
+    let previous_manifest =
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should exist");
+
+    let project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>Home</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    let messages = write_project_outputs(
+        &project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect_err("foreign owner must fail before touching ambiguous manifest outputs");
+    assert!(matches!(
+        &messages
+            .error_diagnostics()
+            .next()
+            .expect("owner conflict diagnostic should exist")
+            .payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
+            ..
+        }
+    ));
+    assert_eq!(
+        fs::read(output_root.join("Pages/app.js")).expect("output should remain"),
+        previous_output
+    );
+    assert_eq!(
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
+        previous_manifest
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn read_build_manifest_rejects_malformed_v4_metadata() {
     let root = temp_dir("cleanup_ext_malformed_metadata");
     fs::create_dir_all(&root).expect("should create temp root");
 
-    // A v3 header with an unknown builder name is invalid metadata, distinct from an extension
+    // A v4 header with an unknown builder name is invalid metadata, distinct from an extension
     // mismatch or builder mismatch between known builders.
     write_v4_manifest_text(&root, "unknown", "dev", ".html,.js,.wasm", &["index.html"]);
 
     assert_eq!(
-        read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::InvalidMetadata,
+        read_html_manifest(&root),
+        ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::InvalidMetadata,
         }
     );
 
@@ -699,7 +1066,7 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
         .expect("should write stale js file");
     fs::write(output_root.join("notes.txt"), "keep me").expect("should write notes file");
 
-    // The manifest claims a different managed-extension set, so cleanup must enter limited safe
+    // The manifest claims a different managed-extension set, so cleanup must enter recoverable
     // mode rather than delete files under a mismatched ownership contract.
     write_v4_manifest_text(
         &output_root,
@@ -715,15 +1082,16 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
     );
 
     assert_eq!(
-        read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::ManagedExtensionsMismatch {
+        read_html_manifest(&output_root),
+        ManifestReadResult::RecoverableWithOwner {
+            reason: ManifestRecoveryReason::ManagedExtensionsMismatch {
                 manifest_extensions: [".html", ".js"]
                     .iter()
                     .map(|ext| (*ext).to_string())
                     .collect(),
                 active_extensions: html_active_extensions(),
             },
+            owner: html_owner(BuildProfile::Dev),
         }
     );
 
@@ -740,7 +1108,7 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
     )
     .expect("build should succeed");
 
-    // Limited safe mode preserves stale files while the extension ownership differs.
+    // Recoverable mode preserves stale files while the extension ownership differs.
     assert!(
         output_root.join("about/index.html").exists(),
         "extension mismatch must preserve stale html files"
@@ -751,17 +1119,13 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
     );
     assert!(
         output_root.join("notes.txt").exists(),
-        "limited safe mode must preserve non-managed file types"
+        "recoverable mode must preserve non-managed file types"
     );
 
     // The finalize path rewrites the manifest using the active policy, so the next read is valid.
     assert_eq!(
-        read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::Valid {
-            paths: vec![PathBuf::from("index.html")],
-            builder_kind: BuilderKind::Html,
-            build_profile: FrontendBuildProfile::Dev,
-        }
+        read_html_manifest(&output_root),
+        valid_manifest(vec![PathBuf::from("index.html")], BuildProfile::Dev)
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
@@ -781,8 +1145,9 @@ fn write_build_manifest_produces_sorted_output() {
     .collect();
 
     write_build_manifest(
-        &root,
+        &root.join(BUILD_MANIFEST_FILENAME),
         &paths,
+        html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
         &StringTable::new(),
@@ -808,8 +1173,106 @@ fn write_build_manifest_produces_sorted_output() {
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
+#[test]
+fn manifest_paths_round_trip_leading_and_interior_spaces() {
+    let root = temp_dir("manifest_space_paths");
+    fs::create_dir_all(&root).expect("should create temp root");
+
+    let paths: HashSet<PathBuf> = [
+        PathBuf::from(" leading.html"),
+        PathBuf::from("interior name.html"),
+    ]
+    .into_iter()
+    .collect();
+    write_build_manifest(
+        &root.join(BUILD_MANIFEST_FILENAME),
+        &paths,
+        html_owner(BuildProfile::Dev),
+        &html_cleanup_policy(),
+        WriteMode::AlwaysWrite,
+        &StringTable::new(),
+    )
+    .expect("should write space-preserving manifest");
+
+    assert_eq!(
+        read_html_manifest(&root),
+        valid_manifest(
+            vec![
+                PathBuf::from(" leading.html"),
+                PathBuf::from("interior name.html"),
+            ],
+            BuildProfile::Dev,
+        )
+    );
+
+    fs::write(root.join(" leading.html"), "leading").expect("should write leading-space file");
+    fs::write(root.join("interior name.html"), "interior")
+        .expect("should write interior-space file");
+    let report = remove_manifest_tracked_stale_artifacts(
+        &root,
+        &HashSet::new(),
+        &HashSet::new(),
+        &[
+            PathBuf::from(" leading.html"),
+            PathBuf::from("interior name.html"),
+        ],
+    );
+    assert_eq!(report.removed_paths.len(), 2);
+    assert!(!root.join(" leading.html").exists());
+    assert!(!root.join("interior name.html").exists());
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn stale_cleanup_ignores_reserved_manifest_paths() {
+    let cases = [
+        (
+            "exact",
+            PathBuf::from(".moth_manifest"),
+            PathBuf::from(".moth_manifest"),
+        ),
+        (
+            "descendant",
+            PathBuf::from(".moth_manifest/child.js"),
+            PathBuf::from(".moth_manifest/child.js"),
+        ),
+        (
+            "case_separator",
+            PathBuf::from(r".MOTH_MANIFEST\child.js"),
+            PathBuf::from(".MOTH_MANIFEST/child.js"),
+        ),
+    ];
+
+    for (case_name, stale_path, filesystem_path) in cases {
+        let root = temp_dir(&format!("cleanup_reserved_manifest_{case_name}"));
+        fs::create_dir_all(&root).expect("should create temp root");
+        if let Some(parent) = filesystem_path.parent()
+            && parent != Path::new("")
+        {
+            fs::create_dir_all(root.join(parent)).expect("should create reserved parent");
+        }
+        fs::write(root.join(&filesystem_path), "must remain")
+            .expect("should create reserved stale path");
+
+        let report = remove_manifest_tracked_stale_artifacts(
+            &root,
+            &HashSet::new(),
+            &HashSet::new(),
+            std::slice::from_ref(&stale_path),
+        );
+        assert_eq!(report.ignored_paths, vec![stale_path]);
+        assert_eq!(
+            fs::read(root.join(filesystem_path)).expect("reserved path should remain"),
+            b"must remain"
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+}
+
 // -------------------------
-//  Phase 7B: Output ownership and preflight tests
+//  Output ownership and preflight tests
 // -------------------------
 
 #[test]
@@ -862,8 +1325,115 @@ fn matching_v4_owner_performs_stale_cleanup() {
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
+#[cfg(unix)]
 #[test]
-fn dev_then_release_against_same_v4_root_enters_limited_safe_mode() {
+fn stale_cleanup_tracks_canonical_final_file_symlink_destination() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_dir("canonical_file_symlink_cleanup");
+    let project_dir = root.join("project");
+    let output_root = project_dir.join("dev");
+    fs::create_dir_all(&output_root).expect("should create output root");
+    fs::write(output_root.join("real.html"), "old target").expect("should create real file target");
+    symlink(
+        output_root.join("real.html"),
+        output_root.join("alias.html"),
+    )
+    .expect("should create final-file alias");
+
+    let first_project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("alias.html"),
+            FileKind::Html(String::from("<html>first</html>")),
+        )],
+        Some(PathBuf::from("alias.html")),
+    );
+    write_project_outputs(
+        &first_project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect("first symlinked build should succeed");
+
+    let second_project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>second</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    write_project_outputs(
+        &second_project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect("second symlinked build should succeed");
+
+    assert!(!output_root.join("real.html").exists());
+    assert!(
+        fs::symlink_metadata(output_root.join("alias.html"))
+            .expect("alias should remain as a symlink")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(output_root.join("index.html").exists());
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[cfg(unix)]
+#[test]
+fn stale_cleanup_does_not_follow_retargeted_directory_aliases() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_dir("canonical_directory_symlink_cleanup");
+    let project_dir = root.join("project");
+    let output_root = project_dir.join("dev");
+    let old_target = output_root.join("old_target");
+    let new_target = output_root.join("new_target");
+    fs::create_dir_all(&old_target).expect("should create old target");
+    fs::create_dir_all(&new_target).expect("should create new target");
+    symlink(&old_target, output_root.join("alias")).expect("should create directory alias");
+
+    let first_project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("alias/old.html"),
+            FileKind::Html(String::from("<html>first</html>")),
+        )],
+        Some(PathBuf::from("alias/old.html")),
+    );
+    write_project_outputs(
+        &first_project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect("first directory-alias build should succeed");
+
+    fs::remove_file(output_root.join("alias")).expect("should remove old directory alias");
+    symlink(&new_target, output_root.join("alias")).expect("should retarget directory alias");
+    fs::write(new_target.join("old.html"), "new target").expect("should create new target file");
+
+    let second_project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>second</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    write_project_outputs(
+        &second_project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect("second directory-alias build should succeed");
+
+    assert!(!old_target.join("old.html").exists());
+    assert_eq!(
+        fs::read(new_target.join("old.html")).expect("new target should remain"),
+        b"new target"
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn dev_then_release_against_same_v4_root_fails_without_mutation() {
     let root = temp_dir("v4_profile_mismatch");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
@@ -882,6 +1452,9 @@ fn dev_then_release_against_same_v4_root_enters_limited_safe_mode() {
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
     )
     .expect("dev build should succeed");
+    let previous_output = fs::read(output_root.join("index.html")).expect("output should exist");
+    let previous_manifest =
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should exist");
 
     let release_project = Project {
         output_files: vec![OutputFile::new(
@@ -889,67 +1462,165 @@ fn dev_then_release_against_same_v4_root_enters_limited_safe_mode() {
             FileKind::Html(String::from("<html>Release</html>")),
         )],
         entry_page_rel: Some(PathBuf::from("index.html")),
-        cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Release),
+        cleanup_policy: CleanupPolicy::html(),
         warnings: vec![],
     };
     let result = write_project_outputs(
         &release_project,
-        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+        &always_write_options_for_profile(
+            output_root.clone(),
+            Some(project_dir.clone()),
+            BuildProfile::Release,
+        ),
     );
 
-    assert!(
-        result.is_ok(),
-        "profile mismatch enters limited safe mode, does not block write"
-    );
-
-    let manifest = read_build_manifest(
-        &output_root,
-        &CleanupPolicy::html(FrontendBuildProfile::Release),
+    let messages = result.expect_err("profile ownership conflict should fail the write");
+    assert_eq!(messages.error_count(), 1);
+    assert!(matches!(
+        &messages
+            .error_diagnostics()
+            .next()
+            .expect("conflict diagnostic should exist")
+            .payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
+            ..
+        }
+    ));
+    assert_eq!(
+        fs::read(output_root.join("index.html"))
+            .expect("output should remain")
+            .as_slice(),
+        previous_output.as_slice()
     );
     assert_eq!(
-        manifest,
-        ManifestLoadResult::Valid {
-            paths: vec![PathBuf::from("index.html")],
-            builder_kind: BuilderKind::Html,
-            build_profile: FrontendBuildProfile::Release,
-        }
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME))
+            .expect("manifest should remain")
+            .as_slice(),
+        previous_manifest.as_slice()
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
-fn different_builder_identity_enters_limited_safe_mode() {
+fn builder_owner_conflict_fails_without_mutation() {
+    let root = temp_dir("v4_builder_owner_conflict");
+    fs::create_dir_all(&root).expect("should create temp root");
+    let project_dir = root.join("project");
+    fs::create_dir_all(&project_dir).expect("should create project dir");
+    let output_root = project_dir.join("dev");
+
+    let project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>HTML</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    write_project_outputs(
+        &project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect("initial HTML build should succeed");
+    let previous_output = fs::read(output_root.join("index.html")).expect("output should exist");
+    let previous_manifest =
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should exist");
+
+    let mut string_table = StringTable::new();
+    let setting_location = SourceLocation::from_path(Path::new("config.moth"), &mut string_table);
+    let conflicting_options = WriteOptions {
+        output_plan: OutputPlan::SingleFile(SingleFileOutputPlan {
+            output_root: output_root.clone(),
+            project_root: Some(project_dir.clone()),
+            owner: OutputOwner {
+                builder: BuilderKind::Test,
+                profile: BuildProfile::Dev,
+            },
+            setting_location: setting_location.clone(),
+        }),
+        write_mode: WriteMode::AlwaysWrite,
+    };
+    let messages = crate::build_system::output::write_project_outputs(
+        &project,
+        &conflicting_options,
+        &string_table,
+    )
+    .expect_err("a foreign builder must not claim the output root");
+    let diagnostic = messages
+        .error_diagnostics()
+        .next()
+        .expect("owner conflict diagnostic should exist");
+    assert!(matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
+            ..
+        }
+    ));
+    assert_eq!(
+        diagnostic.primary_location,
+        conflicting_options.output_plan.setting_location().clone()
+    );
+    let resolved_scope =
+        resolve_source_file_path(&diagnostic.primary_location.scope, &messages.string_table);
+    assert_eq!(resolved_scope, Path::new("config.moth"));
+    assert!(
+        format_terse_compiler_messages(&messages)
+            .iter()
+            .any(|line| line.contains("config.moth")),
+        "owner-conflict diagnostics should render their config source scope"
+    );
+    assert_eq!(
+        fs::read(output_root.join("index.html")).expect("output should remain"),
+        previous_output
+    );
+    assert_eq!(
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
+        previous_manifest
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[test]
+fn manifest_reader_returns_manifest_owner_without_comparing_active_owner() {
     let root = temp_dir("v4_builder_mismatch");
     fs::create_dir_all(&root).expect("should create temp root");
 
-    let generic_policy = CleanupPolicy::generic([".html"], FrontendBuildProfile::Dev);
+    let generic_policy = CleanupPolicy::generic([".html"]);
     let paths: HashSet<PathBuf> = [PathBuf::from("index.html")].into_iter().collect();
     write_build_manifest(
-        &root,
+        &root.join(BUILD_MANIFEST_FILENAME),
         &paths,
+        OutputOwner {
+            builder: BuilderKind::Test,
+            profile: BuildProfile::Dev,
+        },
         &generic_policy,
         WriteMode::AlwaysWrite,
         &StringTable::new(),
     )
     .expect("should write manifest");
 
-    let html_policy = CleanupPolicy::html(FrontendBuildProfile::Dev);
+    let manifest = read_build_manifest(&root, &generic_policy);
     assert_eq!(
-        read_build_manifest(&root, &html_policy),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::BuilderMismatch {
-                manifest_builder_kind: BuilderKind::Generic,
-                active_builder_kind: BuilderKind::Html,
+        manifest,
+        ManifestReadResult::Valid(BuildManifest {
+            owner: OutputOwner {
+                builder: BuilderKind::Test,
+                profile: BuildProfile::Dev,
             },
-        }
+            managed_extensions: [".html"].into_iter().map(String::from).collect(),
+            paths: vec![PathBuf::from("index.html")],
+        })
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
-fn v3_manifest_enters_limited_safe_mode() {
+fn v3_manifest_enters_recoverable_mode() {
     let root = temp_dir("v3_legacy");
     fs::create_dir_all(&root).expect("should create temp root");
 
@@ -959,13 +1630,13 @@ fn v3_manifest_enters_limited_safe_mode() {
     )
     .expect("should write v3 manifest");
 
-    let html_policy = CleanupPolicy::html(FrontendBuildProfile::Dev);
+    let html_policy = CleanupPolicy::html();
     assert_eq!(
         read_build_manifest(&root, &html_policy),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::UnsupportedVersion,
+        ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::UnsupportedVersion,
         },
-        "v3 manifests enter limited safe mode because they lack profile identity"
+        "v3 manifests enter recoverable mode because they lack profile identity"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
@@ -1010,33 +1681,48 @@ fn managed_extension_drift_preserves_old_files() {
     );
 
     assert_eq!(
-        read_build_manifest(&output_root, &html_cleanup_policy()),
-        ManifestLoadResult::Valid {
-            paths: vec![PathBuf::from("index.html")],
-            builder_kind: BuilderKind::Html,
-            build_profile: FrontendBuildProfile::Dev,
-        }
+        read_html_manifest(&output_root),
+        valid_manifest(vec![PathBuf::from("index.html")], BuildProfile::Dev)
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
-fn profile_mismatch_in_v4_manifest_enters_limited_safe_mode() {
-    let root = temp_dir("v4_profile_mismatch_read");
-    fs::create_dir_all(&root).expect("should create temp root");
-
-    write_v4_manifest_text(&root, "html", "release", ".html,.js,.wasm", &["index.html"]);
-
-    assert_eq!(
-        read_build_manifest(&root, &html_cleanup_policy()),
-        ManifestLoadResult::LimitedSafeMode {
-            reason: ManifestLimitedSafeModeReason::ProfileMismatch {
-                manifest_profile: FrontendBuildProfile::Release,
-                active_profile: FrontendBuildProfile::Dev,
-            },
-        }
+fn failed_stale_deletion_remains_owned_in_next_manifest() {
+    let root = temp_dir("cleanup_failed_stale_delete");
+    let project_dir = root.join("project");
+    let output_root = project_dir.join("dev");
+    fs::create_dir_all(output_root.join("stale.html")).expect("should create stale directory");
+    write_v4_manifest_text(
+        &output_root,
+        "html",
+        "dev",
+        ".html,.js,.wasm",
+        &["stale.html"],
     );
+
+    let project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>Home</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    write_project_outputs(
+        &project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    )
+    .expect("failed stale deletion should not fail the build");
+
+    let manifest = read_html_manifest(&output_root);
+    assert!(matches!(
+        manifest,
+        ManifestReadResult::Valid(BuildManifest { paths, .. })
+            if paths.contains(&PathBuf::from("stale.html"))
+                && paths.contains(&PathBuf::from("index.html"))
+    ));
+    assert!(output_root.join("stale.html").is_dir());
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }

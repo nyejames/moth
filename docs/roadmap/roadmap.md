@@ -37,7 +37,6 @@ Do not mark a plan active unless its current-state capsule says it is active.
 
 ## Completed
 
-- [Benchmark and build-system closeout](./plans/benchmark-correctness-follow-up-implementation-plan.md)
 - Module root marker migration from `#` to `@`
 
 ---

@@ -1,0 +1,20 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001", "MOTH-CONFIG-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-CONFIG-0001"
+occurrence = 1
+reason = "invalid_config.unknown_key"
+path = "input/config.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-CONFIG-0001"
+occurrence = 2
+reason = "invalid_config.invalid_output_folder.parent_directory_segment"
+path = "input/config.moth"
+line = 2

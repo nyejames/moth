@@ -1,4 +1,5 @@
 use super::compile_project_frontend;
+use crate::build_system::BuildProfile;
 use crate::build_system::build::{BackendBuilder, ProjectCompilation};
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::PackageOrigin;
@@ -62,7 +63,8 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     let mut string_table = StringTable::new();
     let messages = match compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
@@ -144,7 +146,8 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
 
     let messages = match compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -208,7 +211,8 @@ io.line(result)
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -279,7 +283,8 @@ same_private_box PrivateBox of Bool = forward(private_box)
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -407,7 +412,8 @@ wrapped Wrapper = identity(make())
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -782,7 +788,8 @@ fn provider_created_package_registry_survives_into_module() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -842,7 +849,8 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -896,7 +904,8 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -975,7 +984,8 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1039,7 +1049,8 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1051,7 +1062,13 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
         crate::build_system::build::ProjectCompilation::from_frontend(modules)
             .expect("compiled modules should assemble entries");
     let project = builder
-        .build_backend(project_compilation, &config, &[], &mut string_table)
+        .build_backend(
+            project_compilation,
+            &config,
+            crate::build_system::BuildProfile::Dev,
+            &[],
+            &mut string_table,
+        )
         .expect("HTML build should succeed with module-owned registry");
 
     assert!(
@@ -1080,7 +1097,8 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
@@ -1141,7 +1159,8 @@ fn single_file_rejects_wrong_extension() {
 
     let result = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
@@ -1177,7 +1196,8 @@ fn single_file_rejects_missing_file() {
 
     let result = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
@@ -1209,7 +1229,8 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
 
     let result = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
@@ -1249,7 +1270,8 @@ fn directory_project_discovers_multiple_entry_modules() {
 
     let result = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
@@ -1291,7 +1313,8 @@ fn directory_project_remaps_delta_collisions_across_modules() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
@@ -1371,7 +1394,8 @@ fn provider_backed_grouped_import_compiles_and_reuses_cache() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1411,7 +1435,8 @@ fn provider_backed_namespace_import_exposes_function_and_type_members() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1463,7 +1488,8 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1503,7 +1529,8 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1540,7 +1567,8 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
 
     let messages = match compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1588,7 +1616,8 @@ fn directory_project_rejects_missing_entry_root() {
 
     let result = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
@@ -1647,7 +1676,8 @@ fn html_js_provider_namespace_import_resolves() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1687,7 +1717,8 @@ fn html_js_provider_grouped_import_resolves() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1727,7 +1758,8 @@ fn html_js_provider_grouped_alias_for_function_and_opaque_type_resolves() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1767,7 +1799,8 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
 
     let messages = match compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1813,7 +1846,8 @@ fn html_js_provider_repeated_imports_reuse_cache() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1854,7 +1888,8 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
 
     let modules = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
@@ -1901,7 +1936,8 @@ fn single_file_rejects_source_package_moth_folder_collision() {
 
     let result = compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,

@@ -56,7 +56,10 @@ mod non_utf8_filesystem_identity {
 
         let messages = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -89,7 +92,10 @@ mod non_utf8_filesystem_identity {
 
         let messages = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -124,7 +130,10 @@ mod non_utf8_filesystem_identity {
 
         let messages = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -771,7 +780,10 @@ mod module_identity_tests {
 
         let index = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root.clone(),
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -1111,7 +1123,10 @@ mod module_identity_tests {
 
         let messages = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
-            &missing_project_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &missing_project_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -1149,7 +1164,10 @@ mod module_identity_tests {
         let mut string_table = StringTable::new();
         let messages = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -1230,7 +1248,10 @@ mod module_identity_tests {
 
         let messages = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -1262,7 +1283,10 @@ mod module_identity_tests {
 
         let messages = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -1294,7 +1318,10 @@ mod module_identity_tests {
 
         let messages = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -1336,7 +1363,10 @@ mod module_identity_tests {
 
         let index = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root.clone(),
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -1716,7 +1746,10 @@ mod owned_source_inventory_tests {
 
         SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             source_file_kinds,
@@ -2598,7 +2631,10 @@ mod owned_source_inventory_tests {
 
         SourceTreeIndex::discover(
             canonical_entry_root,
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &SourceFileKindRegistry::default(),
@@ -2775,7 +2811,10 @@ mod project_module_graph_tests {
 
         let index = SourceTreeIndex::discover(
             canonical_entry_root.clone(),
-            &canonical_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),

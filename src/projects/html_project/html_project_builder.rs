@@ -11,12 +11,12 @@ use crate::backends::external_package_validation::{
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BackendBuilder, CleanupPolicy, Module, ModuleExternalImport, OutputFile, Project,
-    ProjectCompilation, ProjectLinkedModule,
+    BackendBuilder, Module, ModuleExternalImport, OutputFile, Project, ProjectCompilation,
+    ProjectLinkedModule,
 };
+use crate::build_system::output::{BuilderKind, CleanupPolicy};
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -78,10 +78,15 @@ impl HtmlProjectBuilder {
 }
 
 impl BackendBuilder for HtmlProjectBuilder {
+    fn builder_kind(&self) -> BuilderKind {
+        BuilderKind::Html
+    }
+
     fn build_backend(
         &self,
         project_compilation: ProjectCompilation,
         config: &Config,
+        build_profile: BuildProfile,
         flags: &[Flag],
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
@@ -111,11 +116,6 @@ impl BackendBuilder for HtmlProjectBuilder {
             ));
         }
 
-        let build_profile = BuildProfile::from_flags(flags);
-        let frontend_profile = match build_profile {
-            BuildProfile::Dev => FrontendBuildProfile::Dev,
-            BuildProfile::Release => FrontendBuildProfile::Release,
-        };
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
         let entry_paths = {
             let _entry_path_guard =
@@ -269,7 +269,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         Ok(Project {
             output_files,
             entry_page_rel,
-            cleanup_policy: CleanupPolicy::html(frontend_profile),
+            cleanup_policy: CleanupPolicy::html(),
             warnings,
         })
     }

@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["Development and release output folders 'dist/release' and 'dist\\release' resolve to the same portable path and must be distinct."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-CONFIG-0001"
+reason = "invalid_config.output_folders_not_distinct"
+path = "input/config.moth"
+line = 2

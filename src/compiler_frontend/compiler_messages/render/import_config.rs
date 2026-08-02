@@ -233,10 +233,25 @@ pub(crate) fn invalid_config_message(
         }
         InvalidConfigReason::OutputFoldersNotDistinct {
             dev_folder,
-            release_folder: _,
+            release_folder,
         } => format!(
-            "Development and release output folders must be distinct. Both resolve to '{}'.",
+            "Development and release output folders '{}' and '{}' resolve to the same portable path and must be distinct.",
             string_table.resolve(*dev_folder),
+            string_table.resolve(*release_folder),
+        ),
+        InvalidConfigReason::OutputManifestOwnerConflict {
+            output_root,
+            existing_builder,
+            existing_profile,
+            active_builder,
+            active_profile,
+        } => format!(
+            "Build output root '{}' is already owned by builder '{}' in profile '{}', but the active build is builder '{}' in profile '{}'. Choose a different output folder or remove the output only after verifying its owner.",
+            string_table.resolve(*output_root),
+            string_table.resolve(*existing_builder),
+            string_table.resolve(*existing_profile),
+            string_table.resolve(*active_builder),
+            string_table.resolve(*active_profile),
         ),
     }
 }
@@ -287,6 +302,9 @@ fn invalid_output_folder_message(
                 "'{key_label}' cannot be empty. Configure a project-relative output folder in config.moth."
             )
         }
+        InvalidOutputFolderReason::NonUtf8 => {
+            format!("'{key_label}' must use valid UTF-8 portable path components.")
+        }
         InvalidOutputFolderReason::AbsolutePath => {
             let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
             format!("'{key_label}' '{name}' must be relative to the project root, not absolute.")
@@ -305,10 +323,22 @@ fn invalid_output_folder_message(
                 "'{key_label}' must not be '.'. Configure a named project-relative output folder."
             )
         }
+        InvalidOutputFolderReason::InvalidPathComponent => {
+            let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
+            format!(
+                "'{key_label}' '{name}' contains a Windows-incompatible or otherwise invalid path component."
+            )
+        }
         InvalidOutputFolderReason::InsideOrEqualToEntryRoot => {
             let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
             format!(
                 "'{key_label}' '{name}' must be outside the source entry root. Configure a distinct output folder."
+            )
+        }
+        InvalidOutputFolderReason::ResolvesOutsideProjectRoot => {
+            let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
+            format!(
+                "'{key_label}' '{name}' must resolve strictly inside the project root and may not escape through a symlink."
             )
         }
     }

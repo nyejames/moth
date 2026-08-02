@@ -20,9 +20,9 @@ use std::path::Path;
 pub(crate) fn should_skip_unchanged_write(
     path: &Path,
     next_bytes: &[u8],
-    write_mode: crate::build_system::build::WriteMode,
+    write_mode: crate::build_system::output::WriteMode,
 ) -> bool {
-    if write_mode != crate::build_system::build::WriteMode::SkipUnchanged {
+    if write_mode != crate::build_system::output::WriteMode::SkipUnchanged {
         return false;
     }
 

@@ -1,4 +1,8 @@
+use super::super::output_path::parse_relative_path;
 use super::super::policy::classify_output_folder;
+use crate::build_system::output::output_path::{
+    is_lossless_portable_relative_path, normalize_relative_path, output_path_component_identities,
+};
 use crate::build_system::output::output_path_identity;
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 
@@ -87,6 +91,37 @@ fn classifier_rejects_cur_dir_segments_anywhere() {
 }
 
 #[test]
+fn portable_parser_rejects_windows_ambiguous_components_on_every_host() {
+    for path in [
+        "page.js.",
+        "page.js ",
+        "CON",
+        "con.txt",
+        "NUL.dat",
+        "COM1",
+        "LPT9",
+        "COM¹",
+        "com¹",
+        "CoM¹.txt",
+        "LPT²",
+        "lpt².txt",
+        "LpT³.bin",
+        "bad<name",
+        "bad|name",
+        "bad?name",
+        "bad*name",
+        "bad\"name",
+        "bad\u{0}name",
+    ] {
+        assert_eq!(
+            parse_relative_path(path),
+            Err(InvalidOutputFolderReason::InvalidPathComponent),
+            "{path:?} must be rejected before filesystem emission"
+        );
+    }
+}
+
+#[test]
 fn classifier_rejects_output_equal_to_explicit_entry_root() {
     assert_eq!(
         classify_output_folder(Path::new("src"), &project_root(), Some(&entry_root())),
@@ -130,6 +165,51 @@ fn classifier_skips_entry_root_containment_in_transitional_root_form() {
     assert_eq!(dev.resolved_path, PathBuf::from("/project/dev"));
 }
 
+#[cfg(unix)]
+#[test]
+fn config_and_write_time_containment_share_canonical_classification() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use super::super::policy::validate_output_folder_containment;
+    use crate::build_system::output::manifest::validate_output_root_is_safe;
+    use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+    let project_root = crate::compiler_tests::test_support::temp_dir("shared_output_containment");
+    let outside_root = crate::compiler_tests::test_support::temp_dir("shared_output_outside");
+    fs::create_dir_all(&project_root).expect("should create project root");
+    fs::create_dir_all(&outside_root).expect("should create outside root");
+    symlink(&outside_root, project_root.join("out")).expect("should create output symlink");
+
+    let folder = classify_output_folder(Path::new("out"), &project_root, None)
+        .expect("lexical output folder should classify before symlink validation");
+    let expected = Err(InvalidOutputFolderReason::ResolvesOutsideProjectRoot);
+    assert_eq!(
+        validate_output_folder_containment(&folder, &project_root, None),
+        expected
+    );
+    assert_eq!(
+        super::super::policy::validate_directory_output_root_containment(
+            &folder.resolved_path,
+            &project_root,
+            None,
+        ),
+        expected
+    );
+    assert!(
+        validate_output_root_is_safe(
+            &folder.resolved_path,
+            &project_root,
+            Some(&project_root.join("src")),
+            &StringTable::new(),
+        )
+        .is_err()
+    );
+
+    fs::remove_dir_all(&project_root).expect("should remove project root");
+    fs::remove_dir_all(&outside_root).expect("should remove outside root");
+}
+
 // -------------------------
 //  Output-Path Identity Pairs
 // -------------------------
@@ -162,4 +242,34 @@ fn distinct_valid_roots_have_distinct_output_identities() {
     let release =
         output_path_identity(Path::new("release")).expect("release is a valid relative path");
     assert_ne!(dev, release);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn non_utf8_relative_paths_return_non_utf8_from_all_conversions() {
+    use std::ffi::OsString;
+
+    #[cfg(unix)]
+    use std::os::unix::ffi::OsStringExt;
+    #[cfg(windows)]
+    use std::os::windows::ffi::OsStringExt;
+
+    #[cfg(unix)]
+    let path = PathBuf::from(OsString::from_vec(b"safe-\xFF-file.js".to_vec()));
+    #[cfg(windows)]
+    let path = PathBuf::from(OsString::from_wide(&[0xD800]));
+
+    assert!(!is_lossless_portable_relative_path(&path));
+    assert_eq!(
+        output_path_identity(&path),
+        Err(InvalidOutputFolderReason::NonUtf8)
+    );
+    assert_eq!(
+        output_path_component_identities(&path),
+        Err(InvalidOutputFolderReason::NonUtf8)
+    );
+    assert_eq!(
+        normalize_relative_path(&path),
+        Err(InvalidOutputFolderReason::NonUtf8)
+    );
 }

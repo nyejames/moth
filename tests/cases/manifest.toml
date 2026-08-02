@@ -2547,6 +2547,27 @@ contract = "language.config.current_keys_accepted"
 role = "primary"
 
 [[case]]
+id = "config_output_parent_segment_rejected"
+path = "config_output_parent_segment_rejected"
+tags = ["integration", "config", "diagnostics"]
+contract = "language.config.output_parent_segment_rejected"
+role = "primary"
+
+[[case]]
+id = "config_output_inside_entry_root_rejected"
+path = "config_output_inside_entry_root_rejected"
+tags = ["integration", "config", "diagnostics"]
+contract = "language.config.output_inside_entry_root_rejected"
+role = "primary"
+
+[[case]]
+id = "config_output_roots_must_be_distinct"
+path = "config_output_roots_must_be_distinct"
+tags = ["integration", "config", "diagnostics"]
+contract = "language.config.output_roots_must_be_distinct"
+role = "primary"
+
+[[case]]
 id = "raw_backtick_string_expression_rejected"
 path = "raw_backtick_string_expression_rejected"
 tags = ["integration", "strings", "diagnostics"]
@@ -2573,6 +2594,13 @@ path = "config_multi_error"
 tags = ["integration", "config", "diagnostics"]
 contract = "language.config.multiple_errors_reported"
 role = "primary"
+
+[[case]]
+id = "config_output_error_aggregates_with_unrelated_error"
+path = "config_output_error_aggregates_with_unrelated_error"
+tags = ["integration", "config", "diagnostics"]
+contract = "language.config.multiple_errors_reported"
+role = "boundary"
 
 [[case]]
 id = "config_unknown_key_rejected"
@@ -11633,13 +11661,6 @@ id = "normal_module_root_config_namesake_is_module_root"
 path = "normal_module_root_config_namesake_is_module_root"
 tags = ["integration", "config", "html", "module-roots"]
 contract = "language.modules.normal_module_root_config_namesake_is_module_root_acceptance"
-role = "primary"
-
-[[case]]
-id = "skipped_directory_collision_ignored"
-path = "skipped_directory_collision_ignored"
-tags = ["integration", "config", "module-roots", "collisions"]
-contract = "language.modules.skipped_directory_collision_ignored_acceptance"
 role = "primary"
 
 [[case]]

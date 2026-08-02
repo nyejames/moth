@@ -6,7 +6,7 @@
 //!      orchestration while preserving a single output path policy for JS assets.
 
 use crate::build_system::build::{FileKind, OutputFile};
-use crate::build_system::output_cleanup::validate_relative_output_path;
+use crate::build_system::output::validate_relative_output_path;
 use crate::build_system::utils::file_error_messages;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;

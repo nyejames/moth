@@ -2,13 +2,16 @@
 // NOTE: temp file creation processes have to be explicitly dropped
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
-use super::{WriteOptions, write_project_outputs as write_project_outputs_with_table};
+use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BackendBuilder, CleanupPolicy, FileKind, ModuleRootActivity, OutputFile, Project, WriteMode,
+    BackendBuilder, FileKind, ModuleRootActivity, OutputFile, Project,
+};
+use crate::build_system::output::{
+    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
+    WriteOptions, write_project_outputs as write_project_outputs_with_table,
 };
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
@@ -54,11 +57,11 @@ fn current_dir_test_lock() -> &'static Mutex<()> {
 }
 
 fn html_cleanup_policy() -> CleanupPolicy {
-    CleanupPolicy::html(FrontendBuildProfile::Dev)
+    CleanupPolicy::html()
 }
 
 fn generic_cleanup_policy() -> CleanupPolicy {
-    CleanupPolicy::generic([".html", ".js", ".wasm"], FrontendBuildProfile::Dev)
+    CleanupPolicy::generic([".html", ".js", ".wasm"])
 }
 
 #[test]
@@ -96,8 +99,18 @@ fn write_project_outputs(
 
 fn always_write_options(output_root: PathBuf, project_entry_dir: Option<PathBuf>) -> WriteOptions {
     WriteOptions {
-        output_root,
-        project_entry_dir,
+        output_plan: test_output_plan(output_root, project_entry_dir, BuildProfile::Dev),
+        write_mode: WriteMode::AlwaysWrite,
+    }
+}
+
+fn always_write_options_for_profile(
+    output_root: PathBuf,
+    project_entry_dir: Option<PathBuf>,
+    profile: BuildProfile,
+) -> WriteOptions {
+    WriteOptions {
+        output_plan: test_output_plan(output_root, project_entry_dir, profile),
         write_mode: WriteMode::AlwaysWrite,
     }
 }
@@ -107,10 +120,25 @@ fn skip_unchanged_options(
     project_entry_dir: Option<PathBuf>,
 ) -> WriteOptions {
     WriteOptions {
-        output_root,
-        project_entry_dir,
+        output_plan: test_output_plan(output_root, project_entry_dir, BuildProfile::Dev),
         write_mode: WriteMode::SkipUnchanged,
     }
+}
+
+fn test_output_plan(
+    output_root: PathBuf,
+    project_root: Option<PathBuf>,
+    profile: BuildProfile,
+) -> OutputPlan {
+    OutputPlan::SingleFile(SingleFileOutputPlan {
+        output_root,
+        project_root,
+        owner: OutputOwner {
+            builder: BuilderKind::Html,
+            profile,
+        },
+        setting_location: SourceLocation::default(),
+    })
 }
 
 fn html_project(output_files: Vec<OutputFile>, entry_page_rel: Option<PathBuf>) -> Project {
@@ -150,6 +178,7 @@ impl BackendBuilder for WarningBuilder {
         &self,
         _project_compilation: super::ProjectCompilation,
         _config: &Config,
+        _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
@@ -159,7 +188,7 @@ impl BackendBuilder for WarningBuilder {
                 FileKind::Js(String::from("console.log('ok');")),
             )],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic([".js"], FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::generic([".js"]),
             warnings: vec![unused_variable_warning(
                 StringTable::new().get_or_intern("x".to_string()),
                 SourceLocation::default(),
@@ -199,6 +228,7 @@ impl BackendBuilder for EntryTrackingBuilder {
         &self,
         project_compilation: super::ProjectCompilation,
         _config: &Config,
+        _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
@@ -214,7 +244,7 @@ impl BackendBuilder for EntryTrackingBuilder {
         Ok(Project {
             output_files: vec![],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new(), FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
             warnings: vec![],
         })
     }
@@ -241,6 +271,7 @@ impl BackendBuilder for ValidationTrackingBuilder {
         &self,
         _project_compilation: super::ProjectCompilation,
         _config: &Config,
+        _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
@@ -248,7 +279,7 @@ impl BackendBuilder for ValidationTrackingBuilder {
         Ok(Project {
             output_files: vec![],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new(), FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
             warnings: vec![],
         })
     }
@@ -279,6 +310,7 @@ impl BackendBuilder for FailingValidationBuilder {
         &self,
         _project_compilation: super::ProjectCompilation,
         _config: &Config,
+        _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
@@ -314,6 +346,7 @@ impl BackendBuilder for NoDirectiveBuilder {
         &self,
         _project_compilation: super::ProjectCompilation,
         _config: &Config,
+        _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
@@ -323,7 +356,7 @@ impl BackendBuilder for NoDirectiveBuilder {
                 FileKind::Html(String::new()),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::generic([".html"], FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::generic([".html"]),
             warnings: vec![],
         })
     }
@@ -352,6 +385,7 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
         &self,
         project_compilation: super::ProjectCompilation,
         _config: &Config,
+        _build_profile: BuildProfile,
         _flags: &[Flag],
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {

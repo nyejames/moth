@@ -11,14 +11,18 @@ This plan intentionally stays off the roadmap until the current language documen
 ```text
 WORK_ID: benchmark-output-final-corrections
 WORK_SOURCE: docs/roadmap/plans/benchmark-correctness-follow-up-implementation-plan.md
+BASE_REVISION: f15fbbfab7b0d3b4c18cb82ecaa14f311ffb3225
 REVIEW_BASE: c162458b3f22c48e5b277e3c777909e1a59cdbce
-IMPLEMENTATION_UNDER_REVIEW: 780215f05d96b4bdf8d8deb03005b2522335caa1
-STATUS: ready for implementation, intentionally not linked from the roadmap
-CURRENT_SLICE: Phase 0 - refresh the output boundary and baseline
-ACCEPTED: benchmark fixture import migration, typed benchmark manifest, shared benchmark execution, isolated file-entry outputs, repository mutation checks, split workload/measurement identity, protocol-aware history, profile drift identity and bounded bench-ci
-OPEN_CORRECTIONS: manifest owner conflicts fail open, scaffolded release manifests claim dev ownership, output planning is duplicated between CLI and dev, output preflight is incomplete, failed stale cleanup loses ownership, one primary integration case no longer tests its contract, comments/tests retain completed-phase drift and July baselines are not trustworthy
+IMPLEMENTATION_UNDER_REVIEW: working tree based on BASE_REVISION (pre-commit)
+STATUS: active, implementation checkpoint accepted; benchmark closeout pending, intentionally not linked from the roadmap
+CURRENT_SLICE: Output lifecycle ownership, canonical root identity, Windows-safe portable identity, fail-closed hard-link inspection, byte-safe manifest recovery, explicit-directory retention, non-regular stale-node retention and validated Stage 0 output exclusion complete; benchmark history and baseline closeout pending
+ACCEPTED: Phase 0 baseline; one selected BuildProfile and OutputOwner per build; validated directory plans consumed by CLI, check, frontend benchmarks and dev; fail-closed manifest ownership; scaffold manifests removed; prepared output preflight and stale-path retention; restored config/output/dev-server/scaffold coverage; stale skipped-collision coverage and comments removed; canonical output-root alias rejection; authored diagnostics; Windows portable-component policy including superscript DOS-device names; fail-closed Windows hard-link inspection; non-regular stale-node retention; validated Stage 0 exclusion for separator-normalized output roots; final independent audit clean
+OPEN_CORRECTIONS: corrected July benchmark history, fresh CLI/frontend baselines, final benchmark gates, commit and completion review
 DEPENDENCY: rebase and review before implementation if canonical-module or config work changes build.rs, project config output fields, dev build orchestration or output manifests
-NEXT_ACTION: complete Phase 0, then implement Phase 1 only and stop for review
+NEXT_ACTION: commit the implementation, then inspect/correct benchmark history and record CLI/frontend baselines
+VALIDATION: cargo fmt --all -- --check; cargo test --workspace --no-run --quiet; focused output (121), build_cleanup (38), build_orchestration (45), create_project_modules (232), diagnostic_model (72), CLI/dev prior suites and config integration (pass); separator-normalized Stage 0 stale-output regression (pass); git diff --check (pass); just validate (pass: native/Linux/Windows clippy, 3915 unit tests, 1822 integration cases, docs with no errors or warnings, 58 benchmark sanity cases)
+AUDITS: pass 1 findings corrected; pass 2 found canonical bootstrap containment and canonical-alias gaps; verification found dangling-alias resolution, blank-metadata contract and quadratic-preflight gaps; second verification found active-chain quadratic traversal and obsolete parity test; final focused audit found reserved manifest, canonical identity, lossless serialization and stale-comment gaps; follow-up verification found reserved-manifest descendant and stale-cleanup gaps; canonical alias-to-manifest, portable lossless identity, hard-link, owner-recovery and all-kind destination findings corrected and covered; final independent audit clean after validated Stage 0 output exclusion correction
+BLOCKERS: none
 ```
 
 Keep this capsule concise. Update it only at accepted checkpoints. Git history remains the implementation record.

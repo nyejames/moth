@@ -5,6 +5,8 @@ use crate::build_system::build::{BackendBuilder, Project, ProjectBuilder};
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidImportClauseReason};
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_messages::{InvalidConfigReason, InvalidOutputFolderReason};
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveSpec, TemplateHeadCompatibility,
 };
@@ -21,6 +23,7 @@ impl BackendBuilder for NoopBuilder {
         &self,
         _project_compilation: crate::build_system::build::ProjectCompilation,
         _config: &Config,
+        _build_profile: crate::build_system::BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
     ) -> Result<Project, crate::compiler_frontend::compiler_errors::CompilerMessages> {
@@ -51,6 +54,7 @@ impl BackendBuilder for ConflictingDirectiveBuilder {
         &self,
         _project_compilation: crate::build_system::build::ProjectCompilation,
         _config: &Config,
+        _build_profile: crate::build_system::BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
     ) -> Result<Project, crate::compiler_frontend::compiler_errors::CompilerMessages> {
@@ -144,6 +148,61 @@ fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() 
 
     assert_eq!(resolved.output_dir, root.join("preview"));
     fs::remove_dir_all(&root).expect("should clean up temp dir");
+}
+
+#[cfg(unix)]
+#[test]
+fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
+    use std::os::unix::fs::symlink;
+
+    for (case_name, target_name, expected_reason) in [
+        (
+            "sibling",
+            "outside",
+            InvalidOutputFolderReason::ResolvesOutsideProjectRoot,
+        ),
+        (
+            "entry",
+            "src",
+            InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
+        ),
+    ] {
+        let root = temp_dir(&format!("dev_runtime_output_symlink_{case_name}"));
+        let source_root = root.join("src");
+        let outside = temp_dir(&format!("dev_runtime_output_target_{case_name}"));
+        fs::create_dir_all(&source_root).expect("should create source root");
+        fs::create_dir_all(&outside).expect("should create outside root");
+        let output_root = root.join("dev");
+        if target_name == "src" {
+            symlink(&source_root, &output_root).expect("should create entry-root symlink");
+        } else {
+            symlink(&outside, &output_root).expect("should create sibling symlink");
+        }
+        fs::write(
+            root.join(CONFIG_FILE_NAME),
+            "entry_root #= \"src\"\ndev_folder #= \"dev\"\noutput_folder #= \"release\"\n",
+        )
+        .expect("should write config");
+
+        let builder = ProjectBuilder::new(Box::new(NoopBuilder));
+        let messages = resolve_dev_runtime_paths(&builder, &root, &[])
+            .expect_err("dev startup must reject symlinked output roots");
+        assert!(messages.error_diagnostics().any(|diagnostic| {
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidConfig {
+                    reason: InvalidConfigReason::InvalidOutputFolder {
+                        reason,
+                        ..
+                    },
+                    ..
+                } if *reason == expected_reason
+            )
+        }));
+
+        fs::remove_dir_all(&root).expect("should remove project root");
+        fs::remove_dir_all(&outside).expect("should remove target root");
+    }
 }
 
 #[test]

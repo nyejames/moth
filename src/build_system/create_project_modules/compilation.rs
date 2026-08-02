@@ -6,6 +6,7 @@
 use crate::build_system::build::{
     CompiledModuleArtifact, ModuleSemanticDraft, ProjectFrontendCompilation,
 };
+use crate::build_system::output::ValidatedDirectoryOutputSettings;
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -1041,6 +1042,7 @@ fn order_source_package_inventories(
 pub(crate) fn compile_directory_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
+    validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
@@ -1051,6 +1053,7 @@ pub(crate) fn compile_directory_frontend(
     let path_resolver_start = crate::timing::start_pipeline_timing();
     let mut project_setup = match project_roots::build_project_path_resolver_with_index(
         config,
+        validated_output_settings,
         &builder_surface.source_packages,
         &builder_surface.source_file_kinds,
         &builder_surface.external_import_providers,

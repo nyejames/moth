@@ -67,7 +67,10 @@ fn configured_resolver_with_source_file_kinds(
     let mut index_string_table = StringTable::new();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root.clone(),
-        &project_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
         config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         source_file_kinds,
@@ -101,7 +104,7 @@ fn parse_project_config_for_test(
         style_directives,
         frontend_surface: &frontend_surface,
     };
-    parse_project_config_file(config, config_path, &services, &mut string_table)
+    parse_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
 
 fn parse_project_config_for_test_with_html_keys(
@@ -117,7 +120,7 @@ fn parse_project_config_for_test_with_html_keys(
         style_directives,
         frontend_surface: &frontend_surface,
     };
-    parse_project_config_file(config, config_path, &services, &mut string_table)
+    parse_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
 
 fn parse_project_config_for_test_with_packages(
@@ -131,7 +134,7 @@ fn parse_project_config_for_test_with_packages(
         style_directives,
         frontend_surface,
     };
-    parse_project_config_file(config, config_path, &services, &mut string_table)
+    parse_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
 
 fn discover_modules_for_test(
@@ -145,7 +148,10 @@ fn discover_modules_for_test(
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
-        &project_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
         config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         resolver.source_file_kinds(),
@@ -203,7 +209,10 @@ fn discover_modules_for_test_with_providers(
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
-        &project_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
         config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         resolver.source_file_kinds(),
@@ -266,7 +275,10 @@ fn with_namespace_resolution(
         crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
-        &project_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
         config,
         source_packages,
         resolver.source_file_kinds(),
@@ -505,7 +517,10 @@ fn discover_modules_and_graph_for_test(
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
-        &project_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
         config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         resolver.source_file_kinds(),
@@ -648,10 +663,19 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
+    let validated_output_settings =
+        crate::build_system::project_config::validate_directory_output_settings(
+            &config,
+            &mut string_table,
+        )
+        .expect("configured output folders should validate");
 
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root.clone(),
-        &canonical_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: Some(&validated_output_settings),
+        },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -697,9 +721,8 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
     let root = temp_dir("source_tree_index_fixed_skipped_collision");
     let entry_root = root.clone();
 
-    // Fixed-skipped directory with collision-shaped contents.
-    // The canonical `skipped_directory_collision_ignored` integration case covers the
-    // configured-skip path; this unit retains the fixed-skip policy fact.
+    // Fixed-skipped directory with collision-shaped contents. Configured output directories
+    // remain outside the source-entry tree and do not receive a compatibility exception.
     let target_dir = entry_root.join("target");
     fs::create_dir_all(target_dir.join("helper")).expect("should create target/helper");
     fs::write(target_dir.join("helper.moth"), "x ~= 1\n").expect("should write colliding file");
@@ -718,7 +741,10 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
 
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
-        &canonical_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: None,
+        },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -761,7 +787,10 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
     let mut string_table = StringTable::new();
     super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
-        &canonical_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: None,
+        },
         &config,
         &source_packages,
         &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -790,7 +819,10 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
 
     let messages = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
-        &canonical_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: None,
+        },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -894,7 +926,10 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
     let mut string_table = StringTable::new();
     let messages = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
-        &canonical_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: None,
+        },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -4009,7 +4044,10 @@ fn project_prepared_source_store_transitions_one_dense_source_slot_once() {
     let mut string_table = StringTable::new();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
-        &project_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
         &crate::builder_surface::SourceFileKindRegistry::default(),

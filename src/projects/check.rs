@@ -5,6 +5,7 @@
 //! WHY: users and tooling need a fast diagnostic pass that validates source correctness while
 //! remaining backend-agnostic.
 
+use crate::build_system::BuildProfile;
 use crate::build_system::build::{
     BuildBootstrap, ProjectBuilder, bootstrap_project_build, collect_frontend_warnings,
 };
@@ -102,6 +103,7 @@ fn execute_check(path: &str) -> CheckOutcome {
         style_directives,
         mut string_table,
         mut frontend_surface,
+        validated_directory_output_settings,
     } = match bootstrap_project_build(&project_builder, valid_path) {
         Ok(bootstrap) => {
             log_check_timing("command.check.bootstrap", bootstrap_start);
@@ -119,7 +121,8 @@ fn execute_check(path: &str) -> CheckOutcome {
     let compile_frontend_start = crate::timing::start_pipeline_timing();
     let messages = match compile_project_frontend(
         &mut config,
-        &[],
+        BuildProfile::Dev,
+        validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
         &mut string_table,

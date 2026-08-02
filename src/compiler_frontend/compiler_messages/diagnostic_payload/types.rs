@@ -234,16 +234,26 @@ pub enum InvalidConfigReason {
         dev_folder: StringId,
         release_folder: StringId,
     },
+    OutputManifestOwnerConflict {
+        output_root: StringId,
+        existing_builder: StringId,
+        existing_profile: StringId,
+        active_builder: StringId,
+        active_profile: StringId,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidOutputFolderReason {
     Empty,
+    NonUtf8,
     AbsolutePath,
     RootOrPrefix,
     ParentDirectorySegment,
     CurrentDirectory,
+    InvalidPathComponent,
     InsideOrEqualToEntryRoot,
+    ResolvesOutsideProjectRoot,
 }
 
 impl InvalidConfigReason {
@@ -389,6 +399,20 @@ impl InvalidConfigReason {
             } => {
                 *dev_folder = remap.get(*dev_folder);
                 *release_folder = remap.get(*release_folder);
+            }
+
+            Self::OutputManifestOwnerConflict {
+                output_root,
+                existing_builder,
+                existing_profile,
+                active_builder,
+                active_profile,
+            } => {
+                *output_root = remap.get(*output_root);
+                *existing_builder = remap.get(*existing_builder);
+                *existing_profile = remap.get(*existing_profile);
+                *active_builder = remap.get(*active_builder);
+                *active_profile = remap.get(*active_profile);
             }
 
             Self::UnknownKey { key } => {

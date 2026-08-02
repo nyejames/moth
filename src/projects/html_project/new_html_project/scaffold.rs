@@ -12,13 +12,10 @@ use crate::projects::html_project::new_html_project::{
 use crate::projects::settings::CONFIG_FILE_NAME;
 
 const PAGE_FILE: &str = "src/@page.moth";
-const DEV_MANIFEST: &str = "dev/.moth_manifest";
-const RELEASE_MANIFEST: &str = "release/.moth_manifest";
 const GITIGNORE_FILE: &str = ".gitignore";
 
 /// Relative paths of all scaffold-owned files.
-const SCAFFOLD_OWNED_FILES: &[&str] =
-    &[CONFIG_FILE_NAME, PAGE_FILE, DEV_MANIFEST, RELEASE_MANIFEST];
+const SCAFFOLD_OWNED_FILES: &[&str] = &[CONFIG_FILE_NAME, PAGE_FILE];
 
 /// Relative paths of all scaffold-owned directories.
 pub const SCAFFOLD_DIRECTORIES: &[&str] = &["src", "lib", "dev", "release"];
@@ -157,16 +154,7 @@ pub(crate) fn write_scaffold(
     // 3. Starter page.
     write_scaffold_file(PAGE_FILE, start_page_scaffolding::page_template())?;
 
-    // 4. Dev manifest.
-    write_scaffold_file(DEV_MANIFEST, start_page_scaffolding::manifest_template())?;
-
-    // 5. Release manifest.
-    write_scaffold_file(
-        RELEASE_MANIFEST,
-        start_page_scaffolding::manifest_template(),
-    )?;
-
-    // 6. .gitignore (handled separately — never overwritten).
+    // 4. .gitignore (handled separately — never overwritten).
     let gitignore = handle_gitignore(project_dir, prompt)?;
 
     if let Some(path) = gitignore.created {

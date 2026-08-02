@@ -17,8 +17,9 @@ use super::super::{
     BackendId, DiagnosticMatchMode, ExpectedOutcome, FailureExpectation, FailureKind, GoldenMode,
     SuccessExpectation, TestCaseSpec, WarningExpectation,
 };
-use crate::build_system::build::{BuildResult, CleanupPolicy, FileKind, OutputFile, Project};
-use crate::compiler_frontend::FrontendBuildProfile;
+use crate::build_system::BuildProfile;
+use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
+use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
@@ -866,12 +867,17 @@ fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) -> BuildResul
         project: Project {
             output_files,
             entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: Vec::new(),
         string_table: StringTable::new(),
+        output_owner: OutputOwner {
+            builder: BuilderKind::Html,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
     }
 }
 
@@ -1391,12 +1397,17 @@ fn nested_golden_validation_compares_relative_paths() {
                 FileKind::Html("<p>nested</p>\n".to_owned()),
             )],
             entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::html(FrontendBuildProfile::Dev),
+            cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: Vec::new(),
         string_table: StringTable::new(),
+        output_owner: OutputOwner {
+            builder: BuilderKind::Html,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
     };
     let golden = discover_golden_expectation(&golden_dir, None)
         .expect("golden inventory should be discovered");

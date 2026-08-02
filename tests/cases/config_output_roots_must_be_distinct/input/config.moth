@@ -1,0 +1,3 @@
+entry_root #= "src"
+dev_folder #= "dist/release"
+output_folder #= "dist\\release"
