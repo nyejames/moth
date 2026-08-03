@@ -1,0 +1,1526 @@
+-- code-highlighter-stress.moth
+-- Dedicated $code("moth") formatter workload.
+-- The balanced directive body below is representative Moth source-like text so
+-- the compile-time HTML formatter scans a realistic mix of words, operators,
+-- strings, numbers, comments, directives, paths and plain identifiers.
+
+code_snippet #= [$code("moth"):
+-- module documentation
+import @core/io {print, line, debug}
+import @core/math {sin, cos, tan, PI, TAU, E}
+import @core/text {length, contains, prefix, suffix}
+import @web/canvas {Canvas, draw_rect, fill_circle, stroke_line}
+import @project {config, version, build_number}
+import @vendor/drawing.js {render_scene, apply_filter}
+
+-- nominal types
+Label = |
+    text String,
+    count Int,
+    active Bool,
+|
+
+Point type A = |
+    x A,
+    y A,
+|
+
+Box type A = |
+    value A,
+    next none,
+|
+
+Maybe type A ::
+    Some | value A, |,
+    Empty,
+;
+
+Color ::
+    Red,
+    Green,
+    Blue,
+    Rgb | red Float, green Float, blue Float, |,
+;
+
+Status ::
+    Ready,
+    Running | progress Float, |,
+    Failed | message String, code Int, |,
+;
+
+-- traits and conformances
+DISPLAY_TEXT must:
+    display |this Label| -> String
+;
+
+SERIALIZABLE must:
+;
+
+COMPARABLE must:
+    compare |this Label, other Label| -> Int
+;
+
+FROZEN must:
+;
+
+Label must DISPLAY_TEXT
+Label must SERIALIZABLE and COMPARABLE
+Point must not FROZEN
+Color must SERIALIZABLE
+
+-- generic bounds
+identity type A is SERIALIZABLE |value A| -> A:
+    return value
+;
+
+-- functions
+render |title String, lines Int| -> String:
+    if lines is:
+        0 => return ""
+        1 => return title
+        else => return title + "!"
+    ;
+;
+
+paint |canvas Canvas, color Color| -> Bool:
+    canvas.prepare()
+    draw_rect(canvas, 10, 20, 30, 40)
+    fill_circle(canvas, 5.5, 6.5, 1.0e2)
+    stroke_line(canvas, 0, 0, 100, 100)
+    return true
+;
+
+parse |source String| -> Maybe Int:
+    catch number = Int.from_text(source)
+    return Some(number)
+;
+
+total |values {Int}| -> Int:
+    copy sum = 0
+    for value in values:
+        sum += value
+    return sum
+;
+
+-- receiver methods
+display |this Label| -> String:
+    return this.text
+;
+
+compare |this Label, other Label| -> Int:
+    if this.count is:
+        other.count => return 0
+        less => return -1
+        else => return 1
+    ;
+;
+
+scale |this Point Float| -> Point Float:
+    copy value = this.x * 2.0
+    return Point(value, this.y * 2.0)
+;
+
+push |this {Int}, value Int|:
+    this += value
+;
+
+-- constants and literal values
+page_title #= "Highlighter stress"
+max_attempts #= 1_000
+step #= 1.5
+rate #= 1e6
+precision #= 1e-6
+limit #= 1.0e+21
+enabled #= true
+disabled #= false
+missing #= none
+empty_name #= ""
+single_char #= 'z'
+newline #= "\n"
+quote #= "say \"hello\""
+unicode_name #= "héllo"
+greek_name #= "π ≈ 3.14159"
+cjk_name #= "名前"
+lambda #= 'λ'
+cyrillic #= "Здравствуйте"
+
+-- numeric forms
+integer_value #= 42
+separated_value #= 12_345_678
+fraction_value #= 3.25
+small_exponent #= 2e8
+negative_exponent #= 4e-9
+mixed_exponent #= 7.5e+12
+largest_exponent #= 1.0e+21
+
+-- compound assignment and declaration forms
+total //= 1
+total += 2
+total -= 1
+total *= 3
+total /= 2
+total %= 5
+total ^= 2
+mask #= 0
+value ~= 2
+budget $= 100
+
+-- structural and control forms
+match status:
+    Ready => io.line("ready")
+    Running | progress, | if progress >= 0.5 => io.line("almost")
+    else => io.line("waiting")
+;
+
+render -> String:
+    return title
+;
+
+Maybe type A ::
+    Some | value A, |,
+    Empty,
+;
+
+range 1..10
+shifted >> 2
+shifted << 1
+remainder // 3
+score <= 100
+score >= 0
+equal = value
+plus = a + b
+minus = a - b
+star = a * b
+slash = a / b
+percent = a % b
+caret = a ^ b
+less = a < b
+greater = a > b
+tilde ~ place
+hash # marker
+dollar $ marker
+bang ! handled
+question ?
+ampersand &
+at @ core
+
+-- explicit exclusions stay plain
+in_value = 1
+fn_value = 2
+group_value = 3
+into_value = 4
+where_value = 5
+
+-- deferred reserved words use keyword style
+async_task #= true
+yield_point #= 0
+checked_mode #= true
+block_scope #= false
+
+-- attached bang forms
+return! value
+cast! value
+catch error!:
+
+-- strings and characters with escapes
+escaped = "tab\there"
+unicode_escape = "\u0041"
+char_escape = '\n'
+combined = "line one\nline two"
+nested_quote = 'it\'s'
+
+-- line comments
+-- a comment with keywords if return loop to by
+-- a comment with operators //= += -= and paths @core/io
+
+-- template examples with directives
+markdown_block #= [$md:
+    # Heading
+
+    Paragraph with **emphasis** and @./other-page (a link).
+]
+
+code_block #= [$code("moth"):
+    value = 42
+]
+
+page_wrapper #= [$children(:<div class="card">[$slot]</div>):
+    <article>[$slot]</article>
+]
+
+named_slot #= [$slot("title")]
+insert_block #= [$insert("aside"): sidebar text]
+raw_block #= [$raw: <b>kept</b>]
+html_block #= [$html: <main class="content"></main>]
+css_block #= [$css: .card { border: 1px solid; }]
+escape_block #= [$escape_html: <div>&</div>]
+fresh_child #= [$fresh]
+
+-- grouped imports and aliases
+import @core/io {print as log, line as write_line}
+import @core/collections {Map, map_from}
+import @core/time {Duration, Timestamp}
+import @core/random {random_float, random_int}
+
+-- module structure
+export:
+    render
+    paint
+    parse
+    total
+    Label
+    Point
+    Maybe
+    Color
+    Status
+;
+
+-- control flow
+if enabled:
+    io.line("enabled")
+else if disabled:
+    io.line("disabled")
+else:
+    io.line("unknown")
+;
+
+while attempts < max_attempts:
+    attempts += 1
+;
+
+loop:
+    break
+;
+
+for index to 10 by 2:
+    io.line(index)
+;
+
+for name in names:
+    if name is:
+        "stop" => break
+        "skip" => continue
+        else => io.line(name)
+    ;
+;
+
+-- error handling
+read_file |path String| -> String:
+    catch content = File.read(path)
+    return content
+;
+
+-- choices and pattern matching
+describe |color Color| -> String:
+    match color:
+        Red => return "red"
+        Green => return "green"
+        Blue => return "blue"
+        Rgb | red, green, blue, | => return "rgb"
+    ;
+;
+
+-- option handling
+first |values {Int}| -> Maybe Int:
+    if values:
+        return Some(values[0])
+    return Empty
+;
+
+-- mutable access
+set_name |this Label, name String|:
+    ~this.text = name
+;
+
+-- collections
+numbers #= {1, 2, 3, 4, 5}
+names #= {"Priya", "Rob", "Emmy", "Huw"}
+scores #= {"alpha" = 10, "beta" = 20, "gamma" = 30}
+nested #= { {1, 2}, {3, 4}, {5, 6} }
+
+-- loops over collections
+sum_all |values {Int}| -> Int:
+    copy result = 0
+    for value in values:
+        result += value
+    return result
+;
+
+-- generic functions
+identity type A |value A| -> A:
+    return value
+;
+
+pair type A, B = |
+    first A,
+    second B,
+|
+
+-- aliases
+type Name = String
+type Index = Int
+type Lookup = {String = Int}
+
+-- casts
+as_int = value as Int
+as_float = value as Float
+as_string = value as String
+cast_value = cast! value
+return_value = return! value
+
+-- assertions
+assert enabled
+assert count > 0
+assert name != ""
+
+-- this and This
+describe |this Label| -> String:
+    return this.text
+;
+
+trait_method |This| -> String:
+    return "trait method"
+;
+
+-- async and yield deferred forms
+async load |url String| -> String:
+    yield result
+    return result
+;
+
+-- operators in expressions
+sum = a + b - c * d / e % f
+bitwise = a ^ b
+shifts = (a << 2) + (b >> 1)
+comparisons = a < b and b <= c or c >= d
+equality = a is b
+inequality = a not b
+logical = enabled and not disabled or pending
+range_check = value in bounds
+contains_check = item in collection
+access = map[key]
+projection = object.field
+method_call = object.render()
+chain = object.transform().render()
+
+-- ALL_CAPS constants stay plain outside contract context
+PI #= 3.14159
+TAU #= 6.28318
+E #= 2.71828
+MAX_SIZE #= 1024
+MIN_DELAY #= 0.05
+DEFAULT_COLOR #= "blue"
+CONFIG_PATH #= "@project/config"
+
+-- trait requirements
+SHAPE must:
+    area |this| -> Float
+    perimeter |this| -> Float
+;
+
+DRAWABLE must:
+    draw |this, canvas Canvas| -> Bool
+;
+
+-- conformance with lists
+Circle must SHAPE and DRAWABLE
+Square must SHAPE
+Polygon must SHAPE and COMPARABLE and SERIALIZABLE
+
+-- generic parameter bounds
+sort type A is COMPARABLE |values {A}| -> {A}:
+    return values
+;
+
+-- struct construction and fields
+label #= Label("hello", 3, true)
+origin #= Point(0, 0)
+origin_f #= Point(0.0, 0.0)
+boxed #= Box(42, none)
+maybe_int #= Maybe.Some(7)
+maybe_empty #= Maybe.Empty
+color #= Color.Rgb(1.0, 0.5, 0.25)
+status #= Status.Running(0.75)
+
+-- field access
+title_text = label.text
+label_count = label.count
+is_active = label.active
+origin_x = origin.x
+origin_y = origin.y
+
+-- method calls
+rendered = label.display()
+comparison = label.compare(other)
+scaled = origin.scale(2.0)
+pushed = numbers.push(6)
+
+-- namespace access
+io.line("hello")
+io.print("world")
+io.debug("trace")
+math.sin(1.0)
+math.cos(0.5)
+text.length("hello")
+text.contains("hello", "ell")
+
+-- plain variables and fields stay unwrapped
+ordinary_value = 1
+another_value = ordinary_value + 1
+local_field = label_count
+temporary = rendered
+
+-- deep nesting for scanner pressure
+deep_a = ((((1 + 2) * (3 - 4)) / (5 % 6)) ^ (7 << 1)) + (8 >> 2)
+deep_b = (a + (b * (c - (d / (e % f))))) - ((g << 2) + (h >> 1))
+deep_c = "prefix" + "middle" + "suffix" + "tail"
+deep_d = if enabled then "yes" else "no"
+deep_e = point.x + point.y + point.z + point.w
+
+-- repeated realistic declarations for scan volume
+article_1 #= "First article"
+article_2 #= "Second article"
+article_3 #= "Third article"
+article_4 #= "Fourth article"
+article_5 #= "Fifth article"
+article_6 #= "Sixth article"
+article_7 #= "Seventh article"
+article_8 #= "Eighth article"
+article_9 #= "Ninth article"
+article_10 #= "Tenth article"
+
+section_1 #= "Introduction"
+section_2 #= "Background"
+section_3 #= "Methods"
+section_4 #= "Results"
+section_5 #= "Discussion"
+section_6 #= "Conclusion"
+section_7 #= "References"
+section_8 #= "Appendix"
+
+-- helper functions with mixed bodies
+validate |value Int| -> Bool:
+    if value < 0 or value > 100:
+        return false
+    return true
+;
+
+classify |score Float| -> String:
+    if score >= 90.0:
+        return "excellent"
+    else if score >= 75.0:
+        return "good"
+    else if score >= 50.0:
+        return "pass"
+    return "fail"
+;
+
+format |values {String}| -> String:
+    copy parts = ""
+    for index to values.length() by 1:
+        if index > 0:
+            parts += ", "
+        parts += values[index]
+    return parts
+;
+
+-- runtime template fragments
+header #= [: <h1>[title]</h1> ]
+footer #= [: <footer>[version]</footer> ]
+card #= [: <div class="card">[label.text]</div> ]
+list_item #= [: <li>[name]</li> ]
+
+-- reactive markers
+count $= 0
+@count + 1
+[$count]
+[$name]
+
+-- imports with paths and resources
+import @core/io {print}
+import @web/canvas {Canvas}
+import @project/config {theme}
+import @vendor/assets/logo.png
+
+-- long plain identifier runs
+configuration_default_cache_size = 1024
+configuration_default_timeout_ms = 30_000
+configuration_default_retry_limit = 5
+rendered_document_cache_key = "docs/index"
+generated_output_directory_name = "release"
+
+-- numeric edge forms
+tiny #= 1e-21
+huge #= 9e21
+fraction_underscore #= 1_000.5
+exponent_underscore #= 1_0e6
+mixed_fraction #= 123.456e-7
+-- project modules and packages
+project #= {
+    name = "highlight-stress",
+    version = "0.1.0",
+    entry_root = "src",
+    builder = "html",
+}
+
+config #= {
+    theme = "dark",
+    accent = "#fdbe82",
+    code_font_size = "0.95rem",
+}
+
+-- application entry
+start:
+    io.line("starting")
+    render_main_page()
+    io.line("finished")
+;
+
+render_main_page || -> String:
+    copy title = "Dashboard"
+    copy body = "Welcome"
+    return [:
+        <html>
+            <head><title>[title]</title></head>
+            <body><main>[body]</main></body>
+        </html>
+    ]
+;
+
+-- component style helpers
+primary_button #= [: <button class="primary">[$slot]</button> ]
+secondary_button #= [: <button class="secondary">[$slot]</button> ]
+icon #= [: <span class="icon">[$slot]</span> ]
+badge #= [: <span class="badge">[$slot]</span> ]
+
+-- layout templates
+sidebar_layout #= [$children(:<aside>[$slot]</aside>):
+    <div class="sidebar">[$slot]</div>
+]
+
+main_layout #= [$children(:<main>[$slot]</main>):
+    <article>[$slot]</article>
+]
+
+header_layout #= [$insert("title"): Document title]
+footer_layout #= [$insert("footer"): Copyright notice]
+
+-- long template with markdown
+long_document #= [$md:
+    # Chapter One
+
+    This chapter covers **basic usage** and @./basic (the basics).
+
+    ## Section One
+
+    Ordinary paragraphs flow here with `inline code` and [emphasis links](@./links).
+
+    ## Section Two
+
+    Lists keep structure readable:
+
+    - first item
+    - second item
+    - third item
+
+    1. numbered step
+    2. numbered step
+    3. numbered step
+
+    ## Section Three
+
+    More prose with **bold terms**, *italic notes* and @./references (references).
+]
+
+-- css block
+theme_css #= [$css:
+    .card {
+        border: 1px solid var(--moth-border-width);
+        border-radius: 0.25rem;
+        padding: 1rem;
+    }
+    .card h3 {
+        margin: 0 0 0.5rem 0;
+    }
+]
+
+-- html block
+hero_html #= [$html:
+    <section class="hero">
+        <h1>Highlight stress</h1>
+        <p>Compile-time formatter workload.</p>
+    </section>
+]
+
+-- raw block
+raw_html #= [$raw:
+    <pre><code>kept verbatim</code></pre>
+]
+
+-- escape block
+escaped_html #= [$escape_html:
+    <div class="note">&amp;</div>
+]
+
+-- slots and inserts
+profile_page #= [$insert("profile"): Profile section]
+settings_page #= [$insert("settings"): Settings section]
+history_page #= [$insert("history"): History section]
+notifications_page #= [$insert("notifications"): Notifications section]
+
+-- unicode identifiers
+héllo #= 1
+π_value #= 3.14159
+名前 #= "name"
+café #= "coffee"
+naïve #= "simple"
+élan #= "style"
+façade #= "front"
+
+-- unicode strings and characters
+unicode_string_1 #= "Привет мир"
+unicode_string_2 #= "こんにちは"
+unicode_string_3 #= "안녕하세요"
+unicode_string_4 #= "مرحبا"
+unicode_string_5 #= "שלום"
+unicode_char_1 #= 'Ω'
+unicode_char_2 #= '漢'
+unicode_char_3 #= '😀'
+unicode_char_4 #= 'é'
+unicode_char_5 #= 'ß'
+
+-- operator dense expressions
+operator_line_1 = a //= b
+operator_line_2 = c += d
+operator_line_3 = e -= f
+operator_line_4 = g *= h
+operator_line_5 = i /= j
+operator_line_6 = k %= l
+operator_line_7 = m ^= n
+operator_line_8 = o #= p
+operator_line_9 = q ~= r
+operator_line_10 = s $= t
+operator_line_11 = u <= v
+operator_line_12 = w >= x
+operator_line_13 = y << z
+operator_line_14 = aa >> bb
+operator_line_15 = cc => dd
+operator_line_16 = ee -> ff
+operator_line_17 = gg :: hh
+operator_line_18 = ii .. jj
+operator_line_19 = kk // ll
+operator_line_20 = mm < nn
+operator_line_21 = oo > pp
+operator_line_22 = qq + rr
+operator_line_23 = ss - tt
+operator_line_24 = uu * vv
+operator_line_25 = ww / xx
+operator_line_26 = yy % zz
+operator_line_27 = aaa ^ bbb
+operator_line_28 = ccc ~ ddd
+operator_line_29 = eee # fff
+operator_line_30 = ggg $ hhh
+operator_line_31 = iii ! jjj
+operator_line_32 = kkk ? lll
+operator_line_33 = mmm & nnn
+operator_line_34 = ooo @ ppp
+
+-- numeric literal table
+n_01 #= 0
+n_02 #= 1
+n_03 #= 9
+n_04 #= 10
+n_05 #= 99
+n_06 #= 100
+n_07 #= 999
+n_08 #= 1_000
+n_09 #= 10_000
+n_10 #= 100_000
+n_11 #= 1_000_000
+n_12 #= 12_345_678
+n_13 #= 0.5
+n_14 #= 1.0
+n_15 #= 2.25
+n_16 #= 3.14159
+n_17 #= 123.456
+n_18 #= 0.001
+n_19 #= 1_000.5
+n_20 #= 1e0
+n_21 #= 1e1
+n_22 #= 1e2
+n_23 #= 1e3
+n_24 #= 1e6
+n_25 #= 1e9
+n_26 #= 1e12
+n_27 #= 1e-1
+n_28 #= 1e-3
+n_29 #= 1e-6
+n_30 #= 1e-9
+n_31 #= 1.5e2
+n_32 #= 2.5e-3
+n_33 #= 7.7e+10
+n_34 #= 1.0e+21
+n_35 #= 9.99e99
+n_36 #= 4_096
+n_37 #= 65_536
+n_38 #= 1_048_576
+n_39 #= 16_777_216
+n_40 #= 2_147_483_648
+
+-- string table
+s_01 #= ""
+s_02 #= "a"
+s_03 #= "ab"
+s_04 #= "abc"
+s_05 #= "abcd"
+s_06 #= "hello world"
+s_07 #= "hello, world"
+s_08 #= "hello\nworld"
+s_09 #= "tab\tseparated"
+s_10 #= "quote \"inside\""
+s_11 #= "single 'inside'"
+s_12 #= "backslash \\ inside"
+s_13 #= "<tag>"
+s_14 #= "&amp;"
+s_15 #= "a & b < c > d"
+s_16 #= "double \"quoted\" text"
+s_17 #= "path/to/file.txt"
+s_18 #= "https://example.com/docs"
+s_19 #= "@core/io"
+s_20 #= "@project/config"
+s_21 #= "trailing space "
+s_22 #= " leading space"
+s_23 #= "multiple   spaces"
+s_24 #= "tab	inside"
+s_25 #= "unicode héllo"
+s_26 #= "emoji 😀 test"
+s_27 #= "mixed 中文 text"
+s_28 #= "Русский текст"
+s_29 #= "العربية نص"
+s_30 #= "עברית טקסט"
+
+-- char table
+c_01 #= 'a'
+c_02 #= 'b'
+c_03 #= 'z'
+c_04 #= 'A'
+c_05 #= 'Z'
+c_06 #= '0'
+c_07 #= '9'
+c_08 #= '_'
+c_09 #= '-'
+c_10 #= '.'
+c_11 #= ' '
+c_12 #= '\n'
+c_13 #= '\t'
+c_14 #= '\\'
+c_15 #= '\''
+c_16 #= '"'
+c_17 #= 'é'
+c_18 #= 'λ'
+c_19 #= 'Ω'
+c_20 #= '漢'
+
+-- keyword usage in realistic statements
+if ready and not busy or pending:
+    start_work()
+else:
+    queue_work()
+;
+
+while running:
+    step()
+;
+
+loop:
+    poll()
+    if done:
+        break
+;
+
+for item in items:
+    process(item)
+;
+
+for index to limit by step:
+    advance(index)
+;
+
+assert ready
+assert value is not none
+assert index >= 0 and index < length
+
+-- type usage in signatures
+convert |value String| -> Int:
+    return value as Int
+;
+
+convert |value Int| -> Float:
+    return value as Float
+;
+
+convert |value Float| -> String:
+    return value as String
+;
+
+-- builtin singleton types
+empty_text #= None
+empty_optional #= none
+positive #= True
+negative #= False
+error_value #= Error
+error_message #= Error("failed")
+
+-- receiver chains
+result = pipeline.transform().validate().render()
+output = builder.set_title("Docs").set_theme("dark").build()
+count = words.filter(is_long).count()
+value = config.get("theme").or_default("light")
+
+-- function declarations with parameters
+greet |name String| -> String:
+    return "Hello, " + name
+;
+
+add |a Int, b Int| -> Int:
+    return a + b
+;
+
+multiply |a Float, b Float| -> Float:
+    return a * b
+;
+
+divide |a Float, b Float| -> Float:
+    assert b != 0.0
+    return a / b
+;
+
+-- nested control flow
+process_all |values {Int}| -> Int:
+    copy total = 0
+    for value in values:
+        if value is 0:
+            continue
+        if value < 0:
+            break
+        total += value
+    return total
+;
+
+-- error propagation with catch
+load_config |path String| -> config:
+    catch data = File.read(path)
+    catch parsed = parse_config(data)
+    return parsed
+;
+
+-- mutable state
+counter = 0
+~counter += 1
+~counter = counter * 2
+~counter -= 1
+
+-- shared access
+copy first = label
+copy second = label
+io.line(first.text)
+io.line(second.text)
+
+-- explicit copies
+copy independent = label
+~independent.text = "changed"
+
+-- collection operations
+values.push(1)
+values.push(2)
+values.remove(0)
+values.length()
+map.insert("key", 1)
+map.get("key")
+map.remove("key")
+
+-- range loops
+for index to 10:
+    io.line(index)
+;
+
+for index to 100 by 10:
+    io.line(index)
+;
+
+for index to 1_000 by 100:
+    io.line(index)
+;
+
+-- pattern matching with guards
+match result:
+    Some | value, | if value > 0 => io.line(value)
+    Some | value, | => io.line(-value)
+    Empty => io.line("none")
+;
+
+-- trait method dispatch
+display_text = label.display()
+compare_result = label.compare(other_label)
+area_result = circle.area()
+perimeter_result = circle.perimeter()
+draw_result = circle.draw(canvas)
+
+-- generic instantiation
+int_box #= Box(7)
+float_box #= Box(1.5)
+string_box #= Box("value")
+int_pair #= Pair(1, 2)
+float_pair #= Pair(1.0, 2.0)
+mixed_pair #= Pair("name", 42)
+
+-- constant templates
+title_template #= [: <h1>[$slot("title")]</h1> ]
+subtitle_template #= [: <h2>[$slot("subtitle")]</h2> ]
+paragraph_template #= [: <p>[$slot]</p> ]
+link_template #= [: <a href="[$slot("href")]">[$slot("label")]</a> ]
+list_template #= [: <ul>[$slot]</ul> ]
+item_template #= [: <li>[$slot]</li> ]
+
+-- import alias table
+import @core/io {print as p, line as l}
+import @core/math {sin as sine, cos as cosine}
+import @core/text {length as len, contains as has}
+import @core/collections {Map as Dict}
+import @core/time {Duration as Span}
+import @web/canvas {Canvas as Board}
+
+-- namespace paths
+io.print
+io.line
+io.debug
+io.warn
+io.error
+math.sin
+math.cos
+math.tan
+math.PI
+math.TAU
+math.E
+text.length
+text.contains
+text.prefix
+text.suffix
+collections.Map
+time.Duration
+random.random_float
+random.random_int
+canvas.Canvas
+canvas.draw_rect
+canvas.fill_circle
+canvas.stroke_line
+
+-- plain namespace variable
+io = "not a namespace here"
+local_io = io
+
+-- directives in context
+[$md]
+[$code]
+[$slot]
+[$insert]
+[$children]
+[$fresh]
+[$html]
+[$css]
+[$raw]
+[$escape_html]
+[$note]
+[$todo]
+[$doc]
+
+-- reactive markers in context
+[$count]
+[$name]
+[$title]
+[$status]
+[$progress]
+[$selected]
+[$hovered]
+[$dragging]
+
+-- long plain text paragraphs inside comments
+-- The quick brown fox jumps over the lazy dog while the compiler scans every word boundary.
+-- Readability matters because generated documentation ships to users in many contexts and themes.
+-- Plain identifiers must stay unwrapped so ordinary code does not drown in low-value spans.
+-- Compound operators should remain one visual token instead of a chain of separate characters.
+-- Contextual roles only appear when bounded lexical evidence supports them without semantic claims.
+-- ALL_CAPS constants such as PI TAU and E stay plain unless a real contract list surrounds them.
+-- Unicode identifiers and strings must survive escaping without splitting surrogate pairs.
+
+-- declaration volume for scanner pressure
+record_01 #= "alpha"
+record_02 #= "beta"
+record_03 #= "gamma"
+record_04 #= "delta"
+record_05 #= "epsilon"
+record_06 #= "zeta"
+record_07 #= "eta"
+record_08 #= "theta"
+record_09 #= "iota"
+record_10 #= "kappa"
+record_11 #= "lambda"
+record_12 #= "mu"
+record_13 #= "nu"
+record_14 #= "xi"
+record_15 #= "omicron"
+record_16 #= "pi"
+record_17 #= "rho"
+record_18 #= "sigma"
+record_19 #= "tau"
+record_20 #= "upsilon"
+record_21 #= "phi"
+record_22 #= "chi"
+record_23 #= "psi"
+record_24 #= "omega"
+record_25 #= "Alpha"
+record_26 #= "Beta"
+record_27 #= "Gamma"
+record_28 #= "Delta"
+record_29 #= "Epsilon"
+record_30 #= "Zeta"
+record_31 #= "Eta"
+record_32 #= "Theta"
+record_33 #= "Iota"
+record_34 #= "Kappa"
+record_35 #= "Lambda"
+record_36 #= "Mu"
+record_37 #= "Nu"
+record_38 #= "Xi"
+record_39 #= "Omicron"
+record_40 #= "Pi"
+
+-- word-group density table
+w_01 = if
+w_02 = else
+w_03 = return
+w_04 = break
+w_05 = continue
+w_06 = loop
+w_07 = to
+w_08 = by
+w_09 = as
+w_10 = copy
+w_11 = import
+w_12 = export
+w_13 = catch
+w_14 = then
+w_15 = block
+w_16 = checked
+w_17 = cast
+w_18 = type
+w_19 = of
+w_20 = must
+w_21 = this
+w_22 = This
+w_23 = async
+w_24 = yield
+w_25 = assert
+w_26 = is
+w_27 = not
+w_28 = and
+w_29 = or
+w_30 = true
+w_31 = false
+w_32 = none
+w_33 = Int
+w_34 = Float
+w_35 = Bool
+w_36 = String
+w_37 = Char
+w_38 = None
+w_39 = True
+w_40 = False
+w_41 = Error
+w_42 = in
+w_43 = fn
+w_44 = group
+w_45 = into
+w_46 = where
+
+-- realistic long example blocks
+-- Example: document renderer
+renderer = |
+    page_title String,
+    page_body String,
+    theme_name String,
+|
+
+render_document |renderer| -> String:
+    return [:
+        <html>
+            <head>
+                <title>[renderer.page_title]</title>
+                <style>[theme_css]</style>
+            </head>
+            <body>
+                <header>[header_layout]</header>
+                <main>[renderer.page_body]</main>
+                <footer>[footer_layout]</footer>
+            </body>
+        </html>
+    ]
+;
+
+-- Example: batch processing
+batch |items {Int}| -> Int:
+    copy processed = 0
+    for item in items:
+        if item is 0:
+            continue
+        processed += 1
+    return processed
+;
+
+-- Example: geometry helpers
+distance |a Point Float, b Point Float| -> Float:
+    copy dx = a.x - b.x
+    copy dy = a.y - b.y
+    return (dx * dx + dy * dy) ^ 0.5
+;
+
+-- Example: string utilities
+join |parts {String}, separator String| -> String:
+    copy result = ""
+    for index to parts.length():
+        if index > 0:
+            result += separator
+        result += parts[index]
+    return result
+;
+
+-- Example: lookup table
+find |table {String = Int}, key String| -> Maybe Int:
+    if key in table:
+        return Some(table[key])
+    return Empty
+;
+
+-- Example: nested records
+profile #= {
+    name = "Priya",
+    address = {
+        street = "1 Main Street",
+        city = "London",
+        postcode = "N1 1AA",
+    },
+    tags = {"rust", "moth", "docs"},
+}
+
+-- Example: error ladder
+run |step_name String| -> Bool:
+    catch ok = perform(step_name)
+    if not ok:
+        return false
+    return true
+;
+
+-- Example: state machine
+next_state |current String, event String| -> String:
+    match event:
+        "start" => return "running"
+        "pause" => return "paused"
+        "resume" => return "running"
+        "stop" => return "stopped"
+        else => return current
+    ;
+;
+-- Example: cache with fixed capacity
+cache = |
+    capacity Int,
+    entries {String = String},
+|
+
+insert_cache |this cache, key String, value String|:
+    if this.entries.length() >= this.capacity:
+        remove oldest entry
+    this.entries.insert(key, value)
+;
+
+lookup_cache |this cache, key String| -> Maybe String:
+    if key in this.entries:
+        return Some(this.entries[key])
+    return Empty
+;
+
+-- Example: tokeniser helpers
+is_letter |char| -> Bool:
+    return char.is_alphabetic()
+;
+
+is_digit |char| -> Bool:
+    return char.is_numeric()
+;
+
+is_separator |char| -> Bool:
+    return char == '_' or char == '-'
+;
+
+-- Example: report generation
+report |title String, rows {Row}| -> String:
+    copy html = "<h1>" + title + "</h1>"
+    html += "<table>"
+    for row in rows:
+        html += "<tr><td>" + row.name + "</td><td>" + row.value + "</td></tr>"
+    html += "</table>"
+    return html
+;
+
+-- Example: retry with backoff
+retry |action || -> Bool, attempts Int| -> Bool:
+    for attempt to attempts:
+        if action():
+            return true
+    return false
+;
+
+-- Example: weighted choice
+choose |weights {Float}| -> Int:
+    copy total_weight = 0.0
+    for weight in weights:
+        total_weight += weight
+    copy pick = random_float() * total_weight
+    copy running = 0.0
+    for index to weights.length():
+        running += weights[index]
+        if pick <= running:
+            return index
+    return 0
+;
+
+-- Example: tree structure
+Node type A ::
+    Leaf | value A, |,
+    Branch | left Node, right Node, |,
+;
+
+-- Example: tree walk
+walk |node Node Int| -> {Int}:
+    match node:
+        Leaf | value, | => return {value}
+        Branch | left, right, | => return walk(left) + walk(right)
+    ;
+;
+
+-- Example: formatting numbers
+format_float |value Float| -> String:
+    return value as String
+;
+
+format_int |value Int| -> String:
+    return value as String
+;
+
+-- Example: validation chain
+validate_all |value String| -> Bool:
+    if not validate_length(value):
+        return false
+    if not validate_chars(value):
+        return false
+    if not validate_balance(value):
+        return false
+    return true
+;
+
+-- Example: simple reactive counter
+counter_state $= 0
+increment $:
+    ~counter_state += 1
+;
+
+decrement $:
+    ~counter_state -= 1
+;
+
+reset $:
+    ~counter_state = 0
+;
+
+-- Example: subscriptions
+[$counter_state]
+[$counter_state * 2]
+[$counter_state >= 10]
+[$counter_state + 1]
+
+-- Example: template components
+component_button #= [$children(:<button class="btn">[$slot]</button>):
+    <span class="label">[$slot]</span>
+]
+
+component_input #= [$children(:<label>[$slot]</label>):
+    <input type="text" placeholder="[$slot]">
+]
+
+component_badge #= [$children(:<span class="badge">[$slot]</span>):
+    <em>[$slot]</em>
+]
+
+-- Example: page fragments
+fragment_header #= [: <header class="page-header">[$slot("title")]</header> ]
+fragment_nav #= [: <nav class="page-nav">[$slot]</nav> ]
+fragment_main #= [: <main class="page-main">[$slot]</main> ]
+fragment_footer #= [: <footer class="page-footer">[$slot("copyright")]</footer> ]
+
+-- Example: deep constant folding
+fold_01 #= ((1 + 2 + 3 + 4 + 5) * 6) - ((7 + 8) * 9)
+fold_02 #= (10 * 11 * 12) + (13 * 14 * 15) - (16 * 17)
+fold_03 #= ((18 + 19) * (20 + 21)) / (22 - 2)
+fold_04 #= (23 ^ 2) + (24 ^ 2) - (25 * 25)
+fold_05 #= 26 + 27 + 28 + 29 + 30 + 31 + 32 + 33 + 34 + 35
+fold_06 #= (36 * 37) + (38 * 39) + (40 * 41) + (42 * 43)
+fold_07 #= ((44 + 45) * (46 - 47)) + (48 * 49)
+fold_08 #= 50_000 + 51_000 + 52_000 + 53_000 + 54_000
+fold_09 #= 1.5 + 2.5 + 3.5 + 4.5 + 5.5 + 6.5 + 7.5
+fold_10 #= 1e2 + 2e2 + 3e2 + 4e2 + 5e2 + 6e2
+fold_11 #= (1_000 * 2_000) + (3_000 * 4_000)
+fold_12 #= ((1 + 2) * (3 + 4) * (5 + 6)) - (7 * 8)
+fold_13 #= (9 ^ 2) + (10 ^ 3) - (11 * 12) + (13 * 14)
+fold_14 #= ((15 + 16) * 17) + ((18 + 19) * 20)
+fold_15 #= 21 * 22 * 23 + 24 * 25 * 26 - 27 * 28 * 29
+fold_16 #= ((30 + 31) / 2) + ((32 + 33) / 2)
+fold_17 #= (34 + 35 + 36 + 37 + 38 + 39 + 40) * 3
+fold_18 #= (41 * 42) - (43 * 44) + (45 * 46) - (47 * 48)
+fold_19 #= ((49 + 50) * (51 + 52)) / (53 + 54)
+fold_20 #= (55 ^ 2) * (56 ^ 2) / (57 ^ 2)
+
+-- Example: string builder
+build_message |name String, count Int| -> String:
+    copy message = "Hello " + name
+    if count > 1:
+        message += " you have " + count + " messages"
+    else:
+        message += " you have one message"
+    return message
+;
+
+-- Example: guard clauses
+guard |value Int| -> Bool:
+    if value < 0:
+        return false
+    if value > 1_000:
+        return false
+    return true
+;
+
+-- Example: default parameters
+render_box |title String = "Untitled", padding Int = 8| -> String:
+    return [:
+        <div class="box" style="padding: [padding]px;">
+            <h2>[title]</h2>
+            <div>[$slot]</div>
+        </div>
+    ]
+;
+
+-- Example: tuple-like pairs
+pair_1 #= ("alpha", 1)
+pair_2 #= ("beta", 2)
+pair_3 #= ("gamma", 3)
+pair_4 #= ("delta", 4)
+pair_5 #= ("epsilon", 5)
+
+-- Example: matrix rows
+row_1 #= {1, 0, 0}
+row_2 #= {0, 1, 0}
+row_3 #= {0, 0, 1}
+row_4 #= {1, 1, 0}
+row_5 #= {0, 1, 1}
+row_6 #= {1, 0, 1}
+row_7 #= {2, 2, 2}
+row_8 #= {3, 3, 3}
+row_9 #= {4, 4, 4}
+row_10 #= {5, 5, 5}
+
+-- Example: coordinate helpers
+origin_point #= Point(0, 0)
+unit_x #= Point(1, 0)
+unit_y #= Point(0, 1)
+diagonal #= Point(1, 1)
+offset #= Point(10, 20)
+
+-- Example: label records
+label_a #= Label("alpha", 1, true)
+label_b #= Label("beta", 2, false)
+label_c #= Label("gamma", 3, true)
+label_d #= Label("delta", 4, false)
+label_e #= Label("epsilon", 5, true)
+
+-- Example: status handling
+handle |status Status| -> String:
+    match status:
+        Ready => return "ready"
+        Running | progress, | => return "running at " + progress
+        Failed | message, code, | => return message + " (" + code + ")"
+    ;
+;
+
+-- Example: option composition
+compose |a Maybe Int, b Maybe Int| -> Maybe Int:
+    match a:
+        Empty => return Empty
+        Some | x, | => match b:
+            Empty => return Empty
+            Some | y, | => return Some(x + y)
+    ;
+;
+
+-- Example: import surface
+import @core/io {print, line, debug, warn, error, input}
+import @core/math {floor, ceil, round, abs, sqrt, pow}
+import @core/text {length, contains, prefix, suffix, trim}
+import @core/collections {Map, map_from, keys, values}
+import @core/random {random_float, random_int}
+import @core/time {Duration, Timestamp, now}
+import @web/canvas {Canvas, draw_rect, fill_circle, stroke_line, clear}
+
+-- Example: module exports
+export:
+    render
+    paint
+    parse
+    total
+    validate
+    classify
+    format
+    Label
+    Point
+    Maybe
+    Color
+    Status
+    DISPLAY_TEXT
+    SERIALIZABLE
+    COMPARABLE
+    FROZEN
+;
+
+-- Example: long prose comment block
+-- This fixture intentionally mixes complete current word groups, planned
+-- non-token words, compound operators, numeric forms, strings with escapes,
+-- unicode identifiers, function declarations, receiver methods, trait
+-- declarations, conformances, generic bounds, directives, import paths,
+-- grouped imports, ALL_CAPS constants and plain identifiers so the compile-time
+-- formatter exercises every scanning branch in one deterministic workload.
+-- The body stays balanced and clean because benchmark cases require a clean
+-- compile and the fixture must not become correctness coverage itself.
+
+-- Example: final assertions
+assert code_snippet.length() > 0
+assert renderer != none
+assert total >= 0
+assert config.theme != ""
+
+-- Example: closing state
+last_value #= 42
+last_message #= "done"
+]
+
+render || -> String:
+    return [code_snippet]
+;
+
+[render()]

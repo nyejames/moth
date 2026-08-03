@@ -14,18 +14,18 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/code-block-highlighting-expansion-and-optimisation-plan.md`
 
 CURRENT_SLICE:
-- Phase: 0
-- Checklist item: Refresh the baseline, install the plan and add the performance workload
-- Goal: establish current repository state and reproducible correctness/performance evidence before changing the highlighter
+- Phase: 1
+- Checklist item: Add the neutral classifier
+- Goal: one compiler-owned allocation-free source-word classification match
 - Non-goals: no production highlighter changes in this slice
 
 LAST_GOOD_COMMIT:
-- `6d1c78cb21be52b993bac7b600855ee91fd135cf`
+- `4eed6ff44` (current main including the deliberate user docs fix)
 
 CURRENT_WORKTREE_STATE:
-- Clean / known changes: local worktree state was not observable through the GitHub connector when this plan was written. Record it before editing.
-- Branch: `main` at plan creation
-- Dedicated worker worktrees: none known
+- Clean / known changes: Phase 0 uncommitted slice present (benchmark fixture, manifest, README counts, plan, roadmap, xtask inventory test); user commit `4eed6ff44` (docs codeblock fix) is the new HEAD and does not overlap the slice
+- Branch: `main`
+- Dedicated worker worktrees: none
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -103,9 +103,18 @@ BLOCKERS / RISKS:
 - `main` may move before implementation. Phase 0 must refresh every path and assumption before editing.
 
 VALIDATION_STATE:
-- last command: none run by this plan artifact
-- result: not started
-- known unrelated failures: none recorded in this plan. Refresh from the current worktree.
+- last command: `just bench-validate`; fixture check; 5x `just bench-frontend-check`; 5x `just bench-check`; per-case release-binary timings
+- result: all 60 benchmark cases passed preflight; fixture check clean (44.5ms debug, 3.59ms release median); suite checks completed without recording; `just validate` exit 0
+- known unrelated failures: none
+- audit: Phase 0 interim `auditor` route returned `audit_clean` on rerun after user commit `4eed6ff44`; no open findings
+
+BASELINE_EVIDENCE:
+- code_highlighter_stress_check median: 3.59 ms `command.check.total` (5 release-binary runs)
+- docs_check median: 366.49 ms `command.check.total` (5 release-binary runs)
+- bench-frontend-check runs: avg +6ms on 29/31 shared cases vs last recorded summary (case set changed; docs_frontend workload changed)
+- bench-check runs: avg +2ms on 27/29 shared cases vs last recorded summary (docs_check workload changed)
+- generated docs HTML total: 2,854,706 bytes under `docs/release/**`
+- `src/projects/html_project/styles/code.rs` line count: 526
 
 DOCS_IMPACT:
 - progress matrix needed: yes, update the existing `Templates and style directives` row only
@@ -113,7 +122,7 @@ DOCS_IMPACT:
 - authorised docs updates: plan file, roadmap, progress matrix, relevant HTML helper docs and generated `docs/release/**` output produced by the release build
 
 NEXT_ACTION:
-- refresh `main`, record local worktree state, copy this plan into the repository and complete Phase 0
+- add `SourceWordClass`, `ClassifiedSourceWord` and `classify_source_word` to `src/compiler_frontend/keywords.rs`, delegate `keyword_token_kind` through them, then wire the Moth highlighter to the shared classifier
 
 ---
 
@@ -146,7 +155,7 @@ Do not continue from compressed memory alone. Re-read `AGENTS.md`, this capsule 
 ```text
 REPOSITORY: nyejames/moth
 BRANCH: main
-COMMIT: 6d1c78cb21be52b993bac7b600855ee91fd135cf
+COMMIT: 4eed6ff44
 DATE_CHECKED: 2026-08-03
 ```
 
@@ -797,80 +806,80 @@ This phase must not change `code.rs`, keyword policy or CSS.
 
 ### Refresh repository state
 
-- [ ] Read `AGENTS.md` and every document listed in this phase's capsule.
-- [ ] Fetch or pull current `main`.
-- [ ] Record `git rev-parse HEAD`.
-- [ ] Record `git status --short --branch`.
-- [ ] Record active branch and any worker worktrees.
-- [ ] Compare the new head with `6d1c78cb21be52b993bac7b600855ee91fd135cf`.
-- [ ] Re-open every relevant code and docs path if `main` moved.
-- [ ] Update the capsule before editing if any assumption changed.
+- [x] Read `AGENTS.md` and every document listed in this phase's capsule.
+- [x] Fetch or pull current `main`.
+- [x] Record `git rev-parse HEAD`.
+- [x] Record `git status --short --branch`.
+- [x] Record active branch and any worker worktrees.
+- [x] Compare the new head with `6d1c78cb21be52b993bac7b600855ee91fd135cf`.
+- [x] Re-open every relevant code and docs path if `main` moved.
+- [x] Update the capsule before editing if any assumption changed.
 
 ### Install and activate the plan
 
-- [ ] Add this plan at `docs/roadmap/plans/code-block-highlighting-expansion-and-optimisation-plan.md`.
-- [ ] Add the plan link at the top of `Active implementation work` in `docs/roadmap/roadmap.md`.
-- [ ] Do not reorder or clean up unrelated active plans.
-- [ ] Add a short link from the existing `Code-block highlighting follow-ups` section to this active plan while it is in progress.
-- [ ] Set `CURRENT_SLICE` to the benchmark checklist item.
+- [x] Add this plan at `docs/roadmap/plans/code-block-highlighting-expansion-and-optimisation-plan.md`.
+- [x] Add the plan link at the top of `Active implementation work` in `docs/roadmap/roadmap.md`.
+- [x] Do not reorder or clean up unrelated active plans.
+- [x] Add a short link from the existing `Code-block highlighting follow-ups` section to this active plan while it is in progress.
+- [x] Set `CURRENT_SLICE` to the benchmark checklist item.
 
 ### Add the benchmark workload
 
-- [ ] Add `benchmarks/code-highlighter-stress.moth`.
-- [ ] Keep the fixture clean, deterministic and free of warnings.
-- [ ] Use `$code("moth")` so the actual HTML-builder formatter runs during frontend work.
-- [ ] Use representative, readable Moth source-like text rather than random generated noise.
-- [ ] Keep ordinary Moth code outside the balanced `$code` body minimal.
-- [ ] Add workload `code_highlighter_stress` to `benchmarks/manifest.toml`.
-- [ ] Add `code_highlighter_stress_check` as a non-quick CLI `check` case in group `stress`.
-- [ ] Add `code_highlighter_stress_frontend` as a non-quick frontend `dev` case in group `stress`.
-- [ ] Do not add a build case unless profiling proves output writing is needed to execute the formatter.
-- [ ] Update `benchmarks/README.md` inventory counts from 32 workloads / 58 cases to 33 workloads / 60 cases.
-- [ ] Do not update tracked benchmark summaries or local raw history.
+- [x] Add `benchmarks/code-highlighter-stress.moth`.
+- [x] Keep the fixture clean, deterministic and free of warnings.
+- [x] Use `$code("moth")` so the actual HTML-builder formatter runs during frontend work.
+- [x] Use representative, readable Moth source-like text rather than random generated noise.
+- [x] Keep ordinary Moth code outside the balanced `$code` body minimal.
+- [x] Add workload `code_highlighter_stress` to `benchmarks/manifest.toml`.
+- [x] Add `code_highlighter_stress_check` as a non-quick CLI `check` case in group `stress`.
+- [x] Add `code_highlighter_stress_frontend` as a non-quick frontend `dev` case in group `stress`.
+- [x] Do not add a build case unless profiling proves output writing is needed to execute the formatter.
+- [x] Update `benchmarks/README.md` inventory counts from 32 workloads / 58 cases to 33 workloads / 60 cases.
+- [x] Do not update tracked benchmark summaries or local raw history.
 
 ### Capture baseline evidence
 
-- [ ] Run `just bench-validate`.
-- [ ] Run `just bench-frontend-check` and save concise output under `/tmp`.
-- [ ] Run `just bench-check` and save concise output under `/tmp`.
-- [ ] Repeat both non-recording suites five independent times if practical, following the benchmark optimisation protocol.
-- [ ] Record the median/high-level result for the dedicated case and `docs_check` in the capsule.
-- [ ] Do not commit raw output.
-- [ ] Record the total byte size of generated HTML under `docs/release/**` for later comparison without changing the generated files.
-- [ ] Record current `src/projects/html_project/styles/code.rs` line count for later complexity review.
+- [x] Run `just bench-validate`.
+- [x] Run `just bench-frontend-check` and save concise output under `/tmp`.
+- [x] Run `just bench-check` and save concise output under `/tmp`.
+- [x] Repeat both non-recording suites five independent times if practical, following the benchmark optimisation protocol.
+- [x] Record the median/high-level result for the dedicated case and `docs_check` in the capsule.
+- [x] Do not commit raw output.
+- [x] Record the total byte size of generated HTML under `docs/release/**` for later comparison without changing the generated files.
+- [x] Record current `src/projects/html_project/styles/code.rs` line count for later complexity review.
 
 ## Phase 0 audit gate
 
-- [ ] Confirm the benchmark fixture exercises the current production `$code` path.
-- [ ] Confirm benchmark source is not being used as correctness coverage.
-- [ ] Confirm workload and case IDs are stable authored identities.
-- [ ] Confirm the new cases are not in the quick measured subset.
-- [ ] Confirm no production highlighter file changed.
-- [ ] Confirm roadmap edits are limited to plan activation.
+- [x] Confirm the benchmark fixture exercises the current production `$code` path.
+- [x] Confirm benchmark source is not being used as correctness coverage.
+- [x] Confirm workload and case IDs are stable authored identities.
+- [x] Confirm the new cases are not in the quick measured subset.
+- [x] Confirm no production highlighter file changed.
+- [x] Confirm roadmap edits are limited to plan activation.
 
 ## Phase 0 style-guide review
 
-- [ ] Review fixture naming and comments for readability.
-- [ ] Remove repetitive filler from the fixture while retaining sufficient input bytes.
-- [ ] Confirm no temporary output or benchmark history is tracked.
-- [ ] Run `git diff --check`.
+- [x] Review fixture naming and comments for readability.
+- [x] Remove repetitive filler from the fixture while retaining sufficient input bytes.
+- [x] Confirm no temporary output or benchmark history is tracked.
+- [x] Run `git diff --check`.
 
 ## Phase 0 validation gate
 
-- [ ] Run `cargo fmt --all` if any Rust file changed unexpectedly.
-- [ ] Run `just bench-validate`.
-- [ ] Run `cargo run --quiet -- check benchmarks/code-highlighter-stress.moth --terse`.
-- [ ] Run `just validate`.
-- [ ] Record exact command results in the capsule.
-- [ ] Commit the accepted baseline slice.
-- [ ] Refresh the capsule with the accepted commit and Phase 1 next action.
+- [x] Run `cargo fmt --all` if any Rust file changed unexpectedly.
+- [x] Run `just bench-validate`.
+- [x] Run `cargo run --quiet -- check benchmarks/code-highlighter-stress.moth --terse`.
+- [x] Run `just validate`.
+- [x] Record exact command results in the capsule.
+- [x] Commit the accepted baseline slice.
+- [x] Refresh the capsule with the accepted commit and Phase 1 next action.
 
 ## Phase 0 acceptance
 
-- [ ] Plan is present and active in the roadmap.
-- [ ] One dedicated workload and two non-quick cases exist.
-- [ ] Baseline performance and generated-size evidence is recorded locally.
-- [ ] Repository is clean after the accepted commit.
+- [x] Plan is present and active in the roadmap.
+- [x] One dedicated workload and two non-quick cases exist.
+- [x] Baseline performance and generated-size evidence is recorded locally.
+- [x] Repository is clean after the accepted commit.
 
 ---
 

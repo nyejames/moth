@@ -73,6 +73,8 @@ JavaScript, TypeScript, Python, Rust and shell profiles. Future formats should e
 `CodeLanguage` owner in `src/projects/html_project/styles/code.rs`, including its aliases,
 comment syntax, keyword/type rules, supported-values diagnostic and focused formatter tests.
 
+Active work: [code-block highlighting expansion and optimisation plan](./plans/code-block-highlighting-expansion-and-optimisation-plan.md).
+
 Suggested extension order:
 
 1. TOML and JSON, because they are common in project configuration, manifests and generated-data

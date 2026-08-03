@@ -494,6 +494,15 @@ fn repository_manifest_has_complete_ordered_authority() {
             generated_roots: &[],
         },
         ExpectedWorkload {
+            id: "code_highlighter_stress",
+            entry: "benchmarks/code-highlighter-stress.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/code-highlighter-stress.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
             id: "type_stress",
             entry: "benchmarks/type-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
@@ -828,6 +837,13 @@ fn repository_manifest_has_complete_ordered_authority() {
             runner: CHECK,
         },
         ExpectedCase {
+            id: "code_highlighter_stress_check",
+            workload_id: "code_highlighter_stress",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
             id: "type_stress_check",
             workload_id: "type_stress",
             group: "stress",
@@ -1007,6 +1023,13 @@ fn repository_manifest_has_complete_ordered_authority() {
             workload_id: "template_stress",
             group: "stress",
             quick: true,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "code_highlighter_stress_frontend",
+            workload_id: "code_highlighter_stress",
+            group: "stress",
+            quick: false,
             runner: FRONTEND,
         },
         ExpectedCase {

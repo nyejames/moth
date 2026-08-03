@@ -29,6 +29,13 @@ fingerprint_roots = ["benchmarks/template-stress.moth"]
 fingerprint_excludes = []
 
 [[workload]]
+id = "code_highlighter_stress"
+entry = "benchmarks/code-highlighter-stress.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/code-highlighter-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
 id = "type_stress"
 entry = "benchmarks/type-stress.moth"
 fingerprint_mode = "full_tree"
@@ -276,6 +283,17 @@ args = []
 [[case]]
 id = "template_stress_check"
 workload = "template_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "code_highlighter_stress_check"
+workload = "code_highlighter_stress"
 group = "stress"
 quick = false
 expectation = "clean"
@@ -562,6 +580,16 @@ id = "template_stress_frontend"
 workload = "template_stress"
 group = "stress"
 quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "code_highlighter_stress_frontend"
+workload = "code_highlighter_stress"
+group = "stress"
+quick = false
 expectation = "clean"
 [case.runner]
 kind = "frontend"
