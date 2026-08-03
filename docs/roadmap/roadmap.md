@@ -11,11 +11,10 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-1. [Language documentation migration Stage C review](./plans/docs-language-migration.md)
+- [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md) (resume at R5C1)
 
 ## Queued implementation chain
 
-- [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md) (resume at R5C1)
 - [TIR follow up cleanup](./plans/tir-corrections-and-simplification-plan.md)
 - [Anonymous const records](./plans/anonymous-const-records-plan.md)
 - [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
