@@ -17,11 +17,14 @@ This is an xtask hardening plan. It does not redesign compiler semantics, Stage 
 
 ```text
 WORK_ID: benchmark-system-final-hardening
-BASE_REVISION: 442a9ab7d34b5e2c44420d9a64327671950b5bc4
-STATUS: ready for implementation
+WORK_SOURCE: docs/roadmap/plans/benchmark-system-final-hardening-plan.md
+BASE_REVISION: 6750c9a57238203ba83b2a31d74d6a19ecf36d70
+BRANCH: codex/benchmark-system-final-hardening (worktree /Users/aneirinjames/projects/beanstalk/moth-benchmark-final-hardening)
+STATUS: active
 ACCEPTED: 32 workloads, 58 typed cases, shared preflight/execution, clean-only benchmark expectations, protocol-aware normal/profile history, isolated file-entry builds, bounded bench-ci, production output-plan integration
 OPEN_CORRECTIONS: dirty recorded baselines, profile snapshot/fingerprint ordering and optional current identity, infallible Drop-only directory cleanup, duplicate CLI/frontend orchestration, stringly benchmark groups, stale documentation
-NEXT_ACTION: complete Phase 0, then Phase 1 only and stop for review
+NEXT_ACTION: implement Phase 1 (clean committed recording), then run the Phase 1 audit and checkpoint commit
+VALIDATION: Phase 0 baseline green on branch 6750c9a57: cargo fmt --all -- --check; cargo test --package xtask (538 passed); just bench-validate (58/58 preflight); just bench-ci (58 preflight, 8 CLI + 10 frontend quick); just validate (clippy native/linux/windows, 3945 workspace tests + 538 xtask, 1816 integration cases, docs check, bench-ci) all pass
 ```
 
 Keep this capsule concise as work advances. Git history is the implementation record.
