@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -738,16 +738,16 @@ canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'
 [p: A paragraph built from the @html p helper.]
 
 [codeblock, $code(&quot;moth&quot;): value = 42]</code></pre><p>A <code>.moth</code> file that needs specific <code>@html</code> symbols can import them explicitly:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>table, th, td<span class='moth-code-parenthesis'>}</span></code></pre><p>Same-directory module root constants and <code>@html</code> constants don&#39;t shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See <a href="../../../moth-templates/#template-scope">Template scope</a> for the full collision contract.</p><h3>Exported constants</h3><p>All helpers are compile-time <code>#String</code> constants that produce HTML strings. They fold at compile time and produce no runtime code.</p><h4>HTML tags</h4><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Helper</p></th><th scope="col" style=""><p> Produces</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>p</code></p></td> <td style=""><p> <code>&lt;p&gt;</code> paragraph</p></td>
         </tr><tr style="">
              <td style=""><p> <code>h1</code> through <code>h6</code></p></td> <td style=""><p> heading levels</p></td>
@@ -764,18 +764,18 @@ canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'
         </tr><tr style="">
              <td style=""><p> <code>canvas</code></p></td> <td style=""><p> <code>&lt;canvas&gt;</code> with <code>id</code> and <code>style</code> slots</p></td>
         </tr>
-        
-</table><h4>Formatting helpers</h4><table style="">
-        
-        <tr style="">
             
+</table><h4>Formatting helpers</h4><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Helper</p></th><th scope="col" style=""><p> Produces</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>bold</code></p></td> <td style=""><p> <code>&lt;b&gt;</code> bold text</p></td>
         </tr><tr style="">
              <td style=""><p> <code>italic</code></p></td> <td style=""><p> <code>&lt;i&gt;</code> italic text</p></td>
@@ -784,18 +784,18 @@ canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'
         </tr><tr style="">
              <td style=""><p> <code>strikethrough</code></p></td> <td style=""><p> <code>&lt;s&gt;</code> strikethrough text</p></td>
         </tr>
-        
-</table><h4>Code and tables</h4><table style="">
-        
-        <tr style="">
             
+</table><h4>Code and tables</h4><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Helper</p></th><th scope="col" style=""><p> Produces</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>codeblock</code></p></td> <td style=""><p> <code>&lt;pre&gt;</code> code block</p></td>
         </tr><tr style="">
              <td style=""><p> <code>table</code></p></td> <td style=""><p> styled <code>&lt;table&gt;</code> with header and row slots</p></td>
@@ -804,18 +804,18 @@ canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'
         </tr><tr style="">
              <td style=""><p> <code>td</code></p></td> <td style=""><p> <code>&lt;td&gt;</code> data cell</p></td>
         </tr>
-        
-</table><h4>Utility style inserts</h4><p>These constants produce CSS property values for style slots.</p><table style="">
-        
-        <tr style="">
             
+</table><h4>Utility style inserts</h4><p>These constants produce CSS property values for style slots.</p><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Helper</p></th><th scope="col" style=""><p> CSS</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>center</code></p></td> <td style=""><p> <code>text-align: center;</code></p></td>
         </tr><tr style="">
              <td style=""><p> <code>right</code></p></td> <td style=""><p> <code>text-align: right;</code></p></td>
@@ -828,25 +828,25 @@ canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'
         </tr><tr style="">
              <td style=""><p> <code>larger</code></p></td> <td style=""><p> <code>font-size: larger;</code></p></td>
         </tr>
-        
-</table><h3>Canvas wrapper</h3><p><code>@html</code> exports a <code>Canvas</code> struct and two functions that wrap <code>@web/canvas</code> into a source-owned method-style API.</p><table style="">
-        
-        <tr style="">
             
+</table><h3>Canvas wrapper</h3><p><code>@html</code> exports a <code>Canvas</code> struct and two functions that wrap <code>@web/canvas</code> into a source-owned method-style API.</p><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Name</p></th><th scope="col" style=""><p> Signature</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>Canvas</code></p></td> <td style=""><p> struct with one field <code>context Canvas2d</code></p></td>
         </tr><tr style="">
              <td style=""><p> <code>get_canvas</code></p></td> <td style=""><p> <code>|id String| -&gt; Canvas, Error!</code></p></td>
         </tr><tr style="">
              <td style=""><p> <code>get_canvas_context</code></p></td> <td style=""><p> <code>|id String| -&gt; Canvas2d, Error!</code></p></td>
         </tr>
-        
+            
 </table><p>The <code>Canvas</code> struct provides receiver methods for drawing: <code>set_fill_style</code>, <code>fill_rect</code>, <code>clear_rect</code> and <code>stroke_rect</code>. Each takes <code>~Canvas</code> (mutable receiver) and delegates to the underlying <code>@web/canvas</code> free functions.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>get_canvas<span class='moth-code-parenthesis'>}</span>
 
 canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> get_canvas<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;my-canvas&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>

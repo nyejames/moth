@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -742,16 +742,16 @@ width <span class='moth-code-operator'>=</span> canvas_width<span class='moth-co
     <p><code>@web/canvas</code> provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@web/canvas</code> ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the standard library expands.</p><h3>Import roots</h3><p>Import individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>web<span class='moth-code-operator'>/</span>canvas <span class='moth-code-parenthesis'>{</span>get_canvas, context_<span class='moth-code-number'>2</span>d, fill_rect<span class='moth-code-parenthesis'>}</span>
 
 import <span class='moth-code-operator'>@</span>web<span class='moth-code-operator'>/</span>canvas</code></pre><h3>Opaque types</h3><p><code>@web/canvas</code> exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through <code>@web/canvas</code> functions.</p><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Type</p></th><th scope="col" style=""><p> Description</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>CanvasElement</code></p></td> <td style=""><p> A <code>&lt;canvas&gt;</code> DOM element handle</p></td>
         </tr><tr style="">
              <td style=""><p> <code>Canvas2d</code></p></td> <td style=""><p> A 2D rendering context handle</p></td>
@@ -766,18 +766,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>CanvasTextMetrics</code></p></td> <td style=""><p> A text measurement result handle</p></td>
         </tr>
-        
-</table><p>All opaque types lower to object references in the JS backend. The Wasm backend does not support <code>@web/canvas</code> and rejects reachable calls before lowering.</p><h3>Canvas element management</h3><table style="">
-        
-        <tr style="">
             
+</table><p>All opaque types lower to object references in the JS backend. The Wasm backend does not support <code>@web/canvas</code> and rejects reachable calls before lowering.</p><h3>Canvas element management</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>get_canvas</code></p></td> <td style=""><p> <code>id String</code></p></td> <td style=""><p> <code>CanvasElement, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>create_canvas</code></p></td> <td style=""><p> <code>width Int, height Int</code></p></td> <td style=""><p> <code>CanvasElement</code></p></td> <td style=""><p> shared</p></td>
@@ -810,18 +810,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>to_data_url_quality</code></p></td> <td style=""><p> <code>canvas CanvasElement, mime_type String, quality Float</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
-</table><h3>Image queries</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Image queries</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>image_width</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>image_height</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
@@ -832,18 +832,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>image_is_loaded</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
-</table><h3>Context state</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Context state</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>save</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>restore</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -852,36 +852,36 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>is_context_lost</code></p></td> <td style=""><p> <code>ctx Canvas2d</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
-</table><h3>Rectangles</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Rectangles</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>clear_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>fill_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>stroke_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Fill and stroke style</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Fill and stroke style</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>set_fill_style</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, color String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_stroke_style</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, color String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -894,34 +894,34 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>set_stroke_pattern</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, pattern CanvasPattern</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Compositing</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Compositing</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>set_global_alpha</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, alpha Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_global_composite_operation</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, operation String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Line style</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Line style</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>set_line_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, width Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_line_cap</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, line_cap String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -936,18 +936,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>set_line_dash_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, offset Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Text rendering settings</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Text rendering settings</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>set_font</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, font String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_text_align</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, align String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -970,18 +970,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>set_lang</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, lang String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Image smoothing, filter and shadow</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Image smoothing, filter and shadow</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>set_image_smoothing_enabled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, enabled Bool</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_image_smoothing_quality</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, quality String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -994,18 +994,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>set_shadow_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Path construction</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Path construction</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>begin_path</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>move_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -1032,18 +1032,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>ellipse_counterclockwise</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Fill, stroke and clip</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Fill, stroke and clip</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>fill</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>fill_even_odd</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -1058,18 +1058,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>is_point_in_stroke</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Float, y Float</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
-</table><h3>Transformations</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Transformations</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>translate</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>rotate</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, angle Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -1082,18 +1082,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>reset_transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Text drawing</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Text drawing</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>fill_text</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>fill_text_max_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float, max_width Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
@@ -1104,18 +1104,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>measure_text</code></p></td> <td style=""><p> <code>ctx Canvas2d, text String</code></p></td> <td style=""><p> <code>CanvasTextMetrics</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
-</table><h3>Text metrics</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Text metrics</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>text_width</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>text_actual_bounding_box_left</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
@@ -1130,18 +1130,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>text_font_bounding_box_descent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
-</table><h3>Gradients</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Gradients</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>create_linear_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, x0 Float, y0 Float, x1 Float, y1 Float</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>create_radial_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, x0 Float, y0 Float, r0 Float, x1 Float, y1 Float, r1 Float</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
@@ -1150,34 +1150,34 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>add_color_stop</code></p></td> <td style=""><p> <code>gradient ~CanvasGradient, offset Float, color String</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><h3>Patterns</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Patterns</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>create_pattern</code></p></td> <td style=""><p> <code>ctx Canvas2d, image CanvasImage, repetition String</code></p></td> <td style=""><p> <code>CanvasPattern, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>create_canvas_pattern</code></p></td> <td style=""><p> <code>ctx Canvas2d, canvas CanvasElement, repetition String</code></p></td> <td style=""><p> <code>CanvasPattern, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
-</table><h3>Image drawing</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Image drawing</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>draw_image</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, x Float, y Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>draw_image_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
@@ -1188,18 +1188,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>draw_canvas_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
-</table><p>Image drawing functions fail with <code>Error!</code> when the image has not finished loading.</p><h3>Image data</h3><table style="">
-        
-        <tr style="">
             
+</table><p>Image drawing functions fail with <code>Error!</code> when the image has not finished loading.</p><h3>Image data</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>get_image_data</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Int, y Int, width Int, height Int</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>create_image_data</code></p></td> <td style=""><p> <code>ctx Canvas2d, width Int, height Int</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
@@ -1214,18 +1214,18 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>image_data_height</code></p></td> <td style=""><p> <code>image_data CanvasImageData</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
-</table><h3>Pixel access</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Pixel access</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>image_data_get_red</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>image_data_get_green</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
@@ -1238,7 +1238,7 @@ import <span class='moth-code-operator'>@</span>web<span class='moth-code-operat
         </tr><tr style="">
              <td style=""><p> <code>image_data_clear_pixel</code></p></td> <td style=""><p> <code>image_data ~CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
-        
+            
 </table><p>Pixel getters and setters fail with <code>Error!</code> when coordinates fall outside the image data bounds. Channel values clamp to 0 through 255.</p><h3>Access and return contracts</h3><p>Functions that mutate the context take <code>~Canvas2d</code> (mutable access). Query functions take <code>Canvas2d</code> (shared access). The same pattern applies to <code>~CanvasElement</code>, <code>~CanvasGradient</code> and <code>~CanvasImageData</code>. Fresh values from creation functions satisfy mutable parameters without <code>~</code>. Existing places require explicit <code>~</code> at the call site.</p><p>All parameters stay positional-only. Named arguments are not supported because binding-backed packages do not expose source-function features.</p><h3>Opaque type rules</h3><ul><li>Do not construct opaque types with struct syntax.</li><li>Do not inspect opaque type fields.</li><li>Opaque types have no source-visible methods. Use the free functions.</li><li>The <code>@html</code> package provides a <code>Canvas</code> wrapper struct with receiver methods for a more ergonomic drawing API.</li></ul><h3>Backend behaviour</h3><p>The JS backend fully supports <code>@web/canvas</code>. When canvas functions are reachable, the build emits the <code>canvas.js</code> runtime asset, a generated glue module and an import map entry for <code>@moth/runtime</code>.</p><p>The Wasm backend rejects reachable <code>@web/canvas</code> calls before lowering. Canvas support requires a browser JS environment.</p><h3>Teardown</h3><p><code>@web/canvas</code> defines no teardown, close or disposal functions. Opaque handles are managed by the host JavaScript runtime.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path imports such as <code>import @web/canvas/get_canvas</code> face rejection. Use grouped or namespace imports.</li><li>Named arguments are not supported. Binding-backed calls stay positional-only.</li><li>The package does not expose receiver methods, source-defined types or constants.</li><li>Opaque types cannot be constructed or inspected from Moth source.</li></ul><h3>Deferred surfaces</h3><p><code>@web/canvas</code> ships as a skeleton. Deferred surfaces include async image-loading helpers, <code>toBlob</code> and <code>captureStream</code>, raw typed-array and arbitrary line-dash array access, <code>Path2D</code>, <code>DOMMatrix</code>, <code>OffscreenCanvas</code>, <code>ImageBitmap</code>, video sources and WebGL. These will arrive as the language and external package ABI mature. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="../../#import-paths">Import paths</a>.</li><li>For the <code>@html</code> source-backed wrapper see <a href="../html">@html</a>.</li></ul>
 </div>
 </fieldset></section>

@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -732,16 +732,16 @@ result <span class='moth-code-operator'>=</span> parse<span class='moth-code-par
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>Moth keeps the source language small. Compiler complexity is acceptable when it makes the programmer-facing model simpler, safer and more predictable. Keep source behaviour statically resolved and locally inspectable. Hide backend optimisation behind stable semantics so implementation techniques do not become source-language obligations.</p><h3>Central bias</h3><ul><li>keep the source language small, explicit and statically inspectable</li><li>prefer constrained built-in mechanisms over general metaprogramming</li><li>prefer static resolution over runtime dynamism</li><li>keep backend optimisations hidden behind stable source semantics</li><li>avoid features that need pervasive solver-heavy reasoning</li></ul><h3>Preferred constrained mechanisms</h3><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Need</p></th><th scope="col" style=""><p> Preferred mechanism</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> Compile-time generation</p></td> <td style=""><p> Templates, constants and builder directives</p></td>
         </tr><tr style="">
              <td style=""><p> Static reuse</p></td> <td style=""><p> Generic functions and explicit trait bounds</p></td>
@@ -766,7 +766,7 @@ result <span class='moth-code-operator'>=</span> parse<span class='moth-code-par
         </tr><tr style="">
              <td style=""><p> Performance</p></td> <td style=""><p> Hidden compiler and backend optimisation</p></td>
         </tr>
-        
+            
 </table><h3>Design review questions</h3><ul><li>Does this introduce a new source category when an existing mechanism is enough?</li><li>Does it make behaviour more implicit?</li><li>Does it need whole-program or solver-heavy reasoning?</li><li>Does it introduce erased runtime machinery?</li><li>Does it leak backend representation?</li><li>Does it expose optimisation mechanics?</li><li>Is it accepted but unimplemented, undecided or intentionally excluded?</li><li>Does it make code harder to inspect locally?</li></ul><h3>Read next</h3><ul><li><a href="#deferred-and-outside-scope">Deferred, open and outside scope</a></li><li><a href="#excluded-language-families">Excluded language families</a></li></ul>
 </div>
 </fieldset></section>

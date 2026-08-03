@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -763,52 +763,52 @@ io.line<span class='moth-code-parenthesis'>(</span>to_iso_string<span class='mot
 import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>time
 
 previous <span class='moth-code-operator'>=</span> time.mark_now<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Opaque types</h3><p>The package exposes three opaque types. Do not construct them with struct syntax or inspect their fields. Pass them to the package functions.</p><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Type</p></th><th scope="col" style=""><p> Purpose</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>Duration</code></p></td> <td style=""><p> Signed elapsed amount</p></td>
         </tr><tr style="">
              <td style=""><p> <code>TimeMark</code></p></td> <td style=""><p> Monotonic clock mark for deltas and frame timing</p></td>
         </tr><tr style="">
              <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> UTC wall-clock instant for logs, storage and system boundaries</p></td>
         </tr>
-        
-</table><p>All three use the handle ABI. They carry no source-visible fields.</p><h3>Monotonic clock functions</h3><table style="">
-        
-        <tr style="">
             
+</table><p>All three use the handle ABI. They carry no source-visible fields.</p><h3>Monotonic clock functions</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Error</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>mark_now()</code></p></td> <td style=""><p> none</p></td> <td style=""><p> <code>TimeMark</code></p></td> <td style=""><p> no</p></td>
         </tr><tr style="">
              <td style=""><p> <code>elapsed_since(start)</code></p></td> <td style=""><p> <code>TimeMark</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
         </tr><tr style="">
              <td style=""><p> <code>duration_between(start, end)</code></p></td> <td style=""><p> <code>TimeMark, TimeMark</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
         </tr>
-        
-</table><p><code>mark_now()</code> returns the current monotonic mark. <code>elapsed_since(start)</code> returns the duration from <code>start</code> to now. <code>duration_between(start, end)</code> returns the duration from <code>start</code> to <code>end</code>.</p><h3>Wall-clock timestamp functions</h3><table style="">
-        
-        <tr style="">
             
+</table><p><code>mark_now()</code> returns the current monotonic mark. <code>elapsed_since(start)</code> returns the duration from <code>start</code> to now. <code>duration_between(start, end)</code> returns the duration from <code>start</code> to <code>end</code>.</p><h3>Wall-clock timestamp functions</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Error</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>timestamp_now()</code></p></td> <td style=""><p> none</p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> no</p></td>
         </tr><tr style="">
              <td style=""><p> <code>timestamp_from_unix_seconds(seconds)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> no</p></td>
@@ -817,7 +817,7 @@ previous <span class='moth-code-operator'>=</span> time.mark_now<span class='mot
         </tr><tr style="">
              <td style=""><p> <code>timestamp_from_iso_string(text)</code></p></td> <td style=""><p> <code>String</code></p></td> <td style=""><p> <code>Timestamp, Error!</code></p></td> <td style=""><p> yes</p></td>
         </tr>
-        
+            
 </table><p><code>timestamp_from_iso_string</code> is the only fallible function. Invalid ISO strings return through <code>Error!</code>.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>time <span class='moth-code-parenthesis'>{</span>
     <span class='moth-code-struct'>Timestamp,</span>
     timestamp_from_iso_string,
@@ -827,16 +827,16 @@ previous <span class='moth-code-operator'>=</span> time.mark_now<span class='mot
 created <span class='moth-code-operator'>=</span> timestamp_from_iso_string<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;not-a-date&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     then timestamp_from_unix_milliseconds<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0.0</span><span class='moth-code-parenthesis'>)</span>
 ;</code></pre><h3>Duration construction and helpers</h3><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Error</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>duration_from_seconds(seconds)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
         </tr><tr style="">
              <td style=""><p> <code>duration_from_milliseconds(milliseconds)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
@@ -851,25 +851,25 @@ created <span class='moth-code-operator'>=</span> timestamp_from_iso_string<span
         </tr><tr style="">
              <td style=""><p> <code>clamp(duration, min, max)</code></p></td> <td style=""><p> <code>Duration, Duration, Duration</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
         </tr>
-        
-</table><h3>Timestamp helpers</h3><table style="">
-        
-        <tr style="">
             
+</table><h3>Timestamp helpers</h3><table style="">
+            
+            <tr style="">
+                
             <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Error</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>unix_seconds(timestamp)</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> no</p></td>
         </tr><tr style="">
              <td style=""><p> <code>unix_milliseconds(timestamp)</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> no</p></td>
         </tr><tr style="">
              <td style=""><p> <code>to_iso_string(timestamp)</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> <code>String</code></p></td> <td style=""><p> no</p></td>
         </tr>
-        
+            
 </table><h3>Access and return contracts</h3><p>All parameters use shared access. No function requires mutable access. All return values stay fresh. <code>timestamp_from_iso_string</code> returns through <code>Error!</code> on invalid input. Every other function stays infallible.</p><h3>Backend behaviour</h3><p>HTML-JS lowers <code>mark_now</code> to <code>globalThis.performance.now()</code>. <code>timestamp_now</code> lowers to <code>Date.now()</code>. <code>to_iso_string</code> lowers to <code>(new Date(#0)).toISOString()</code>. Duration and timestamp construction helpers lower to inline JavaScript expressions.</p><p>HTML-Wasm lacks a Wasm lowering for these functions. See <a href="../../../progress">progress matrix</a> for current target availability.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path imports such as <code>import @core/time/mark_now</code> face rejection. Use grouped or namespace imports.</li><li>Named arguments are not supported. Binding-backed calls are positional-only.</li><li>Do not construct <code>Duration</code>, <code>TimeMark</code> or <code>Timestamp</code> with struct syntax.</li><li>Do not inspect opaque type fields directly.</li><li>The package does not expose receiver methods.</li></ul><h3>Deferred surfaces</h3><p>Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings remain deferred. Browser animation-frame integration belongs in a future web-specific package rather than <code>@core/time</code>. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="../../#import-paths">Import paths</a>.</li></ul>
 </div>
 </fieldset></section>

@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -399,16 +399,16 @@ td {
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 05. Tokenization</p><p>Lexical analysis cuts character streams into located tokens and prepares document source kinds for shared later stages.</p></section>
 <section class="container"><h1>From characters to located tokens</h1><p>A parser that stares at an undifferentiated character stream spends its life guessing. Where does the identifier end? Is <code>=</code> part of <code>==</code> or a lonely assignment? Did a string already open?</p><p><strong>Tokenization</strong> (lexical analysis) cuts the stream into <strong>tokens</strong>: small classified chunks with spelling and source locations. Later stages stop arguing about character boundaries and start arguing about meaning.</p><h2>Token boundaries and spelling</h2><p>A token carries at least:</p><ul><li>a <strong>kind</strong> (identifier, string literal, keyword-like form, delimiter, operator, ...)</li><li>the <strong>authored spelling</strong> as it appeared in source</li><li>a <strong>source location</strong> span pointing back at the file</li></ul><p>Take the page import:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>greeting <span class='moth-code-parenthesis'>{</span> greet <span class='moth-code-parenthesis'>}</span></code></pre><p>A lexer might emit a sequence in this spirit:</p><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Spelling</p></th><th scope="col" style=""><p> Kind family</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>import</code></p></td> <td style=""><p> keyword or identifier reserved by grammar</p></td>
         </tr><tr style="">
              <td style=""><p> <code>@greeting</code></p></td> <td style=""><p> package or module path atom</p></td>
@@ -419,7 +419,7 @@ td {
         </tr><tr style="">
              <td style=""><p> <code>}</code></p></td> <td style=""><p> delimiter</p></td>
         </tr>
-        
+            
 </table><p>Exact kind names live in the tokenizer. The teaching point stays fixed: boundaries enter here, meaning does not.</p><p>Identifiers, delimiters, operators and literals each become discrete pieces. The parser will arrange them. The type checker will judge them. The lexer only marks the boundaries.</p><p><strong>Diagram placeholder:</strong> Source characters become located token kinds</p><p><em>Caption: simplified lexer view.</em> <em>Question: where do boundaries enter the pipeline?</em></p><h2>Source locations</h2><p>Every useful diagnostic eventually points at text the author wrote. Locations make that possible without forcing every later stage to keep the entire file string beside every node forever.</p><p>A span says &quot;these characters in this source identity.&quot; When interface binding later fails to find <code>greet</code>, the diagnostic can underline the import name rather than shrug at &quot;somewhere in the module.&quot;</p><p>Tokenization attaches locations. It does not decide that <code>greet</code> is a function. That decision waits for binding and AST.</p><p><strong>Diagram placeholder:</strong> Token spans point back to exact source ranges</p><p><em>Caption: exact diagnostic principle, simplified data shape.</em> <em>Question: how can later stages point to authored text without reparsing?</em></p><h2>Code and document source kinds</h2><p>Not every file starts in the same lexical mode.</p><ul><li>Ordinary <strong><code>.moth</code></strong> starts in code mode.</li><li><strong>Moth template <code>.mtf</code></strong> starts in an implicit template body while preserving original source locations.</li><li>Plain <strong><code>.md</code></strong> is prepared before tokenization and does not use a tokenizer entry mode in the same way.</li></ul><p>Those paths converge. Moth template preparation synthesises an ordinary private <code>content #String</code> declaration whose initializer is a Markdown template over the body tokens. Markdown preparation can contribute the same declaration shape with a synthetic string literal. Later stages see ordinary declarations, not a forever-special document dialect in HIR.</p><p>The greeting project uses <code>.moth</code> files. Document kinds still matter because the same compiler owners serve docs sites and content imports without a second semantic pipeline.</p><p><strong>Diagram placeholder:</strong> moth, mtf and md use different entry preparation then converge</p><p><em>Caption: teaching simplification.</em> <em>Question: why avoid duplicate pipelines for documents and code?</em></p><h2>Lexical failures</h2><p>Some mistakes die at the first cut:</p><ul><li>invalid characters or escapes</li><li>malformed delimiters</li><li>symbolic spacing rules for operators, assignments and mutable declarations</li><li>numeric text that fails shared lexical grammar</li></ul><p><code>numeric_text</code> owns shared numeric grammar, normalisation, separators and exponents. Lexical numeric failure is not yet a semantic <code>Number</code> versus <code>Byte</code> debate. Semantic numeric types arrive later. Keep those layers separate when you read diagnostics.</p><h2>Boundary of ownership</h2><p>Tokenization recognises spelling, locations and delimiter context. It may reject unsupported directive forms at the syntax level through the merged directive registry.</p><p>It does <strong>not</strong>:</p><ul><li>resolve imports</li><li>build types</li><li>fold constants</li><li>understand templates as semantic structures</li><li>decide target support</li></ul><p>If a stage after the lexer rediscovers token boundaries from raw text, something has slipped.</p><h2>What can fail here</h2><ul><li>invalid character, escape, delimiter or lexical spacing</li><li>source-kind preparation failure</li><li>import, type and template semantic errors that only look lexical when misdiagnosed</li></ul><p>Defer semantic errors to their owning stages. A good lexer stays humble.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> give each source kind a separate parser and backend pipeline.</p><p><strong>Choice:</strong> adapt source kinds early, then share declaration and semantic stages.</p><p><strong>Benefit:</strong> one semantic owner for ordinary declarations and runtime lowering. Document content becomes data the rest of the compiler already understands.</p><p><strong>Cost:</strong> source-kind adapters must preserve locations and keep boundaries crisp.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> located tokens and retained source preparation.</li><li><strong>Current implementation:</strong> progress rows for source-kind coverage.</li><li><strong>Queued work:</strong> numeric roadmap may change later semantic ownership, not lexical token boundaries.</li><li><strong>Deferred or outside scope:</strong> tokenization does not infer target support or type identity.</li></ul><h2>Exit state</h2><p>You leave with located tokens and source-kind prepared payloads. Next: which declarations and import relationships those tokens describe.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../project-graphs-and-modules">Previous</a> / <a href="../declarations-imports-and-ordering">Next</a></p></section>
 <script>

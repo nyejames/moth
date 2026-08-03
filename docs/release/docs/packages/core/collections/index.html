@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -739,16 +739,16 @@ count <span class='moth-code-operator'>=</span> values.length<span class='moth-c
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p><code>@core/collections</code> forms the binding-backed Core package that provides runtime functions for compiler-owned collection methods. Authors do not import <code>@core/collections</code> directly. The compiler lowers collection receiver methods to calls against this package.</p><p><code>@core/collections</code> belongs to the Core origin package family with ExternalBinding backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3>Binding-backed behaviour</h3><p>The package registers five host functions that implement the compiler-owned collection member operations:</p><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Host function</p></th><th scope="col" style=""><p> Compiler-owned member</p></th><th scope="col" style=""><p> Receiver access</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>__moth_collection_get</code></p></td> <td style=""><p> <code>get(index)</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>__moth_collection_set</code></p></td> <td style=""><p> <code>set(index, value)</code></p></td> <td style=""><p> mutable</p></td>
@@ -759,7 +759,7 @@ count <span class='moth-code-operator'>=</span> values.length<span class='moth-c
         </tr><tr style="">
              <td style=""><p> <code>__moth_collection_length</code></p></td> <td style=""><p> <code>length()</code></p></td> <td style=""><p> shared</p></td>
         </tr>
-        
+            
 </table><p>These host functions use inferred ABI types for the collection element and value parameters. The index parameter is <code>I32</code>. The length return is <code>I32</code>. Fallible operations return through the builtin <code>Error!</code> channel.</p><h3>Source-visible surface</h3><p>Authors interact with collections through language-level syntax and receiver methods, not through direct imports of <code>@core/collections</code>. The compiler-owned methods include:</p><ul><li><code>get(index)</code> returns the element at <code>index</code> or fails with <code>Error!</code></li><li><code>set(index, value)</code> replaces the element at <code>index</code> or fails with <code>Error!</code></li><li><code>push(value)</code> appends <code>value</code> after the last element or fails with <code>Error!</code></li><li><code>remove(index)</code> removes and returns the element at <code>index</code> or fails with <code>Error!</code></li><li><code>length()</code> returns the logical length as <code>Int</code></li></ul><p><code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> take the fallible path. <code>length</code> stays infallible. <code>set</code>, <code>push</code> and <code>remove</code> require mutable receiver access through <code>~</code>.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
 
 <span class='moth-code-operator'>~</span>values.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>4</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>

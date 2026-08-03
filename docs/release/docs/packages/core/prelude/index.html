@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -726,19 +726,19 @@ import <span class='moth-code-operator'>@</span>core<span class='moth-code-opera
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>The prelude forms visibility policy, not an <code>@core/prelude</code> package. It defines the small set of names available without an explicit import. No <code>@core/prelude</code> package exists to import.</p><h3>Registered prelude surface</h3><p>The prelude registers one namespace alias:</p><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Bare name</p></th><th scope="col" style=""><p> Alias target</p></th><th scope="col" style=""><p> Exposes</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> <code>io</code></p></td> <td style=""><p> <code>@core/io</code></p></td> <td style=""><p> Core IO console and input helpers</p></td>
         </tr>
-        
+            
 </table><p>The bare <code>io</code> namespace behaves as a compile-time alias to <code>@core/io</code>. It does not act as a runtime value. An explicit <code>import @core/io</code> binds the same <code>io</code> namespace. An explicit <code>import @core/io as output</code> creates a separate file-local namespace name. A different alias name does not shadow the prelude alias. Only a same-name collision follows the ordinary no-shadowing model.</p><h3>Compiler-owned bare symbols</h3><p>The compiler-owned <code>Error</code> type stays available as a bare language symbol for <code>Error!</code> flows. It works as a compiler-owned builtin, not a prelude symbol. The prelude registry does not register it. See <a href="../../../errors">Errors, options and assertions</a> for the <code>Error</code> contract.</p><h3>Collision policy</h3><p>Prelude names participate in the ordinary no-shadowing collision model. Same-file declarations, source imports, binding imports, aliases, prelude symbols and builtins cannot silently shadow one another. The prelude registers <code>io</code> as a reserved name first, then inserts it only if not shadowed.</p><h3>What the prelude does not include</h3><p>Most Core packages require explicit imports:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>sin<span class='moth-code-parenthesis'>}</span>
 import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>time <span class='moth-code-parenthesis'>{</span>mark_now<span class='moth-code-parenthesis'>}</span>
 import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>text <span class='moth-code-parenthesis'>{</span>length<span class='moth-code-parenthesis'>}</span>

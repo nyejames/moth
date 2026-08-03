@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -399,16 +399,16 @@ td {
 </nav>
 <section class="container"><p><a href="../">Memory management</a> / Access and aliasing</p><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Existing values are shared by default. Copies are explicit. <code>~</code> requests exclusive access to a mutable place.</p></section>
 <section class="container"><h1>Access and aliasing</h1><h2>Design contract</h2><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Existing values use shared, read-only access by default. Independent copies require explicit <code>copy</code>. Mutation requires explicit exclusive access to an existing mutable place.</p><p>Reference relationships are real source semantics. Moth does not expose reference type constructors or lifetime syntax.</p><p>These are source-semantic rules. Backends may use different scalar, handle, pointer or GC representations as long as they preserve the same observable behaviour.</p><h2>Main compiler paths</h2><ul><li><code>src/compiler_frontend/value_mode.rs</code></li><li><code>src/compiler_frontend/ast/expressions/</code></li><li><code>src/compiler_frontend/ast/statements/</code></li><li><code>src/compiler_frontend/ast/field_access/</code></li><li><code>src/compiler_frontend/hir/</code></li></ul><p>This is a navigation map, not a status declaration.</p><h2>Vocabulary</h2><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> <strong>Term</strong></p></th><th scope="col" style=""><p> <strong>Definition</strong></p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> Value</p></td> <td style=""><p> A Moth language value. Not necessarily heap allocated.</p></td>
         </tr><tr style="">
              <td style=""><p> Place</p></td> <td style=""><p> Existing storage that can be read or mutated.</p></td>
@@ -431,7 +431,7 @@ td {
         </tr><tr style="">
              <td style=""><p> Fresh value</p></td> <td style=""><p> A newly produced literal, template, constructor result or computed aggregate.</p></td>
         </tr>
-        
+            
 </table><h2>Shared access</h2><p>Reads of existing values are shared. Ordinary immutable arguments are shared. Multiple shared reads may coexist. Shared access is read-only, doesn&#39;t imply ownership and can prevent mutation while live. Scalar values may be represented directly by a backend.</p><p>Shared access is a source-semantic relationship. It does not require every scalar to be heap allocated or represented by a pointer.</p><pre style=""><code class='codeblock'>first <span class='moth-code-operator'>=</span> load_items<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
 second <span class='moth-code-operator'>=</span> first
 

@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -411,23 +411,23 @@ html <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=
     dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
     release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
 <span class='moth-code-operator'>|</span></code></pre><p><code>config.moth</code> does not select the builder. The command already did.</p><p><strong>Diagram placeholder:</strong> One config source stops at folded values and does not enter HIR</p><p><em>Caption: exact design boundary.</em> <em>Question: what does config produce that Stage 0 can consume?</em></p><h2>Build inputs and <code>@project</code></h2><p>Direct primitive fields of <code>project</code> may declare a build-input contract with <code>#Import</code>. Accepted types stay narrow: <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those.</p><p>Resolution order:</p><ol><li>explicit CLI or programmatic build input</li><li>builder-provided primitive global</li><li>the folded declaration default</li><li>a structured missing-input diagnostic</li></ol><p>The folded <code>project</code> record becomes a specialised immutable <strong><code>ProjectGlobalsInterface</code></strong> under the reserved <strong><code>@project</code></strong> import root.</p><p>That interface carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body.</p><p>Normal modules may import <code>@project</code> explicitly. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the <code>@project</code> root. Direct re-export of <code>@project</code> is forbidden.</p><p>For the greeting walkthrough, record the values Stage 0 needs for entry discovery: project name, entry root and builder sections. Those folded facts bridge files on disk to a project the graph can name.</p><p><strong>Diagram placeholder:</strong> Resolved project fields enter ordinary module compilation through an immutable interface</p><p><em>Caption: simplified interface view.</em> <em>Question: how do build values reach source without becoming a second language?</em></p><h2>The ownership boundary</h2><p>Draw the line early and keep it sharp.</p><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> Owner</p></th><th scope="col" style=""><p> Responsibility</p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> Build system</p></td> <td style=""><p> discovers source, builds graphs, schedules modules, plans entries, writes outputs</p></td>
         </tr><tr style="">
              <td style=""><p> Compiler</p></td> <td style=""><p> prepares syntax, binds interfaces, checks semantics, lowers HIR, validates access and target contracts over explicit inputs</p></td>
         </tr><tr style="">
              <td style=""><p> Builder</p></td> <td style=""><p> assembles successful artefacts into project-shaped outputs after compilation succeeds</p></td>
         </tr>
-        
+            
 </table><p>The compiler does not wander the filesystem inventing a project. The builder does not re-parse <code>@page.moth</code> to rediscover <code>greet</code>. Each stage trusts the previous owner&#39;s facts.</p><h2>What can fail here</h2><ul><li>unknown command or unsupported builder capability</li><li>invalid config shape, forbidden config import or missing required input</li><li>queued config syntax that still differs from accepted end-state shape</li></ul><p>When the walkthrough mentions config, label <strong>current</strong> versus <strong>accepted</strong> if the progress matrix still shows transitional forms.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> an unrestricted host-language build script that can do anything the host process can do.</p><p><strong>Choice:</strong> command-selected capabilities and typed compile-time config.</p><p><strong>Benefit:</strong> the project contract stays visible and bounded before discovery. Tools can validate schema without executing arbitrary host code.</p><p><strong>Cost:</strong> users lose general host-code build hooks and must fit builder schemas.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> one self-contained <code>config.moth</code> and a specialised <code>ProjectGlobalsInterface</code>.</li><li><strong>Current implementation:</strong> label legacy flat config only where it changes the walkthrough.</li><li><strong>Queued work:</strong> plans such as <code>import_values_anonymous_records_plan.md</code> and <code>entry-config-blocks-runtime-title-plan.md</code> still move pieces of the surface.</li><li><strong>Deferred or outside scope:</strong> config imports and a general Moth build script system.</li></ul><h2>Exit state</h2><p>You leave with a validated command, a capability surface, folded project values and <code>@project</code>. Next: which files become semantic modules, and how a folder becomes a graph.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../moth-design-choices">Previous</a> / <a href="../project-graphs-and-modules">Next</a></p></section>
 <script>

@@ -24,33 +24,35 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: parent instruction to continue through the rest of the plan (R5C1 accepted; resume at commit 6750c9a57)
 BASE_REVISION: 18b7870f7 (R5C1 correction committed in 6750c9a57; worktree clean on main)
-STATUS: active - R5C3 complete and gated; checkpoint pending
-CURRENT_SLICE: R5C3 - transient indexed interface view, declaration/evidence work queue, direct-record move, deterministic publication order (implemented)
-LAST_ACCEPTED_COMMIT: 8b030a112 (R5C2 checkpoint; user commits 469accd60 and 6951f1b36 sit on top with unrelated docs fixes)
-WORKTREE: R5C3 changes uncommitted on main; no unrelated working-tree changes remain
-REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, interface_closure.rs, interface_view.rs, interface_validation.rs, model.rs and export_projection.rs
+STATUS: active - R5C4 compact immutable generic materialisation metadata
+CURRENT_SLICE: R5C4 - one compact remappable frozen token buffer, shared closure tables, no mirrored token vocabulary
+LAST_ACCEPTED_COMMIT: 851998891 (R5C3 checkpoint)
+WORKTREE: clean on main after R5C3 checkpoint
+REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, generic materialisation owner, tokenizer tokens, frozen token buffer types and materialisation tests
 RELEVANT_CONTEXT_NOW:
 - R5C1 accepted: CompiledGraphBoundary/CompiledSourcePackage retain structure, dense ModuleId->artifact mapping, typed frontend outcomes, entry selection by graph identity, cross-boundary warnings
 - R5C2 accepted (8b030a112): ImportShellId joins replace path/suffix matching; final_auditor findings resolved; verification audit deferred to provider availability
-- R5C3 implemented: InterfaceView indexes export names, binding exports, declaration origins, summary origins and evidence identities with duplicate-key validation; interface closure uses combined origin maps and a declaration/evidence work queue; evidence eligibility is precomputed per record; direct records move once, provider records clone once; final vectors sorted by semantic origin; provider dedup is by interface identity so disagreeing publishers fail deterministically; re-export binding projection uses per-operation binding views
+- R5C3 accepted (851998891): transient InterfaceView indexes, closure work queue, direct-record move, deterministic sorted publication, disagreement rejection
+- R5C4 target: replace mirrored StableTokenKind/StablePlainTokenKind with one compact remappable FrozenTokenBuffer over the canonical TokenKind vocabulary; one context-local string pool remapped once when freezing and merged once when materialising; audit materialisation context for duplicated per-template closure data; no donor StringId/InternedPath/FileId crossing the artefact boundary
 ACCEPTANCE_CRITERIA:
-- build each view at most once per closure or binding operation
-- validate duplicate keys while constructing the view
-- interface closure uses a declaration/evidence work queue over indexes
-- do not scan every provider for each selected declaration or summary
-- do not clone all evidence candidates on each fixed-point iteration
-- borrow direct records during closure and move final records once
-- sort final vectors by semantic order before publication
-- final PublicSemanticInterface stays deterministic and contains no durable lookup map
+- reuse the canonical TokenKind vocabulary
+- own one context-local immutable string pool
+- remap donor token IDs into that pool once when freezing
+- merge/remap the pool into the generated-local table once when materialising
+- no owned String per repeated symbol, path component or literal token
+- adding a tokenizer token variant must not require updating a second exhaustive token enum
+- module-wide closure tables stored once; template artefacts reference dense indexes
+- one template record keyed by stable generated declaration identity
+- no AST, TIR store, mutable type environment or donor string table retained
 VALIDATION_STATE:
- - cargo fmt --all; just validate passes on the final R5C3 tree (ci-clippy native/linux/windows, 3960 unit + 17 + 538 workspace tests, 1816 integration cases, docs check, bench-ci all 58 preflight cases). bench-ci records small positive frontend/build deltas; treated as attribution evidence, not correctness proof. One validate rerun was needed because a user docs commit landed during the first bench-ci run (commit-changed guard).
+ - R5C3 gate passed (cargo fmt --all; just validate). R5C4 focused tests and full gate pending.
 DOCS_IMPACT: plan current-state block only; no architecture doc change
-BLOCKERS_OR_OPEN_DECISIONS: none for R5C3
-AUDIT_STATE: delegated audits unavailable: codex provider usage limit blocks until 2026-08-08 (R5C2 verification audit and R5C3 final audit both deferred). R5C3 requirements are covered by six focused closure tests plus the full gate; a fresh final_auditor run is queued once provider access resumes.
+BLOCKERS_OR_OPEN_DECISIONS: none for R5C4
+AUDIT_STATE: delegated audits unavailable: codex provider usage limit blocks until 2026-08-08 (R5C2 verification, R5C3 final, and R5C4 audits deferred); focused tests plus the full gate cover each slice
 DELEGATION_DECISION: coordinator implements the architecture-owning slice; interim auditor and final_auditor routes review
-NEXT_WORKER_ORDER: R5C4 compact immutable generic materialisation metadata
+NEXT_WORKER_ORDER: R5C4 only; stop for audit checkpoint before R5C5
 STOP_REASON: none
-NEXT_RESUME_ACTION: create the R5C3 checkpoint commit, then begin R5C4
+NEXT_RESUME_ACTION: after R5C4 final audit and checkpoint commit, begin R5C5
 ```
 
 

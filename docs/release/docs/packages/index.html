@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -1082,16 +1082,16 @@ import <span class='moth-code-operator'>@</span>components <span class='moth-cod
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>Every package has two independent classifications: where it comes from and how the compiler obtains its implementation.</p><h3>Package origin</h3><p>Origin describes ownership and distribution:</p><ul><li><strong>Core</strong>: compiler-owned packages such as <code>@core/io</code> and <code>@core/math</code>.</li><li><strong>Builder</strong>: packages selected by a project builder, including <code>@html</code> and <code>@web/canvas</code>.</li><li><strong>ProjectLocal</strong>: scoped <code>+*.moth</code> support packages, the project-root package facade and annotated project-local JavaScript imports.</li><li><strong>Standard</strong> and <strong>Dependency</strong>: reserved for future package-system support.</li></ul><h3>Package backing</h3><p>Backing describes implementation:</p><ul><li><strong>MothSource</strong>: one or more Moth modules resolved through the source package registry.</li><li><strong>ExternalBinding</strong>: typed functions, constants and opaque types implemented outside Moth.</li></ul><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> <strong>Package</strong></p></th><th scope="col" style=""><p> <strong>Origin</strong></p></th><th scope="col" style=""><p> <strong>Backing</strong></p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
             <p> <td style=""><p><code>@html</code></p></td>  <td style=""><p> Builder</p></td>  <td style=""><p> MothSource</p></td></p>
         </tr><tr style="">
             <p> <td style=""><p><code>@core/collections</code>, <code>@core/io</code>, <code>@core/math</code>, <code>@core/text</code>, <code>@core/random</code>, <code>@core/time</code></p></td>  <td style=""><p> Core</p></td>  <td style=""><p> ExternalBinding</p></td></p>
@@ -1104,7 +1104,7 @@ import <span class='moth-code-operator'>@</span>components <span class='moth-cod
         </tr><tr style="">
             <p> <td style=""><p> Annotated project-local <code>.js</code> import</p></td>  <td style=""><p> ProjectLocal</p></td>  <td style=""><p> ExternalBinding</p></td></p>
         </tr>
-        
+            
 </table><p>Origin and backing don&#39;t change import syntax or module visibility. Source-backed packages contain ordinary modules with strict <code>export:</code> public surfaces. Binding-backed packages expose typed external symbols registered by the builder.</p><h3>Prelude is visibility policy</h3><p>The prelude is implicit-import policy, not an origin or backing. It exposes the bare <code>io</code> namespace as an alias to <code>@core/io</code>. Package metadata belongs to <code>@core/io</code>, while bare-name visibility belongs to the prelude.</p><h3>Builder-selected availability</h3><p>The builder decides which packages exist. Unsupported packages are rejected with an unsupported-by-builder diagnostic. The HTML builder opts into <code>@html</code>, <code>@web/canvas</code> and current optional Core packages.</p><h3>Binding-backed package constraints</h3><p>Binding-backed packages expose free functions, constants and opaque types. They don&#39;t expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments, default parameters and reactive parameters are source-function features.</p><p>The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package needs a Wasm lowering before that backend can use it.</p><h3>No package manager yet</h3><p>There is no remote fetching, lockfile or version resolution yet. Use <code>+*.moth</code> support packages for project-local source-backed packages, builder-provided package imports for built-in capabilities and annotated <code>.js</code> wrappers for direct browser integration.</p><h3>Related concepts</h3><ul><li>For project-local packages see <a href="#project-local-packages">Project-local packages</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For Core package API details see <a href="./core">Core packages</a>.</li></ul>
 </div>
 </fieldset></section>

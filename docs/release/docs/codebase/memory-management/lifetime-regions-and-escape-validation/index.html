@@ -212,8 +212,8 @@ body {
             linear-gradient(
                 145deg,
                 #abd7ed 0%,
-                #eff6ff 23%,
-                #cde3ff 83%,
+                #bdd9f8 23%,
+                #cdddff 83%,
                 #bac9ff 100%
             );
 
@@ -238,7 +238,7 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: #c444aff9;
+    color: light-dark(hsl(333, 92%, 43%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
 }
 
@@ -399,16 +399,16 @@ td {
 </nav>
 <section class="container"><p><a href="../">Memory management</a> / Lifetime regions and escape validation</p><p>Every allocation has exactly one semantic lifetime owner. GC cannot bypass topology validation.</p></section>
 <section class="container"><h1>Lifetime regions and escape validation</h1><h2>Design contract</h2><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Lifetime-region and escape validation is the mandatory semantic proof that every retained reference is legal under one lifetime owner. It is distinct from optional ownership optimisation.</p><p><strong>Mandatory semantic proof</strong> covers:</p><ul><li>lifetime owner and region legality</li><li>retained-edge outlives relationships</li><li>escape legality</li><li>cycle legality</li><li>external-boundary legality</li></ul><p>User-authored topology that is invalid or cannot be proven legal produces a structured <code>CompilerDiagnostic</code>. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce <code>CompilerError</code>.</p><p><strong>Optional optimisation proof</strong> covers final-use transfer, deterministic drop placement, retain/drop elimination, stack/arena/region allocation, collector elision and ownership specialisation. Failure to prove an optimisation preserves semantics through a conservative representation such as GC. It must not reject the program.</p><p>GC is a permitted runtime representation for a statically legal lifetime topology. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles.</p><p>Implementation of this analysis is deferred. This leaf is the canonical design authority for lifetime topology. Canonical grouped-memory semantics live under <a href="../declared-memory-groups">Declared memory groups</a>. The roadmap file owns implementation sequencing and deferred follow-up only.</p><h2>Terminology</h2><table style="">
-        
-        <tr style="">
             
+            <tr style="">
+                
             <th scope="col" style=""><p> <strong>Term</strong></p></th><th scope="col" style=""><p> <strong>Definition</strong></p></th>
         
 </tr>
 
 
 
-            <tr style="">
+                <tr style="">
              <td style=""><p> Allocation</p></td> <td style=""><p> One runtime storage unit created for a value graph node.</p></td>
         </tr><tr style="">
              <td style=""><p> Allocation family</p></td> <td style=""><p> The containing allocation plus projections that remain rooted in it.</p></td>
@@ -439,7 +439,7 @@ td {
         </tr><tr style="">
              <td style=""><p> Independent result graph</p></td> <td style=""><p> New graph with no mutable sharing or retained Moth reference to pre-existing storage.</p></td>
         </tr>
-        
+            
 </table><p>An allocation family is the containing allocation plus field, element and other projections that remain rooted in it. A projection does not silently become an independent allocation.</p><h2>One semantic lifetime owner</h2><p>Every runtime allocation has exactly one semantic lifetime owner.</p><p>Multiple bindings, fields, elements or returned values may alias one allocation without becoming additional lifetime owners.</p><pre style=""><code class='codeblock'>Page region owns Theme
 
 header.theme ─┐
