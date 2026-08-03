@@ -16,236 +16,1114 @@ Import individual symbols or the whole namespace:
 
 `@web/canvas` exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through `@web/canvas` functions.
 
-| Type | Description |
-|---|---|
-| `CanvasElement` | A `<canvas>` DOM element handle |
-| `Canvas2d` | A 2D rendering context handle |
-| `CanvasGradient` | A gradient object handle |
-| `CanvasPattern` | A pattern object handle |
-| `CanvasImage` | An image element handle |
-| `CanvasImageData` | An `ImageData` pixel buffer handle |
-| `CanvasTextMetrics` | A text measurement result handle |
+[table:
+    [th:
+        [: Type]
+        [: Description]
+    ]
+
+    [td:
+        [: `CanvasElement`]
+        [: A `<canvas>` DOM element handle]
+    ]
+
+    [td:
+        [: `Canvas2d`]
+        [: A 2D rendering context handle]
+    ]
+
+    [td:
+        [: `CanvasGradient`]
+        [: A gradient object handle]
+    ]
+
+    [td:
+        [: `CanvasPattern`]
+        [: A pattern object handle]
+    ]
+
+    [td:
+        [: `CanvasImage`]
+        [: An image element handle]
+    ]
+
+    [td:
+        [: `CanvasImageData`]
+        [: An `ImageData` pixel buffer handle]
+    ]
+
+    [td:
+        [: `CanvasTextMetrics`]
+        [: A text measurement result handle]
+    ]
+]
 
 All opaque types lower to object references in the JS backend. The Wasm backend does not support `@web/canvas` and rejects reachable calls before lowering.
 
 ### Canvas element management
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `get_canvas` | `id String` | `CanvasElement, Error!` | shared |
-| `create_canvas` | `width Int, height Int` | `CanvasElement` | shared |
-| `get_image` | `id String` | `CanvasImage, Error!` | shared |
-| `create_image` | `src String` | `CanvasImage` | shared |
-| `create_image_with_size` | `src String, width Int, height Int` | `CanvasImage` | shared |
-| `context_2d` | `canvas CanvasElement` | `Canvas2d, Error!` | shared |
-| `canvas_width` | `canvas CanvasElement` | `Int` | shared |
-| `canvas_height` | `canvas CanvasElement` | `Int` | shared |
-| `canvas_client_width` | `canvas CanvasElement` | `Int` | shared |
-| `canvas_client_height` | `canvas CanvasElement` | `Int` | shared |
-| `set_canvas_width` | `canvas ~CanvasElement, width Int` | void | mutable |
-| `set_canvas_height` | `canvas ~CanvasElement, height Int` | void | mutable |
-| `set_canvas_size` | `canvas ~CanvasElement, width Int, height Int` | void | mutable |
-| `to_data_url` | `canvas CanvasElement` | `String, Error!` | shared |
-| `to_data_url_type` | `canvas CanvasElement, mime_type String` | `String, Error!` | shared |
-| `to_data_url_quality` | `canvas CanvasElement, mime_type String, quality Float` | `String, Error!` | shared |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `get_canvas`]
+        [: `id String`]
+        [: `CanvasElement, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `create_canvas`]
+        [: `width Int, height Int`]
+        [: `CanvasElement`]
+        [: shared]
+    ]
+
+    [td:
+        [: `get_image`]
+        [: `id String`]
+        [: `CanvasImage, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `create_image`]
+        [: `src String`]
+        [: `CanvasImage`]
+        [: shared]
+    ]
+
+    [td:
+        [: `create_image_with_size`]
+        [: `src String, width Int, height Int`]
+        [: `CanvasImage`]
+        [: shared]
+    ]
+
+    [td:
+        [: `context_2d`]
+        [: `canvas CanvasElement`]
+        [: `Canvas2d, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `canvas_width`]
+        [: `canvas CanvasElement`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `canvas_height`]
+        [: `canvas CanvasElement`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `canvas_client_width`]
+        [: `canvas CanvasElement`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `canvas_client_height`]
+        [: `canvas CanvasElement`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `set_canvas_width`]
+        [: `canvas ~CanvasElement, width Int`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_canvas_height`]
+        [: `canvas ~CanvasElement, height Int`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_canvas_size`]
+        [: `canvas ~CanvasElement, width Int, height Int`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `to_data_url`]
+        [: `canvas CanvasElement`]
+        [: `String, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `to_data_url_type`]
+        [: `canvas CanvasElement, mime_type String`]
+        [: `String, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `to_data_url_quality`]
+        [: `canvas CanvasElement, mime_type String, quality Float`]
+        [: `String, Error!`]
+        [: shared]
+    ]
+]
 
 ### Image queries
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `image_width` | `image CanvasImage` | `Int` | shared |
-| `image_height` | `image CanvasImage` | `Int` | shared |
-| `image_natural_width` | `image CanvasImage` | `Int` | shared |
-| `image_natural_height` | `image CanvasImage` | `Int` | shared |
-| `image_is_loaded` | `image CanvasImage` | `Bool` | shared |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `image_width`]
+        [: `image CanvasImage`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_height`]
+        [: `image CanvasImage`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_natural_width`]
+        [: `image CanvasImage`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_natural_height`]
+        [: `image CanvasImage`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_is_loaded`]
+        [: `image CanvasImage`]
+        [: `Bool`]
+        [: shared]
+    ]
+]
 
 ### Context state
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `save` | `ctx ~Canvas2d` | void | mutable |
-| `restore` | `ctx ~Canvas2d` | void | mutable |
-| `reset` | `ctx ~Canvas2d` | void | mutable |
-| `is_context_lost` | `ctx Canvas2d` | `Bool` | shared |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `save`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `restore`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `reset`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `is_context_lost`]
+        [: `ctx Canvas2d`]
+        [: `Bool`]
+        [: shared]
+    ]
+]
 
 ### Rectangles
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `clear_rect` | `ctx ~Canvas2d, x Float, y Float, width Float, height Float` | void | mutable |
-| `fill_rect` | `ctx ~Canvas2d, x Float, y Float, width Float, height Float` | void | mutable |
-| `stroke_rect` | `ctx ~Canvas2d, x Float, y Float, width Float, height Float` | void | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `clear_rect`]
+        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `fill_rect`]
+        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `stroke_rect`]
+        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float`]
+        [: void]
+        [: mutable]
+    ]
+]
 
 ### Fill and stroke style
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `set_fill_style` | `ctx ~Canvas2d, color String` | void | mutable |
-| `set_stroke_style` | `ctx ~Canvas2d, color String` | void | mutable |
-| `set_fill_gradient` | `ctx ~Canvas2d, gradient CanvasGradient` | void | mutable |
-| `set_stroke_gradient` | `ctx ~Canvas2d, gradient CanvasGradient` | void | mutable |
-| `set_fill_pattern` | `ctx ~Canvas2d, pattern CanvasPattern` | void | mutable |
-| `set_stroke_pattern` | `ctx ~Canvas2d, pattern CanvasPattern` | void | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `set_fill_style`]
+        [: `ctx ~Canvas2d, color String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_stroke_style`]
+        [: `ctx ~Canvas2d, color String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_fill_gradient`]
+        [: `ctx ~Canvas2d, gradient CanvasGradient`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_stroke_gradient`]
+        [: `ctx ~Canvas2d, gradient CanvasGradient`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_fill_pattern`]
+        [: `ctx ~Canvas2d, pattern CanvasPattern`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_stroke_pattern`]
+        [: `ctx ~Canvas2d, pattern CanvasPattern`]
+        [: void]
+        [: mutable]
+    ]
+]
 
 ### Compositing
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `set_global_alpha` | `ctx ~Canvas2d, alpha Float` | void | mutable |
-| `set_global_composite_operation` | `ctx ~Canvas2d, operation String` | void | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `set_global_alpha`]
+        [: `ctx ~Canvas2d, alpha Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_global_composite_operation`]
+        [: `ctx ~Canvas2d, operation String`]
+        [: void]
+        [: mutable]
+    ]
+]
 
 ### Line style
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `set_line_width` | `ctx ~Canvas2d, width Float` | void | mutable |
-| `set_line_cap` | `ctx ~Canvas2d, line_cap String` | void | mutable |
-| `set_line_join` | `ctx ~Canvas2d, line_join String` | void | mutable |
-| `set_miter_limit` | `ctx ~Canvas2d, limit Float` | void | mutable |
-| `set_line_dash` | `ctx ~Canvas2d, dash Float, gap Float` | void | mutable |
-| `set_line_dash_solid` | `ctx ~Canvas2d` | void | mutable |
-| `set_line_dash_offset` | `ctx ~Canvas2d, offset Float` | void | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `set_line_width`]
+        [: `ctx ~Canvas2d, width Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_line_cap`]
+        [: `ctx ~Canvas2d, line_cap String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_line_join`]
+        [: `ctx ~Canvas2d, line_join String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_miter_limit`]
+        [: `ctx ~Canvas2d, limit Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_line_dash`]
+        [: `ctx ~Canvas2d, dash Float, gap Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_line_dash_solid`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_line_dash_offset`]
+        [: `ctx ~Canvas2d, offset Float`]
+        [: void]
+        [: mutable]
+    ]
+]
 
 ### Text rendering settings
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `set_font` | `ctx ~Canvas2d, font String` | void | mutable |
-| `set_text_align` | `ctx ~Canvas2d, align String` | void | mutable |
-| `set_text_baseline` | `ctx ~Canvas2d, baseline String` | void | mutable |
-| `set_direction` | `ctx ~Canvas2d, direction String` | void | mutable |
-| `set_letter_spacing` | `ctx ~Canvas2d, spacing String` | void | mutable |
-| `set_word_spacing` | `ctx ~Canvas2d, spacing String` | void | mutable |
-| `set_font_kerning` | `ctx ~Canvas2d, kerning String` | void | mutable |
-| `set_font_stretch` | `ctx ~Canvas2d, stretch String` | void | mutable |
-| `set_font_variant_caps` | `ctx ~Canvas2d, caps String` | void | mutable |
-| `set_text_rendering` | `ctx ~Canvas2d, rendering String` | void | mutable |
-| `set_lang` | `ctx ~Canvas2d, lang String` | void | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `set_font`]
+        [: `ctx ~Canvas2d, font String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_text_align`]
+        [: `ctx ~Canvas2d, align String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_text_baseline`]
+        [: `ctx ~Canvas2d, baseline String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_direction`]
+        [: `ctx ~Canvas2d, direction String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_letter_spacing`]
+        [: `ctx ~Canvas2d, spacing String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_word_spacing`]
+        [: `ctx ~Canvas2d, spacing String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_font_kerning`]
+        [: `ctx ~Canvas2d, kerning String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_font_stretch`]
+        [: `ctx ~Canvas2d, stretch String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_font_variant_caps`]
+        [: `ctx ~Canvas2d, caps String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_text_rendering`]
+        [: `ctx ~Canvas2d, rendering String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_lang`]
+        [: `ctx ~Canvas2d, lang String`]
+        [: void]
+        [: mutable]
+    ]
+]
 
 ### Image smoothing, filter and shadow
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `set_image_smoothing_enabled` | `ctx ~Canvas2d, enabled Bool` | void | mutable |
-| `set_image_smoothing_quality` | `ctx ~Canvas2d, quality String` | void | mutable |
-| `set_filter` | `ctx ~Canvas2d, filter String` | void | mutable |
-| `set_shadow_color` | `ctx ~Canvas2d, color String` | void | mutable |
-| `set_shadow_blur` | `ctx ~Canvas2d, blur Float` | void | mutable |
-| `set_shadow_offset` | `ctx ~Canvas2d, x Float, y Float` | void | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `set_image_smoothing_enabled`]
+        [: `ctx ~Canvas2d, enabled Bool`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_image_smoothing_quality`]
+        [: `ctx ~Canvas2d, quality String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_filter`]
+        [: `ctx ~Canvas2d, filter String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_shadow_color`]
+        [: `ctx ~Canvas2d, color String`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_shadow_blur`]
+        [: `ctx ~Canvas2d, blur Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_shadow_offset`]
+        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+]
 
 ### Path construction
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `begin_path` | `ctx ~Canvas2d` | void | mutable |
-| `move_to` | `ctx ~Canvas2d, x Float, y Float` | void | mutable |
-| `line_to` | `ctx ~Canvas2d, x Float, y Float` | void | mutable |
-| `close_path` | `ctx ~Canvas2d` | void | mutable |
-| `rect` | `ctx ~Canvas2d, x Float, y Float, width Float, height Float` | void | mutable |
-| `round_rect` | `ctx ~Canvas2d, x Float, y Float, width Float, height Float, radius Float` | `Error!` | mutable |
-| `arc` | `ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float` | `Error!` | mutable |
-| `arc_counterclockwise` | `ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float` | `Error!` | mutable |
-| `arc_to` | `ctx ~Canvas2d, x1 Float, y1 Float, x2 Float, y2 Float, radius Float` | `Error!` | mutable |
-| `quadratic_curve_to` | `ctx ~Canvas2d, cpx Float, cpy Float, x Float, y Float` | void | mutable |
-| `bezier_curve_to` | `ctx ~Canvas2d, cp1x Float, cp1y Float, cp2x Float, cp2y Float, x Float, y Float` | void | mutable |
-| `ellipse` | `ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float` | `Error!` | mutable |
-| `ellipse_counterclockwise` | `ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float` | `Error!` | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `begin_path`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `move_to`]
+        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `line_to`]
+        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `close_path`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `rect`]
+        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `round_rect`]
+        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float, radius Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `arc`]
+        [: `ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `arc_counterclockwise`]
+        [: `ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `arc_to`]
+        [: `ctx ~Canvas2d, x1 Float, y1 Float, x2 Float, y2 Float, radius Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `quadratic_curve_to`]
+        [: `ctx ~Canvas2d, cpx Float, cpy Float, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `bezier_curve_to`]
+        [: `ctx ~Canvas2d, cp1x Float, cp1y Float, cp2x Float, cp2y Float, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `ellipse`]
+        [: `ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `ellipse_counterclockwise`]
+        [: `ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+]
 
 ### Fill, stroke and clip
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `fill` | `ctx ~Canvas2d` | void | mutable |
-| `fill_even_odd` | `ctx ~Canvas2d` | void | mutable |
-| `stroke` | `ctx ~Canvas2d` | void | mutable |
-| `clip` | `ctx ~Canvas2d` | void | mutable |
-| `clip_even_odd` | `ctx ~Canvas2d` | void | mutable |
-| `is_point_in_path` | `ctx Canvas2d, x Float, y Float` | `Bool` | shared |
-| `is_point_in_stroke` | `ctx Canvas2d, x Float, y Float` | `Bool` | shared |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `fill`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `fill_even_odd`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `stroke`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `clip`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `clip_even_odd`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `is_point_in_path`]
+        [: `ctx Canvas2d, x Float, y Float`]
+        [: `Bool`]
+        [: shared]
+    ]
+
+    [td:
+        [: `is_point_in_stroke`]
+        [: `ctx Canvas2d, x Float, y Float`]
+        [: `Bool`]
+        [: shared]
+    ]
+]
 
 ### Transformations
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `translate` | `ctx ~Canvas2d, x Float, y Float` | void | mutable |
-| `rotate` | `ctx ~Canvas2d, angle Float` | void | mutable |
-| `scale` | `ctx ~Canvas2d, x Float, y Float` | void | mutable |
-| `transform` | `ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float` | void | mutable |
-| `set_transform` | `ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float` | void | mutable |
-| `reset_transform` | `ctx ~Canvas2d` | void | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `translate`]
+        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `rotate`]
+        [: `ctx ~Canvas2d, angle Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `scale`]
+        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `transform`]
+        [: `ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `set_transform`]
+        [: `ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `reset_transform`]
+        [: `ctx ~Canvas2d`]
+        [: void]
+        [: mutable]
+    ]
+]
 
 ### Text drawing
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `fill_text` | `ctx ~Canvas2d, text String, x Float, y Float` | void | mutable |
-| `fill_text_max_width` | `ctx ~Canvas2d, text String, x Float, y Float, max_width Float` | void | mutable |
-| `stroke_text` | `ctx ~Canvas2d, text String, x Float, y Float` | void | mutable |
-| `stroke_text_max_width` | `ctx ~Canvas2d, text String, x Float, y Float, max_width Float` | void | mutable |
-| `measure_text` | `ctx Canvas2d, text String` | `CanvasTextMetrics` | shared |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `fill_text`]
+        [: `ctx ~Canvas2d, text String, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `fill_text_max_width`]
+        [: `ctx ~Canvas2d, text String, x Float, y Float, max_width Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `stroke_text`]
+        [: `ctx ~Canvas2d, text String, x Float, y Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `stroke_text_max_width`]
+        [: `ctx ~Canvas2d, text String, x Float, y Float, max_width Float`]
+        [: void]
+        [: mutable]
+    ]
+
+    [td:
+        [: `measure_text`]
+        [: `ctx Canvas2d, text String`]
+        [: `CanvasTextMetrics`]
+        [: shared]
+    ]
+]
 
 ### Text metrics
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `text_width` | `metrics CanvasTextMetrics` | `Float` | shared |
-| `text_actual_bounding_box_left` | `metrics CanvasTextMetrics` | `Float` | shared |
-| `text_actual_bounding_box_right` | `metrics CanvasTextMetrics` | `Float` | shared |
-| `text_actual_bounding_box_ascent` | `metrics CanvasTextMetrics` | `Float` | shared |
-| `text_actual_bounding_box_descent` | `metrics CanvasTextMetrics` | `Float` | shared |
-| `text_font_bounding_box_ascent` | `metrics CanvasTextMetrics` | `Float` | shared |
-| `text_font_bounding_box_descent` | `metrics CanvasTextMetrics` | `Float` | shared |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `text_width`]
+        [: `metrics CanvasTextMetrics`]
+        [: `Float`]
+        [: shared]
+    ]
+
+    [td:
+        [: `text_actual_bounding_box_left`]
+        [: `metrics CanvasTextMetrics`]
+        [: `Float`]
+        [: shared]
+    ]
+
+    [td:
+        [: `text_actual_bounding_box_right`]
+        [: `metrics CanvasTextMetrics`]
+        [: `Float`]
+        [: shared]
+    ]
+
+    [td:
+        [: `text_actual_bounding_box_ascent`]
+        [: `metrics CanvasTextMetrics`]
+        [: `Float`]
+        [: shared]
+    ]
+
+    [td:
+        [: `text_actual_bounding_box_descent`]
+        [: `metrics CanvasTextMetrics`]
+        [: `Float`]
+        [: shared]
+    ]
+
+    [td:
+        [: `text_font_bounding_box_ascent`]
+        [: `metrics CanvasTextMetrics`]
+        [: `Float`]
+        [: shared]
+    ]
+
+    [td:
+        [: `text_font_bounding_box_descent`]
+        [: `metrics CanvasTextMetrics`]
+        [: `Float`]
+        [: shared]
+    ]
+]
 
 ### Gradients
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `create_linear_gradient` | `ctx Canvas2d, x0 Float, y0 Float, x1 Float, y1 Float` | `CanvasGradient, Error!` | shared |
-| `create_radial_gradient` | `ctx Canvas2d, x0 Float, y0 Float, r0 Float, x1 Float, y1 Float, r1 Float` | `CanvasGradient, Error!` | shared |
-| `create_conic_gradient` | `ctx Canvas2d, start_angle Float, x Float, y Float` | `CanvasGradient, Error!` | shared |
-| `add_color_stop` | `gradient ~CanvasGradient, offset Float, color String` | `Error!` | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `create_linear_gradient`]
+        [: `ctx Canvas2d, x0 Float, y0 Float, x1 Float, y1 Float`]
+        [: `CanvasGradient, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `create_radial_gradient`]
+        [: `ctx Canvas2d, x0 Float, y0 Float, r0 Float, x1 Float, y1 Float, r1 Float`]
+        [: `CanvasGradient, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `create_conic_gradient`]
+        [: `ctx Canvas2d, start_angle Float, x Float, y Float`]
+        [: `CanvasGradient, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `add_color_stop`]
+        [: `gradient ~CanvasGradient, offset Float, color String`]
+        [: `Error!`]
+        [: mutable]
+    ]
+]
 
 ### Patterns
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `create_pattern` | `ctx Canvas2d, image CanvasImage, repetition String` | `CanvasPattern, Error!` | shared |
-| `create_canvas_pattern` | `ctx Canvas2d, canvas CanvasElement, repetition String` | `CanvasPattern, Error!` | shared |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `create_pattern`]
+        [: `ctx Canvas2d, image CanvasImage, repetition String`]
+        [: `CanvasPattern, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `create_canvas_pattern`]
+        [: `ctx Canvas2d, canvas CanvasElement, repetition String`]
+        [: `CanvasPattern, Error!`]
+        [: shared]
+    ]
+]
 
 ### Image drawing
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `draw_image` | `ctx ~Canvas2d, image CanvasImage, x Float, y Float` | `Error!` | mutable |
-| `draw_image_scaled` | `ctx ~Canvas2d, image CanvasImage, x Float, y Float, width Float, height Float` | `Error!` | mutable |
-| `draw_image_cropped` | `ctx ~Canvas2d, image CanvasImage, source_x Float, source_y Float, source_width Float, source_height Float, x Float, y Float, width Float, height Float` | `Error!` | mutable |
-| `draw_canvas` | `ctx ~Canvas2d, canvas CanvasElement, x Float, y Float` | `Error!` | mutable |
-| `draw_canvas_scaled` | `ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float` | `Error!` | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `draw_image`]
+        [: `ctx ~Canvas2d, image CanvasImage, x Float, y Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `draw_image_scaled`]
+        [: `ctx ~Canvas2d, image CanvasImage, x Float, y Float, width Float, height Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `draw_image_cropped`]
+        [: `ctx ~Canvas2d, image CanvasImage, source_x Float, source_y Float, source_width Float, source_height Float, x Float, y Float, width Float, height Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `draw_canvas`]
+        [: `ctx ~Canvas2d, canvas CanvasElement, x Float, y Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `draw_canvas_scaled`]
+        [: `ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+]
 
 Image drawing functions fail with `Error!` when the image has not finished loading.
 
 ### Image data
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `get_image_data` | `ctx Canvas2d, x Int, y Int, width Int, height Int` | `CanvasImageData, Error!` | shared |
-| `create_image_data` | `ctx Canvas2d, width Int, height Int` | `CanvasImageData, Error!` | shared |
-| `create_image_data_from` | `ctx Canvas2d, image_data CanvasImageData` | `CanvasImageData, Error!` | shared |
-| `put_image_data` | `ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float` | `Error!` | mutable |
-| `put_image_data_dirty` | `ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float, dirty_x Float, dirty_y Float, dirty_width Float, dirty_height Float` | `Error!` | mutable |
-| `image_data_width` | `image_data CanvasImageData` | `Int` | shared |
-| `image_data_height` | `image_data CanvasImageData` | `Int` | shared |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `get_image_data`]
+        [: `ctx Canvas2d, x Int, y Int, width Int, height Int`]
+        [: `CanvasImageData, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `create_image_data`]
+        [: `ctx Canvas2d, width Int, height Int`]
+        [: `CanvasImageData, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `create_image_data_from`]
+        [: `ctx Canvas2d, image_data CanvasImageData`]
+        [: `CanvasImageData, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `put_image_data`]
+        [: `ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `put_image_data_dirty`]
+        [: `ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float, dirty_x Float, dirty_y Float, dirty_width Float, dirty_height Float`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `image_data_width`]
+        [: `image_data CanvasImageData`]
+        [: `Int`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_data_height`]
+        [: `image_data CanvasImageData`]
+        [: `Int`]
+        [: shared]
+    ]
+]
 
 ### Pixel access
 
-| Function | Parameters | Returns | Access |
-|---|---|---|---|
-| `image_data_get_red` | `image_data CanvasImageData, x Int, y Int` | `Int, Error!` | shared |
-| `image_data_get_green` | `image_data CanvasImageData, x Int, y Int` | `Int, Error!` | shared |
-| `image_data_get_blue` | `image_data CanvasImageData, x Int, y Int` | `Int, Error!` | shared |
-| `image_data_get_alpha` | `image_data CanvasImageData, x Int, y Int` | `Int, Error!` | shared |
-| `image_data_set_pixel` | `image_data ~CanvasImageData, x Int, y Int, red Int, green Int, blue Int, alpha Int` | `Error!` | mutable |
-| `image_data_clear_pixel` | `image_data ~CanvasImageData, x Int, y Int` | `Error!` | mutable |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Access]
+    ]
+
+    [td:
+        [: `image_data_get_red`]
+        [: `image_data CanvasImageData, x Int, y Int`]
+        [: `Int, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_data_get_green`]
+        [: `image_data CanvasImageData, x Int, y Int`]
+        [: `Int, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_data_get_blue`]
+        [: `image_data CanvasImageData, x Int, y Int`]
+        [: `Int, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_data_get_alpha`]
+        [: `image_data CanvasImageData, x Int, y Int`]
+        [: `Int, Error!`]
+        [: shared]
+    ]
+
+    [td:
+        [: `image_data_set_pixel`]
+        [: `image_data ~CanvasImageData, x Int, y Int, red Int, green Int, blue Int, alpha Int`]
+        [: `Error!`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `image_data_clear_pixel`]
+        [: `image_data ~CanvasImageData, x Int, y Int`]
+        [: `Error!`]
+        [: mutable]
+    ]
+]
 
 Pixel getters and setters fail with `Error!` when coordinates fall outside the image data bounds. Channel values clamp to 0 through 255.
 

@@ -11,11 +11,14 @@ with escapes when the text contains backslashes:
     windows_path = "C:\\docs\\site"
 ]
 
-Use single quotes for one character:
+Use single quotes for one Unicode scalar value:
 
 [codeblock, $code("moth"):
     seedling = '🦋'
 ]
+
+`Char` follows scalar values rather than UTF-16 code units. A user-perceived
+character made from more than one scalar value needs a `String`.
 
 Use a template when text needs values or a larger structure:
 

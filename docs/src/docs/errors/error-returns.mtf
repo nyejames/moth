@@ -2,7 +2,7 @@ A fallible function marks one return slot with `!`.
 
 [codeblock, $code("moth"):
     parse_number |text String| -> Int, Error!:
-        if text.is_empty():
+        if text is "":
             return! Error("Missing number", 200)
         ;
 

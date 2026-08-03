@@ -23,11 +23,31 @@ A namespace alias creates a file-local name:
 
 ### Constants
 
-| Constant | Type | Value |
-|---|---|---|
-| `PI` | `Float` | pi |
-| `TAU` | `Float` | 2 * pi |
-| `E` | `Float` | Euler's number |
+[table:
+    [th:
+        [: Constant]
+        [: Type]
+        [: Value]
+    ]
+
+    [td:
+        [: `PI`]
+        [: `Float`]
+        [: pi]
+    ]
+
+    [td:
+        [: `TAU`]
+        [: `Float`]
+        [: 2 * pi]
+    ]
+
+    [td:
+        [: `E`]
+        [: `Float`]
+        [: Euler's number]
+    ]
+]
 
 Constants form compile-time `Float` values. They fold into expressions at compile time and do not produce runtime lookups.
 
@@ -35,26 +55,121 @@ Constants form compile-time `Float` values. They fold into expressions at compil
 
 All functions take `Float` parameters and return `Float`. Parameters stay positional-only. Named arguments lack support because binding-backed packages do not expose source-function features.
 
-| Function | Parameters | Returns |
-|---|---|---|
-| `sin(x)` | `Float` | `Float` |
-| `cos(x)` | `Float` | `Float` |
-| `tan(x)` | `Float` | `Float` |
-| `atan2(y, x)` | `Float, Float` | `Float` |
-| `log(x)` | `Float` | `Float` |
-| `log2(x)` | `Float` | `Float` |
-| `log10(x)` | `Float` | `Float` |
-| `exp(x)` | `Float` | `Float` |
-| `pow(base, exponent)` | `Float, Float` | `Float` |
-| `sqrt(x)` | `Float` | `Float` |
-| `abs(x)` | `Float` | `Float` |
-| `floor(x)` | `Float` | `Float` |
-| `ceil(x)` | `Float` | `Float` |
-| `round(x)` | `Float` | `Float` |
-| `trunc(x)` | `Float` | `Float` |
-| `min(a, b)` | `Float, Float` | `Float` |
-| `max(a, b)` | `Float, Float` | `Float` |
-| `clamp(x, min, max)` | `Float, Float, Float` | `Float` |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+    ]
+
+    [td:
+        [: `sin(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `cos(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `tan(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `atan2(y, x)`]
+        [: `Float, Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `log(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `log2(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `log10(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `exp(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `pow(base, exponent)`]
+        [: `Float, Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `sqrt(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `abs(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `floor(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `ceil(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `round(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `trunc(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `min(a, b)`]
+        [: `Float, Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `max(a, b)`]
+        [: `Float, Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `clamp(x, min, max)`]
+        [: `Float, Float, Float`]
+        [: `Float`]
+    ]
+]
 
 All functions keep infallible Moth signatures. A non-finite result still fails
 at the shared external `Float` boundary before ordinary Moth code observes it.

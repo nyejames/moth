@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Errors, options and assertions</p><h1>Errors, options and assertions</h1><p>Missing data, expected failure and a broken invariant are three different problems. Moth gives each one a separate path.</p><p>Use options for ordinary absence. Use typed error returns when callers need failure information. Use assertions when continuing would be wrong.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Errors, options and assertions</p><h1>Errors, options and assertions</h1><p>Moth separates ordinary absence, recoverable failure and broken invariants. Many languages combine these cases through null values or exceptions, which hides part of a function&#39;s behaviour.</p><p>Use options for absence, <code>Error!</code> returns for expected failure and <code>assert</code> only when continuing would violate an invariant.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Error values
@@ -779,7 +779,7 @@ coded <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>E
 
 
         <p>A function that can fail adds one final return marked with <code>!</code>.</p><pre style=""><code class='codeblock'>parse_number <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>if</span> text.is_empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>if</span> text is <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing number&quot;</span><span class='moth-code-parenthesis'>)</span>
     ;
 
@@ -789,7 +789,7 @@ coded <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>E
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>A fallible function marks one return slot with <code>!</code>.</p><pre style=""><code class='codeblock'>parse_number <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>if</span> text.is_empty<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>:</span>
+    <span class='moth-code-keyword'>if</span> text is <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-operator'>:</span>
         <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing number&quot;</span>, <span class='moth-code-number'>200</span><span class='moth-code-parenthesis'>)</span>
     ;
 
@@ -1013,7 +1013,7 @@ fallback <span class='moth-code-type'>String</span><span class='moth-code-operat
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;missing&quot;</span><span class='moth-code-parenthesis'>)</span>
 ;</code></pre><h3>Equality and ordering</h3><p>Options support equality comparisons:</p><pre style=""><code class='codeblock'>present <span class='moth-code-operator'>=</span> maybe_name is <span class='moth-code-string'>&quot;Priya&quot;</span>
 absent <span class='moth-code-operator'>=</span> maybe_name is none
-same <span class='moth-code-operator'>=</span> a is b</code></pre><p>Ordering operators such as <code>&lt;</code> on optional values are not supported.</p><h3>Postfix propagation</h3><p>Postfix <code>?</code> unwraps a present value or returns <code>none</code> from the enclosing function.</p><pre style=""><code class='codeblock'>get_display_name <span class='moth-code-operator'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span><span class='moth-code-operator'>:</span>
+same <span class='moth-code-operator'>=</span> a is b</code></pre><p>Two options can be compared only when they have the same option type and their inner type supports equality. Two absent values compare equal. Present values compare through the inner type&#39;s equality rule, and a present value never equals <code>none</code>.</p><p>Ordering operators such as <code>&lt;</code> on optional values are not supported.</p><h3>Postfix propagation</h3><p>Postfix <code>?</code> unwraps a present value or returns <code>none</code> from the enclosing function.</p><pre style=""><code class='codeblock'>get_display_name <span class='moth-code-operator'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span><span class='moth-code-operator'>:</span>
     user <span class='moth-code-operator'>=</span> find_user<span class='moth-code-parenthesis'>(</span>id<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>?</span>
     <span class='moth-code-keyword'>return</span> user.name
 ;</code></pre><p>The exact contract is:</p><ul><li>the operand must be optional</li><li>the enclosing function must have exactly one success return slot</li><li>that success slot must be a compatible optional type</li><li>the present payload becomes the expression result</li><li>absence returns <code>none</code> immediately</li><li><code>?</code> cannot be followed by <code>catch</code></li></ul><p>Options are compiler-owned value shapes. Source code does not construct public <code>Option</code> variants.</p>

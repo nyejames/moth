@@ -13,7 +13,7 @@ The binding is mutable because the collection changes.
 An immutable collection can still be read:
 
 [codeblock, $code("moth"):
-    names = {"Priya", "Grace"}
+    names = {"Priya", "Sam"}
 
     first = names.get(0) catch:
         then "guest"

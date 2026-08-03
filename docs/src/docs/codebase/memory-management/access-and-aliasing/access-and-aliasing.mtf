@@ -268,7 +268,9 @@ These are permanent design boundaries, not merely unimplemented features.
 
 ## No shadowing
 
-One visible name maps to one binding. This keeps alias roots, future-use reasoning and diagnostics easier to reason about. The full language no-shadowing rule remains in `docs/language-overview.md`.
+One visible name maps to one binding. This keeps alias roots, future-use
+reasoning and diagnostics easier to follow. The full language no-shadowing
+rule lives in `docs/src/docs/bindings/shadowing.mtf`.
 
 ## Common mistakes
 
@@ -295,6 +297,6 @@ One visible name maps to one binding. This keeps alias roots, future-use reasoni
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): retained edges, escapes and region topology
 - @../declared-memory-groups (Declared memory groups): accepted `group` / `into` placement and destination lifetimes
 - @../ownership-and-drops (Ownership and drops): inferred transfer after access validation
-- @https://github.com/nyejames/moth/blob/main/docs/language-overview.md (Language overview): full source syntax
+- @../../../language/ (Language reference): canonical source syntax and semantics
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler AST construction): source access and coercion ownership
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler HIR generation): places and hidden mutable-rvalue locals

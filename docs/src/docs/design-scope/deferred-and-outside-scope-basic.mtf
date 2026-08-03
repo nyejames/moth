@@ -2,8 +2,9 @@ Moth has two kinds of features that aren't available today.
 
 ### Deferred: coming later
 
-Some features are planned but not built yet. The compiler knows about them and
-gives a helpful error when you try to use them. Examples include declared memory
+Some features belong to the accepted design but aren't built yet. A deferred
+feature may have a targeted compiler diagnostic, or its syntax may remain
+unrecognised until implementation starts. Examples include declared memory
 groups and recursive choice types.
 
 ### Outside scope: not planned

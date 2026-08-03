@@ -174,7 +174,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [docs entry point](docs/): comprehensive compiler and language documentation.
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
-- [language semantics overview](docs/language-overview.md)
+- [language semantics reference index](docs/src/docs/codebase/language/overview.mtf)
 - [memory management design](docs/src/docs/codebase/memory-management/overview.mtf)
 - [codebase style guide](docs/codebase-style-guide.md)
 - [docs website source](docs/src/docs/); [generated output](docs/release/)

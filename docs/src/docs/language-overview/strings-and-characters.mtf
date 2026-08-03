@@ -31,7 +31,7 @@ slice contents mutable.
 
 [codeblock, $code("moth"):
     name ~= "Priya"
-    name = "Aisha"  -- reassigns the mutable binding, doesn't mutate the slice
+    name = "Sam"  -- reassigns the mutable binding, doesn't mutate the slice
 ]
 
 ### Characters

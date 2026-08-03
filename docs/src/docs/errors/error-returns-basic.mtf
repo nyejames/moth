@@ -2,7 +2,7 @@ A function that can fail adds one final return marked with `!`.
 
 [codeblock, $code("moth"):
     parse_number |text String| -> Int, Error!:
-        if text.is_empty():
+        if text is "":
             return! Error("Missing number")
         ;
 

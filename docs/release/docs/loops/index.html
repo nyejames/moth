@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Loops</p><h1>Loops</h1><p>Loops repeat work without hiding which kind of repetition runs. Moth uses one <code>loop</code> keyword for conditions, collections and numeric ranges. The header tells you which form you face.</p><p>Each section starts with a practical explanation. Switch only that section to Advanced when you need the exact rules and edge cases.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Loops</p><h1>Loops</h1><p>Moth uses one <code>loop</code> keyword for conditional repetition, collection iteration and numeric ranges. The header selects the form, so you don&#39;t need separate <code>while</code>, <code>for</code> and range-loop keywords.</p><p><code>break</code> and <code>continue</code> target the nearest loop. Range bounds and steps follow checked numeric rules rather than backend-native arithmetic.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Conditional loops
@@ -794,11 +794,11 @@ td {
 
 
 
-        <p>A collection loop visits each value in a collection, from the first item to the last.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span>, <span class='moth-code-string'>&quot;Linus&quot;</span><span class='moth-code-parenthesis'>}</span>
+        <p>A collection loop visits each value in a collection, from the first item to the last.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span>, <span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-parenthesis'>}</span>
 
 <span class='moth-code-keyword'>loop</span> names <span class='moth-code-operator'>|</span>name<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>The name inside <code>|...|</code> is created for the loop body. On each iteration it refers to the current item.</p><h3>Add an index when you need one</h3><p>A second name receives the zero-based position of the item.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span>, <span class='moth-code-string'>&quot;Linus&quot;</span><span class='moth-code-parenthesis'>}</span>
+;</code></pre><p>The name inside <code>|...|</code> is created for the loop body. On each iteration it refers to the current item.</p><h3>Add an index when you need one</h3><p>A second name receives the zero-based position of the item.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span>, <span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-parenthesis'>}</span>
 
 <span class='moth-code-keyword'>loop</span> names <span class='moth-code-operator'>|</span>name, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>index<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
@@ -811,7 +811,7 @@ count <span class='moth-code-operator'>~</span><span class='moth-code-operator'>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>A collection loop visits the values in a Moth collection in collection order.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span>, <span class='moth-code-string'>&quot;Linus&quot;</span><span class='moth-code-parenthesis'>}</span>
+    <p>A collection loop visits the values in a Moth collection in collection order.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span>, <span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-parenthesis'>}</span>
 
 <span class='moth-code-keyword'>loop</span> names <span class='moth-code-operator'>|</span>name, index<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>index<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>:</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>

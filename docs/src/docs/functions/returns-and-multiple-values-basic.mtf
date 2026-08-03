@@ -10,7 +10,7 @@ A function can return more than one success value:
 
 [codeblock, $code("moth"):
     pair || -> String, Int:
-        return "Ana", 2
+        return "Priya", 2
     ;
 
     name, count = pair()

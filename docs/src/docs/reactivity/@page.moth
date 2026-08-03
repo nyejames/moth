@@ -65,11 +65,12 @@ page_head #= language_theme_head
 
     # Reactivity
 
-    Reactivity lets a template observe a stable source without turning Moth
-    into a callback language.
+    Reactivity lets a template subscribe to a stable source and update when that
+    source changes. Moth uses this constrained model instead of general closures,
+    callbacks or a second reactive type system.
 
-    Sources and subscriptions stay explicit. Mutation follows the
-    ordinary type and access rules.
+    Source declarations and subscriptions remain explicit. Mutation follows the
+    same access rules as every other value.
 ]
 
 #[section:

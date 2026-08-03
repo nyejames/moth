@@ -49,9 +49,12 @@ page_head #= language_theme_head
 
     # Structs
 
-    Structs give data a name, a shape and a clear owner. Matching fields don't make two types interchangeable.
+    A struct creates a nominal type with named fields. Two structs remain
+    different types even when their fields match, unlike structural record
+    systems.
 
-    Methods stay explicit. They bind to their type as top-level functions, with shared or mutable access visible in the receiver.
+    Receiver methods use ordinary top-level function declarations in the same
+    file as the type. Their first parameter shows shared or mutable access.
 ]
 
 #[section:

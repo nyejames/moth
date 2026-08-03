@@ -4,9 +4,19 @@ The prelude forms visibility policy, not an `@core/prelude` package. It defines 
 
 The prelude registers one namespace alias:
 
-| Bare name | Alias target | Exposes |
-|---|---|---|
-| `io` | `@core/io` | Core IO console and input helpers |
+[table:
+    [th:
+        [: Bare name]
+        [: Alias target]
+        [: Exposes]
+    ]
+
+    [td:
+        [: `io`]
+        [: `@core/io`]
+        [: Core IO console and input helpers]
+    ]
+]
 
 The bare `io` namespace behaves as a compile-time alias to `@core/io`. It does not act as a runtime value. An explicit `import @core/io` binds the same `io` namespace. An explicit `import @core/io as output` creates a separate file-local namespace name. A different alias name does not shadow the prelude alias. Only a same-name collision follows the ordinary no-shadowing model.
 

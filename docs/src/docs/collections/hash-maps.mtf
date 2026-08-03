@@ -3,7 +3,7 @@ Hash maps form insertion-ordered key/value groups.
 ### Types and literals
 
 [codeblock, $code("moth"):
-    scores ~= {"Priya" = 10, "Grace" = 12}
+    scores ~= {"Priya" = 10, "Sam" = 12}
     empty_scores ~{String = Int} = {}
 ]
 
@@ -39,6 +39,10 @@ Invalid key families include:
 
 The builtin map surface does not expose user-defined `HASHABLE`, custom
 hashers or custom comparers.
+
+Every `String` key uses content equality and content hashing. Quoted and
+template-produced strings follow the same key rule because construction origin
+does not create a second string category.
 
 ### Storage and order
 
@@ -99,10 +103,10 @@ Insertion order follows these rules:
 
     found = scores.contains("Priya")
 
-    ~scores.set("Linus", 7) catch:
+    ~scores.set("Emmy", 7) catch:
     ;
 
-    removed = ~scores.remove("Grace") catch:
+    removed = ~scores.remove("Sam") catch:
         then 0
     ;
 
@@ -123,7 +127,7 @@ that shared access is no longer used.
 - mutable entry APIs
 - const maps
 - fixed-capacity maps
-- specialized map variants
+- specialised map variants
 - user-defined key types
 
 More sophisticated maps belong in ordinary package structs.

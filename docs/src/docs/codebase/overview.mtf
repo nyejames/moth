@@ -2,12 +2,9 @@
 
 `docs/src/docs/codebase/**` owns memory design, design scope, implementation style, testing and validation.
 
-`docs/language-overview.md` remains the complete compiler-facing language
-authority during the language documentation migration.
-
-`docs/src/docs/codebase/language/overview.mtf` indexes focused Moth template
-replacement references as they are prepared and reviewed against that
-authority.
+`docs/src/docs/codebase/language/overview.mtf` routes contributors to the
+canonical focused references for source syntax and observable language
+semantics.
 
 Use the progress matrix for current support. Use the roadmap for sequencing, active plans and genuinely deferred design.
 

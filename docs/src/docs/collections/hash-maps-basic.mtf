@@ -3,7 +3,7 @@ A hash map stores values under keys.
 [codeblock, $code("moth"):
     scores ~= {
         "Priya" = 10,
-        "Grace" = 12,
+        "Sam" = 12,
     }
 ]
 
@@ -18,10 +18,10 @@ Use `get` to read a value:
 Use `set` and `remove` through a mutable receiver:
 
 [codeblock, $code("moth"):
-    ~scores.set("Linus", 7) catch:
+    ~scores.set("Emmy", 7) catch:
     ;
 
-    removed = ~scores.remove("Grace") catch:
+    removed = ~scores.remove("Sam") catch:
         then 0
     ;
 ]

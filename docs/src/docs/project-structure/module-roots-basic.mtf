@@ -1,8 +1,11 @@
-Each source directory can have one `@*.moth` file that marks it as a module.
+Each source directory can contain one module root. A normal module uses an
+`@*.moth` root, while an API-only support package uses a `+*.moth` root.
 
 ### One root per folder
 
-The filename after `@` does not matter. `@page.moth`, `@mod.moth` and `@api.moth` all mean the same thing. Two `@*.moth` files in one folder are rejected.
+The filename after `@` or `+` does not matter. `@page.moth`, `@mod.moth` and
+`@api.moth` all create the same normal-root role. One directory cannot contain
+two roots or mix an `@*.moth` root with a `+*.moth` root.
 
 ### Import the module, not the root file
 

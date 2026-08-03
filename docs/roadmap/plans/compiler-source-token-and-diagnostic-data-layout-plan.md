@@ -80,7 +80,7 @@ RELEVANT_DOCS_THIS_SLICE:
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`
 - `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md`
 - `benchmarks/frontend-optimization-results.md`
-- `docs/language-overview.md` only when source-visible diagnostic or span assertions change
+- the relevant canonical unsuffixed language references selected by `docs/src/docs/codebase/language/overview.mtf` only when source-visible diagnostic or span assertions change
 - `docs/src/docs/codebase/memory-management/overview.mtf` only when borrow facts or tooling worker lifetimes change
 
 RELEVANT_CODE:

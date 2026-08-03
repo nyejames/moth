@@ -21,7 +21,7 @@ A function may declare and return more than one success value.
 
 [codeblock, $code("moth"):
     pair || -> String, Int:
-        return "Ana", 2
+        return "Priya", 2
     ;
 
     name, count = pair()
@@ -44,7 +44,7 @@ That slot must be last.
 
 [codeblock, $code("moth"):
     load |id String| -> String, Error!:
-        if id.is_empty():
+        if id is "":
             return! Error("Missing id")
         ;
 

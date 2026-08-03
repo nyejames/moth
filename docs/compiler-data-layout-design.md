@@ -33,7 +33,7 @@ It does not override:
 
 - `docs/compiler-design-overview.md` for compiler stage and semantic ownership
 - `docs/build-system-design.md` for Stage 0, graph scheduling, project tooling and host orchestration
-- `docs/language-overview.md` for source-language behaviour
+- `docs/src/docs/codebase/language/overview.mtf` and its selected canonical references for source-language behaviour
 - the memory-management authorities for Moth program semantics
 - `docs/src/docs/progress/@page.moth` for current implementation status
 - `docs/roadmap/roadmap.md` and the owning implementation plan for sequencing

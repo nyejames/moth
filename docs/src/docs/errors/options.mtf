@@ -76,6 +76,11 @@ Options support equality comparisons:
     same = a is b
 ]
 
+Two options can be compared only when they have the same option type and their
+inner type supports equality. Two absent values compare equal. Present values
+compare through the inner type's equality rule, and a present value never
+equals `none`.
+
 Ordering operators such as `<` on optional values are not supported.
 
 ### Postfix propagation

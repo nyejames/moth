@@ -65,9 +65,12 @@ page_head #= language_theme_head
 
     # Errors, options and assertions
 
-    Missing data, expected failure and a broken invariant are three different problems. Moth gives each one a separate path.
+    Moth separates ordinary absence, recoverable failure and broken invariants.
+    Many languages combine these cases through null values or exceptions, which
+    hides part of a function's behaviour.
 
-    Use options for ordinary absence. Use typed error returns when callers need failure information. Use assertions when continuing would be wrong.
+    Use options for absence, `Error!` returns for expected failure and `assert`
+    only when continuing would violate an invariant.
 ]
 
 #[section:

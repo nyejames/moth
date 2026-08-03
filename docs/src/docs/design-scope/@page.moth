@@ -41,7 +41,13 @@ page_head #= language_theme_head
 
     # Design scope
 
-    Moth keeps the source language small. This page explains what belongs in the language, what defers and what the language intentionally excludes.
+    Moth admits a feature only when it fits the language's small, explicit
+    source model. Features marked deferred belong to that model but still await
+    implementation. Features outside scope conflict with it.
+
+    This distinction prevents an unsupported feature from looking like a design
+    promise, and it explains why Moth chooses constrained templates, choices and
+    static traits over broader mechanisms found in other languages.
 ]
 
 #[section:

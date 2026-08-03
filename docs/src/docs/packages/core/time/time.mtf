@@ -24,32 +24,102 @@ Import individual symbols or the whole namespace:
 
 The package exposes three opaque types. Do not construct them with struct syntax or inspect their fields. Pass them to the package functions.
 
-| Type | Purpose |
-|---|---|
-| `Duration` | Signed elapsed amount |
-| `TimeMark` | Monotonic clock mark for deltas and frame timing |
-| `Timestamp` | UTC wall-clock instant for logs, storage and system boundaries |
+[table:
+    [th:
+        [: Type]
+        [: Purpose]
+    ]
+
+    [td:
+        [: `Duration`]
+        [: Signed elapsed amount]
+    ]
+
+    [td:
+        [: `TimeMark`]
+        [: Monotonic clock mark for deltas and frame timing]
+    ]
+
+    [td:
+        [: `Timestamp`]
+        [: UTC wall-clock instant for logs, storage and system boundaries]
+    ]
+]
 
 All three use the handle ABI. They carry no source-visible fields.
 
 ### Monotonic clock functions
 
-| Function | Parameters | Returns | Error |
-|---|---|---|---|
-| `mark_now()` | none | `TimeMark` | no |
-| `elapsed_since(start)` | `TimeMark` | `Duration` | no |
-| `duration_between(start, end)` | `TimeMark, TimeMark` | `Duration` | no |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Error]
+    ]
+
+    [td:
+        [: `mark_now()`]
+        [: none]
+        [: `TimeMark`]
+        [: no]
+    ]
+
+    [td:
+        [: `elapsed_since(start)`]
+        [: `TimeMark`]
+        [: `Duration`]
+        [: no]
+    ]
+
+    [td:
+        [: `duration_between(start, end)`]
+        [: `TimeMark, TimeMark`]
+        [: `Duration`]
+        [: no]
+    ]
+]
 
 `mark_now()` returns the current monotonic mark. `elapsed_since(start)` returns the duration from `start` to now. `duration_between(start, end)` returns the duration from `start` to `end`.
 
 ### Wall-clock timestamp functions
 
-| Function | Parameters | Returns | Error |
-|---|---|---|---|
-| `timestamp_now()` | none | `Timestamp` | no |
-| `timestamp_from_unix_seconds(seconds)` | `Float` | `Timestamp` | no |
-| `timestamp_from_unix_milliseconds(milliseconds)` | `Float` | `Timestamp` | no |
-| `timestamp_from_iso_string(text)` | `String` | `Timestamp, Error!` | yes |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Error]
+    ]
+
+    [td:
+        [: `timestamp_now()`]
+        [: none]
+        [: `Timestamp`]
+        [: no]
+    ]
+
+    [td:
+        [: `timestamp_from_unix_seconds(seconds)`]
+        [: `Float`]
+        [: `Timestamp`]
+        [: no]
+    ]
+
+    [td:
+        [: `timestamp_from_unix_milliseconds(milliseconds)`]
+        [: `Float`]
+        [: `Timestamp`]
+        [: no]
+    ]
+
+    [td:
+        [: `timestamp_from_iso_string(text)`]
+        [: `String`]
+        [: `Timestamp, Error!`]
+        [: yes]
+    ]
+]
 
 `timestamp_from_iso_string` is the only fallible function. Invalid ISO strings return through `Error!`.
 
@@ -67,23 +137,95 @@ All three use the handle ABI. They carry no source-visible fields.
 
 ### Duration construction and helpers
 
-| Function | Parameters | Returns | Error |
-|---|---|---|---|
-| `duration_from_seconds(seconds)` | `Float` | `Duration` | no |
-| `duration_from_milliseconds(milliseconds)` | `Float` | `Duration` | no |
-| `as_seconds(duration)` | `Duration` | `Float` | no |
-| `as_milliseconds(duration)` | `Duration` | `Float` | no |
-| `is_negative(duration)` | `Duration` | `Bool` | no |
-| `abs(duration)` | `Duration` | `Duration` | no |
-| `clamp(duration, min, max)` | `Duration, Duration, Duration` | `Duration` | no |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Error]
+    ]
+
+    [td:
+        [: `duration_from_seconds(seconds)`]
+        [: `Float`]
+        [: `Duration`]
+        [: no]
+    ]
+
+    [td:
+        [: `duration_from_milliseconds(milliseconds)`]
+        [: `Float`]
+        [: `Duration`]
+        [: no]
+    ]
+
+    [td:
+        [: `as_seconds(duration)`]
+        [: `Duration`]
+        [: `Float`]
+        [: no]
+    ]
+
+    [td:
+        [: `as_milliseconds(duration)`]
+        [: `Duration`]
+        [: `Float`]
+        [: no]
+    ]
+
+    [td:
+        [: `is_negative(duration)`]
+        [: `Duration`]
+        [: `Bool`]
+        [: no]
+    ]
+
+    [td:
+        [: `abs(duration)`]
+        [: `Duration`]
+        [: `Duration`]
+        [: no]
+    ]
+
+    [td:
+        [: `clamp(duration, min, max)`]
+        [: `Duration, Duration, Duration`]
+        [: `Duration`]
+        [: no]
+    ]
+]
 
 ### Timestamp helpers
 
-| Function | Parameters | Returns | Error |
-|---|---|---|---|
-| `unix_seconds(timestamp)` | `Timestamp` | `Float` | no |
-| `unix_milliseconds(timestamp)` | `Timestamp` | `Float` | no |
-| `to_iso_string(timestamp)` | `Timestamp` | `String` | no |
+[table:
+    [th:
+        [: Function]
+        [: Parameters]
+        [: Returns]
+        [: Error]
+    ]
+
+    [td:
+        [: `unix_seconds(timestamp)`]
+        [: `Timestamp`]
+        [: `Float`]
+        [: no]
+    ]
+
+    [td:
+        [: `unix_milliseconds(timestamp)`]
+        [: `Timestamp`]
+        [: `Float`]
+        [: no]
+    ]
+
+    [td:
+        [: `to_iso_string(timestamp)`]
+        [: `Timestamp`]
+        [: `String`]
+        [: no]
+    ]
+]
 
 ### Access and return contracts
 

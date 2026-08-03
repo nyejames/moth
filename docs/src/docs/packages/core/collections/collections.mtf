@@ -6,13 +6,43 @@
 
 The package registers five host functions that implement the compiler-owned collection member operations:
 
-| Host function | Compiler-owned member | Receiver access |
-|---|---|---|
-| `__moth_collection_get` | `get(index)` | shared |
-| `__moth_collection_set` | `set(index, value)` | mutable |
-| `__moth_collection_push` | `push(value)` | mutable |
-| `__moth_collection_remove` | `remove(index)` | mutable |
-| `__moth_collection_length` | `length()` | shared |
+[table:
+    [th:
+        [: Host function]
+        [: Compiler-owned member]
+        [: Receiver access]
+    ]
+
+    [td:
+        [: `__moth_collection_get`]
+        [: `get(index)`]
+        [: shared]
+    ]
+
+    [td:
+        [: `__moth_collection_set`]
+        [: `set(index, value)`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `__moth_collection_push`]
+        [: `push(value)`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `__moth_collection_remove`]
+        [: `remove(index)`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `__moth_collection_length`]
+        [: `length()`]
+        [: shared]
+    ]
+]
 
 These host functions use inferred ABI types for the collection element and value parameters. The index parameter is `I32`. The length return is `I32`. Fallible operations return through the builtin `Error!` channel.
 

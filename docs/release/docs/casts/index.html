@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Casts</p><h1>Casts</h1><p>Casts stay explicit and target-driven. The receiving type says where the value goes. <code>cast</code>, <code>cast!</code> or <code>catch</code> says how the program handles conversion failure.</p><p>This keeps conversion local. You can see the source, target and failure path without asking the compiler to guess from distant code.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Casts</p><h1>Casts</h1><p>A cast converts a value for an immediate typed destination. Moth doesn&#39;t use constructor-like conversions such as <code>Int(value)</code>, and it doesn&#39;t infer a target from distant code.</p><p>The receiving type names the target. <code>cast</code>, <code>cast!</code> or <code>catch</code> makes the failure path visible beside the conversion.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Cast syntax

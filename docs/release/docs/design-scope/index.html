@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Design scope</p><h1>Design scope</h1><p>Moth keeps the source language small. This page explains what belongs in the language, what defers and what the language intentionally excludes.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Design scope</p><h1>Design scope</h1><p>Moth admits a feature only when it fits the language&#39;s small, explicit source model. Features marked deferred belong to that model but still await implementation. Features outside scope conflict with it.</p><p>This distinction prevents an unsupported feature from looking like a design promise, and it explains why Moth chooses constrained templates, choices and static traits over broader mechanisms found in other languages.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Design principles
@@ -731,7 +731,43 @@ result <span class='moth-code-operator'>=</span> parse<span class='moth-code-par
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Moth keeps the source language small. Compiler complexity is acceptable when it makes the programmer-facing model simpler, safer and more predictable.</p><h3>Central bias</h3><ul><li>keep the source language small, explicit and statically inspectable</li><li>prefer constrained built-in mechanisms over general metaprogramming</li><li>prefer static resolution over runtime dynamism</li><li>keep backend optimisations hidden behind stable source semantics</li><li>avoid features that need pervasive solver-heavy reasoning</li></ul><h3>Preferred constrained mechanisms</h3><p>| Need | Preferred mechanism | | ---- | ------------------- | | Compile-time generation | Templates, constants and builder directives | | Static reuse | Generic functions and explicit trait bounds | | Runtime heterogeneity | Choices | | Expected failure | <code>Error!</code>, postfix propagation and <code>catch</code> | | Invariant failure | <code>assert</code> | | Explicit result-like domain values | Ordinary choices | | Platform integration | Builder packages, external packages and source-backed packages | | Memory safety | GC baseline plus mandatory borrow and lifetime-region validation | | Mutation | Explicit exclusive access rather than implicit mutation | | Ownership | Compiler-inferred optional transfer rather than source-visible move or lifetime syntax | | Declared bulk lifetimes | Accepted deferred <code>group</code> / <code>into</code> hard lifetime regions | | Performance | Hidden compiler and backend optimisation |</p><h3>Read next</h3><ul><li><a href="#deferred-and-outside-scope">Deferred and outside scope</a></li><li><a href="#excluded-language-families">Excluded language families</a></li></ul>
+    <p>Moth keeps the source language small. Compiler complexity is acceptable when it makes the programmer-facing model simpler, safer and more predictable.</p><h3>Central bias</h3><ul><li>keep the source language small, explicit and statically inspectable</li><li>prefer constrained built-in mechanisms over general metaprogramming</li><li>prefer static resolution over runtime dynamism</li><li>keep backend optimisations hidden behind stable source semantics</li><li>avoid features that need pervasive solver-heavy reasoning</li></ul><h3>Preferred constrained mechanisms</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Need</p></th><th scope="col" style=""><p> Preferred mechanism</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> Compile-time generation</p></td> <td style=""><p> Templates, constants and builder directives</p></td>
+        </tr><tr style="">
+             <td style=""><p> Static reuse</p></td> <td style=""><p> Generic functions and explicit trait bounds</p></td>
+        </tr><tr style="">
+             <td style=""><p> Runtime heterogeneity</p></td> <td style=""><p> Choices</p></td>
+        </tr><tr style="">
+             <td style=""><p> Expected failure</p></td> <td style=""><p> <code>Error!</code>, postfix propagation and <code>catch</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Invariant failure</p></td> <td style=""><p> <code>assert</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Explicit result-like domain values</p></td> <td style=""><p> Ordinary choices</p></td>
+        </tr><tr style="">
+             <td style=""><p> Platform integration</p></td> <td style=""><p> Builder packages, external packages and source-backed packages</p></td>
+        </tr><tr style="">
+             <td style=""><p> Memory safety</p></td> <td style=""><p> GC baseline plus mandatory borrow and lifetime-region validation</p></td>
+        </tr><tr style="">
+             <td style=""><p> Mutation</p></td> <td style=""><p> Explicit exclusive access rather than implicit mutation</p></td>
+        </tr><tr style="">
+             <td style=""><p> Ownership</p></td> <td style=""><p> Compiler-inferred optional transfer rather than source-visible move or lifetime syntax</p></td>
+        </tr><tr style="">
+             <td style=""><p> Declared bulk lifetimes</p></td> <td style=""><p> Accepted deferred <code>group</code> / <code>into</code> hard lifetime regions</p></td>
+        </tr><tr style="">
+             <td style=""><p> Performance</p></td> <td style=""><p> Hidden compiler and backend optimisation</p></td>
+        </tr>
+        
+</table><h3>Read next</h3><ul><li><a href="#deferred-and-outside-scope">Deferred and outside scope</a></li><li><a href="#excluded-language-families">Excluded language families</a></li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -783,7 +819,7 @@ result <span class='moth-code-operator'>=</span> parse<span class='moth-code-par
 
 
 
-        <p>Moth has two kinds of features that aren&#39;t available today.</p><h3>Deferred: coming later</h3><p>Some features are planned but not built yet. The compiler knows about them and gives a helpful error when you try to use them. Examples include declared memory groups and recursive choice types.</p><h3>Outside scope: not planned</h3><p>Other features are intentionally excluded. They don&#39;t fit Moth&#39;s design goals. The compiler rejects them, but the error message won&#39;t say &quot;coming soon&quot; because they aren&#39;t coming.</p><h3>Why exclude features?</h3><p>Moth prefers:</p><ul><li>one clear mechanism over many specialised forms</li><li>static resolution over runtime dynamism</li><li>explicit behaviour over implicit magic</li><li>small surface area over broad feature coverage</li></ul><p>When a feature would make the language broader, more implicit or harder to reason about locally, Moth says no.</p>
+        <p>Moth has two kinds of features that aren&#39;t available today.</p><h3>Deferred: coming later</h3><p>Some features belong to the accepted design but aren&#39;t built yet. A deferred feature may have a targeted compiler diagnostic, or its syntax may remain unrecognised until implementation starts. Examples include declared memory groups and recursive choice types.</p><h3>Outside scope: not planned</h3><p>Other features are intentionally excluded. They don&#39;t fit Moth&#39;s design goals. The compiler rejects them, but the error message won&#39;t say &quot;coming soon&quot; because they aren&#39;t coming.</p><h3>Why exclude features?</h3><p>Moth prefers:</p><ul><li>one clear mechanism over many specialised forms</li><li>static resolution over runtime dynamism</li><li>explicit behaviour over implicit magic</li><li>small surface area over broad feature coverage</li></ul><p>When a feature would make the language broader, more implicit or harder to reason about locally, Moth says no.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">

@@ -1,4 +1,5 @@
-A `.mtf` file sees compile-time constants from its module root and `@html` helpers.
+A `.mtf` file sees exported compile-time constants from its same-directory
+module root and compile-time helpers supplied by `@html`.
 
 ### A constant capture
 

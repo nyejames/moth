@@ -1,7 +1,7 @@
 Use `copy` when two stored values need to change independently.
 
 [codeblock, $code("moth"):
-    names ~= {"Priya", "Grace"}
+    names ~= {"Priya", "Sam"}
     copied_names ~= copy names
 
     ~names.push("Linus") catch:

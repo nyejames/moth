@@ -49,10 +49,12 @@ page_head #= language_theme_head
 
     # Plain Markdown
 
-    Plain Markdown earns its place as the least magical content format in a Moth project.
+    A `.md` file remains ordinary Markdown. The compiler renders it at compile
+    time and exports the HTML as `content`, but it never interprets Moth syntax
+    inside the file.
 
-    The compiler can import it, render it and hand the result to the HTML builder.
-    It never pretends the file contains Moth code.
+    This keeps plain content portable across Markdown tools. Choose `.mtf` only
+    when content needs Moth constants, templates or builder helpers.
 ]
 
 #[section:

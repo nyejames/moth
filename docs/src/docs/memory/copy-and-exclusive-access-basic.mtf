@@ -6,7 +6,7 @@ Use `copy` when you need a separate version of a value:
 
 [codeblock, $code("moth"):
     original ~= {1, 2, 3}
-    independent = copy original
+    independent ~= copy original
 
     ~independent.push(4) catch:
         assert(false, "unexpected push failure")

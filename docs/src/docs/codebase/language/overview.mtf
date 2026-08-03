@@ -1,19 +1,23 @@
 # Compiler-facing language reference
 
-`docs/language-overview.md` remains the complete compiler-facing language
-authority while the public language documentation is split into focused
-Moth template references.
+This index routes contributors to Moth's canonical source-language references.
+The unsuffixed `.mtf` files listed below own complete source syntax and
+observable semantics for their topics.
 
-## Consolidated authority
+## Authority model
 
-Read `docs/language-overview.md` for syntax, semantic invariants, edge cases,
-deferred behaviour and the exact outside-scope language surface.
+- Read every relevant unsuffixed file before writing Moth code or changing the
+  parser, semantic stages, diagnostics or lowering for that feature.
+- Paired `-basic.mtf` files teach a smaller truthful surface. They do not define
+  edge cases or replace the unsuffixed reference.
+- `@page.moth` files own introductions, navigation and website composition.
+- `docs/src/docs/codebase/memory-management/**` owns the formal memory model.
+- `docs/compiler-design-overview.md` owns compiler-stage contracts.
+- `docs/build-system-design.md` owns project and build orchestration.
+- `docs/src/docs/progress/@page.moth` owns current implementation and backend
+  support.
 
-Dedicated parity-sync plans may update the monolith after canonical focused pages have been
-verified. Each sync must keep the monolith and focused references aligned in the same accepted
-slice.
-
-## Focused references under review
+## Canonical focused references
 
 ### Language basics
 
@@ -182,13 +186,8 @@ slice.
 - `docs/src/docs/markdown/rendering-contract.mtf`
 - `docs/src/docs/markdown/choosing-a-content-format.mtf`
 
-Each unsuffixed file has a paired `-basic.mtf` teaching version.
-
-Each public route imports both levels.
-
-These files contain the technically complete focused surface under review.
-They do not supersede `docs/language-overview.md` until the writing pass,
-parity review and authority switch are approved.
+Each unsuffixed file has a paired `-basic.mtf` teaching version. Each public
+route imports both levels.
 
 ## Public documentation
 

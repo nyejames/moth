@@ -36,7 +36,7 @@ Do not begin implementation merely because this file exists. Design Phases 0 thr
 
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
-- `docs/language-overview.md`
+- `docs/src/docs/codebase/language/overview.mtf` and its relevant canonical references
 - package sections of the progress matrix and roadmap
 - style, testing and validation guides
 

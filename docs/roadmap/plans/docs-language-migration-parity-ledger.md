@@ -2,6 +2,17 @@
 
 Audit evidence, not a prose diary. One row per monolith section or delegated formal authority.
 
+Stage C rechecked every row against the former monolith at commit `1548b09be`
+and the delegated compiler, build-system and memory authorities. The review
+restored omitted compound-assignment, option-equality, collection-access and
+String-map-key rules, corrected current/deferred status drift and rebuilt every
+public route before the authority switch.
+
+The corrected Stage C final audit confirmed the focused owner map preserves the
+former monolith contract. A focused follow-up audit cleared the final Prelude
+ownership wording correction. No incomplete parity row or unresolved design
+ambiguity remains.
+
 The ledger distinguishes two separate states:
 - **Doc parity**: whether the focused documentation owner exists and covers the source contract. `Complete` or `Incomplete`.
 - **Implementation status**: what the compiler currently supports. `Supported`, `Partial`, `Deferred`, `Rejected` or `Compiler drift`.
@@ -122,7 +133,7 @@ A documentation row can be `Complete` while implementation is `Deferred` or `Par
 | Design principles | design-scope/design-principles.mtf | design-principles-basic.mtf | /docs/design-scope/ | compiler-design-overview.md | Yes | N/A | None | Complete |
 | Deferred and outside scope | design-scope/deferred-and-outside-scope.mtf | deferred-and-outside-scope-basic.mtf | /docs/design-scope/ | compiler-design-overview.md | Yes | N/A | None | Complete |
 | Excluded language families | design-scope/excluded-language-families.mtf | excluded-language-families-basic.mtf | /docs/design-scope/ | compiler-design-overview.md | Yes | N/A | None | Complete |
-| Core IO | packages/core/io/io.mtf | io-basic.mtf | /docs/packages/core/io/ | build-system-design.md | Yes | Supported | None | Complete |
+| Core IO | packages/core/io/io.mtf | io-basic.mtf | /docs/packages/core/io/ | build-system-design.md | Yes | Partial | HTML-JS supports Core IO. HTML-Wasm and other non-JS lowerings remain deferred. | Complete |
 | Core math | packages/core/math/math.mtf | math-basic.mtf | /docs/packages/core/math/ | build-system-design.md | Yes | Partial | HTML-JS uses the shared finite-Float external boundary. HTML-Wasm package lowering remains deferred. | Complete |
 | Core text | packages/core/text/text.mtf | text-basic.mtf | /docs/packages/core/text/ | build-system-design.md | Yes | Partial | HTML-JS `text.length` counts Unicode scalar values. HTML-Wasm package lowering and receiver methods remain deferred. | Complete |
 | Core random | packages/core/random/random.mtf | random-basic.mtf | /docs/packages/core/random/ | build-system-design.md | Yes | Partial | Seeded random deferred | Complete |

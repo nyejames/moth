@@ -67,7 +67,8 @@ These forms are invalid:
     count=1
 ]
 
-Compound assignments follow the same rule:
+The compound forms `+=`, `-=`, `*=`, `/=`, `//=`, `%=` and `^=` follow the
+same rule:
 
 [codeblock, $code("moth"):
     count += 1

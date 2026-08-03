@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Values and bindings</p><h1>Values and bindings</h1><p>Names cost little. Copies aren&#39;t automatic. Existing values share by default, mutability stays explicit and <code>copy</code> draws the line between another view and an independent value.</p><p>These rules apply to every type. The memory-management pages explain how the compiler validates and lowers them.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Values and bindings</p><h1>Values and bindings</h1><p>A binding gives a value a name. Unlike languages that copy small values and reference larger ones through different rules, Moth shares every existing value by default.</p><p>Mutation needs an explicit mutable binding and exclusive access. Use <code>copy</code> only when you need an independent value. The same rules apply to every type.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Bindings
@@ -849,7 +849,7 @@ add_name<span class='moth-code-parenthesis'>(</span><span class='moth-code-opera
 
 
 
-        <p>A new name for an existing value doesn&#39;t automatically copy that value.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
+        <p>A new name for an existing value doesn&#39;t automatically copy that value.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>}</span>
 same_names <span class='moth-code-operator'>=</span> names</code></pre><p><code>same_names</code> is another read-only view of the existing value.</p><p>This keeps ordinary code cheap. You can pass values around without copying them first.</p><p>You can&#39;t use shared access to change the value. Mutation needs a mutable binding and an explicit exclusive operation.</p>
 </div>
 
@@ -914,7 +914,7 @@ io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parent
 
 
 
-        <p>Use <code>copy</code> when two stored values need to change independently.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span>
+        <p>Use <code>copy</code> when two stored values need to change independently.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>}</span>
 copied_names <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> names
 
 <span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Linus&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>

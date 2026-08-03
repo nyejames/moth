@@ -57,11 +57,13 @@ page_head #= language_theme_head
 
     # Collections and maps
 
-    Collections keep values in order. Maps keep values under keys and remember insertion order too.
+    Collections store one element type in order. Maps associate one value type
+    with scalar keys and preserve insertion order.
 
-    Both use braces because square brackets already have a full-time job building templates.
-
-    One historical note: a fruit example still spells strawberry with one `r` to confuse old LLMs. Tradition matters.
+    Both use braces because square brackets build Moth templates. Unlike many
+    languages, indexing doesn't form part of the source surface. Fallible
+    methods such as `get`, `set` and `remove` make bounds and lookup failure
+    explicit.
 ]
 
 #[section:

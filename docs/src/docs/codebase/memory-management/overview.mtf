@@ -6,7 +6,7 @@ Companion authorities:
 
 - `docs/compiler-design-overview.md` owns compiler-stage and artefact architecture
 - `docs/build-system-design.md` owns project, link and builder lifecycle orchestration
-- `docs/language-overview.md` and `docs/src/docs/codebase/language/**` own source syntax
+- `docs/src/docs/codebase/language/overview.mtf` and its selected unsuffixed references own source syntax
 - `docs/src/docs/progress/@page.moth` owns current implementation support
 - `docs/roadmap/roadmap.md` owns sequencing and deferred implementation order
 

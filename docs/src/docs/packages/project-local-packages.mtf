@@ -43,7 +43,10 @@ Consumers see only the support facade's `export:` surface. They cannot address `
 
 ### Imported package roots do not produce routes
 
-A support package root is imported rather than activated as an HTML route. Support roots reject top-level runtime work and page fragments. They export declarations but produce no HTML artifact. See @../project-structure/#html-routing-and-artifacts (HTML routing and artifacts).
+Code imports a support package root rather than activating it as an HTML route.
+Support roots reject top-level runtime work and page fragments. They export
+declarations but produce no HTML artefact. See
+@../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
 
 ### Origin and backing are separate
 

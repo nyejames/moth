@@ -48,6 +48,6 @@ use shared access. The `~` goes before the value you're mutating.
     -- querying: shared access, no ~
     width = canvas_width(canvas)
 ]
-  environment.
+
 For the full function surface, opaque type rules, pixel access and deferred
 surfaces, see @#canvas-drawing (@web/canvas advanced).

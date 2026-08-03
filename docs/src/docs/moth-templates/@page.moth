@@ -46,27 +46,30 @@ import @styles {
     doc_pager,
 }
 
-page_title #= "moth-template-files"
+page_title #= "Moth template files"
 page_description #= "Moth-aware Markdown content files for HTML projects."
 page_head #= language_theme_head
 
 #[navbar]
 
 #[section, $md:
-    @../ (Documentation) / moth-template-files
+    @../ (Documentation) / Moth template files
 
-    # moth-template-files
+    # Moth template files
 
-    moth-template-files brings Markdown that already lives inside Moth's template world.
+    A `.mtf` file puts Markdown directly inside Moth's compile-time template
+    system. It needs no frontmatter, embedded script block or separate template
+    engine.
 
-    Write the content directly. Import the folded result as `content`. Reach for a
-    normal `.moth` file when the job stops being content-shaped.
+    The compiler exports the folded result as `content`. Use plain `.md` for
+    portable Markdown and normal `.moth` when the file needs declarations,
+    imports or runtime work.
 ]
 
 #[section:
     [doc_level:
         [$insert("key"):moth-template-files-files]
-        [$insert("title"):moth-template-files files]
+        [$insert("title"):Moth template files]
         [$insert("advanced"):[moth_template_files]]
 
         [moth_template_files_basic]
@@ -106,7 +109,7 @@ page_head #= language_theme_head
 #[section:
     [doc_level:
         [$insert("key"):moth-template-files-limits]
-        [$insert("title"):moth-template-files limits]
+        [$insert("title"):Moth template file limits]
         [$insert("advanced"):[moth_template_limits]]
 
         [moth_template_limits_basic]

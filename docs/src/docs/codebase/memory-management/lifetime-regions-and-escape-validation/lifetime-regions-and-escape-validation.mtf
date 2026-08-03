@@ -241,7 +241,10 @@ External bindings use closed semantic boundary profiles. They do not expose arbi
 
 **Restricted host-binding profile.** Existing Core, Builder and JavaScript-backed bindings use a restricted host-binding profile. Ordinary Moth values cross by value, host code may not retain references into ordinary Moth storage, and opaque handles represent foreign identities rather than Moth reference types.
 
-Richer resource-capable profiles are deferred and require a separate complete design. Detail lives in @../runtime-and-backend-lowering (Runtime and backend lowering), `docs/build-system-design.md` and `docs/language-overview.md`.
+Richer resource-capable profiles are deferred and require a separate complete
+design. Detail lives in @../runtime-and-backend-lowering (Runtime and backend
+lowering), `docs/build-system-design.md` and
+`docs/src/docs/packages/external-binding-contracts.mtf`.
 
 ## Analysis boundary
 

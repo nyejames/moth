@@ -25,8 +25,9 @@ page_head #= language_theme_head
 
     # @html
 
-    `@html` provides compile-time HTML helpers as a builder source-backed
-    package. The constants fold into HTML strings during compilation.
+    `@html` provides compile-time layout and formatting helpers through a
+    source-backed builder package. Each helper remains an ordinary exported
+    constant that folds into a `String`, rather than a hidden HTML syntax layer.
 ]
 
 #[section:

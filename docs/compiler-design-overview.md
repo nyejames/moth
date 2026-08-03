@@ -11,7 +11,7 @@ This document is the single source of truth for accepted core compiler architect
 Companion authorities:
 
 - `docs/build-system-design.md` for project and build orchestration
-- `docs/language-overview.md` and `docs/src/docs/codebase/language/**` for source syntax and language semantics
+- `docs/src/docs/codebase/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/codebase/design-scope/overview.mtf` for design bias and scope boundaries
 - `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
 - `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards

@@ -55,7 +55,7 @@ runtime.
 
 ### Advisory const facts
 
-The compiler may discover private const facts for optimization.
+The compiler may discover private const facts for optimisation.
 
 Those facts do not:
 

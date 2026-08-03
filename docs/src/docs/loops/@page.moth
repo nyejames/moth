@@ -49,9 +49,12 @@ page_head #= language_theme_head
 
     # Loops
 
-    Loops repeat work without hiding which kind of repetition runs. Moth uses one `loop` keyword for conditions, collections and numeric ranges. The header tells you which form you face.
+    Moth uses one `loop` keyword for conditional repetition, collection
+    iteration and numeric ranges. The header selects the form, so you don't need
+    separate `while`, `for` and range-loop keywords.
 
-    Each section starts with a practical explanation. Switch only that section to Advanced when you need the exact rules and edge cases.
+    `break` and `continue` target the nearest loop. Range bounds and steps follow
+    checked numeric rules rather than backend-native arithmetic.
 ]
 
 #[section:

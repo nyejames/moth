@@ -49,9 +49,12 @@ page_head #= language_theme_head
 
     # Branching
 
-    Use a normal `if` for one decision. Use a full match when one value has more than two meaningful cases. Both forms stay explicit about scope, fallback behaviour and the values they produce.
+    Use statement `if` for a Boolean decision. Use a full match when one value
+    can take distinct literal, range, option or choice forms.
 
-    No mystery fallthrough. No wildcard punctuation pretending to mean three different things.
+    Unlike C-style `switch`, Moth never falls through between arms. `else =>`
+    alone marks the catch-all, and exhaustive matches can omit it when the
+    compiler can prove every case appears.
 ]
 
 #[section:

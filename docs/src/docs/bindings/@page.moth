@@ -57,9 +57,12 @@ page_head #= language_theme_head
 
     # Values and bindings
 
-    Names cost little. Copies aren't automatic. Existing values share by default, mutability stays explicit and `copy` draws the line between another view and an independent value.
+    A binding gives a value a name. Unlike languages that copy small values and
+    reference larger ones through different rules, Moth shares every existing
+    value by default.
 
-    These rules apply to every type. The memory-management pages explain how the compiler validates and lowers them.
+    Mutation needs an explicit mutable binding and exclusive access. Use `copy`
+    only when you need an independent value. The same rules apply to every type.
 ]
 
 #[section:

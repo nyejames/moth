@@ -49,9 +49,12 @@ page_head #= language_theme_head
 
     # Constants and compile-time behaviour
 
-    Constants move work out of runtime and into the compiler. They stay strict on purpose: the value must be known, stable and finished before the program starts.
+    A constant tells the compiler to finish a value before runtime. Unlike a
+    read-only runtime binding, a Moth constant can depend only on other
+    compile-time values and must fold completely.
 
-    Templates can join in too. A const page fragment forms a template with nowhere left to hide.
+    The same rule covers scalar values, const records and templates. Direct const
+    fragments can contribute finished content to an HTML page.
 ]
 
 #[section:

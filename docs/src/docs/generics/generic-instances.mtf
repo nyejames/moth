@@ -21,7 +21,7 @@ A concrete generic instance substitutes the generic parameters with concrete typ
         Empty,
     ;
 
-    name Maybe of String = Maybe::Some("Ana")
+    name Maybe of String = Maybe::Some("Priya")
     missing Maybe of String = Maybe::Empty
 ]
 

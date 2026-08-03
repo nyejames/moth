@@ -24,7 +24,5 @@ Use block form when a branch needs more room:
 
 `then` provides the value for the surrounding assignment.
 
-Both branches must provide the value or leave the function in another valid
-way.
-
-The block form with `then` supplies the value to the surrounding assignment.
+Both branches must provide the value or leave the function through another
+valid path.

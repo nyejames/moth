@@ -25,8 +25,10 @@ page_head #= language_theme_head
 
     # Prelude policy
 
-    The prelude gives you a few names without an import. It keeps common
-    output convenient without making every Core package global.
+    The prelude registers the bare `io` namespace without an import. The
+    compiler-owned `Error` type also remains available without an import, but it
+    is a builtin rather than a prelude symbol. Most Core capabilities still
+    require visible imports.
 ]
 
 #[section:

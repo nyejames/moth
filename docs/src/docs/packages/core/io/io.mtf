@@ -6,13 +6,37 @@
 
 Console helpers write string content to the backend output surface. Each helper takes one `String` value and returns nothing.
 
-| Helper | Output lane |
-|---|---|
-| `io.print(text)` | plain output |
-| `io.line(text)` | output with a trailing newline |
-| `io.debug(text)` | debug-level output |
-| `io.warn(text)` | warning-level output |
-| `io.error(text)` | error-level output |
+[table:
+    [th:
+        [: Helper]
+        [: Output lane]
+    ]
+
+    [td:
+        [: `io.print(text)`]
+        [: plain output]
+    ]
+
+    [td:
+        [: `io.line(text)`]
+        [: output with a trailing newline]
+    ]
+
+    [td:
+        [: `io.debug(text)`]
+        [: debug-level output]
+    ]
+
+    [td:
+        [: `io.warn(text)`]
+        [: warning-level output]
+    ]
+
+    [td:
+        [: `io.error(text)`]
+        [: error-level output]
+    ]
+]
 
 The output boundary accepts `String` values only. Templates produce `String` values, so template interpolation provides the way to format non-string content for output.
 
@@ -69,13 +93,43 @@ Input polling lives under `io.input.*`. The handle type `io.input.Input` stays o
 
 Keyboard helpers track down, pressed, released and last-edge states.
 
-| Helper | Signature | Access |
-|---|---|---|
-| `key_down(input, key)` | `Input, String -> Bool` | shared |
-| `key_pressed(input, key)` | `Input, String -> Bool` | shared |
-| `key_released(input, key)` | `Input, String -> Bool` | shared |
-| `last_key_pressed(input)` | `Input -> String?` | shared |
-| `last_key_released(input)` | `Input -> String?` | shared |
+[table:
+    [th:
+        [: Helper]
+        [: Signature]
+        [: Access]
+    ]
+
+    [td:
+        [: `key_down(input, key)`]
+        [: `Input, String -> Bool`]
+        [: shared]
+    ]
+
+    [td:
+        [: `key_pressed(input, key)`]
+        [: `Input, String -> Bool`]
+        [: shared]
+    ]
+
+    [td:
+        [: `key_released(input, key)`]
+        [: `Input, String -> Bool`]
+        [: shared]
+    ]
+
+    [td:
+        [: `last_key_pressed(input)`]
+        [: `Input -> String?`]
+        [: shared]
+    ]
+
+    [td:
+        [: `last_key_released(input)`]
+        [: `Input -> String?`]
+        [: shared]
+    ]
+]
 
 Single alphabetic key strings normalise to lowercase. Space uses `"Space"`. Special keys use logical names such as `"ArrowLeft"`, `"Enter"`, `"Escape"`, `"Backspace"` and `"Shift"`.
 
@@ -83,15 +137,55 @@ Single alphabetic key strings normalise to lowercase. Space uses `"Space"`. Spec
 
 Pointer helpers track button state and position.
 
-| Helper | Signature | Access |
-|---|---|---|
-| `pointer_down(input, button)` | `Input, String -> Bool` | shared |
-| `pointer_pressed(input, button)` | `Input, String -> Bool` | shared |
-| `pointer_released(input, button)` | `Input, String -> Bool` | shared |
-| `pointer_x(input)` | `Input -> Float` | shared |
-| `pointer_y(input)` | `Input -> Float` | shared |
-| `last_pointer_pressed(input)` | `Input -> String?` | shared |
-| `last_pointer_released(input)` | `Input -> String?` | shared |
+[table:
+    [th:
+        [: Helper]
+        [: Signature]
+        [: Access]
+    ]
+
+    [td:
+        [: `pointer_down(input, button)`]
+        [: `Input, String -> Bool`]
+        [: shared]
+    ]
+
+    [td:
+        [: `pointer_pressed(input, button)`]
+        [: `Input, String -> Bool`]
+        [: shared]
+    ]
+
+    [td:
+        [: `pointer_released(input, button)`]
+        [: `Input, String -> Bool`]
+        [: shared]
+    ]
+
+    [td:
+        [: `pointer_x(input)`]
+        [: `Input -> Float`]
+        [: shared]
+    ]
+
+    [td:
+        [: `pointer_y(input)`]
+        [: `Input -> Float`]
+        [: shared]
+    ]
+
+    [td:
+        [: `last_pointer_pressed(input)`]
+        [: `Input -> String?`]
+        [: shared]
+    ]
+
+    [td:
+        [: `last_pointer_released(input)`]
+        [: `Input -> String?`]
+        [: shared]
+    ]
+]
 
 Pointer buttons use `"left"`, `"middle"` and `"right"`. Pointer coordinates use `Float` values.
 

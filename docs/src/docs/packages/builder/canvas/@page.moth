@@ -25,9 +25,9 @@ page_head #= language_theme_head
 
     # @web/canvas
 
-    `@web/canvas` provides 2D canvas drawing as a binding-backed runtime
-    package. It exposes opaque handle types and free functions for drawing
-    shapes, text, images and pixels.
+    `@web/canvas` exposes browser canvas drawing through opaque handles and free
+    functions. A binding-backed package keeps JavaScript object identity outside
+    Moth's value model while preserving typed access and explicit mutation.
 ]
 
 #[section:

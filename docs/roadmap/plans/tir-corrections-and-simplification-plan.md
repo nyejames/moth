@@ -2,7 +2,7 @@
 
 ## Audit scope
 
-This revision audits the completed TIR implementation on the current connected `nyejames/moth` default branch, including `src/compiler_frontend/ast/templates/tir/**`, template construction, slot planning, AST finalization, reactive-template metadata, the neutral AST-to-HIR handoff and the HIR template entry points. The review is governed by `docs/compiler-design-overview.md`, `docs/language-overview.md`, `docs/src/docs/codebase/style-guide/style-guide.mtf`, `docs/src/docs/codebase/style-guide/testing.mtf` and the profile-gated `docs/roadmap/plans/post-tir-template-parser-optimization-plan.md`. The architecture is fundamentally good: TIR is AST-local, exact views are established and HIR consumes neutral owned data. The remaining work is a substantial consolidation pass with several confirmed invariant defects, two probable user-visible slot/wrapper bugs, repeated semantic walks and migration-era scaffolding. This was a static source audit through the read-only GitHub connector, so findings marked **probable** must begin with a failing regression test before implementation.
+This revision audits the completed TIR implementation on the current connected `nyejames/moth` default branch, including `src/compiler_frontend/ast/templates/tir/**`, template construction, slot planning, AST finalization, reactive-template metadata, the neutral AST-to-HIR handoff and the HIR template entry points. The review is governed by `docs/compiler-design-overview.md`, the canonical template references selected by `docs/src/docs/codebase/language/overview.mtf`, `docs/src/docs/codebase/style-guide/style-guide.mtf`, `docs/src/docs/codebase/style-guide/testing.mtf` and the profile-gated `docs/roadmap/plans/post-tir-template-parser-optimization-plan.md`. The architecture is fundamentally good: TIR is AST-local, exact views are established and HIR consumes neutral owned data. The remaining work is a substantial consolidation pass with several confirmed invariant defects, two probable user-visible slot/wrapper bugs, repeated semantic walks and migration-era scaffolding. This was a static source audit through the read-only GitHub connector, so findings marked **probable** must begin with a failing regression test before implementation.
 
 The target end state remains:
 
@@ -743,7 +743,9 @@ Requires derived-template APIs and expression-site remapping.
 
 **Concrete change**
 
-`docs/language-overview.md` says repeated slots replay the same contribution. Resolve the current code's rejection of a second default slot against that authority.
+`docs/src/docs/templates/template-slots.mtf` says repeated slots replay the same
+contribution. Resolve the current code's rejection of a second default slot
+against that authority.
 
 Binding decision for this plan:
 
@@ -1568,7 +1570,11 @@ The following tests are release blockers for this plan:
 
 ### Repeated slot semantics
 
-`docs/language-overview.md` states that repeated slots replay the same contribution. `TirSlotSchema::record_key` currently rejects a second default slot. Resolve this contradiction in favor of the accepted language authority unless a newer explicit design decision exists. Update implementation tests and remove or revise the stale diagnostic.
+`docs/src/docs/templates/template-slots.mtf` states that repeated slots replay
+the same contribution. `TirSlotSchema::record_key` currently rejects a second
+default slot. Resolve this contradiction in favour of the accepted language
+authority unless a newer explicit design decision exists. Update implementation
+tests and remove or revise the stale diagnostic.
 
 ### Stale migration narration
 

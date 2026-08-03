@@ -25,8 +25,9 @@ page_head #= language_theme_head
 
     # Core text
 
-    `@core/text` provides helper functions for `String` values. Import it
-    when you need to check length, emptiness or substrings.
+    `@core/text` provides checks for `String` length, emptiness and substrings.
+    Length counts Unicode scalar values rather than UTF-16 code units, which
+    keeps the result aligned with Moth's `Char` model across backends.
 ]
 
 #[section:

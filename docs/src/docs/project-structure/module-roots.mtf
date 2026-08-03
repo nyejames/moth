@@ -65,7 +65,9 @@ Every selected normal module is compiled into an immutable module artefact. Its 
 
 ### API-only roots
 
-A module root with no builder-relevant top-level activity (no runtime code, no const fragments, no runtime fragments) is API-only. It is a valid module root that exports declarations but produces no builder artifact.
+A module root with no builder-relevant top-level activity (no runtime code, no
+const fragments and no runtime fragments) remains API-only. It may export
+declarations but produces no builder artefact.
 
 ### Migrating older module projects
 
@@ -78,4 +80,4 @@ A module root with no builder-relevant top-level activity (no runtime code, no c
 
 - For the export block see @#public-api (Public API).
 - For root activity and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
-- For HTML routes see @#html-routing-and-artifacts (HTML routing and artifacts).
+- For HTML routes see @#html-routing-and-artifacts (HTML routing and artefacts).

@@ -11,5 +11,6 @@ When you put a value into a group, that value cannot outlive the group.
 Group syntax is **accepted but deferred**. Current programs don't use it. The
 compiler doesn't parse or validate group declarations yet.
 
-You don't need groups to write Moth programs today. The compiler handles
-memory safety through shared access, explicit `copy` and `~` exclusive access.
+You don't need groups to write Moth programs today. Current shared-access,
+explicit-copy and `~` rules cover access conflicts, while lifetime-topology
+validation remains deferred.

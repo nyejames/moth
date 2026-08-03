@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Builder packages</a> / @web/canvas</p><h1>@web/canvas</h1><p><code>@web/canvas</code> provides 2D canvas drawing as a binding-backed runtime package. It exposes opaque handle types and free functions for drawing shapes, text, images and pixels.</p></section>
+<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Builder packages</a> / @web/canvas</p><h1>@web/canvas</h1><p><code>@web/canvas</code> exposes browser canvas drawing through opaque handles and free functions. A binding-backed package keeps JavaScript object identity outside Moth&#39;s value model while preserving typed access and explicit mutation.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Canvas drawing
@@ -735,13 +735,511 @@ fill_rect<span class='moth-code-parenthesis'>(</span><span class='moth-code-oper
 fill_rect<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>100.0</span>, <span class='moth-code-number'>100.0</span><span class='moth-code-parenthesis'>)</span>
 
 <span class='moth-code-comment'>-- querying: shared access, no ~</span>
-width <span class='moth-code-operator'>=</span> canvas_width<span class='moth-code-parenthesis'>(</span>canvas<span class='moth-code-parenthesis'>)</span></code></pre><p>  environment. For the full function surface, opaque type rules, pixel access and deferred surfaces, see <a href="#canvas-drawing">@web/canvas advanced</a>.</p>
+width <span class='moth-code-operator'>=</span> canvas_width<span class='moth-code-parenthesis'>(</span>canvas<span class='moth-code-parenthesis'>)</span></code></pre><p>For the full function surface, opaque type rules, pixel access and deferred surfaces, see <a href="#canvas-drawing">@web/canvas advanced</a>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p><code>@web/canvas</code> provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@web/canvas</code> ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the standard library expands.</p><h3>Import roots</h3><p>Import individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>web<span class='moth-code-operator'>/</span>canvas <span class='moth-code-parenthesis'>{</span>get_canvas, context_<span class='moth-code-number'>2</span>d, fill_rect<span class='moth-code-parenthesis'>}</span>
 
-import <span class='moth-code-operator'>@</span>web<span class='moth-code-operator'>/</span>canvas</code></pre><h3>Opaque types</h3><p><code>@web/canvas</code> exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through <code>@web/canvas</code> functions.</p><p>| Type | Description | |---|---| | <code>CanvasElement</code> | A <code>&lt;canvas&gt;</code> DOM element handle | | <code>Canvas2d</code> | A 2D rendering context handle | | <code>CanvasGradient</code> | A gradient object handle | | <code>CanvasPattern</code> | A pattern object handle | | <code>CanvasImage</code> | An image element handle | | <code>CanvasImageData</code> | An <code>ImageData</code> pixel buffer handle | | <code>CanvasTextMetrics</code> | A text measurement result handle |</p><p>All opaque types lower to object references in the JS backend. The Wasm backend does not support <code>@web/canvas</code> and rejects reachable calls before lowering.</p><h3>Canvas element management</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>get_canvas</code> | <code>id String</code> | <code>CanvasElement, Error!</code> | shared | | <code>create_canvas</code> | <code>width Int, height Int</code> | <code>CanvasElement</code> | shared | | <code>get_image</code> | <code>id String</code> | <code>CanvasImage, Error!</code> | shared | | <code>create_image</code> | <code>src String</code> | <code>CanvasImage</code> | shared | | <code>create_image_with_size</code> | <code>src String, width Int, height Int</code> | <code>CanvasImage</code> | shared | | <code>context_2d</code> | <code>canvas CanvasElement</code> | <code>Canvas2d, Error!</code> | shared | | <code>canvas_width</code> | <code>canvas CanvasElement</code> | <code>Int</code> | shared | | <code>canvas_height</code> | <code>canvas CanvasElement</code> | <code>Int</code> | shared | | <code>canvas_client_width</code> | <code>canvas CanvasElement</code> | <code>Int</code> | shared | | <code>canvas_client_height</code> | <code>canvas CanvasElement</code> | <code>Int</code> | shared | | <code>set_canvas_width</code> | <code>canvas ~CanvasElement, width Int</code> | void | mutable | | <code>set_canvas_height</code> | <code>canvas ~CanvasElement, height Int</code> | void | mutable | | <code>set_canvas_size</code> | <code>canvas ~CanvasElement, width Int, height Int</code> | void | mutable | | <code>to_data_url</code> | <code>canvas CanvasElement</code> | <code>String, Error!</code> | shared | | <code>to_data_url_type</code> | <code>canvas CanvasElement, mime_type String</code> | <code>String, Error!</code> | shared | | <code>to_data_url_quality</code> | <code>canvas CanvasElement, mime_type String, quality Float</code> | <code>String, Error!</code> | shared |</p><h3>Image queries</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>image_width</code> | <code>image CanvasImage</code> | <code>Int</code> | shared | | <code>image_height</code> | <code>image CanvasImage</code> | <code>Int</code> | shared | | <code>image_natural_width</code> | <code>image CanvasImage</code> | <code>Int</code> | shared | | <code>image_natural_height</code> | <code>image CanvasImage</code> | <code>Int</code> | shared | | <code>image_is_loaded</code> | <code>image CanvasImage</code> | <code>Bool</code> | shared |</p><h3>Context state</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>save</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>restore</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>reset</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>is_context_lost</code> | <code>ctx Canvas2d</code> | <code>Bool</code> | shared |</p><h3>Rectangles</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>clear_rect</code> | <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code> | void | mutable | | <code>fill_rect</code> | <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code> | void | mutable | | <code>stroke_rect</code> | <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code> | void | mutable |</p><h3>Fill and stroke style</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>set_fill_style</code> | <code>ctx ~Canvas2d, color String</code> | void | mutable | | <code>set_stroke_style</code> | <code>ctx ~Canvas2d, color String</code> | void | mutable | | <code>set_fill_gradient</code> | <code>ctx ~Canvas2d, gradient CanvasGradient</code> | void | mutable | | <code>set_stroke_gradient</code> | <code>ctx ~Canvas2d, gradient CanvasGradient</code> | void | mutable | | <code>set_fill_pattern</code> | <code>ctx ~Canvas2d, pattern CanvasPattern</code> | void | mutable | | <code>set_stroke_pattern</code> | <code>ctx ~Canvas2d, pattern CanvasPattern</code> | void | mutable |</p><h3>Compositing</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>set_global_alpha</code> | <code>ctx ~Canvas2d, alpha Float</code> | void | mutable | | <code>set_global_composite_operation</code> | <code>ctx ~Canvas2d, operation String</code> | void | mutable |</p><h3>Line style</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>set_line_width</code> | <code>ctx ~Canvas2d, width Float</code> | void | mutable | | <code>set_line_cap</code> | <code>ctx ~Canvas2d, line_cap String</code> | void | mutable | | <code>set_line_join</code> | <code>ctx ~Canvas2d, line_join String</code> | void | mutable | | <code>set_miter_limit</code> | <code>ctx ~Canvas2d, limit Float</code> | void | mutable | | <code>set_line_dash</code> | <code>ctx ~Canvas2d, dash Float, gap Float</code> | void | mutable | | <code>set_line_dash_solid</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>set_line_dash_offset</code> | <code>ctx ~Canvas2d, offset Float</code> | void | mutable |</p><h3>Text rendering settings</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>set_font</code> | <code>ctx ~Canvas2d, font String</code> | void | mutable | | <code>set_text_align</code> | <code>ctx ~Canvas2d, align String</code> | void | mutable | | <code>set_text_baseline</code> | <code>ctx ~Canvas2d, baseline String</code> | void | mutable | | <code>set_direction</code> | <code>ctx ~Canvas2d, direction String</code> | void | mutable | | <code>set_letter_spacing</code> | <code>ctx ~Canvas2d, spacing String</code> | void | mutable | | <code>set_word_spacing</code> | <code>ctx ~Canvas2d, spacing String</code> | void | mutable | | <code>set_font_kerning</code> | <code>ctx ~Canvas2d, kerning String</code> | void | mutable | | <code>set_font_stretch</code> | <code>ctx ~Canvas2d, stretch String</code> | void | mutable | | <code>set_font_variant_caps</code> | <code>ctx ~Canvas2d, caps String</code> | void | mutable | | <code>set_text_rendering</code> | <code>ctx ~Canvas2d, rendering String</code> | void | mutable | | <code>set_lang</code> | <code>ctx ~Canvas2d, lang String</code> | void | mutable |</p><h3>Image smoothing, filter and shadow</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>set_image_smoothing_enabled</code> | <code>ctx ~Canvas2d, enabled Bool</code> | void | mutable | | <code>set_image_smoothing_quality</code> | <code>ctx ~Canvas2d, quality String</code> | void | mutable | | <code>set_filter</code> | <code>ctx ~Canvas2d, filter String</code> | void | mutable | | <code>set_shadow_color</code> | <code>ctx ~Canvas2d, color String</code> | void | mutable | | <code>set_shadow_blur</code> | <code>ctx ~Canvas2d, blur Float</code> | void | mutable | | <code>set_shadow_offset</code> | <code>ctx ~Canvas2d, x Float, y Float</code> | void | mutable |</p><h3>Path construction</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>begin_path</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>move_to</code> | <code>ctx ~Canvas2d, x Float, y Float</code> | void | mutable | | <code>line_to</code> | <code>ctx ~Canvas2d, x Float, y Float</code> | void | mutable | | <code>close_path</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>rect</code> | <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code> | void | mutable | | <code>round_rect</code> | <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float, radius Float</code> | <code>Error!</code> | mutable | | <code>arc</code> | <code>ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float</code> | <code>Error!</code> | mutable | | <code>arc_counterclockwise</code> | <code>ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float</code> | <code>Error!</code> | mutable | | <code>arc_to</code> | <code>ctx ~Canvas2d, x1 Float, y1 Float, x2 Float, y2 Float, radius Float</code> | <code>Error!</code> | mutable | | <code>quadratic_curve_to</code> | <code>ctx ~Canvas2d, cpx Float, cpy Float, x Float, y Float</code> | void | mutable | | <code>bezier_curve_to</code> | <code>ctx ~Canvas2d, cp1x Float, cp1y Float, cp2x Float, cp2y Float, x Float, y Float</code> | void | mutable | | <code>ellipse</code> | <code>ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float</code> | <code>Error!</code> | mutable | | <code>ellipse_counterclockwise</code> | <code>ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float</code> | <code>Error!</code> | mutable |</p><h3>Fill, stroke and clip</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>fill</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>fill_even_odd</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>stroke</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>clip</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>clip_even_odd</code> | <code>ctx ~Canvas2d</code> | void | mutable | | <code>is_point_in_path</code> | <code>ctx Canvas2d, x Float, y Float</code> | <code>Bool</code> | shared | | <code>is_point_in_stroke</code> | <code>ctx Canvas2d, x Float, y Float</code> | <code>Bool</code> | shared |</p><h3>Transformations</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>translate</code> | <code>ctx ~Canvas2d, x Float, y Float</code> | void | mutable | | <code>rotate</code> | <code>ctx ~Canvas2d, angle Float</code> | void | mutable | | <code>scale</code> | <code>ctx ~Canvas2d, x Float, y Float</code> | void | mutable | | <code>transform</code> | <code>ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float</code> | void | mutable | | <code>set_transform</code> | <code>ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float</code> | void | mutable | | <code>reset_transform</code> | <code>ctx ~Canvas2d</code> | void | mutable |</p><h3>Text drawing</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>fill_text</code> | <code>ctx ~Canvas2d, text String, x Float, y Float</code> | void | mutable | | <code>fill_text_max_width</code> | <code>ctx ~Canvas2d, text String, x Float, y Float, max_width Float</code> | void | mutable | | <code>stroke_text</code> | <code>ctx ~Canvas2d, text String, x Float, y Float</code> | void | mutable | | <code>stroke_text_max_width</code> | <code>ctx ~Canvas2d, text String, x Float, y Float, max_width Float</code> | void | mutable | | <code>measure_text</code> | <code>ctx Canvas2d, text String</code> | <code>CanvasTextMetrics</code> | shared |</p><h3>Text metrics</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>text_width</code> | <code>metrics CanvasTextMetrics</code> | <code>Float</code> | shared | | <code>text_actual_bounding_box_left</code> | <code>metrics CanvasTextMetrics</code> | <code>Float</code> | shared | | <code>text_actual_bounding_box_right</code> | <code>metrics CanvasTextMetrics</code> | <code>Float</code> | shared | | <code>text_actual_bounding_box_ascent</code> | <code>metrics CanvasTextMetrics</code> | <code>Float</code> | shared | | <code>text_actual_bounding_box_descent</code> | <code>metrics CanvasTextMetrics</code> | <code>Float</code> | shared | | <code>text_font_bounding_box_ascent</code> | <code>metrics CanvasTextMetrics</code> | <code>Float</code> | shared | | <code>text_font_bounding_box_descent</code> | <code>metrics CanvasTextMetrics</code> | <code>Float</code> | shared |</p><h3>Gradients</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>create_linear_gradient</code> | <code>ctx Canvas2d, x0 Float, y0 Float, x1 Float, y1 Float</code> | <code>CanvasGradient, Error!</code> | shared | | <code>create_radial_gradient</code> | <code>ctx Canvas2d, x0 Float, y0 Float, r0 Float, x1 Float, y1 Float, r1 Float</code> | <code>CanvasGradient, Error!</code> | shared | | <code>create_conic_gradient</code> | <code>ctx Canvas2d, start_angle Float, x Float, y Float</code> | <code>CanvasGradient, Error!</code> | shared | | <code>add_color_stop</code> | <code>gradient ~CanvasGradient, offset Float, color String</code> | <code>Error!</code> | mutable |</p><h3>Patterns</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>create_pattern</code> | <code>ctx Canvas2d, image CanvasImage, repetition String</code> | <code>CanvasPattern, Error!</code> | shared | | <code>create_canvas_pattern</code> | <code>ctx Canvas2d, canvas CanvasElement, repetition String</code> | <code>CanvasPattern, Error!</code> | shared |</p><h3>Image drawing</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>draw_image</code> | <code>ctx ~Canvas2d, image CanvasImage, x Float, y Float</code> | <code>Error!</code> | mutable | | <code>draw_image_scaled</code> | <code>ctx ~Canvas2d, image CanvasImage, x Float, y Float, width Float, height Float</code> | <code>Error!</code> | mutable | | <code>draw_image_cropped</code> | <code>ctx ~Canvas2d, image CanvasImage, source_x Float, source_y Float, source_width Float, source_height Float, x Float, y Float, width Float, height Float</code> | <code>Error!</code> | mutable | | <code>draw_canvas</code> | <code>ctx ~Canvas2d, canvas CanvasElement, x Float, y Float</code> | <code>Error!</code> | mutable | | <code>draw_canvas_scaled</code> | <code>ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float</code> | <code>Error!</code> | mutable |</p><p>Image drawing functions fail with <code>Error!</code> when the image has not finished loading.</p><h3>Image data</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>get_image_data</code> | <code>ctx Canvas2d, x Int, y Int, width Int, height Int</code> | <code>CanvasImageData, Error!</code> | shared | | <code>create_image_data</code> | <code>ctx Canvas2d, width Int, height Int</code> | <code>CanvasImageData, Error!</code> | shared | | <code>create_image_data_from</code> | <code>ctx Canvas2d, image_data CanvasImageData</code> | <code>CanvasImageData, Error!</code> | shared | | <code>put_image_data</code> | <code>ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float</code> | <code>Error!</code> | mutable | | <code>put_image_data_dirty</code> | <code>ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float, dirty_x Float, dirty_y Float, dirty_width Float, dirty_height Float</code> | <code>Error!</code> | mutable | | <code>image_data_width</code> | <code>image_data CanvasImageData</code> | <code>Int</code> | shared | | <code>image_data_height</code> | <code>image_data CanvasImageData</code> | <code>Int</code> | shared |</p><h3>Pixel access</h3><p>| Function | Parameters | Returns | Access | |---|---|---|---| | <code>image_data_get_red</code> | <code>image_data CanvasImageData, x Int, y Int</code> | <code>Int, Error!</code> | shared | | <code>image_data_get_green</code> | <code>image_data CanvasImageData, x Int, y Int</code> | <code>Int, Error!</code> | shared | | <code>image_data_get_blue</code> | <code>image_data CanvasImageData, x Int, y Int</code> | <code>Int, Error!</code> | shared | | <code>image_data_get_alpha</code> | <code>image_data CanvasImageData, x Int, y Int</code> | <code>Int, Error!</code> | shared | | <code>image_data_set_pixel</code> | <code>image_data ~CanvasImageData, x Int, y Int, red Int, green Int, blue Int, alpha Int</code> | <code>Error!</code> | mutable | | <code>image_data_clear_pixel</code> | <code>image_data ~CanvasImageData, x Int, y Int</code> | <code>Error!</code> | mutable |</p><p>Pixel getters and setters fail with <code>Error!</code> when coordinates fall outside the image data bounds. Channel values clamp to 0 through 255.</p><h3>Access and return contracts</h3><p>Functions that mutate the context take <code>~Canvas2d</code> (mutable access). Query functions take <code>Canvas2d</code> (shared access). The same pattern applies to <code>~CanvasElement</code>, <code>~CanvasGradient</code> and <code>~CanvasImageData</code>. Fresh values from creation functions satisfy mutable parameters without <code>~</code>. Existing places require explicit <code>~</code> at the call site.</p><p>All parameters stay positional-only. Named arguments are not supported because binding-backed packages do not expose source-function features.</p><h3>Opaque type rules</h3><ul><li>Do not construct opaque types with struct syntax.</li><li>Do not inspect opaque type fields.</li><li>Opaque types have no source-visible methods. Use the free functions.</li><li>The <code>@html</code> package provides a <code>Canvas</code> wrapper struct with receiver methods for a more ergonomic drawing API.</li></ul><h3>Backend behaviour</h3><p>The JS backend fully supports <code>@web/canvas</code>. When canvas functions are reachable, the build emits the <code>canvas.js</code> runtime asset, a generated glue module and an import map entry for <code>@moth/runtime</code>.</p><p>The Wasm backend rejects reachable <code>@web/canvas</code> calls before lowering. Canvas support requires a browser JS environment.</p><h3>Teardown</h3><p><code>@web/canvas</code> defines no teardown, close or disposal functions. Opaque handles are managed by the host JavaScript runtime.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path imports such as <code>import @web/canvas/get_canvas</code> face rejection. Use grouped or namespace imports.</li><li>Named arguments are not supported. Binding-backed calls stay positional-only.</li><li>The package does not expose receiver methods, source-defined types or constants.</li><li>Opaque types cannot be constructed or inspected from Moth source.</li></ul><h3>Deferred surfaces</h3><p><code>@web/canvas</code> ships as a skeleton. Deferred surfaces include async image-loading helpers, <code>toBlob</code> and <code>captureStream</code>, raw typed-array and arbitrary line-dash array access, <code>Path2D</code>, <code>DOMMatrix</code>, <code>OffscreenCanvas</code>, <code>ImageBitmap</code>, video sources and WebGL. These will arrive as the language and external package ABI mature. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="../../#import-paths">Import paths</a>.</li><li>For the <code>@html</code> source-backed wrapper see <a href="../html">@html</a>.</li></ul>
+import <span class='moth-code-operator'>@</span>web<span class='moth-code-operator'>/</span>canvas</code></pre><h3>Opaque types</h3><p><code>@web/canvas</code> exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through <code>@web/canvas</code> functions.</p><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Type</p></th><th scope="col" style=""><p> Description</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>CanvasElement</code></p></td> <td style=""><p> A <code>&lt;canvas&gt;</code> DOM element handle</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>Canvas2d</code></p></td> <td style=""><p> A 2D rendering context handle</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>CanvasGradient</code></p></td> <td style=""><p> A gradient object handle</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>CanvasPattern</code></p></td> <td style=""><p> A pattern object handle</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>CanvasImage</code></p></td> <td style=""><p> An image element handle</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>CanvasImageData</code></p></td> <td style=""><p> An <code>ImageData</code> pixel buffer handle</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>CanvasTextMetrics</code></p></td> <td style=""><p> A text measurement result handle</p></td>
+        </tr>
+        
+</table><p>All opaque types lower to object references in the JS backend. The Wasm backend does not support <code>@web/canvas</code> and rejects reachable calls before lowering.</p><h3>Canvas element management</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>get_canvas</code></p></td> <td style=""><p> <code>id String</code></p></td> <td style=""><p> <code>CanvasElement, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>create_canvas</code></p></td> <td style=""><p> <code>width Int, height Int</code></p></td> <td style=""><p> <code>CanvasElement</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>get_image</code></p></td> <td style=""><p> <code>id String</code></p></td> <td style=""><p> <code>CanvasImage, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>create_image</code></p></td> <td style=""><p> <code>src String</code></p></td> <td style=""><p> <code>CanvasImage</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>create_image_with_size</code></p></td> <td style=""><p> <code>src String, width Int, height Int</code></p></td> <td style=""><p> <code>CanvasImage</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>context_2d</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Canvas2d, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>canvas_width</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>canvas_height</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>canvas_client_width</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>canvas_client_height</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_canvas_width</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, width Int</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_canvas_height</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, height Int</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_canvas_size</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, width Int, height Int</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>to_data_url</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>to_data_url_type</code></p></td> <td style=""><p> <code>canvas CanvasElement, mime_type String</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>to_data_url_quality</code></p></td> <td style=""><p> <code>canvas CanvasElement, mime_type String, quality Float</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr>
+        
+</table><h3>Image queries</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>image_width</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_height</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_natural_width</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_natural_height</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_is_loaded</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
+        </tr>
+        
+</table><h3>Context state</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>save</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>restore</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>reset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>is_context_lost</code></p></td> <td style=""><p> <code>ctx Canvas2d</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
+        </tr>
+        
+</table><h3>Rectangles</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>clear_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>fill_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>stroke_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Fill and stroke style</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>set_fill_style</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, color String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_stroke_style</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, color String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_fill_gradient</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, gradient CanvasGradient</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_stroke_gradient</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, gradient CanvasGradient</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_fill_pattern</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, pattern CanvasPattern</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_stroke_pattern</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, pattern CanvasPattern</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Compositing</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>set_global_alpha</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, alpha Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_global_composite_operation</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, operation String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Line style</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>set_line_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, width Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_line_cap</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, line_cap String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_line_join</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, line_join String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_miter_limit</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, limit Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_line_dash</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, dash Float, gap Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_line_dash_solid</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_line_dash_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, offset Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Text rendering settings</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>set_font</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, font String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_text_align</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, align String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_text_baseline</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, baseline String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_direction</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, direction String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_letter_spacing</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, spacing String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_word_spacing</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, spacing String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_font_kerning</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, kerning String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_font_stretch</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, stretch String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_font_variant_caps</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, caps String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_text_rendering</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, rendering String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_lang</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, lang String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Image smoothing, filter and shadow</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>set_image_smoothing_enabled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, enabled Bool</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_image_smoothing_quality</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, quality String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_filter</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, filter String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_shadow_color</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, color String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_shadow_blur</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, blur Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_shadow_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Path construction</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>begin_path</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>move_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>line_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>close_path</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>round_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float, radius Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>arc</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>arc_counterclockwise</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>arc_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x1 Float, y1 Float, x2 Float, y2 Float, radius Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>quadratic_curve_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, cpx Float, cpy Float, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>bezier_curve_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, cp1x Float, cp1y Float, cp2x Float, cp2y Float, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>ellipse</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>ellipse_counterclockwise</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Fill, stroke and clip</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>fill</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>fill_even_odd</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>stroke</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>clip</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>clip_even_odd</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>is_point_in_path</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Float, y Float</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>is_point_in_stroke</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Float, y Float</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
+        </tr>
+        
+</table><h3>Transformations</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>translate</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>rotate</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, angle Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>scale</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>set_transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>reset_transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Text drawing</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>fill_text</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>fill_text_max_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float, max_width Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>stroke_text</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>stroke_text_max_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float, max_width Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>measure_text</code></p></td> <td style=""><p> <code>ctx Canvas2d, text String</code></p></td> <td style=""><p> <code>CanvasTextMetrics</code></p></td> <td style=""><p> shared</p></td>
+        </tr>
+        
+</table><h3>Text metrics</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>text_width</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>text_actual_bounding_box_left</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>text_actual_bounding_box_right</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>text_actual_bounding_box_ascent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>text_actual_bounding_box_descent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>text_font_bounding_box_ascent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>text_font_bounding_box_descent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+        </tr>
+        
+</table><h3>Gradients</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>create_linear_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, x0 Float, y0 Float, x1 Float, y1 Float</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>create_radial_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, x0 Float, y0 Float, r0 Float, x1 Float, y1 Float, r1 Float</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>create_conic_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, start_angle Float, x Float, y Float</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>add_color_stop</code></p></td> <td style=""><p> <code>gradient ~CanvasGradient, offset Float, color String</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><h3>Patterns</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>create_pattern</code></p></td> <td style=""><p> <code>ctx Canvas2d, image CanvasImage, repetition String</code></p></td> <td style=""><p> <code>CanvasPattern, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>create_canvas_pattern</code></p></td> <td style=""><p> <code>ctx Canvas2d, canvas CanvasElement, repetition String</code></p></td> <td style=""><p> <code>CanvasPattern, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr>
+        
+</table><h3>Image drawing</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>draw_image</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, x Float, y Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>draw_image_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>draw_image_cropped</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, source_x Float, source_y Float, source_width Float, source_height Float, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>draw_canvas</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, canvas CanvasElement, x Float, y Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>draw_canvas_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><p>Image drawing functions fail with <code>Error!</code> when the image has not finished loading.</p><h3>Image data</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>get_image_data</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Int, y Int, width Int, height Int</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>create_image_data</code></p></td> <td style=""><p> <code>ctx Canvas2d, width Int, height Int</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>create_image_data_from</code></p></td> <td style=""><p> <code>ctx Canvas2d, image_data CanvasImageData</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>put_image_data</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>put_image_data_dirty</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float, dirty_x Float, dirty_y Float, dirty_width Float, dirty_height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_data_width</code></p></td> <td style=""><p> <code>image_data CanvasImageData</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_data_height</code></p></td> <td style=""><p> <code>image_data CanvasImageData</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+        </tr>
+        
+</table><h3>Pixel access</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Access</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>image_data_get_red</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_data_get_green</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_data_get_blue</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_data_get_alpha</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_data_set_pixel</code></p></td> <td style=""><p> <code>image_data ~CanvasImageData, x Int, y Int, red Int, green Int, blue Int, alpha Int</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>image_data_clear_pixel</code></p></td> <td style=""><p> <code>image_data ~CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+        </tr>
+        
+</table><p>Pixel getters and setters fail with <code>Error!</code> when coordinates fall outside the image data bounds. Channel values clamp to 0 through 255.</p><h3>Access and return contracts</h3><p>Functions that mutate the context take <code>~Canvas2d</code> (mutable access). Query functions take <code>Canvas2d</code> (shared access). The same pattern applies to <code>~CanvasElement</code>, <code>~CanvasGradient</code> and <code>~CanvasImageData</code>. Fresh values from creation functions satisfy mutable parameters without <code>~</code>. Existing places require explicit <code>~</code> at the call site.</p><p>All parameters stay positional-only. Named arguments are not supported because binding-backed packages do not expose source-function features.</p><h3>Opaque type rules</h3><ul><li>Do not construct opaque types with struct syntax.</li><li>Do not inspect opaque type fields.</li><li>Opaque types have no source-visible methods. Use the free functions.</li><li>The <code>@html</code> package provides a <code>Canvas</code> wrapper struct with receiver methods for a more ergonomic drawing API.</li></ul><h3>Backend behaviour</h3><p>The JS backend fully supports <code>@web/canvas</code>. When canvas functions are reachable, the build emits the <code>canvas.js</code> runtime asset, a generated glue module and an import map entry for <code>@moth/runtime</code>.</p><p>The Wasm backend rejects reachable <code>@web/canvas</code> calls before lowering. Canvas support requires a browser JS environment.</p><h3>Teardown</h3><p><code>@web/canvas</code> defines no teardown, close or disposal functions. Opaque handles are managed by the host JavaScript runtime.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path imports such as <code>import @web/canvas/get_canvas</code> face rejection. Use grouped or namespace imports.</li><li>Named arguments are not supported. Binding-backed calls stay positional-only.</li><li>The package does not expose receiver methods, source-defined types or constants.</li><li>Opaque types cannot be constructed or inspected from Moth source.</li></ul><h3>Deferred surfaces</h3><p><code>@web/canvas</code> ships as a skeleton. Deferred surfaces include async image-loading helpers, <code>toBlob</code> and <code>captureStream</code>, raw typed-array and arbitrary line-dash array access, <code>Path2D</code>, <code>DOMMatrix</code>, <code>OffscreenCanvas</code>, <code>ImageBitmap</code>, video sources and WebGL. These will arrive as the language and external package ABI mature. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="../../#import-paths">Import paths</a>.</li><li>For the <code>@html</code> source-backed wrapper see <a href="../html">@html</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

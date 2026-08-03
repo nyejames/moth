@@ -11,13 +11,12 @@ page_head #= language_theme_head
 
     # Builder packages
 
-    Builder packages are selected by the project builder. The HTML builder
-    provides `@html` as a source-backed compile-time helper package and
-    `@web/canvas` as a binding-backed runtime drawing package.
+    The selected project builder supplies packages tied to its artefact model.
+    This keeps browser and rendering APIs out of the core language.
 
-    Both ship as early skeletons and will grow as the language stabilises and
-    the standard library expands. The @../../progress (progress matrix) owns
-    current support status.
+    The HTML builder provides source-backed compile-time helpers through
+    `@html` and binding-backed runtime drawing through `@web/canvas`. The
+    @../../progress (progress matrix) records current support.
 
     ## Package pages
 

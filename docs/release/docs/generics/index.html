@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Generics</p><h1>Generics</h1><p>Generics let one declaration describe a family of concrete types or functions.</p><p>Moth keeps the solving local. Type arguments come from the declaration, the call in front of you and its immediate receiving type.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Generics</p><h1>Generics</h1><p>Generics let one declaration describe a family of concrete structs, choices or functions. Moth specialises each use statically and doesn&#39;t expose erased generic values at runtime.</p><p>Type inference stays local. It reads the immediate arguments and receiving type rather than searching later uses or the whole program.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Generic declarations
@@ -922,7 +922,7 @@ always_fail type <span class='moth-code-struct'>T,</span> <span class='moth-code
     <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> err
 ;
 
-maybe_name <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> wrap_optional<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span>
+maybe_name <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> wrap_optional<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span>
 
 value <span class='moth-code-operator'>=</span> always_fail<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>7</span>, <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;bad&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span> then <span class='moth-code-number'>0</span></code></pre><p>A bare <code>none</code> cannot infer an otherwise unknown parameter by itself.</p><h3>Imported generic functions</h3><p>Visible imported generic functions use the same local inference rules. There is no explicit call-site type argument syntax.</p><h3>Cast boundary</h3><p>Generic inference does not look through <code>cast</code>. The cast target must be selected after the generic call has already been solved.</p><h3>Generic error parameter inference</h3><p>A concrete callee error type does not specialise an otherwise unsolved generic error parameter merely because it appears inside the generic body. Immediate declaration and call-site evidence must still solve the parameter.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Rejected: E is not solved by the concrete Error inside the body.</span>
 generic_fail type <span class='moth-code-struct'>E</span> <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>E</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
@@ -992,7 +992,7 @@ string_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-t
     <span class='moth-code-struct'>Empty,</span>
 ;
 
-name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>Maybe of String</code> stores a <code>String</code> payload. <code>Maybe of Int</code> would store an <code>Int</code>.</p>
+name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>Maybe of String</code> stores a <code>String</code> payload. <code>Maybe of Int</code> would store an <code>Int</code>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -1006,7 +1006,7 @@ string_box <span class='moth-code-struct'>Box</span> of <span class='moth-code-t
     <span class='moth-code-struct'>Empty,</span>
 ;
 
-name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ana&quot;</span><span class='moth-code-parenthesis'>)</span>
+name <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Some</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span>
 missing <span class='moth-code-struct'>Maybe</span> of <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Maybe</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-struct'>Empty</span></code></pre><p>Choice payload matching uses the substituted payload types.</p><h3>Instance identity</h3><p>Same constructor plus same concrete arguments yields the same instance type. Different arguments yield incompatible instance types.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
     value <span class='moth-code-struct'>A,</span>
 <span class='moth-code-operator'>|</span>

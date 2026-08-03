@@ -73,10 +73,12 @@ page_head #= language_theme_head
 
     # Traits
 
-    Traits name behaviour a type promises to provide.
+    A trait names a static method contract. Matching methods don't imply
+    conformance, so a type must declare the promise explicitly.
 
-    The promise stays explicit. Method shapes don't count until the source declares
-    conformance, and every reusable bound stays static before runtime begins.
+    Unlike object-oriented interfaces or Rust trait objects, Moth traits don't
+    create runtime values or dynamic dispatch. Generic bounds use visible
+    conformance evidence during compilation.
 ]
 
 #[section:

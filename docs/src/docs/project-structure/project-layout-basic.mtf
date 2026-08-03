@@ -8,14 +8,21 @@ A Moth project has one config file, one source root and generated output folders
 
 ### One root file per module directory
 
-Each source directory can have one `@*.moth` file that marks it as a module. The `@` filename is a convention. `@page.moth`, `@api.moth` and `@mod.moth` all mean the same thing to the compiler.
+Each source directory can have one root file. An `@*.moth` root creates a normal
+module. The text after `@` stays cosmetic, so `@page.moth`, `@api.moth` and
+`@mod.moth` all create the same root role.
 
 ### Shared scoped packages
 
-A `+*.moth` file in a source directory marks it as a scoped support package. For example, `shared/+package.moth` creates `@shared`. Its owner module, normal sibling modules and their descendants may import it. Other support packages in the same scope and the package's private implementation subtree cannot.
+A `+*.moth` root creates a scoped support package instead of a normal module.
+For example, `shared/+package.moth` creates `@shared`. Its owner module, normal
+sibling modules and their descendants may import it. Other support packages in
+the same scope and the package's private implementation subtree cannot. A
+directory cannot contain both `@*.moth` and `+*.moth` roots.
 
 The current scaffold creates an empty legacy `lib/` folder. It has no special meaning in the accepted package design.
 
 ### Outputs are generated
 
-The build command creates output folders. They are not source. The builder cleans up stale artifacts automatically.
+The build command creates output folders. They are not source. The builder
+cleans up stale artefacts automatically.

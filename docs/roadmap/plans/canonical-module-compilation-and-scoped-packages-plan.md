@@ -70,7 +70,7 @@ Read these before implementation and before every review phase:
 - `AGENTS.md`
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
-- `docs/language-overview.md`
+- `docs/src/docs/codebase/language/overview.mtf` and its relevant canonical references
 - `docs/src/docs/codebase/memory-management/overview.mtf`
 - `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`
 - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`

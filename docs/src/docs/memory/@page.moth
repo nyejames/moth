@@ -49,9 +49,13 @@ page_head #= language_theme_head
 
     # Memory and lifetimes
 
-    Moth defaults to reference semantics, explicit copies and inferred moves. Existing values use shared read-only access. Mutation requires explicit exclusive access. The compiler infers moves while keeping copies explicit.
+    Moth shares existing values by default, requires explicit copies and infers
+    safe ownership transfers. Unlike Rust, it exposes no reference types,
+    lifetime parameters or move syntax. Unlike a conventional garbage-collected
+    language, its accepted design also requires alias and lifetime-topology
+    validation. Lifetime-topology validation remains deferred in the compiler.
 
-    These pages cover source-facing memory behaviour. For the formal memory model, borrow validation and backend lowering, see @../codebase/memory-management (Memory management).
+    These pages explain source behaviour. The @../codebase/memory-management (memory model) defines borrow validation and backend lowering.
 ]
 
 #[section:

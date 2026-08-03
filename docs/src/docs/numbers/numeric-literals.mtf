@@ -19,7 +19,7 @@ The source spelling of a number determines its natural type.
 - `-1`, `-1e6` and `-count` are valid prefix forms.
 - `- count` is invalid.
 - Integer literals must fit the `Int` range.
-- Float literals must materialize to a finite `Float`.
+- Float literals must materialise to a finite `Float`.
 
 [codeblock, $code("moth"):
     valid_literal = -42

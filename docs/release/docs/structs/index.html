@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Structs</p><h1>Structs</h1><p>Structs give data a name, a shape and a clear owner. Matching fields don&#39;t make two types interchangeable.</p><p>Methods stay explicit. They bind to their type as top-level functions, with shared or mutable access visible in the receiver.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Structs</p><h1>Structs</h1><p>A struct creates a nominal type with named fields. Two structs remain different types even when their fields match, unlike structural record systems.</p><p>Receiver methods use ordinary top-level function declarations in the same file as the type. Their first parameter shows shared or mutable access.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Struct declarations
@@ -868,7 +868,7 @@ point.x <span class='moth-code-operator'>=</span> <span class='moth-code-number'
 
 
 
-        <p>A receiver method is a function that lives inside a struct.</p><p>You create a struct, then create a function that can only be called from instances of those structs.</p><p>Its first parameter is named <code>this</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Vector</span><span class='moth-code-number'>2</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
+        <p>A receiver method attaches behaviour to a struct or choice declared in the same file.</p><p>Its first parameter is named <code>this</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Vector</span><span class='moth-code-number'>2</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
     x <span class='moth-code-struct'>Float,</span>
     y <span class='moth-code-struct'>Float,</span>
 <span class='moth-code-operator'>|</span>
@@ -878,7 +878,7 @@ length_squared <span class='moth-code-operator'>|</span>this <span class='moth-c
 ;
 
 vector <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Vector</span><span class='moth-code-number'>2</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>3.0</span>, <span class='moth-code-number'>4.0</span><span class='moth-code-parenthesis'>)</span>
-length <span class='moth-code-operator'>=</span> vector.length_squared<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The method is written as a normal top-level function in the same file as the type.</p><p>Call it with <code>value.method()</code>, not <code>method(value)</code>.</p><p>Methods exist as a helpful to organise code. They belong to the struct, so can only be called from instances of that type and are passed around with that type.</p>
+length <span class='moth-code-operator'>=</span> vector.length_squared<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Write the method as a normal top-level function in the same file as the type.</p><p>Call it with <code>value.method()</code>, not <code>method(value)</code>.</p><p>This keeps method ownership visible without placing functions inside the type declaration. Only values of the receiver type can call the method.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -963,7 +963,7 @@ reset <span class='moth-code-operator'>|</span>this <span class='moth-code-opera
 ;
 
 vector <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Vector</span><span class='moth-code-number'>2</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>3.0</span>, <span class='moth-code-number'>4.0</span><span class='moth-code-parenthesis'>)</span>
-<span class='moth-code-operator'>~</span>vector.reset<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Contract</h3><ul><li>The receiver root must be a mutable place.</li><li>The call uses <code>~receiver.method(...)</code>.</li><li>Omitting <code>~</code> for a mutable receiver method is invalid.</li><li>Adding <code>~</code> to a shared receiver method is invalid.</li><li>A temporary or computed rvalue cannot receive a mutable receiver call.</li><li>Field writes inside the method are permitted through mutable <code>this</code>.</li><li><code>~</code> requests exclusive access for the call. It is not move syntax and is not part of type identity.</li></ul><p>This differs from a fresh rvalue passed to a mutable free-function parameter. The compiler may materialize that free-function argument into a hidden local. A mutable receiver call still requires an authored mutable place.</p>
+<span class='moth-code-operator'>~</span>vector.reset<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Contract</h3><ul><li>The receiver root must be a mutable place.</li><li>The call uses <code>~receiver.method(...)</code>.</li><li>Omitting <code>~</code> for a mutable receiver method is invalid.</li><li>Adding <code>~</code> to a shared receiver method is invalid.</li><li>A temporary or computed rvalue cannot receive a mutable receiver call.</li><li>Field writes inside the method are permitted through mutable <code>this</code>.</li><li><code>~</code> requests exclusive access for the call. It is not move syntax and is not part of type identity.</li></ul><p>This differs from a fresh rvalue passed to a mutable free-function parameter. The compiler may materialise that free-function argument into a hidden local. A mutable receiver call still requires an authored mutable place.</p>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

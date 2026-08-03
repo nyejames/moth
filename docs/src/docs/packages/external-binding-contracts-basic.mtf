@@ -34,10 +34,5 @@ not Moth references.
 
 ### WIT is deferred
 
-Future Wasm component imports will use a value-only WIT profile. WIT
-resources, callbacks, async and streams are deferred. See
-@#external-binding-contracts (External binding contracts advanced) for the
-full deferred surface.
-For the full binding contract, rejected JS features and deferred WIT
-surfaces, see @#external-binding-contracts (External binding contracts
-advanced).
+Future Wasm component imports will use a value-only WIT profile. WIT resources,
+callbacks, async and streams remain deferred. See @#external-binding-contracts (External binding contracts advanced) for the full contract and deferred surface.

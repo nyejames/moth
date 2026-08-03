@@ -49,7 +49,12 @@ page_head #= language_theme_head
 
     # Numbers
 
-    Moth ships two numeric types. Strict rules around literals, spacing and failure keep a number consistent across compiler stages and backends.
+    Moth uses `Int` for signed whole numbers and `Float` for finite real-number
+    values. It avoids the large family of integer widths and implicit numeric
+    conversions found in many systems languages.
+
+    Arithmetic checks overflow, division errors and non-finite results. Literal
+    spelling and operator spacing also follow one exact grammar on every backend.
 ]
 
 #[section:

@@ -49,10 +49,13 @@ page_head #= language_theme_head
 
     # Language basics
 
-    Moth keeps a small semantic surface.
-    Each bit of punctuation or keyword represents a single concept.
+    Moth uses a compact set of syntax rules across the whole language. Colons
+    open blocks, semicolons close them and square brackets build strings rather
+    than index collections.
 
-    This page covers the syntax you will see across Moth codebases.
+    These choices differ from C-like and Python-like languages, but they keep
+    each delimiter tied to one job. Start here before moving to bindings,
+    control flow and user-defined types.
 ]
 
 #[section:

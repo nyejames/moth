@@ -21,7 +21,7 @@ When you apply concrete types to a generic declaration, you get a concrete insta
         Empty,
     ;
 
-    name Maybe of String = Maybe::Some("Ana")
+    name Maybe of String = Maybe::Some("Priya")
 ]
 
 `Maybe of String` stores a `String` payload. `Maybe of Int` would store an `Int`.

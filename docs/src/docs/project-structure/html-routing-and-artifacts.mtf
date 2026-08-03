@@ -16,28 +16,36 @@ The root module maps to the project index. A nested directory maps to a nested i
 
 ### API-only modules
 
-A module root with no builder-relevant top-level activity is API-only. It does not emit an HTML artifact merely because a root file exists. Artifact emission requires builder-relevant root activity: runtime code, const fragments or runtime fragments.
+A module root with no builder-relevant top-level activity remains API-only. A
+root file alone emits no HTML artefact. Artefact emission requires runtime code,
+const fragments or runtime fragments.
 
 ### Builder ownership
 
-The HTML builder owns route and artifact policy. The frontend remains builder-neutral. The builder decides:
+The HTML builder owns route and artefact policy. The frontend remains
+builder-neutral. The builder decides:
 
-- which modules produce HTML artifacts
+- which modules produce HTML artefacts
 - how routes are derived
 - how output files are organised
 - whether to reject unsupported reachable features
 
 ### Output folders
 
-Output folders are generated and manifest-managed. Builder sections in `config.moth` own output settings. HTML defaults are development `dev` and release `release`. Generated output folders should be treated as build artifacts, not source.
+The builder generates output folders and manages them through manifests.
+Builder sections in `config.moth` own output settings. HTML defaults to `dev`
+for development and `release` for release builds. Treat generated folders as
+build artefacts, not source.
 
 ### Release versus development output
 
 The default build writes to the dev folder. The `--release` flag writes to the output folder. The dev server serves from the dev folder.
 
-### Entry root artifact requirement
+### Entry root artefact requirement
 
-The HTML builder requires at least one artifact-producing module root at the configured entry root. If the entry root contains only API-only roots, the build is rejected with `MOTH-CONFIG-0001`.
+The HTML builder requires at least one artefact-producing module root at the
+configured entry root. When the entry root contains only API-only roots, the
+compiler rejects the build with `MOTH-CONFIG-0001`.
 
 ### Experimental Wasm mode
 

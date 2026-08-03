@@ -1,7 +1,7 @@
 import @styles {navbar, section, theme_head}
 
 page_title #= "Compiler-facing language reference"
-page_description #= "Current language authority, focused replacement references and related compiler design documentation."
+page_description #= "Canonical language references and related compiler design documentation."
 page_head #= theme_head
 
 #[navbar]
@@ -11,13 +11,15 @@ page_head #= theme_head
 
     # Compiler-facing language reference
 
-    Compiler changes should start from the language contract. `docs/language-overview.md` remains the complete reference for syntax, semantics, edge cases and deferred language surface.
+    Compiler changes should start from the language contract. The unsuffixed
+    references listed below own syntax, semantics, edge cases and deferred
+    language surfaces.
 ]
 
 #[section, $md:
-    ## Focused references
+    ## Canonical references
 
-    Smaller detailed references are being prepared without changing the active authority during the migration.
+    Each public route groups the references for one language area.
 
     Foundations:
 
@@ -58,13 +60,17 @@ page_head #= theme_head
     - @../../moth-templates (Moth template files)
     - @../../markdown (Plain Markdown)
 
-    Each route combines a Basic teaching layer with detailed Advanced references. The unsuffixed Moth template files remain replacements under parity review and do not supersede `docs/language-overview.md` yet.
+    Each route combines a Basic teaching layer with detailed Advanced
+    references. The unsuffixed Moth template files form the canonical language
+    authority. Basic files and route introductions teach that contract without
+    replacing it.
 ]
 
 #[section, $md:
     ## Reference map
 
-    `docs/src/docs/codebase/language/overview.mtf` lists the detailed files completed so far and points back to the consolidated authority.
+    `docs/src/docs/codebase/language/overview.mtf` lists every canonical file and
+    routes formal compiler, build and memory ownership.
 ]
 
 #[section, $md:

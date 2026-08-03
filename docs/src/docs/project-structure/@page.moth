@@ -89,12 +89,12 @@ page_head #= language_theme_head
 
     # Project structure
 
-    A Moth project consists of a set of modules, one strict project config and a builder
-    that decides what those modules produce.
+    A Moth project combines directory-scoped modules, one strict project config
+    and a builder that selects the final artefacts.
 
-    The root filename begins with `#`, but the name after it carries no
-    importance. The source tells the compiler what counts as public. The builder decides
-    whether the module becomes an artefact.
+    Normal module roots start with `@`. Support and package-facade roots start
+    with `+`. The rest of the filename stays cosmetic, while `export:` defines
+    the public API and the builder decides which normal roots become entries.
 ]
 
 #[section:
@@ -150,7 +150,7 @@ page_head #= language_theme_head
 #[section:
     [doc_level:
         [$insert("key"):html-routing-and-artifacts]
-        [$insert("title"):HTML routing and artifacts]
+        [$insert("title"):HTML routing and artefacts]
         [$insert("advanced"):[html_routing_and_artifacts]]
 
         [html_routing_and_artifacts_basic]

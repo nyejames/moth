@@ -31,7 +31,7 @@ Reactivity V1 is a constrained template and UI mechanism. It is not general clos
 - generic function values
 - higher-order polymorphism
 
-Backend optimizations may become finer without changing source semantics.
+Backend optimisations may become finer without changing source semantics.
 
 ### Related concepts
 

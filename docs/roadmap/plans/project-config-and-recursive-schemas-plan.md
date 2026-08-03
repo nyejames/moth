@@ -30,7 +30,7 @@ This plan must complete before imported build values, `@project` and entry-local
 
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
-- `docs/language-overview.md`
+- `docs/src/docs/codebase/language/overview.mtf` and its relevant canonical references
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`
 - `docs/src/docs/codebase/style-guide/testing.mtf`
 - `docs/src/docs/codebase/style-guide/validation.mtf`

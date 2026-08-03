@@ -26,5 +26,5 @@ A mutable receiver method declares `this ~Type`.
 - `~` requests exclusive access for the call. It is not move syntax and is not part of type identity.
 
 This differs from a fresh rvalue passed to a mutable free-function parameter.
-The compiler may materialize that free-function argument into a hidden local.
+The compiler may materialise that free-function argument into a hidden local.
 A mutable receiver call still requires an authored mutable place.

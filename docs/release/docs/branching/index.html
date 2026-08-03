@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Branching</p><h1>Branching</h1><p>Use a normal <code>if</code> for one decision. Use a full match when one value has more than two meaningful cases. Both forms stay explicit about scope, fallback behaviour and the values they produce.</p><p>No mystery fallthrough. No wildcard punctuation pretending to mean three different things.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Branching</p><h1>Branching</h1><p>Use statement <code>if</code> for a Boolean decision. Use a full match when one value can take distinct literal, range, option or choice forms.</p><p>Unlike C-style <code>switch</code>, Moth never falls through between arms. <code>else =&gt;</code> alone marks the catch-all, and exhaustive matches can omit it when the compiler can prove every case appears.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Statement if
@@ -802,7 +802,7 @@ td {
     then <span class='moth-code-string'>&quot;ready&quot;</span>
 <span class='moth-code-keyword'>else</span>
     then <span class='moth-code-string'>&quot;waiting&quot;</span>
-;</code></pre><p><code>then</code> provides the value for the surrounding assignment.</p><p>Both branches must provide the value or leave the function in another valid way.</p><p>The block form with <code>then</code> supplies the value to the surrounding assignment.</p>
+;</code></pre><p><code>then</code> provides the value for the surrounding assignment.</p><p>Both branches must provide the value or leave the function through another valid path.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">

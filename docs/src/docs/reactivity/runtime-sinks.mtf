@@ -31,7 +31,9 @@ Plain string fragments keep ordinary insertion behaviour.
 
 ### Keep backend helpers out of the language contract
 
-The language contract is the source syntax, the metadata and the supported sink gating. Specific backend helper names and internal render plans are backend artifacts, not user-visible language semantics.
+The language contract covers source syntax, metadata and supported sink gating.
+Specific backend helper names and internal render plans remain backend
+artefacts, not user-visible language semantics.
 
 ### Related concepts
 

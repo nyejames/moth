@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Builder packages</a> / @html</p><h1>@html</h1><p><code>@html</code> provides compile-time HTML helpers as a builder source-backed package. The constants fold into HTML strings during compilation.</p></section>
+<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Builder packages</a> / @html</p><h1>@html</h1><p><code>@html</code> provides compile-time layout and formatting helpers through a source-backed builder package. Each helper remains an ordinary exported constant that folds into a <code>String</code>, rather than a hidden HTML syntax layer.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: HTML helpers
@@ -737,7 +737,117 @@ canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'
     <p><code>@html</code> provides compile-time HTML helpers as a builder source-backed package. It belongs to the Builder origin family with MothSource backing, so the compiler reads ordinary Moth source from <code>packages/html/@mod.moth</code>. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@html</code> ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the standard library expands.</p><h3>Implicit scope for Moth template files</h3><p>Exported compile-time constants from <code>@html</code> are visible inside <code>.mtf</code> files without an explicit import. This is the primary way authors use the helpers.</p><pre style=""><code class='codeblock'>-- docs/intro.mtf
 [p: A paragraph built from the @html p helper.]
 
-[codeblock, $code(&quot;moth&quot;): value = 42]</code></pre><p>A <code>.moth</code> file that needs specific <code>@html</code> symbols can import them explicitly:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>table, th, td<span class='moth-code-parenthesis'>}</span></code></pre><p>Same-directory module root constants and <code>@html</code> constants don&#39;t shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See <a href="../../../moth-templates/#template-scope">Template scope</a> for the full collision contract.</p><h3>Exported constants</h3><p>All helpers are compile-time <code>#String</code> constants that produce HTML strings. They fold at compile time and produce no runtime code.</p><h4>HTML tags</h4><p>| Helper | Produces | |---|---| | <code>p</code> | <code>&lt;p&gt;</code> paragraph | | <code>h1</code> through <code>h6</code> | heading levels | | <code>small</code> | <code>&lt;small&gt;</code> text | | <code>large</code> | <code>&lt;large&gt;</code> text | | <code>img</code> | <code>&lt;img&gt;</code> with <code>src</code>, <code>alt</code> and <code>style</code> slots | | <code>div</code> | <code>&lt;div&gt;</code> container | | <code>span</code> | <code>&lt;span&gt;</code> inline container | | <code>canvas</code> | <code>&lt;canvas&gt;</code> with <code>id</code> and <code>style</code> slots |</p><h4>Formatting helpers</h4><p>| Helper | Produces | |---|---| | <code>bold</code> | <code>&lt;b&gt;</code> bold text | | <code>italic</code> | <code>&lt;i&gt;</code> italic text | | <code>underline</code> | <code>&lt;u&gt;</code> underlined text | | <code>strikethrough</code> | <code>&lt;s&gt;</code> strikethrough text |</p><h4>Code and tables</h4><p>| Helper | Produces | |---|---| | <code>codeblock</code> | <code>&lt;pre&gt;</code> code block | | <code>table</code> | styled <code>&lt;table&gt;</code> with header and row slots | | <code>th</code> | <code>&lt;th scope=&quot;col&quot;&gt;</code> header cell | | <code>td</code> | <code>&lt;td&gt;</code> data cell |</p><h4>Utility style inserts</h4><p>These constants produce CSS property values for style slots.</p><p>| Helper | CSS | |---|---| | <code>center</code> | <code>text-align: center;</code> | | <code>right</code> | <code>text-align: right;</code> | | <code>left</code> | <code>text-align: left;</code> | | <code>smaller</code> | <code>font-size: smaller;</code> | | <code>medium</code> | <code>font-size: medium;</code> | | <code>larger</code> | <code>font-size: larger;</code> |</p><h3>Canvas wrapper</h3><p><code>@html</code> exports a <code>Canvas</code> struct and two functions that wrap <code>@web/canvas</code> into a source-owned method-style API.</p><p>| Name | Signature | |---|---| | <code>Canvas</code> | struct with one field <code>context Canvas2d</code> | | <code>get_canvas</code> | <code>|id String| -&gt; Canvas, Error!</code> | | <code>get_canvas_context</code> | <code>|id String| -&gt; Canvas2d, Error!</code> |</p><p>The <code>Canvas</code> struct provides receiver methods for drawing: <code>set_fill_style</code>, <code>fill_rect</code>, <code>clear_rect</code> and <code>stroke_rect</code>. Each takes <code>~Canvas</code> (mutable receiver) and delegates to the underlying <code>@web/canvas</code> free functions.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>get_canvas<span class='moth-code-parenthesis'>}</span>
+[codeblock, $code(&quot;moth&quot;): value = 42]</code></pre><p>A <code>.moth</code> file that needs specific <code>@html</code> symbols can import them explicitly:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>table, th, td<span class='moth-code-parenthesis'>}</span></code></pre><p>Same-directory module root constants and <code>@html</code> constants don&#39;t shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See <a href="../../../moth-templates/#template-scope">Template scope</a> for the full collision contract.</p><h3>Exported constants</h3><p>All helpers are compile-time <code>#String</code> constants that produce HTML strings. They fold at compile time and produce no runtime code.</p><h4>HTML tags</h4><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Helper</p></th><th scope="col" style=""><p> Produces</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>p</code></p></td> <td style=""><p> <code>&lt;p&gt;</code> paragraph</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>h1</code> through <code>h6</code></p></td> <td style=""><p> heading levels</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>small</code></p></td> <td style=""><p> <code>&lt;small&gt;</code> text</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>large</code></p></td> <td style=""><p> <code>&lt;large&gt;</code> text</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>img</code></p></td> <td style=""><p> <code>&lt;img&gt;</code> with <code>src</code>, <code>alt</code> and <code>style</code> slots</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>div</code></p></td> <td style=""><p> <code>&lt;div&gt;</code> container</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>span</code></p></td> <td style=""><p> <code>&lt;span&gt;</code> inline container</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>canvas</code></p></td> <td style=""><p> <code>&lt;canvas&gt;</code> with <code>id</code> and <code>style</code> slots</p></td>
+        </tr>
+        
+</table><h4>Formatting helpers</h4><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Helper</p></th><th scope="col" style=""><p> Produces</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>bold</code></p></td> <td style=""><p> <code>&lt;b&gt;</code> bold text</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>italic</code></p></td> <td style=""><p> <code>&lt;i&gt;</code> italic text</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>underline</code></p></td> <td style=""><p> <code>&lt;u&gt;</code> underlined text</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>strikethrough</code></p></td> <td style=""><p> <code>&lt;s&gt;</code> strikethrough text</p></td>
+        </tr>
+        
+</table><h4>Code and tables</h4><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Helper</p></th><th scope="col" style=""><p> Produces</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>codeblock</code></p></td> <td style=""><p> <code>&lt;pre&gt;</code> code block</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>table</code></p></td> <td style=""><p> styled <code>&lt;table&gt;</code> with header and row slots</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>th</code></p></td> <td style=""><p> <code>&lt;th scope=&quot;col&quot;&gt;</code> header cell</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>td</code></p></td> <td style=""><p> <code>&lt;td&gt;</code> data cell</p></td>
+        </tr>
+        
+</table><h4>Utility style inserts</h4><p>These constants produce CSS property values for style slots.</p><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Helper</p></th><th scope="col" style=""><p> CSS</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>center</code></p></td> <td style=""><p> <code>text-align: center;</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>right</code></p></td> <td style=""><p> <code>text-align: right;</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>left</code></p></td> <td style=""><p> <code>text-align: left;</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>smaller</code></p></td> <td style=""><p> <code>font-size: smaller;</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>medium</code></p></td> <td style=""><p> <code>font-size: medium;</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>larger</code></p></td> <td style=""><p> <code>font-size: larger;</code></p></td>
+        </tr>
+        
+</table><h3>Canvas wrapper</h3><p><code>@html</code> exports a <code>Canvas</code> struct and two functions that wrap <code>@web/canvas</code> into a source-owned method-style API.</p><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Name</p></th><th scope="col" style=""><p> Signature</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>Canvas</code></p></td> <td style=""><p> struct with one field <code>context Canvas2d</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>get_canvas</code></p></td> <td style=""><p> <code>|id String| -&gt; Canvas, Error!</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>get_canvas_context</code></p></td> <td style=""><p> <code>|id String| -&gt; Canvas2d, Error!</code></p></td>
+        </tr>
+        
+</table><p>The <code>Canvas</code> struct provides receiver methods for drawing: <code>set_fill_style</code>, <code>fill_rect</code>, <code>clear_rect</code> and <code>stroke_rect</code>. Each takes <code>~Canvas</code> (mutable receiver) and delegates to the underlying <code>@web/canvas</code> free functions.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>get_canvas<span class='moth-code-parenthesis'>}</span>
 
 canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> get_canvas<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;my-canvas&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;canvas not found&quot;</span><span class='moth-code-parenthesis'>)</span>

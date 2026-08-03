@@ -44,5 +44,5 @@ An alias can name a collection type.
 [codeblock, $code("moth"):
     Names as {String}
 
-    names Names = {"Priya", "Grace"}
+    names Names = {"Priya", "Sam"}
 ]

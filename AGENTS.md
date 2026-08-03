@@ -24,9 +24,14 @@ For memory, ownership, borrow checking, allocation, GC, drops, or runtime-handle
 
 For language syntax, semantics and user-visible behavior, read:
 1. `docs/src/docs/codebase/language/overview.mtf`
-2. The canonical unsuffixed Moth template files it selects
-3. `docs/language-overview.md` for concepts that have not migrated yet
+2. Every relevant canonical unsuffixed Moth template file selected by that overview
+3. `docs/src/docs/codebase/memory-management/overview.mtf` and its routed leaves when source behaviour touches access, copies, borrows, lifetimes, groups or ownership
 4. Paired `-basic.mtf` files and `@page.moth` only when teaching, presentation or website structure is in scope
+
+Before writing Moth code or changing tokenization, parsing, type checking,
+semantics, diagnostics or lowering for a language feature, always read that
+feature's relevant unsuffixed language reference. Do not infer the language
+contract from examples, tests, compiler behaviour or a Basic teaching page.
 
 Use:
 - `docs/src/docs/progress/@page.moth` for current implementation status and coverage
@@ -42,7 +47,7 @@ Use:
 
 A narrow canonical design or standards document may refine a broader authority within its declared ownership area. Educational compiler-design pages explain concepts and implementation examples but cannot override the compiler overview, build-system design, language authorities, memory authorities or progress matrix.
 
-`docs/compiler-design-overview.md` is the authority for compiler semantics and stage contracts. `docs/build-system-design.md` is the authority for project and build orchestration. A plan that crosses compiler and build ownership must read both documents. Roadmap plans cannot override either authority.
+`docs/compiler-design-overview.md` is the authority for compiler semantics and stage contracts. `docs/build-system-design.md` is the authority for project and build orchestration. The unsuffixed language references selected by `docs/src/docs/codebase/language/overview.mtf` own source syntax and observable language semantics. A plan that crosses compiler and build ownership must read both architecture documents. Roadmap plans cannot override these authorities.
 
 Code may lag accepted design. When implementation conflicts with the relevant design document, call out the conflict rather than silently treating the code as authoritative.
 

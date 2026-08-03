@@ -9,7 +9,7 @@ Collections use five compiler-owned member operations.
 ]
 
 - argument: `index Int`
-- success: the element value
+- success: shared access to the stored element value
 - failure: builtin `Error!`
 - receiver access: shared
 
@@ -76,5 +76,7 @@ Collections use five compiler-owned member operations.
 - Assignment through `get` is removed.
 - Square-bracket indexing is not supported.
 - Invalid indices use the typed error path rather than a silent no-op.
+- A live result from `get` prevents conflicting mutation of the same collection
+  until that shared access reaches its last use.
 
 Error propagation and recovery are specified by @../errors (Errors, options and assertions).

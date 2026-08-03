@@ -33,7 +33,7 @@ Hard prerequisites:
 ## Required authorities
 
 - `docs/compiler-design-overview.md`
-- `docs/language-overview.md`
+- `docs/src/docs/codebase/language/overview.mtf` and its relevant canonical references
 - memory-management design under `docs/src/docs/codebase/memory-management/`
 - style, testing and validation guides
 - progress matrix

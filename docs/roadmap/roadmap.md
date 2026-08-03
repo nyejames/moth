@@ -11,7 +11,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-1. [Language migration Stage B](./plans/docs-language-migration.md)
+1. [Language documentation migration Stage C review](./plans/docs-language-migration.md)
 
 ## Queued implementation chain
 

@@ -18,5 +18,5 @@ Accepted deferred `group` / `into` semantics and hard destination lifetimes.
 - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/src/docs/codebase/memory-management/access-and-aliasing/overview.mtf`
 - `docs/roadmap/plans/grouped-memory-design.md`
-- `docs/language-overview.md`
+- `docs/src/docs/memory/declared-memory-groups.mtf`
 - `docs/src/docs/progress/@page.moth`

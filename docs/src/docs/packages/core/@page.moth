@@ -12,16 +12,15 @@ page_head #= language_theme_head
 
     # Core packages
 
-    Core packages form small, typed packages owned by the compiler and selected
-    for availability by a builder. They do not act as ordinary source files in
-    your project, but they import with the same `import` syntax.
+    Core packages provide typed capabilities owned by the compiler and selected
+    by the active builder. They use the same import syntax as source packages,
+    but binding-backed implementations don't become files in your project.
 
-    Most Core packages require explicit imports. The prelude keeps only the
-    smallest always-available surface bare, such as `io`.
+    Most Core packages require explicit imports. Unlike large standard-library
+    preludes, Moth exposes only a small always-available surface such as `io`.
 
-    Builder support can vary. The @../../progress (progress matrix) owns the
-    source of truth for current package and backend support. The HTML builder
-    currently supports optional core packages on the JavaScript path.
+    Builder and backend support can differ. The @../../progress (progress
+    matrix) records current availability.
 
     ## Package pages
 

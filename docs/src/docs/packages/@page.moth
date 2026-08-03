@@ -73,11 +73,12 @@ page_head #= language_theme_head
 
     # Packages and imports
 
-    Imports make names visible. Module roots decide what crosses a module boundary.
-    Project-local packages give reusable modules stable prefixes.
+    Imports make names visible, module roots define public boundaries and
+    packages provide stable named surfaces. Moth keeps those jobs separate.
 
-    Those jobs stay separate. Keeping them separate stops a filesystem from
-    quietly becoming an API.
+    Unlike languages that expose any reachable filesystem path, Moth resolves
+    source imports from the owning module root and stops at each module facade.
+    Project-local support packages share code without opening private paths.
 ]
 
 #[section:

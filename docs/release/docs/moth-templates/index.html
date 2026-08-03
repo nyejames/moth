@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>moth-template-files | Moth</title>
+    <title>Moth template files | Moth</title>
     <meta name="description" content="Moth-aware Markdown content files for HTML projects.">
     <style>
 /*!
@@ -670,10 +670,10 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / moth-template-files</p><h1>moth-template-files</h1><p>moth-template-files brings Markdown that already lives inside Moth&#39;s template world.</p><p>Write the content directly. Import the folded result as <code>content</code>. Reach for a normal <code>.moth</code> file when the job stops being content-shaped.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Moth template files</p><h1>Moth template files</h1><p>A <code>.mtf</code> file puts Markdown directly inside Moth&#39;s compile-time template system. It needs no frontmatter, embedded script block or separate template engine.</p><p>The compiler exports the folded result as <code>content</code>. Use plain <code>.md</code> for portable Markdown and normal <code>.moth</code> when the file needs declarations, imports or runtime work.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
-        Choose the explanation level: moth-template-files files
+        Choose the explanation level: Moth template files
 </legend>
 
 <input
@@ -695,7 +695,7 @@ td {
 
             <header class="doc-level__header">
                 <h2 class="doc-level__title" id="moth-template-files-files">
-                    moth-template-files files
+                    Moth template files
 </h2>
 
 <div class="doc-level__switch">
@@ -908,7 +908,7 @@ This is **bold** text.
 
 
 
-        <p>A <code>.mtf</code> file sees compile-time constants from its module root and <code>@html</code> helpers.</p><h3>A constant capture</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- docs/@docs.moth</span>
+        <p>A <code>.mtf</code> file sees exported compile-time constants from its same-directory module root and compile-time helpers supplied by <code>@html</code>.</p><h3>A constant capture</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- docs/@docs.moth</span>
 export<span class='moth-code-operator'>:</span>
     site_name <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
 ;</code></pre><pre style=""><code class='codeblock'>-- docs/intro.mtf
@@ -937,7 +937,7 @@ export<span class='moth-code-operator'>:</span>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
-        Choose the explanation level: moth-template-files limits
+        Choose the explanation level: Moth template file limits
 </legend>
 
 <input
@@ -959,7 +959,7 @@ export<span class='moth-code-operator'>:</span>
 
             <header class="doc-level__header">
                 <h2 class="doc-level__title" id="moth-template-files-limits">
-                    moth-template-files limits
+                    Moth template file limits
 </h2>
 
 <div class="doc-level__switch">

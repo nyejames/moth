@@ -49,9 +49,12 @@ page_head #= language_theme_head
 
     # Functions
 
-    Functions stay named, statically checked and ordinary. Their signatures show the values they need, the access they request and every value they can return.
+    Moth functions use named declarations rather than anonymous closures or
+    general function values. A signature records each parameter's type and
+    access mode, then lists every success and error return.
 
-    No hidden closure captures or distant conversion rules exist. The call stays readable from the source.
+    Calls stay local and explicit. The source shows named arguments, mutable
+    access and failure propagation where they occur.
 ]
 
 #[section:

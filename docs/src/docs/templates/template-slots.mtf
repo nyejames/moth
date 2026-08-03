@@ -79,5 +79,5 @@ AST prepares the slot routing before HIR.
 Runtime lowering appends the routed contributions through normal string
 accumulators.
 
-Unresolved slot or insert artifacts after routing are invalid template
+Unresolved slot or insert artefacts after routing are invalid template
 structure.

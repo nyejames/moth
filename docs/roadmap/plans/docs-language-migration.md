@@ -6,29 +6,29 @@
 WORK_ID: docs-lang-mig
 WORK_SOURCE: docs/roadmap/plans/docs-language-migration.md
 BASE_REVISION: 820098759bc896365eb99f2239c2bd1a570132f1
-STATUS: stage-b-complete - B2-B7 implementation and mandatory final review accepted; Stage C remains approval-gated
-CURRENT_SCOPE: Stage B complete after resolving the final-auditor corrections; no Stage C authority switch performed
+STATUS: stage-c-review-ready - parity confirmed and authority switch ready for user review
+CURRENT_SCOPE: Stage C writing, parity, authority and deletion changes are complete and intentionally uncommitted
 STAGE_A: complete and accepted
 STAGE_W: complete and accepted
 PRE_B1_CLOSEOUT: complete, full gate green at d82b86d74
 COMPLETED: B1 source syntax removal and JS raw-value return ABI correction; slot-backed result provenance and multi-return summary correction; B2 String semantics, HIR StringAppend, JS/Wasm content equality and map normalization; B3 pattern-surface removal; B4 template collision registry; B5 accepted language gaps; B6 Core Text and Core Math boundary corrections; B7 builder capability metadata
-NEXT_ACTION: request explicit user approval before beginning the separate Stage C parity and authority-switch work
-VALIDATION: cargo fmt; targeted B7 reachability, provider-collision, choice/option equality, provider re-export, same-module re-export, and provenance-remap tests passed; cargo check --all-targets passed; tests --audit passed with 1666 cases and 1816 backend executions; just validate passed (cross-target Clippy, 3933 library tests, 17 CLI tests, 538 xtask tests, 1816 integration executions, docs check, and 58 benchmark preflights); cargo run --quiet -- build docs --release built 69 files successfully; generated raw source-link search returned no matches; git diff --check passed
-AUDITS: prior B1 audits remain accepted; B2 AST findings resolved; Stage B interim audit pass 1 produced four findings, all corrected; pass 2 produced three findings, all corrected; pass 3 clean; final-auditor pass 1 produced three findings, all corrected; final-auditor pass 2 produced one diagnostic-assertion finding, corrected; a subsequent final-auditor attempt was stopped by the launcher path-safety contract with no workspace change; final-auditor pass 4 produced four documentation/comment/fixture findings, all corrected; final-auditor pass 5 produced two B2/B3 findings, all corrected; final-auditor pass 6 found one stale plan-state finding, corrected; final-auditor pass 7 was stopped by the launcher path-safety contract with no workspace change; final-auditor pass 8 found one stale active diagnostics-plan instruction, corrected; final-auditor pass 9 found provider-interface diagnostic provenance and stale invalid-HIR choice-test findings, both corrected; final-auditor pass 10 found reachable B7 source gating, provider re-export/path coverage, none-state choice equality coverage, and stale monolith/count/comments, all requiring correction; all four corrections were implemented and the full post-correction gate is green; fresh final_auditor run 20260802T204605Z-3569a191 returned pass with no findings and no worktree changes
-BLOCKERS: none; B2-B7 resumed by user
-STAGE_C: blocked pending explicit user approval; authority switch not performed
+NEXT_ACTION: user reviews, corrects if needed and commits the uncommitted Stage C authority switch
+VALIDATION: prior Stage B full gate remains recorded; Stage C cargo run --quiet -- check /tmp/docs-lang-mig-snippets.moth --terse passed; final cargo run --quiet -- build docs --release built 69 files successfully; generated raw Moth-link scan returned no matches; generated route pairing, tables, titles and links inspected; changed paths are documentation-only; git diff --check passed
+AUDITS: prior Stage B final_auditor history remains accepted; Stage C final_auditor run 20260802T221557Z-5cc4649b found five documentation defects, all corrected; verification run 20260802T223752Z-92412a86 stopped on a launcher path-safety false positive with no workspace change; final_auditor run 20260802T225312Z-01793695 confirmed monolith parity, package-status alignment and all prior corrections, then found one Prelude ownership wording error; the wording was corrected and focused auditor run 20260802T230826Z-5e3b516c returned clean with no workspace changes
+BLOCKERS: none
+STAGE_C: user approved removal of docs/language-overview.md after parity confirmation; final changes must remain uncommitted for user review
 ```
 
 ## Completion record
 
 Stage A (technical documentation closeout) and Stage W (writing-style pass) are complete and accepted. The bulk migration, focused-page corrections, semantic consistency cleanup, example repairs, status notes, link audits, parity ledger and style pass all landed. Git history and the parity ledger are the detailed evidence.
 
-## Authority during this plan
+## Authority during Stages A, W and B
 
 Use this order when sources disagree:
 
 1. Explicit user decisions recorded in this plan
-2. `docs/language-overview.md` as the maintained compiler-facing parity baseline
+2. `docs/language-overview.md` as the maintained compiler-facing parity baseline, removed in Stage C
 3. `docs/src/docs/codebase/memory-management/**` for formal memory semantics
 4. `docs/compiler-design-overview.md` for compiler stages and artefact contracts
 5. `docs/build-system-design.md` for project, module, package and builder architecture
@@ -44,7 +44,8 @@ Implementation is not automatically language design. When current code conflicts
 - Unsuffixed `.mtf` files own complete Advanced source syntax and observable semantics.
 - Paired `-basic.mtf` files teach a smaller accurate beginner surface.
 - `@page.moth` files own public composition, introductions, ordering and navigation.
-- The monolith remains maintained until Stage C.
+- The focused unsuffixed references replace the monolith in Stage C after the
+  final parity review.
 - Formal compiler, build-system and memory architecture stays in its dedicated owners.
 - The progress matrix owns current implementation and backend status.
 - The roadmap owns sequencing and genuinely deferred implementation.
@@ -242,7 +243,7 @@ Implement the accepted checked Float boundary:
 For each correction:
 
 - remove its temporary Advanced implementation-gap note
-- update `docs/language-overview.md`
+- update the owning canonical Advanced reference
 - update the progress matrix
 - update the parity ledger
 - rebuild docs
@@ -338,13 +339,16 @@ After Stage B:
 6. Confirm the progress matrix matches the compiler.
 7. Present every remaining ambiguity or mismatch to the user.
 
-The authority switch requires explicit user approval.
+The user approved the authority switch and selected removal of the monolith.
 
-Only the separate approved switch patch may:
+The uncommitted Stage C review patch may:
 
 - update `AGENTS.md`
 - declare focused references authoritative
-- decide whether `docs/language-overview.md` remains a consolidated legacy reference, becomes an index or is removed
+- remove `docs/language-overview.md` after confirming complete focused parity
+
+Stage C changes remain uncommitted so the user can review, correct and commit
+the final authority switch.
 
 ---
 

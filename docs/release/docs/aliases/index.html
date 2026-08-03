@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Aliases</p><h1>Aliases</h1><p>Aliases give an existing thing a better name. They don&#39;t create a second value, a hidden conversion or a new nominal type.</p><p>Moth keeps <code>as</code> narrow: type names, imported names and arm-local payload captures.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Aliases</p><h1>Aliases</h1><p>An alias gives an existing type, import or payload field a local name. It doesn&#39;t create a value, conversion or new nominal type.</p><p>Moth keeps <code>as</code> narrower than languages with broad renaming or casting syntax. The surrounding declaration always determines what gets renamed.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Type aliases
@@ -731,7 +731,7 @@ raw <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</
     id <span class='moth-code-struct'>Int,</span>
 <span class='moth-code-operator'>|</span></code></pre><p><code>UserId</code> is <code>Int</code>. <code>User</code> is a separate type.</p><h3>One collection alias</h3><p>An alias can name a collection type.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Names</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span>
 
-names <span class='moth-code-struct'>Names</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Grace&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre>
+names <span class='moth-code-struct'>Names</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">

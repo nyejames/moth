@@ -27,7 +27,7 @@ Options are documented with Errors and options.
 Collections use braces. String templates use square brackets.
 
 [codeblock, $code("moth"):
-    names = {"Priya", "Grace"}
+    names = {"Priya", "Sam"}
 
     message = [:
         Hello from a template.

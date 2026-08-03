@@ -1,8 +1,17 @@
-### Mandatory topology, optional optimisation
+### Accepted mandatory topology, deferred validation
 
-Lifetime-region and escape validation runs mandatory and backend-independent. It proves every retained reference is legal under one lifetime owner. GC cannot bypass it.
+The accepted language contract requires mandatory, backend-independent
+lifetime-region and escape validation. That validation remains deferred in the
+current compiler. Once implemented, it will prove every retained reference
+legal under one lifetime owner, and GC won't bypass it.
 
-Optional ownership optimisation (final-use transfer, deterministic drops, stack or arena allocation, collector elision) layers over a topology already proven legal. When optimisation proof is unavailable, the value stays GC-managed without changing program behaviour.
+The accepted design layers optional ownership optimisation, including final-use
+transfer, deterministic drops, stack or arena allocation and collector elision,
+over a topology already proven legal. When optimisation proof remains
+unavailable, the value stays GC-managed without changing program behaviour.
+
+The rules below define the accepted end state rather than current compiler
+enforcement. Use the progress matrix for implementation status.
 
 ### One semantic lifetime owner
 

@@ -49,9 +49,12 @@ page_head #= language_theme_head
 
     # Casts
 
-    Casts stay explicit and target-driven. The receiving type says where the value goes. `cast`, `cast!` or `catch` says how the program handles conversion failure.
+    A cast converts a value for an immediate typed destination. Moth doesn't use
+    constructor-like conversions such as `Int(value)`, and it doesn't infer a
+    target from distant code.
 
-    This keeps conversion local. You can see the source, target and failure path without asking the compiler to guess from distant code.
+    The receiving type names the target. `cast`, `cast!` or `catch` makes the
+    failure path visible beside the conversion.
 ]
 
 #[section:

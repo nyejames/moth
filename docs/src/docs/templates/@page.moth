@@ -65,9 +65,13 @@ page_head #= language_theme_head
 
     # Templates
 
-    Templates form Moth's string-building engine. They can stay tiny, or grow into a compile-time HTML and Markdown engine with slots, wrappers and control flow.
+    Templates form Moth's only string-composition system. Square brackets can
+    join short values, format Markdown or HTML and compose larger layouts with
+    slots, wrappers and control flow.
 
-    Square brackets take a moment to click. Then ordinary string formatting starts to feel limiting.
+    Other languages often split this work across concatenation, interpolation
+    and a separate template language. Moth keeps one typed `String` result and
+    lets the compiler fold it when every input comes from compile time.
 ]
 
 #[section:

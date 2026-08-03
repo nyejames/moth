@@ -27,57 +27,177 @@ All helpers are compile-time `#String` constants that produce HTML strings. They
 
 #### HTML tags
 
-| Helper | Produces |
-|---|---|
-| `p` | `<p>` paragraph |
-| `h1` through `h6` | heading levels |
-| `small` | `<small>` text |
-| `large` | `<large>` text |
-| `img` | `<img>` with `src`, `alt` and `style` slots |
-| `div` | `<div>` container |
-| `span` | `<span>` inline container |
-| `canvas` | `<canvas>` with `id` and `style` slots |
+[table:
+    [th:
+        [: Helper]
+        [: Produces]
+    ]
+
+    [td:
+        [: `p`]
+        [: `<p>` paragraph]
+    ]
+
+    [td:
+        [: `h1` through `h6`]
+        [: heading levels]
+    ]
+
+    [td:
+        [: `small`]
+        [: `<small>` text]
+    ]
+
+    [td:
+        [: `large`]
+        [: `<large>` text]
+    ]
+
+    [td:
+        [: `img`]
+        [: `<img>` with `src`, `alt` and `style` slots]
+    ]
+
+    [td:
+        [: `div`]
+        [: `<div>` container]
+    ]
+
+    [td:
+        [: `span`]
+        [: `<span>` inline container]
+    ]
+
+    [td:
+        [: `canvas`]
+        [: `<canvas>` with `id` and `style` slots]
+    ]
+]
 
 #### Formatting helpers
 
-| Helper | Produces |
-|---|---|
-| `bold` | `<b>` bold text |
-| `italic` | `<i>` italic text |
-| `underline` | `<u>` underlined text |
-| `strikethrough` | `<s>` strikethrough text |
+[table:
+    [th:
+        [: Helper]
+        [: Produces]
+    ]
+
+    [td:
+        [: `bold`]
+        [: `<b>` bold text]
+    ]
+
+    [td:
+        [: `italic`]
+        [: `<i>` italic text]
+    ]
+
+    [td:
+        [: `underline`]
+        [: `<u>` underlined text]
+    ]
+
+    [td:
+        [: `strikethrough`]
+        [: `<s>` strikethrough text]
+    ]
+]
 
 #### Code and tables
 
-| Helper | Produces |
-|---|---|
-| `codeblock` | `<pre>` code block |
-| `table` | styled `<table>` with header and row slots |
-| `th` | `<th scope="col">` header cell |
-| `td` | `<td>` data cell |
+[table:
+    [th:
+        [: Helper]
+        [: Produces]
+    ]
+
+    [td:
+        [: `codeblock`]
+        [: `<pre>` code block]
+    ]
+
+    [td:
+        [: `table`]
+        [: styled `<table>` with header and row slots]
+    ]
+
+    [td:
+        [: `th`]
+        [: `<th scope="col">` header cell]
+    ]
+
+    [td:
+        [: `td`]
+        [: `<td>` data cell]
+    ]
+]
 
 #### Utility style inserts
 
 These constants produce CSS property values for style slots.
 
-| Helper | CSS |
-|---|---|
-| `center` | `text-align: center;` |
-| `right` | `text-align: right;` |
-| `left` | `text-align: left;` |
-| `smaller` | `font-size: smaller;` |
-| `medium` | `font-size: medium;` |
-| `larger` | `font-size: larger;` |
+[table:
+    [th:
+        [: Helper]
+        [: CSS]
+    ]
+
+    [td:
+        [: `center`]
+        [: `text-align: center;`]
+    ]
+
+    [td:
+        [: `right`]
+        [: `text-align: right;`]
+    ]
+
+    [td:
+        [: `left`]
+        [: `text-align: left;`]
+    ]
+
+    [td:
+        [: `smaller`]
+        [: `font-size: smaller;`]
+    ]
+
+    [td:
+        [: `medium`]
+        [: `font-size: medium;`]
+    ]
+
+    [td:
+        [: `larger`]
+        [: `font-size: larger;`]
+    ]
+]
 
 ### Canvas wrapper
 
 `@html` exports a `Canvas` struct and two functions that wrap `@web/canvas` into a source-owned method-style API.
 
-| Name | Signature |
-|---|---|
-| `Canvas` | struct with one field `context Canvas2d` |
-| `get_canvas` | `|id String| -> Canvas, Error!` |
-| `get_canvas_context` | `|id String| -> Canvas2d, Error!` |
+[table:
+    [th:
+        [: Name]
+        [: Signature]
+    ]
+
+    [td:
+        [: `Canvas`]
+        [: struct with one field `context Canvas2d`]
+    ]
+
+    [td:
+        [: `get_canvas`]
+        [: `|id String| -> Canvas, Error!`]
+    ]
+
+    [td:
+        [: `get_canvas_context`]
+        [: `|id String| -> Canvas2d, Error!`]
+    ]
+]
 
 The `Canvas` struct provides receiver methods for drawing: `set_fill_style`, `fill_rect`, `clear_rect` and `stroke_rect`. Each takes `~Canvas` (mutable receiver) and delegates to the underlying `@web/canvas` free functions.
 

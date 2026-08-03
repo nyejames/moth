@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Core packages</a> / Core time</p><h1>Core time</h1><p><code>@core/time</code> separates elapsed time from wall-clock time. Import it when you need to measure durations or work with UTC timestamps.</p></section>
+<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Core packages</a> / Core time</p><h1>Core time</h1><p><code>@core/time</code> separates monotonic elapsed time from UTC wall-clock time. Many APIs blur these domains, which makes duration measurements vulnerable to clock changes. Moth gives each domain an opaque type.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Time helpers
@@ -762,7 +762,63 @@ io.line<span class='moth-code-parenthesis'>(</span>to_iso_string<span class='mot
 
 import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>time
 
-previous <span class='moth-code-operator'>=</span> time.mark_now<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Opaque types</h3><p>The package exposes three opaque types. Do not construct them with struct syntax or inspect their fields. Pass them to the package functions.</p><p>| Type | Purpose | |---|---| | <code>Duration</code> | Signed elapsed amount | | <code>TimeMark</code> | Monotonic clock mark for deltas and frame timing | | <code>Timestamp</code> | UTC wall-clock instant for logs, storage and system boundaries |</p><p>All three use the handle ABI. They carry no source-visible fields.</p><h3>Monotonic clock functions</h3><p>| Function | Parameters | Returns | Error | |---|---|---|---| | <code>mark_now()</code> | none | <code>TimeMark</code> | no | | <code>elapsed_since(start)</code> | <code>TimeMark</code> | <code>Duration</code> | no | | <code>duration_between(start, end)</code> | <code>TimeMark, TimeMark</code> | <code>Duration</code> | no |</p><p><code>mark_now()</code> returns the current monotonic mark. <code>elapsed_since(start)</code> returns the duration from <code>start</code> to now. <code>duration_between(start, end)</code> returns the duration from <code>start</code> to <code>end</code>.</p><h3>Wall-clock timestamp functions</h3><p>| Function | Parameters | Returns | Error | |---|---|---|---| | <code>timestamp_now()</code> | none | <code>Timestamp</code> | no | | <code>timestamp_from_unix_seconds(seconds)</code> | <code>Float</code> | <code>Timestamp</code> | no | | <code>timestamp_from_unix_milliseconds(milliseconds)</code> | <code>Float</code> | <code>Timestamp</code> | no | | <code>timestamp_from_iso_string(text)</code> | <code>String</code> | <code>Timestamp, Error!</code> | yes |</p><p><code>timestamp_from_iso_string</code> is the only fallible function. Invalid ISO strings return through <code>Error!</code>.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>time <span class='moth-code-parenthesis'>{</span>
+previous <span class='moth-code-operator'>=</span> time.mark_now<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Opaque types</h3><p>The package exposes three opaque types. Do not construct them with struct syntax or inspect their fields. Pass them to the package functions.</p><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Type</p></th><th scope="col" style=""><p> Purpose</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>Duration</code></p></td> <td style=""><p> Signed elapsed amount</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>TimeMark</code></p></td> <td style=""><p> Monotonic clock mark for deltas and frame timing</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> UTC wall-clock instant for logs, storage and system boundaries</p></td>
+        </tr>
+        
+</table><p>All three use the handle ABI. They carry no source-visible fields.</p><h3>Monotonic clock functions</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Error</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>mark_now()</code></p></td> <td style=""><p> none</p></td> <td style=""><p> <code>TimeMark</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>elapsed_since(start)</code></p></td> <td style=""><p> <code>TimeMark</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>duration_between(start, end)</code></p></td> <td style=""><p> <code>TimeMark, TimeMark</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
+        </tr>
+        
+</table><p><code>mark_now()</code> returns the current monotonic mark. <code>elapsed_since(start)</code> returns the duration from <code>start</code> to now. <code>duration_between(start, end)</code> returns the duration from <code>start</code> to <code>end</code>.</p><h3>Wall-clock timestamp functions</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Error</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>timestamp_now()</code></p></td> <td style=""><p> none</p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>timestamp_from_unix_seconds(seconds)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>timestamp_from_unix_milliseconds(milliseconds)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>timestamp_from_iso_string(text)</code></p></td> <td style=""><p> <code>String</code></p></td> <td style=""><p> <code>Timestamp, Error!</code></p></td> <td style=""><p> yes</p></td>
+        </tr>
+        
+</table><p><code>timestamp_from_iso_string</code> is the only fallible function. Invalid ISO strings return through <code>Error!</code>.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>time <span class='moth-code-parenthesis'>{</span>
     <span class='moth-code-struct'>Timestamp,</span>
     timestamp_from_iso_string,
     timestamp_from_unix_milliseconds,
@@ -770,7 +826,51 @@ previous <span class='moth-code-operator'>=</span> time.mark_now<span class='mot
 
 created <span class='moth-code-operator'>=</span> timestamp_from_iso_string<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;not-a-date&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     then timestamp_from_unix_milliseconds<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0.0</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><h3>Duration construction and helpers</h3><p>| Function | Parameters | Returns | Error | |---|---|---|---| | <code>duration_from_seconds(seconds)</code> | <code>Float</code> | <code>Duration</code> | no | | <code>duration_from_milliseconds(milliseconds)</code> | <code>Float</code> | <code>Duration</code> | no | | <code>as_seconds(duration)</code> | <code>Duration</code> | <code>Float</code> | no | | <code>as_milliseconds(duration)</code> | <code>Duration</code> | <code>Float</code> | no | | <code>is_negative(duration)</code> | <code>Duration</code> | <code>Bool</code> | no | | <code>abs(duration)</code> | <code>Duration</code> | <code>Duration</code> | no | | <code>clamp(duration, min, max)</code> | <code>Duration, Duration, Duration</code> | <code>Duration</code> | no |</p><h3>Timestamp helpers</h3><p>| Function | Parameters | Returns | Error | |---|---|---|---| | <code>unix_seconds(timestamp)</code> | <code>Timestamp</code> | <code>Float</code> | no | | <code>unix_milliseconds(timestamp)</code> | <code>Timestamp</code> | <code>Float</code> | no | | <code>to_iso_string(timestamp)</code> | <code>Timestamp</code> | <code>String</code> | no |</p><h3>Access and return contracts</h3><p>All parameters use shared access. No function requires mutable access. All return values stay fresh. <code>timestamp_from_iso_string</code> returns through <code>Error!</code> on invalid input. Every other function stays infallible.</p><h3>Backend behaviour</h3><p>HTML-JS lowers <code>mark_now</code> to <code>globalThis.performance.now()</code>. <code>timestamp_now</code> lowers to <code>Date.now()</code>. <code>to_iso_string</code> lowers to <code>(new Date(#0)).toISOString()</code>. Duration and timestamp construction helpers lower to inline JavaScript expressions.</p><p>HTML-Wasm lacks a Wasm lowering for these functions. See <a href="../../../progress">progress matrix</a> for current target availability.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path imports such as <code>import @core/time/mark_now</code> face rejection. Use grouped or namespace imports.</li><li>Named arguments are not supported. Binding-backed calls are positional-only.</li><li>Do not construct <code>Duration</code>, <code>TimeMark</code> or <code>Timestamp</code> with struct syntax.</li><li>Do not inspect opaque type fields directly.</li><li>The package does not expose receiver methods.</li></ul><h3>Deferred surfaces</h3><p>Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings remain deferred. Browser animation-frame integration belongs in a future web-specific package rather than <code>@core/time</code>. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="../../#import-paths">Import paths</a>.</li></ul>
+;</code></pre><h3>Duration construction and helpers</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Error</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>duration_from_seconds(seconds)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>duration_from_milliseconds(milliseconds)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>as_seconds(duration)</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>as_milliseconds(duration)</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>is_negative(duration)</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>abs(duration)</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>clamp(duration, min, max)</code></p></td> <td style=""><p> <code>Duration, Duration, Duration</code></p></td> <td style=""><p> <code>Duration</code></p></td> <td style=""><p> no</p></td>
+        </tr>
+        
+</table><h3>Timestamp helpers</h3><table style="">
+        
+        <tr style="">
+            
+            <th scope="col" style=""><p> Function</p></th><th scope="col" style=""><p> Parameters</p></th><th scope="col" style=""><p> Returns</p></th><th scope="col" style=""><p> Error</p></th>
+        
+</tr>
+
+
+
+            <tr style="">
+             <td style=""><p> <code>unix_seconds(timestamp)</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>unix_milliseconds(timestamp)</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> no</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>to_iso_string(timestamp)</code></p></td> <td style=""><p> <code>Timestamp</code></p></td> <td style=""><p> <code>String</code></p></td> <td style=""><p> no</p></td>
+        </tr>
+        
+</table><h3>Access and return contracts</h3><p>All parameters use shared access. No function requires mutable access. All return values stay fresh. <code>timestamp_from_iso_string</code> returns through <code>Error!</code> on invalid input. Every other function stays infallible.</p><h3>Backend behaviour</h3><p>HTML-JS lowers <code>mark_now</code> to <code>globalThis.performance.now()</code>. <code>timestamp_now</code> lowers to <code>Date.now()</code>. <code>to_iso_string</code> lowers to <code>(new Date(#0)).toISOString()</code>. Duration and timestamp construction helpers lower to inline JavaScript expressions.</p><p>HTML-Wasm lacks a Wasm lowering for these functions. See <a href="../../../progress">progress matrix</a> for current target availability.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path imports such as <code>import @core/time/mark_now</code> face rejection. Use grouped or namespace imports.</li><li>Named arguments are not supported. Binding-backed calls are positional-only.</li><li>Do not construct <code>Duration</code>, <code>TimeMark</code> or <code>Timestamp</code> with struct syntax.</li><li>Do not inspect opaque type fields directly.</li><li>The package does not expose receiver methods.</li></ul><h3>Deferred surfaces</h3><p>Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings remain deferred. Browser animation-frame integration belongs in a future web-specific package rather than <code>@core/time</code>. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="../../#import-paths">Import paths</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

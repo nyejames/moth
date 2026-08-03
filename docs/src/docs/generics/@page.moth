@@ -57,10 +57,12 @@ page_head #= language_theme_head
 
     # Generics
 
-    Generics let one declaration describe a family of concrete types or functions.
+    Generics let one declaration describe a family of concrete structs, choices
+    or functions. Moth specialises each use statically and doesn't expose erased
+    generic values at runtime.
 
-    Moth keeps the solving local. Type arguments come from the declaration,
-    the call in front of you and its immediate receiving type.
+    Type inference stays local. It reads the immediate arguments and receiving
+    type rather than searching later uses or the whole program.
 ]
 
 #[section:

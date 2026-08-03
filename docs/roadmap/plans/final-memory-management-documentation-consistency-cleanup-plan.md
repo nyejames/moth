@@ -62,7 +62,7 @@ Use this order whenever documents disagree:
 2. The relevant detailed memory leaf
 3. `docs/compiler-design-overview.md`
 4. `docs/build-system-design.md`
-5. `docs/language-overview.md`
+5. `docs/src/docs/codebase/language/overview.mtf` and its canonical memory references
 6. `docs/src/docs/progress/@page.moth`
 7. Roadmap plans for sequencing only
 8. Educational and user-facing pages
@@ -200,7 +200,8 @@ Do not label them active or queued unless a separate approved plan changes roadm
   - all memory authority pages
   - `docs/compiler-design-overview.md`
   - `docs/build-system-design.md`
-  - `docs/language-overview.md`
+  - `docs/src/docs/codebase/language/overview.mtf`
+  - `docs/src/docs/memory/*.mtf`
   - `docs/src/docs/progress/@page.moth`
   - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md`
   - `docs/roadmap/plans/grouped-memory-design.md`
@@ -222,11 +223,10 @@ Do not label them active or queued unless a separate approved plan changes roadm
 ## Files
 
 ```text
-docs/language-overview.md
 docs/src/docs/collections/hash-maps.mtf
 ```
 
-## 1.1 Language overview
+## 1.1 Hash-map language reference
 
 Replace:
 
@@ -310,12 +310,12 @@ with:
 results are lifted into independent Moth result graphs
 ```
 
-## 2.2 Language overview WIT wording
+## 2.2 External-binding WIT wording
 
 File:
 
 ```text
-docs/language-overview.md
+docs/src/docs/packages/external-binding-contracts.mtf
 ```
 
 Replace:
@@ -943,7 +943,7 @@ Expected: one topology sentence and flat pipeline indentation.
 ## 8.6 Group-transfer wording
 
 ```sh
-rg -n   "group-to-group transfer|group physical representation and group-to-group transfer"   docs/src/docs docs/language-overview.md
+rg -n   "group-to-group transfer|group physical representation and group-to-group transfer"   docs/src/docs
 ```
 
 Expected: only explicit statements that V1 has no group-to-group transfer.

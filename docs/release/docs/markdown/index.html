@@ -670,7 +670,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Plain Markdown</p><h1>Plain Markdown</h1><p>Plain Markdown earns its place as the least magical content format in a Moth project.</p><p>The compiler can import it, render it and hand the result to the HTML builder. It never pretends the file contains Moth code.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Plain Markdown</p><h1>Plain Markdown</h1><p>A <code>.md</code> file remains ordinary Markdown. The compiler renders it at compile time and exports the HTML as <code>content</code>, but it never interprets Moth syntax inside the file.</p><p>This keeps plain content portable across Markdown tools. Choose <code>.mtf</code> only when content needs Moth constants, templates or builder helpers.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Markdown files

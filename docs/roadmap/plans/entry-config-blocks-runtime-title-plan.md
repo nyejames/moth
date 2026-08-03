@@ -30,7 +30,7 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 
 - `docs/compiler-design-overview.md` for header syntax preparation, AST folding, module artefact metadata and target validation
 - `docs/build-system-design.md` for entry-local `config:` block placement rules, section schemas and entry assembly
-- `docs/language-overview.md` for source syntax
+- `docs/src/docs/codebase/language/overview.mtf` and its project-structure references for source syntax
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for the module graph
@@ -269,7 +269,7 @@ Context: documentation and scaffolding must teach the accepted entry config mode
 - Update generated HTML project scaffolding.
 - Update integration manifest entries.
 - Keep focused migration-diagnostic fixtures for legacy names.
-- Update `docs/language-overview.md` with `config:` block source semantics.
+- Update `docs/src/docs/project-structure/entry-config.mtf` with `config:` block source semantics.
 - Update HTML page and document metadata source pages.
 - Update Core IO source pages with `io.set_title`.
 - Update progress matrix rows for entry config, scoped builder keys, HTML metadata, legacy removal and `io.set_title`.
@@ -315,7 +315,7 @@ Cover:
 
 ## Documentation and progress-matrix impact
 
-- update `docs/language-overview.md` with `config:` block source semantics
+- update `docs/src/docs/project-structure/entry-config.mtf` with `config:` block source semantics
 - update `docs/build-system-design.md` only if a durable entry-config contract is confirmed missing
 - update HTML page and document metadata source pages
 - update Core IO source pages with `io.set_title`
