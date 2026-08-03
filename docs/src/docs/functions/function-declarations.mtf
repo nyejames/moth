@@ -12,7 +12,7 @@ A source function forms a named top-level declaration.
 
 ### Declaration shape
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     name |parameters|:
         body
     ;

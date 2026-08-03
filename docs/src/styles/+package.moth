@@ -195,7 +195,7 @@ export:
         .doc-level,
         .doc-pager {
             --doc-level-accent: #3d4e8e;
-            --doc-level-accent-hover: #336b77;
+            --doc-level-accent-hover: #44a0cf;
             --doc-level-border: #d7d9df;
             --doc-level-switch-background: #f1f4f5;
             --doc-level-selected-background: #ffffff;
