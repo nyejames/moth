@@ -19,8 +19,7 @@ A binding gives a value a visible name.
 - `=` creates a binding when the name is new.
 - `=` reassigns an existing binding only when that binding is mutable.
 
-Compile-time constants use `#` and are documented separately by Constants and
-compile-time behaviour.
+Compile-time constants use `#` and are documented separately by @../constants (Constants and compile-time behaviour).
 
 ### Binding mode and type
 
