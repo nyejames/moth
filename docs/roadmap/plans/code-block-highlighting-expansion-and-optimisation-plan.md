@@ -20,7 +20,7 @@ CURRENT_SLICE:
 - Non-goals: no production highlighter changes in this slice
 
 LAST_GOOD_COMMIT:
-- `4eed6ff44` (current main including the deliberate user docs fix)
+- `642d58ed0` (accepted Phase 0 baseline slice commit)
 
 CURRENT_WORKTREE_STATE:
 - Clean / known changes: Phase 0 uncommitted slice present (benchmark fixture, manifest, README counts, plan, roadmap, xtask inventory test); user commit `4eed6ff44` (docs codeblock fix) is the new HEAD and does not overlap the slice
