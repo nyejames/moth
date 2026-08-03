@@ -16,6 +16,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Queued implementation chain
 
+- [$code directive moth highlighting improvements](./plans/code-block-highlighting-expansion-and-optimisation-plan.md)
 - [TIR follow up cleanup](./plans/tir-corrections-and-simplification-plan.md)
 - [Anonymous const records](./plans/anonymous-const-records-plan.md)
 - [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
