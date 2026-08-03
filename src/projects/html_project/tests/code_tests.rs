@@ -11,7 +11,7 @@ use crate::projects::html_project::styles::code::{
 fn generic_code_highlighter_marks_syntax_but_not_keywords() {
     let highlighted = highlight_code_html("loop(x + 1)", CodeLanguage::Generic);
 
-    assert!(highlighted.contains("<span class='moth-code-parenthesis'>(</span>"));
+    assert!(highlighted.contains("<span class='moth-code-delimiter'>(</span>"));
     assert!(highlighted.contains("<span class='moth-code-operator'>+</span>"));
     assert!(highlighted.contains("<span class='moth-code-number'>1</span>"));
     assert!(!highlighted.contains("moth-code-keyword"));
@@ -101,4 +101,547 @@ fn text_code_formatter_escapes_html_without_highlighting() {
     assert!(content.contains("&lt;tag&gt;&amp;&quot;quoted&quot;"));
     assert!(!content.contains("<tag>"));
     assert!(!content.contains("moth-code-"));
+}
+
+#[test]
+fn moth_highlighter_uses_compiler_word_classes() {
+    let highlighted = highlight_code_html(
+        "if import return assert is not and or Int Float Bool String Char None True False async yield checked block",
+        CodeLanguage::Moth,
+    );
+
+    for word in [
+        "if", "import", "return", "assert", "async", "yield", "checked", "block",
+    ] {
+        assert!(
+            highlighted.contains(&format!("<span class='moth-code-keyword'>{word}</span>")),
+            "expected keyword span for {word:?} in: {highlighted}"
+        );
+    }
+
+    for word in ["is", "not", "and", "or"] {
+        assert!(
+            highlighted.contains(&format!("<span class='moth-code-operator'>{word}</span>")),
+            "expected operator span for {word:?} in: {highlighted}"
+        );
+    }
+
+    for word in [
+        "Int", "Float", "Bool", "String", "Char", "None", "True", "False",
+    ] {
+        assert!(
+            highlighted.contains(&format!("<span class='moth-code-type'>{word}</span>")),
+            "expected type span for {word:?} in: {highlighted}"
+        );
+    }
+}
+
+#[test]
+fn moth_highlighter_wraps_literals_and_keeps_planned_words_plain() {
+    let highlighted =
+        highlight_code_html("true false none in fn group into where", CodeLanguage::Moth);
+
+    assert_eq!(
+        highlighted,
+        "<span class='moth-code-literal'>true</span> <span class='moth-code-literal'>false</span> <span class='moth-code-literal'>none</span> in fn group into where"
+    );
+}
+
+#[test]
+fn moth_compound_operators_use_one_span() {
+    let highlighted = highlight_code_html(
+        "a //= b -> c :: d .. e => f << g >> h <= i >= j // k",
+        CodeLanguage::Moth,
+    );
+
+    for operator in ["//=", "::", "..", "//"] {
+        assert!(
+            highlighted.contains(&format!(
+                "<span class='moth-code-operator'>{operator}</span>"
+            )),
+            "expected one operator span for {operator:?} in: {highlighted}"
+        );
+    }
+
+    for (operator, escaped) in [
+        ("->", "-&gt;"),
+        ("=>", "=&gt;"),
+        ("<<", "&lt;&lt;"),
+        (">>", "&gt;&gt;"),
+        ("<=", "&lt;="),
+        (">=", "&gt;="),
+    ] {
+        assert!(
+            highlighted.contains(&format!(
+                "<span class='moth-code-operator'>{escaped}</span>"
+            )),
+            "expected one escaped operator span for {operator:?} in: {highlighted}"
+        );
+    }
+
+    assert_eq!(
+        highlighted
+            .matches("<span class='moth-code-operator'>")
+            .count(),
+        10,
+        "expected exactly one span per compound operator in: {highlighted}"
+    );
+}
+
+#[test]
+fn moth_operator_fallbacks_keep_single_char_spans() {
+    let highlighted = highlight_code_html(
+        "a = b + c - d * e / f % g ^ h < i > j ~ k # l $ m ! n ? o & p @ q",
+        CodeLanguage::Moth,
+    );
+
+    for operator in [
+        "=", "+", "-", "*", "/", "%", "^", "~", "#", "$", "!", "?", "@",
+    ] {
+        assert!(
+            highlighted.contains(&format!(
+                "<span class='moth-code-operator'>{operator}</span>"
+            )),
+            "expected operator span for {operator:?} in: {highlighted}"
+        );
+    }
+
+    for (operator, escaped) in [("<", "&lt;"), (">", "&gt;"), ("&", "&amp;")] {
+        assert!(
+            highlighted.contains(&format!(
+                "<span class='moth-code-operator'>{escaped}</span>"
+            )),
+            "expected escaped operator span for {operator:?} in: {highlighted}"
+        );
+    }
+}
+
+#[test]
+fn moth_scanner_does_not_invent_equality_or_logical_operators() {
+    let equality = highlight_code_html("a == b", CodeLanguage::Moth);
+    assert!(
+        equality.contains(
+            "<span class='moth-code-operator'>=</span><span class='moth-code-operator'>=</span>"
+        ),
+        "== must stay two separate '=' operator spans, got: {equality}"
+    );
+
+    let inequality = highlight_code_html("a != b", CodeLanguage::Moth);
+    assert!(
+        inequality.contains(
+            "<span class='moth-code-operator'>!</span><span class='moth-code-operator'>=</span>"
+        ),
+        "!= must stay separate operator spans, got: {inequality}"
+    );
+
+    let logical_and = highlight_code_html("a && b", CodeLanguage::Moth);
+    assert!(
+        logical_and.contains(
+            "<span class='moth-code-operator'>&amp;</span><span class='moth-code-operator'>&amp;</span>"
+        ),
+        "&& must stay two '&' operator spans, got: {logical_and}"
+    );
+
+    let logical_or = highlight_code_html("a || b", CodeLanguage::Moth);
+    assert!(
+        logical_or.contains(
+            "<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span>"
+        ),
+        "|| must stay two delimiter spans, got: {logical_or}"
+    );
+    assert!(!logical_or.contains("moth-code-operator'>|"));
+}
+
+#[test]
+fn moth_punctuation_forms_word_boundaries() {
+    assert_eq!(
+        highlight_code_html("String,", CodeLanguage::Moth),
+        "<span class='moth-code-type'>String</span>,"
+    );
+
+    assert_eq!(
+        highlight_code_html("Status::Ready,", CodeLanguage::Moth),
+        "<span class='moth-code-nominal'>Status</span><span class='moth-code-operator'>::</span><span class='moth-code-nominal'>Ready</span>,"
+    );
+
+    assert_eq!(
+        highlight_code_html("io.line", CodeLanguage::Moth),
+        "<span class='moth-code-type'>io</span>.line"
+    );
+}
+
+#[test]
+fn moth_number_runs_cover_exponents_and_separators() {
+    for source in ["1", "1_000", "1.5", "1e6", "1e-6", "1.0e+21"] {
+        let highlighted = highlight_code_html(source, CodeLanguage::Moth);
+        assert_eq!(
+            highlighted,
+            format!("<span class='moth-code-number'>{source}</span>"),
+            "expected one number run for {source:?}"
+        );
+    }
+}
+
+#[test]
+fn moth_number_runs_do_not_swallow_range_operators() {
+    let highlighted = highlight_code_html("1..10", CodeLanguage::Moth);
+
+    assert_eq!(
+        highlighted,
+        "<span class='moth-code-number'>1</span><span class='moth-code-operator'>..</span><span class='moth-code-number'>10</span>"
+    );
+}
+
+#[test]
+fn unicode_identifiers_and_text_survive_scanning() {
+    assert_eq!(highlight_code_html("héllo", CodeLanguage::Moth), "héllo");
+    assert_eq!(
+        highlight_code_html("π_value", CodeLanguage::Moth),
+        "π_value"
+    );
+    assert_eq!(highlight_code_html("名前", CodeLanguage::Moth), "名前");
+
+    assert_eq!(
+        highlight_code_html("'λ'", CodeLanguage::Moth),
+        "<span class='moth-code-string'>&#39;λ&#39;</span>"
+    );
+    assert_eq!(
+        highlight_code_html("\"héllo\"", CodeLanguage::Moth),
+        "<span class='moth-code-string'>&quot;héllo&quot;</span>"
+    );
+}
+
+#[test]
+fn escaping_is_preserved_across_plain_string_and_comment_runs() {
+    let plain = highlight_code_html("<tag>", CodeLanguage::Moth);
+    assert_eq!(
+        plain,
+        "<span class='moth-code-operator'>&lt;</span>tag<span class='moth-code-operator'>&gt;</span>"
+    );
+
+    let string = highlight_code_html("\"<&>\"", CodeLanguage::Moth);
+    assert_eq!(
+        string,
+        "<span class='moth-code-string'>&quot;&lt;&amp;&gt;&quot;</span>"
+    );
+
+    let comment = highlight_code_html("-- <&>", CodeLanguage::Moth);
+    assert_eq!(
+        comment,
+        "<span class='moth-code-comment'>-- &lt;&amp;&gt;</span>"
+    );
+}
+
+#[test]
+fn scanner_handles_end_of_input_runs() {
+    assert_eq!(highlight_code_html("value", CodeLanguage::Moth), "value");
+
+    assert_eq!(
+        highlight_code_html("123", CodeLanguage::Moth),
+        "<span class='moth-code-number'>123</span>"
+    );
+
+    assert_eq!(
+        highlight_code_html("-- comment", CodeLanguage::Moth),
+        "<span class='moth-code-comment'>-- comment</span>"
+    );
+
+    assert_eq!(
+        highlight_code_html("\"unterminated", CodeLanguage::Moth),
+        "<span class='moth-code-string'>&quot;unterminated</span>"
+    );
+}
+
+#[test]
+fn rust_profile_keeps_a_regression_example() {
+    let highlighted = highlight_code_html(
+        "fn main() -> String { let name = \"moth\"; }",
+        CodeLanguage::Rust,
+    );
+
+    assert!(highlighted.contains("<span class='moth-code-keyword'>fn</span>"));
+    assert!(highlighted.contains("<span class='moth-code-operator'>-</span>"));
+    assert!(highlighted.contains("<span class='moth-code-keyword'>let</span>"));
+    assert!(highlighted.contains("<span class='moth-code-string'>&quot;moth&quot;</span>"));
+    assert!(!highlighted.contains("<span class='moth-code-keyword'>main</span>"));
+}
+
+#[test]
+fn shell_profile_keeps_a_regression_example() {
+    let highlighted = highlight_code_html("if true; then echo hi; fi", CodeLanguage::Shell);
+
+    assert!(highlighted.contains("<span class='moth-code-keyword'>if</span>"));
+    assert!(highlighted.contains("<span class='moth-code-keyword'>then</span>"));
+    assert!(highlighted.contains("<span class='moth-code-keyword'>fi</span>"));
+    assert!(highlighted.contains("<span class='moth-code-literal'>true</span>"));
+    assert!(highlighted.contains(";"));
+}
+
+#[test]
+fn moth_highlighter_marks_nominal_names() {
+    let highlighted = highlight_code_html("Label Point Maybe Status A", CodeLanguage::Moth);
+
+    for word in ["Label", "Point", "Maybe", "Status", "A"] {
+        assert!(
+            highlighted.contains(&format!("<span class='moth-code-nominal'>{word}</span>")),
+            "expected nominal span for {word:?} in: {highlighted}"
+        );
+    }
+}
+
+#[test]
+fn moth_highlighter_marks_error_and_io_namespace_as_types() {
+    let highlighted = highlight_code_html("Error io.line io", CodeLanguage::Moth);
+
+    assert!(highlighted.contains("<span class='moth-code-type'>Error</span>"));
+    assert!(highlighted.contains("<span class='moth-code-type'>io</span>.line"));
+    assert!(!highlighted.contains("moth-code-type'>io</span> <"));
+}
+
+#[test]
+fn moth_highlighter_marks_functions_declarations_calls_and_methods() {
+    let declaration = highlight_code_html("render |title String| -> String:", CodeLanguage::Moth);
+    assert!(
+        declaration.contains("<span class='moth-code-function'>render</span>"),
+        "declaration name before | must be a function, got: {declaration}"
+    );
+
+    let call = highlight_code_html("draw_rect(canvas, 10, 20)", CodeLanguage::Moth);
+    assert!(
+        call.contains("<span class='moth-code-function'>draw_rect</span>"),
+        "call name before ( must be a function, got: {call}"
+    );
+
+    let method = highlight_code_html("value.render()", CodeLanguage::Moth);
+    assert!(
+        method.contains("<span class='moth-code-function'>render</span>"),
+        "method name before ( must be a function, got: {method}"
+    );
+
+    let plain = highlight_code_html("count = total", CodeLanguage::Moth);
+    assert_eq!(
+        plain,
+        "count <span class='moth-code-operator'>=</span> total"
+    );
+}
+
+#[test]
+fn moth_highlighter_marks_contracts_with_bounded_context() {
+    let declaration = highlight_code_html("DISPLAY_TEXT must:", CodeLanguage::Moth);
+    assert!(
+        declaration.contains("<span class='moth-code-contract'>DISPLAY_TEXT</span>"),
+        "trait declaration name must be a contract, got: {declaration}"
+    );
+
+    let conformance = highlight_code_html("Label must DISPLAY_TEXT", CodeLanguage::Moth);
+    assert!(
+        conformance.contains("<span class='moth-code-contract'>DISPLAY_TEXT</span>"),
+        "conformance trait must be a contract, got: {conformance}"
+    );
+
+    let list = highlight_code_html("type A is SERIALIZABLE and COMPARABLE", CodeLanguage::Moth);
+    assert!(
+        list.contains("<span class='moth-code-contract'>SERIALIZABLE</span>"),
+        "generic bound trait must be a contract, got: {list}"
+    );
+    assert!(
+        list.contains("<span class='moth-code-contract'>COMPARABLE</span>"),
+        "and-continued trait must be a contract, got: {list}"
+    );
+
+    let incompatibility = highlight_code_html("Color must not FROZEN", CodeLanguage::Moth);
+    assert!(
+        incompatibility.contains("<span class='moth-code-contract'>FROZEN</span>"),
+        "must-not trait must be a contract, got: {incompatibility}"
+    );
+}
+
+#[test]
+fn moth_highlighter_keeps_all_caps_constants_non_contract() {
+    let highlighted = highlight_code_html("PI TAU E MAX_SIZE", CodeLanguage::Moth);
+
+    assert_eq!(
+        highlighted,
+        "PI TAU <span class='moth-code-nominal'>E</span> MAX_SIZE"
+    );
+    assert!(!highlighted.contains("moth-code-contract"));
+}
+
+#[test]
+fn moth_highlighter_marks_directives_and_import_paths() {
+    let directives = highlight_code_html(
+        "$md $code $slot $insert $children $html $css",
+        CodeLanguage::Moth,
+    );
+    for directive in [
+        "$md",
+        "$code",
+        "$slot",
+        "$insert",
+        "$children",
+        "$html",
+        "$css",
+    ] {
+        assert!(
+            directives.contains(&format!(
+                "<span class='moth-code-directive'>{directive}</span>"
+            )),
+            "expected directive span for {directive:?} in: {directives}"
+        );
+    }
+
+    let paths = highlight_code_html("import @core/io {print}", CodeLanguage::Moth);
+    assert!(
+        paths.contains("<span class='moth-code-string'>@core/io</span>"),
+        "import path must use the string role, got: {paths}"
+    );
+
+    let double_at = highlight_code_html("@@name", CodeLanguage::Moth);
+    assert!(
+        double_at.contains("<span class='moth-code-string'>@name</span>"),
+        "second @ starts a path, got: {double_at}"
+    );
+}
+
+#[test]
+fn moth_highlighter_keeps_non_directive_dollar_forms_as_operators() {
+    let type_dollar = highlight_code_html("$Int", CodeLanguage::Moth);
+    assert!(
+        type_dollar.contains("<span class='moth-code-operator'>$</span>"),
+        "$Int must keep $ as an operator, got: {type_dollar}"
+    );
+    assert!(
+        type_dollar.contains("<span class='moth-code-type'>Int</span>"),
+        "Int after $ must keep its type role, got: {type_dollar}"
+    );
+
+    let assign = highlight_code_html("$=", CodeLanguage::Moth);
+    assert!(
+        assign.contains("<span class='moth-code-operator'>$=</span>"),
+        "$= must stay one operator span, got: {assign}"
+    );
+}
+
+#[test]
+fn moth_highlighter_keeps_attached_bang_keywords_together() {
+    let highlighted = highlight_code_html("return! value cast! value", CodeLanguage::Moth);
+
+    assert!(
+        highlighted.contains("<span class='moth-code-keyword'>return!</span>"),
+        "return! must be one keyword span, got: {highlighted}"
+    );
+    assert!(
+        highlighted.contains("<span class='moth-code-keyword'>cast!</span>"),
+        "cast! must be one keyword span, got: {highlighted}"
+    );
+}
+
+#[test]
+fn moth_highlighter_marks_delimiters() {
+    let highlighted = highlight_code_html("a : b ; c | d ( e ) [ f ] { g }", CodeLanguage::Moth);
+
+    for delimiter in [":", ";", "|", "(", ")", "[", "]", "{", "}"] {
+        assert!(
+            highlighted.contains(&format!(
+                "<span class='moth-code-delimiter'>{delimiter}</span>"
+            )),
+            "expected delimiter span for {delimiter:?} in: {highlighted}"
+        );
+    }
+}
+
+#[test]
+fn non_moth_profiles_share_literal_role() {
+    let javascript = highlight_code_html("const x = true", CodeLanguage::JavaScript);
+    assert!(javascript.contains("<span class='moth-code-literal'>true</span>"));
+
+    let python = highlight_code_html("value = None", CodeLanguage::Python);
+    assert!(python.contains("<span class='moth-code-literal'>None</span>"));
+
+    let rust = highlight_code_html("let x = false", CodeLanguage::Rust);
+    assert!(rust.contains("<span class='moth-code-literal'>false</span>"));
+}
+
+#[test]
+fn non_moth_profiles_share_function_and_contract_roles() {
+    let javascript = highlight_code_html("function render() {}", CodeLanguage::JavaScript);
+    assert!(javascript.contains("<span class='moth-code-function'>render</span>"));
+
+    let python = highlight_code_html("def run():", CodeLanguage::Python);
+    assert!(python.contains("<span class='moth-code-function'>run</span>"));
+
+    let rust = highlight_code_html("fn main() {}", CodeLanguage::Rust);
+    assert!(rust.contains("<span class='moth-code-function'>main</span>"));
+
+    let typescript =
+        highlight_code_html("interface User { name: string }", CodeLanguage::TypeScript);
+    assert!(typescript.contains("<span class='moth-code-contract'>User</span>"));
+
+    let rust_trait = highlight_code_html("trait Display {}", CodeLanguage::Rust);
+    assert!(rust_trait.contains("<span class='moth-code-contract'>Display</span>"));
+}
+
+#[test]
+fn rust_types_no_longer_inherit_typescript_words() {
+    let rust = highlight_code_html("let value: string = name", CodeLanguage::Rust);
+    assert!(
+        !rust.contains("<span class='moth-code-type'>string</span>"),
+        "Rust must not inherit the TypeScript type word, got: {rust}"
+    );
+
+    let typescript = highlight_code_html("let value: string = name", CodeLanguage::TypeScript);
+    assert!(typescript.contains("<span class='moth-code-type'>string</span>"));
+}
+
+#[test]
+fn moth_compound_assignment_forms_use_one_span() {
+    let highlighted = highlight_code_html(
+        "a += b -= c *= d /= e %= f ^= g #= h ~= i $= j",
+        CodeLanguage::Moth,
+    );
+
+    for operator in ["+=", "-=", "*=", "/=", "%=", "^=", "#=", "~=", "$="] {
+        assert!(
+            highlighted.contains(&format!(
+                "<span class='moth-code-operator'>{operator}</span>"
+            )),
+            "expected one operator span for {operator:?} in: {highlighted}"
+        );
+    }
+
+    assert_eq!(
+        highlighted
+            .matches("<span class='moth-code-operator'>")
+            .count(),
+        9,
+        "expected exactly one span per compound assignment in: {highlighted}"
+    );
+}
+
+#[test]
+fn moth_reactive_marker_is_not_a_directive() {
+    let highlighted = highlight_code_html("$(count)", CodeLanguage::Moth);
+
+    assert!(highlighted.contains("<span class='moth-code-operator'>$</span>"));
+    assert!(highlighted.contains("<span class='moth-code-delimiter'>(</span>"));
+    assert!(!highlighted.contains("moth-code-directive"));
+}
+
+#[test]
+fn moth_contract_state_resets_at_operator_boundaries() {
+    let arrow = highlight_code_html("TRAIT must ONE -> NEXT", CodeLanguage::Moth);
+    assert!(
+        arrow.contains("<span class='moth-code-contract'>ONE</span>"),
+        "ONE must stay a contract before the arrow, got: {arrow}"
+    );
+    assert!(
+        !arrow.contains("<span class='moth-code-contract'>NEXT</span>"),
+        "NEXT must not be a contract after ->, got: {arrow}"
+    );
+
+    let assign = highlight_code_html("TRAIT must ONE = NEXT", CodeLanguage::Moth);
+    assert!(
+        !assign.contains("<span class='moth-code-contract'>NEXT</span>"),
+        "NEXT must not be a contract after =, got: {assign}"
+    );
 }

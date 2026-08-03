@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -322,7 +341,7 @@ td {
 <style>.doc-level,
 .doc-pager {
     --doc-level-accent: #3d4e8e;
-    --doc-level-accent-hover: #336b77;
+    --doc-level-accent-hover: #44a0cf;
     --doc-level-border: #d7d9df;
     --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
@@ -720,21 +739,21 @@ td {
 
 
 
-        <p>Most Moth blocks have a colon at the start and a semicolon at the end.</p><pre style=""><code class='codeblock'>greet <span class='moth-code-operator'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>The colon opens the function body. The semicolon closes it.</p><p>Semicolons do not end every line. Add one only when the surrounding block is finished.</p><p>Use indentation to make nesting easy to see:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> ready<span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Ready!&quot;</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre>
+        <p>Most Moth blocks have a colon at the start and a semicolon at the end.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The colon opens the function body. The semicolon closes it.</p><p>Semicolons do not end every line. Add one only when the surrounding block is finished.</p><p>Use indentation to make nesting easy to see:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> ready<span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Ready!&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Moth uses explicit block delimiters.</p><p>A colon opens a block. A semicolon closes that block.</p><pre style=""><code class='codeblock'>clamp_to_zero <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>if</span> value <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>0</span><span class='moth-code-operator'>:</span>
+    <p>Moth uses explicit block delimiters.</p><p>A colon opens a block. A semicolon closes that block.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>clamp_to_zero</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>if</span> value <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>0</span><span class='moth-code-delimiter'>:</span>
         <span class='moth-code-keyword'>return</span> <span class='moth-code-number'>0</span>
-    ;
+    <span class='moth-code-delimiter'>;</span>
 
     <span class='moth-code-keyword'>return</span> value
-;</code></pre><h3>Contract</h3><ul><li><code>:</code> opens a function body, branch, loop or another block-form construct.</li><li><code>;</code> closes the active block.</li><li>A semicolon does not terminate an ordinary statement.</li><li>Statements inside a block are evaluated in source order unless control flow exits or redirects the block.</li><li>Child blocks create child scopes.</li><li>Indentation is for readability. Explicit delimiters define block boundaries.</li></ul><h3>Reading the shape</h3><p>The final semicolon in the example closes the function. The earlier semicolon closes the <code>if</code> block.</p><p>Nested language features may add their own structural rules. Branching, loops, functions and template control flow document those forms in detail.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Contract</h3><ul><li><code>:</code> opens a function body, branch, loop or another block-form construct.</li><li><code>;</code> closes the active block.</li><li>A semicolon does not terminate an ordinary statement.</li><li>Statements inside a block are evaluated in source order unless control flow exits or redirects the block.</li><li>Child blocks create child scopes.</li><li>Indentation is for readability. Explicit delimiters define block boundaries.</li></ul><h3>Reading the shape</h3><p>The final semicolon in the example closes the function. The earlier semicolon closes the <code>if</code> block.</p><p>Nested language features may add their own structural rules. Branching, loops, functions and template control flow document those forms in detail.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -789,24 +808,24 @@ td {
         <p>In ordinary Moth code, comments begin with two minus signs:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- This source-code line is ignored by the compiler.</span>
 score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span></code></pre><p>Template and moth template bodies are content. Two minus signs inside those bodies are text rather than source comments.</p><p>Use <code>regular_snake_case</code> for values and functions:</p><pre style=""><code class='codeblock'>player_score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>
 
-double_score <span class='moth-code-operator'>|</span>score <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+<span class='moth-code-function'>double_score</span> <span class='moth-code-delimiter'>|</span>score <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> score <span class='moth-code-operator'>*</span> <span class='moth-code-number'>2</span>
-;</code></pre><p>Use <code>PascalCase</code> for named types:</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>PlayerScore</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    value <span class='moth-code-struct'>Int,</span>
-<span class='moth-code-operator'>|</span></code></pre><p>Clear names beat short names. <code>player_score</code> is easier to understand than <code>ps</code>, especially when the code grows.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Use <code>PascalCase</code> for named types:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>PlayerScore</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    value <span class='moth-code-type'>Int</span>,
+<span class='moth-code-delimiter'>|</span></code></pre><p>Clear names beat short names. <code>player_score</code> is easier to understand than <code>ps</code>, especially when the code grows.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>In ordinary Moth code, <code>--</code> starts a single-line comment.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Explain why this value exists.</span>
 retry_count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span></code></pre><p>Everything after <code>--</code> on that source-code line is comment text.</p><h3>Template and moth template text</h3><p>Template bodies are content, not ordinary code-token context.</p><p>Inside a template body, <code>--</code> is ordinary body text. A moth template <code>.mtf</code> file is the body of an implicit compile-time Markdown template, so <code>--</code> is text there too.</p><p>Use template directives such as <code>$note</code> or <code>$todo</code> when template-authored content should be ignored.</p><h3>Naming conventions</h3><ul><li>Variables and functions use <code>regular_snake_case</code>.</li><li>Structs, choices, type aliases and generic parameters use <code>PascalCase</code>.</li><li>Trait names use all-caps identifiers such as <code>DISPLAY_TEXT</code>.</li><li>Names should describe their role rather than their storage or implementation detail.</li></ul><pre style=""><code class='codeblock'>retry_count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
 
-load_profile <span class='moth-code-operator'>|</span>user_id <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+<span class='moth-code-function'>load_profile</span> <span class='moth-code-delimiter'>|</span>user_id <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;profile&quot;</span>
-;
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>UserProfile</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    display_name <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span></code></pre><h3>Name collisions</h3><p>A visible name cannot be redeclared while it remains in scope.</p><p>The complete no-shadowing contract is documented by <a href="../bindings/#shadowing">Values and bindings</a>. Import aliases and module API names have additional collision rules in the Packages documentation.</p>
+<span class='moth-code-nominal'>UserProfile</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    display_name <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span></code></pre><h3>Name collisions</h3><p>A visible name cannot be redeclared while it remains in scope.</p><p>The complete no-shadowing contract is documented by <a href="../bindings/#shadowing">Values and bindings</a>. Import aliases and module API names have additional collision rules in the Packages documentation.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -858,7 +877,7 @@ load_profile <span class='moth-code-operator'>|</span>user_id <span class='moth-
 
 
 
-        <p>Moth can usually work out a value&#39;s type from the value itself.</p><pre style=""><code class='codeblock'>enabled <span class='moth-code-operator'>=</span> true
+        <p>Moth can usually work out a value&#39;s type from the value itself.</p><pre style=""><code class='codeblock'>enabled <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>true</span>
 count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
 ratio <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
 letter <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;🦋&#39;</span>
@@ -868,15 +887,15 @@ name <span class='moth-code-type'>String</span> <span class='moth-code-operator'
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Values have a semantic type. A binding may infer that type from its initializer or state it explicitly.</p><pre style=""><code class='codeblock'>enabled <span class='moth-code-operator'>=</span> true
+    <p>Values have a semantic type. A binding may infer that type from its initializer or state it explicitly.</p><pre style=""><code class='codeblock'>enabled <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>true</span>
 count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
 ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
-letter <span class='moth-code-struct'>Char</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;🦋&#39;</span>
-label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span></code></pre><h3>Core forms</h3><ul><li><code>true</code> and <code>false</code> are <code>Bool</code> values.</li><li>Whole-number literals are naturally <code>Int</code>.</li><li>Decimal-point literals are naturally <code>Float</code>.</li><li>Single-quoted literals create <code>Char</code> values.</li><li>Quoted slices and string templates use the <code>String</code> type.</li><li><code>none</code> requires an optional <code>T?</code> receiving context.</li></ul><p>The Numbers documentation owns exact numeric grammar and arithmetic behaviour. The Strings and characters section owns the implemented string source forms. Options are documented with Errors and options.</p><h3>Composite values</h3><p>Collections use braces. String templates use square brackets.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>}</span>
+letter <span class='moth-code-type'>Char</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;🦋&#39;</span>
+label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span></code></pre><h3>Core forms</h3><ul><li><code>true</code> and <code>false</code> are <code>Bool</code> values.</li><li>Whole-number literals are naturally <code>Int</code>.</li><li>Decimal-point literals are naturally <code>Float</code>.</li><li>Single-quoted literals create <code>Char</code> values.</li><li>Quoted slices and string templates use the <code>String</code> type.</li><li><code>none</code> requires an optional <code>T?</code> receiving context.</li></ul><p>The Numbers documentation owns exact numeric grammar and arithmetic behaviour. The Strings and characters section owns the implemented string source forms. Options are documented with Errors and options.</p><h3>Composite values</h3><p>Collections use braces. String templates use square brackets.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>}</span>
 
-message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-struct'>Hello</span> from a template.
-<span class='moth-code-parenthesis'>]</span></code></pre><p>Structs, choices, collections, maps and generic instances add richer value shapes without changing the basic annotation form.</p><p>Binding mutability and access mode are separate from semantic type identity. See <a href="../bindings">Values and bindings</a> for that contract.</p>
+message <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-nominal'>Hello</span> from a template.
+<span class='moth-code-delimiter'>]</span></code></pre><p>Structs, choices, collections, maps and generic instances add richer value shapes without changing the basic annotation form.</p><p>Binding mutability and access mode are separate from semantic type identity. See <a href="../bindings">Values and bindings</a> for that contract.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -930,11 +949,11 @@ message <span class='moth-code-operator'>=</span> <span class='moth-code-parenth
 
         <p>Use double quotes for normal text:</p><pre style=""><code class='codeblock'>greeting <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello&quot;</span></code></pre><p>Expression-position backtick strings aren&#39;t implemented. Use an ordinary string with escapes when the text contains backslashes:</p><pre style=""><code class='codeblock'>windows_path <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;C:\\docs\\site&quot;</span></code></pre><p>Use single quotes for one Unicode scalar value:</p><pre style=""><code class='codeblock'>seedling <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;🦋&#39;</span></code></pre><p><code>Char</code> follows scalar values rather than UTF-16 code units. A user-perceived character made from more than one scalar value needs a <code>String</code>.</p><p>Use a template when text needs values or a larger structure:</p><pre style=""><code class='codeblock'>name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 
-greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
-<span class='moth-code-parenthesis'>]</span></code></pre><h3>Joining strings</h3><p>Use templates to join strings together. Put the parts inside square brackets:</p><pre style=""><code class='codeblock'>first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
+greeting <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>]</span></code></pre><h3>Joining strings</h3><p>Use templates to join strings together. Put the parts inside square brackets:</p><pre style=""><code class='codeblock'>first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
 second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;world&quot;</span>
-message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>first, second<span class='moth-code-parenthesis'>]</span></code></pre><p>Don&#39;t use <code>+</code> to join strings. <code>+</code> is for numbers only. Use templates to concatenate strings.</p><h3>Read-only strings</h3><p>A quoted string like <code>&quot;Hello&quot;</code> is read-only content. You can reassign a mutable binding to point at a different string, but you can&#39;t change the string itself.</p><p>Square brackets belong to templates. Collections use curly braces instead.</p>
+message <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span>first, second<span class='moth-code-delimiter'>]</span></code></pre><p>Don&#39;t use <code>+</code> to join strings. <code>+</code> is for numbers only. Use templates to concatenate strings.</p><h3>Read-only strings</h3><p>A quoted string like <code>&quot;Hello&quot;</code> is read-only content. You can reassign a mutable binding to point at a different string, but you can&#39;t change the string itself.</p><p>Square brackets belong to templates. Collections use curly braces instead.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -942,26 +961,26 @@ message <span class='moth-code-operator'>=</span> <span class='moth-code-parenth
 letter <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;🦋&#39;</span>
 
 name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
-message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
-<span class='moth-code-parenthesis'>]</span></code></pre><h3>Quoted string slices</h3><p>Double quotes create escaped string slices. They support exactly these escapes:</p><ul><li><code>\\</code> for a backslash</li><li><code>\&quot;</code> for a double quote</li><li><code>\n</code> for a newline</li><li><code>\r</code> for a carriage return</li><li><code>\t</code> for a tab</li></ul><p>Every other escape is invalid. A backslash can&#39;t continue a quoted string across a physical newline.</p><p>A quoted string slice is read-only content. It has no character or substring mutation surface and isn&#39;t concatenated with <code>+</code>. A slice may be read, compared, passed, returned, stored and inserted into templates. A mutable binding that currently holds a slice may be reassigned. That doesn&#39;t make the slice contents mutable.</p><pre style=""><code class='codeblock'>name <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+message <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>]</span></code></pre><h3>Quoted string slices</h3><p>Double quotes create escaped string slices. They support exactly these escapes:</p><ul><li><code>\\</code> for a backslash</li><li><code>\&quot;</code> for a double quote</li><li><code>\n</code> for a newline</li><li><code>\r</code> for a carriage return</li><li><code>\t</code> for a tab</li></ul><p>Every other escape is invalid. A backslash can&#39;t continue a quoted string across a physical newline.</p><p>A quoted string slice is read-only content. It has no character or substring mutation surface and isn&#39;t concatenated with <code>+</code>. A slice may be read, compared, passed, returned, stored and inserted into templates. A mutable binding that currently holds a slice may be reassigned. That doesn&#39;t make the slice contents mutable.</p><pre style=""><code class='codeblock'>name <span class='moth-code-operator'>~=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Rob&quot;</span>  <span class='moth-code-comment'>-- reassigns the mutable binding, doesn&#39;t mutate the slice</span></code></pre><h3>Characters</h3><p>Single quotes create <code>Char</code> values.</p><h3>Template strings</h3><p>Square brackets create string templates. Templates produce owned string values and may fold at compile time or lower to runtime string construction.</p><p>Templates are the idiomatic and canonical way to:</p><ul><li>concatenate strings</li><li>interpolate values</li><li>build runtime or compile-time text</li><li>produce strings that need full template composition</li></ul><pre style=""><code class='codeblock'>first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
 second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;world&quot;</span>
-message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>first, second<span class='moth-code-parenthesis'>]</span>
+message <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span>first, second<span class='moth-code-delimiter'>]</span>
 
 name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
-greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span></code></pre><p>Use [left, right] for concatenation. Don&#39;t use <code>+</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- VALID: template concatenation</span>
-joined <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>left, right<span class='moth-code-parenthesis'>]</span>
+greeting <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span></code></pre><p>Use [left, right] for concatenation. Don&#39;t use <code>+</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- VALID: template concatenation</span>
+joined <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span>left, right<span class='moth-code-delimiter'>]</span>
 
 <span class='moth-code-comment'>-- INVALID: + is a numeric operator only</span>
 joined <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right</code></pre><p>Source <code>String + String</code> is invalid because <code>+</code> is a numeric operator only. Runtime equality compares content for every <code>String</code> origin, and String map keys use the same content rule. Non-JS map lowering remains target-gated. See <a href="../progress">Progress matrix</a> for current target support.</p><h3>One semantic <code>String</code> type</h3><p>Quoted slices and template-produced strings share one <code>String</code> type at ordinary typed boundaries. They share:</p><ul><li>parameter and return compatibility</li><li>equality</li><li>choice payload equality</li><li>collection and map value use</li><li><code>String</code> map-key use</li><li>casts</li><li>IO and external <code>StringContent</code> boundaries</li><li>template insertion</li><li>aliases and generic use where <code>String</code> is concrete</li></ul><p>Construction origin doesn&#39;t create hidden equality, hashing, map-key or call-compatibility rules.</p><h3>Equality</h3><p><code>String</code> supports <code>is</code> and <code>is not</code>. <code>String</code> doesn&#39;t support ordering operators (<code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>).</p><pre style=""><code class='codeblock'>slice <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;hello&quot;</span>
-template <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> hello<span class='moth-code-parenthesis'>]</span>
+template <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> hello<span class='moth-code-delimiter'>]</span>
 
 <span class='moth-code-comment'>-- VALID: equality across both forms</span>
-same <span class='moth-code-operator'>=</span> slice is template
+same <span class='moth-code-operator'>=</span> slice <span class='moth-code-operator'>is</span> template
 
 <span class='moth-code-comment'>-- INVALID: ordering is not supported</span>
-<span class='moth-code-comment'>-- ordered = slice &lt; template</span></code></pre><h3>Binding reassignment versus content mutation</h3><p>A mutable binding that holds a string can be reassigned. Quoted slices are immutable. Templates produce owned <code>String</code> values. The current source surface does not yet expose in-place string mutation operations.</p><pre style=""><code class='codeblock'>text <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;initial&quot;</span>
+<span class='moth-code-comment'>-- ordered = slice &lt; template</span></code></pre><h3>Binding reassignment versus content mutation</h3><p>A mutable binding that holds a string can be reassigned. Quoted slices are immutable. Templates produce owned <code>String</code> values. The current source surface does not yet expose in-place string mutation operations.</p><pre style=""><code class='codeblock'>text <span class='moth-code-operator'>~=</span> <span class='moth-code-string'>&quot;initial&quot;</span>
 text <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;replacement&quot;</span>  <span class='moth-code-comment'>-- valid: reassigns the binding</span>
 
 <span class='moth-code-comment'>-- No mutation API exists:</span>

@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -322,7 +341,7 @@ td {
 <style>.doc-level,
 .doc-pager {
     --doc-level-accent: #3d4e8e;
-    --doc-level-accent-hover: #336b77;
+    --doc-level-accent-hover: #44a0cf;
     --doc-level-border: #d7d9df;
     --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
@@ -723,21 +742,21 @@ td {
         <p><code>@html</code> gives you compile-time HTML helpers. The constants fold into HTML strings during compilation and produce no runtime code.</p><h3>Using helpers in <code>.mtf</code> files</h3><p><code>.mtf</code> files see <code>@html</code> constants without an import. You can use them directly.</p><pre style=""><code class='codeblock'>-- docs/intro.mtf
 [p: A paragraph.]
 
-[codeblock, $code(&quot;moth&quot;): value = 42]</code></pre><h3>Importing helpers in <code>.moth</code> files</h3><p><code>.moth</code> files need an explicit import to use <code>@html</code> symbols.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>table, th, td<span class='moth-code-parenthesis'>}</span></code></pre><h3>Available helpers</h3><ul><li><code>p</code>, <code>h1</code> through <code>h6</code>, <code>small</code>, <code>large</code>, <code>div</code>, <code>span</code> for structure</li><li><code>canvas</code> for <code>&lt;canvas&gt;</code> elements with <code>id</code> and <code>style</code> slots</li><li><code>bold</code>, <code>italic</code>, <code>underline</code>, <code>strikethrough</code> for formatting</li><li><code>codeblock</code>, <code>table</code>, <code>th</code>, <code>td</code> for code and tables</li><li><code>img</code> for images with <code>src</code>, <code>alt</code> and <code>style</code> slots</li><li><code>center</code>, <code>right</code>, <code>left</code>, <code>smaller</code>, <code>medium</code>, <code>larger</code> for style inserts</li></ul><h3>Canvas</h3><p><code>@html</code> wraps <code>@web/canvas</code> drawing into a <code>Canvas</code> struct with methods.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>get_canvas<span class='moth-code-parenthesis'>}</span>
+[codeblock, $code(&quot;moth&quot;): value = 42]</code></pre><h3>Importing helpers in <code>.moth</code> files</h3><p><code>.moth</code> files need an explicit import to use <code>@html</code> symbols.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @html<span class='moth-code-string'>@html</span> <span class='moth-code-delimiter'>{</span>table, th, td<span class='moth-code-delimiter'>}</span></code></pre><h3>Available helpers</h3><ul><li><code>p</code>, <code>h1</code> through <code>h6</code>, <code>small</code>, <code>large</code>, <code>div</code>, <code>span</code> for structure</li><li><code>canvas</code> for <code>&lt;canvas&gt;</code> elements with <code>id</code> and <code>style</code> slots</li><li><code>bold</code>, <code>italic</code>, <code>underline</code>, <code>strikethrough</code> for formatting</li><li><code>codeblock</code>, <code>table</code>, <code>th</code>, <code>td</code> for code and tables</li><li><code>img</code> for images with <code>src</code>, <code>alt</code> and <code>style</code> slots</li><li><code>center</code>, <code>right</code>, <code>left</code>, <code>smaller</code>, <code>medium</code>, <code>larger</code> for style inserts</li></ul><h3><code>$code</code> code blocks</h3><p><code>$code</code> highlights a balanced template body as a code block.</p><pre style=""><code class='codeblock'><span class='moth-code-delimiter'>[</span>codeblock, $code<span class='moth-code-directive'>$code</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;moth&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>:</span> value <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span><span class='moth-code-delimiter'>]</span></code></pre><p>Supported aliases: <code>text</code>/<code>txt</code>, <code>moth</code>, <code>javascript</code>/<code>js</code>, <code>typescript</code>/<code>ts</code>, <code>python</code>/<code>py</code>, <code>rust</code>/<code>rs</code>, <code>bash</code>/<code>sh</code>/<code>shell</code>.</p><p><code>$code</code> escapes HTML and applies lexical presentation only. It never checks the snippet or reports errors. All profiles share the same palette.</p><h3>Canvas</h3><p><code>@html</code> wraps <code>@web/canvas</code> drawing into a <code>Canvas</code> struct with methods.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @html<span class='moth-code-string'>@html</span> <span class='moth-code-delimiter'>{</span>get_canvas<span class='moth-code-delimiter'>}</span>
 
-canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> get_canvas<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;my-canvas&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;canvas not found&quot;</span><span class='moth-code-parenthesis'>)</span>
-;
+canvas <span class='moth-code-operator'>~=</span> <span class='moth-code-function'>get_canvas</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;my-canvas&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span><span class='moth-code-literal'>false</span>, <span class='moth-code-string'>&quot;canvas not found&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-operator'>~</span>canvas.set_fill_style<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;red&quot;</span><span class='moth-code-parenthesis'>)</span>
-<span class='moth-code-operator'>~</span>canvas.fill_rect<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-parenthesis'>)</span></code></pre><p>For the full export surface, canvas wrapper contract and deferred surfaces, see <a href="#html-helpers">@html advanced</a>.</p>
+<span class='moth-code-operator'>~</span>canvas.<span class='moth-code-function'>set_fill_style</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;red&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-operator'>~</span>canvas.<span class='moth-code-function'>fill_rect</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-delimiter'>)</span></code></pre><p>For the full export surface, canvas wrapper contract and deferred surfaces, see <a href="#html-helpers">@html advanced</a>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p><code>@html</code> provides compile-time HTML helpers as a builder source-backed package. It belongs to the Builder origin family with MothSource backing, so the compiler reads ordinary Moth source from <code>packages/html/@mod.moth</code>. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@html</code> ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the standard library expands.</p><h3>Implicit scope for Moth template files</h3><p>Exported compile-time constants from <code>@html</code> are visible inside <code>.mtf</code> files without an explicit import. This is the primary way authors use the helpers.</p><pre style=""><code class='codeblock'>-- docs/intro.mtf
 [p: A paragraph built from the @html p helper.]
 
-[codeblock, $code(&quot;moth&quot;): value = 42]</code></pre><p>A <code>.moth</code> file that needs specific <code>@html</code> symbols can import them explicitly:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>table, th, td<span class='moth-code-parenthesis'>}</span></code></pre><p>Same-directory module root constants and <code>@html</code> constants don&#39;t shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See <a href="../../../moth-templates/#template-scope">Template scope</a> for the full collision contract.</p><h3>Exported constants</h3><p>All helpers are compile-time <code>#String</code> constants that produce HTML strings. They fold at compile time and produce no runtime code.</p><h4>HTML tags</h4><table style="">
+[codeblock, $code(&quot;moth&quot;): value = 42]</code></pre><p>A <code>.moth</code> file that needs specific <code>@html</code> symbols can import them explicitly:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @html<span class='moth-code-string'>@html</span> <span class='moth-code-delimiter'>{</span>table, th, td<span class='moth-code-delimiter'>}</span></code></pre><p>Same-directory module root constants and <code>@html</code> constants don&#39;t shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See <a href="../../../moth-templates/#template-scope">Template scope</a> for the full collision contract.</p><h3>Exported constants</h3><p>All helpers are compile-time <code>#String</code> constants that produce HTML strings. They fold at compile time and produce no runtime code.</p><h4>HTML tags</h4><table style="">
             
             <tr style="">
                 
@@ -829,7 +848,11 @@ canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'
              <td style=""><p> <code>larger</code></p></td> <td style=""><p> <code>font-size: larger;</code></p></td>
         </tr>
             
-</table><h3>Canvas wrapper</h3><p><code>@html</code> exports a <code>Canvas</code> struct and two functions that wrap <code>@web/canvas</code> into a source-owned method-style API.</p><table style="">
+</table><h3>The <code>$code</code> directive</h3><p><code>$code</code> renders a balanced template body as an HTML code block with lexical highlighting. It is a frontend template directive, so it works in any Moth template.</p><p>Supported aliases:</p><ul><li><code>text</code> / <code>txt</code></li><li><code>moth</code></li><li><code>javascript</code> / <code>js</code></li><li><code>typescript</code> / <code>ts</code></li><li><code>python</code> / <code>py</code></li><li><code>rust</code> / <code>rs</code></li><li><code>bash</code> / <code>sh</code> / <code>shell</code></li></ul><pre style=""><code class='codeblock'><span class='moth-code-delimiter'>[</span>codeblock, $code<span class='moth-code-directive'>$code</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;moth&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>render</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;Hello, &quot;</span> <span class='moth-code-operator'>+</span> name
+    <span class='moth-code-delimiter'>;</span>
+<span class='moth-code-delimiter'>]</span></code></pre><p><code>$code</code> escapes HTML-sensitive characters and wraps the body in <code>&lt;code class=&#39;codeblock&#39;&gt;</code>. Highlighting is lexical presentation only. It never validates the snippet, resolves names or reports diagnostics. Every language profile shares the same general role palette, and the Moth profile uses the compiler-owned source-word classification plus bounded lexical roles for contracts, functions, directives, import paths and the <code>io</code> namespace. Stateful template-body-aware highlighting stays deferred.</p><h3>Canvas wrapper</h3><p><code>@html</code> exports a <code>Canvas</code> struct and two functions that wrap <code>@web/canvas</code> into a source-owned method-style API.</p><table style="">
             
             <tr style="">
                 
@@ -847,14 +870,14 @@ canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'
              <td style=""><p> <code>get_canvas_context</code></p></td> <td style=""><p> <code>|id String| -&gt; Canvas2d, Error!</code></p></td>
         </tr>
             
-</table><p>The <code>Canvas</code> struct provides receiver methods for drawing: <code>set_fill_style</code>, <code>fill_rect</code>, <code>clear_rect</code> and <code>stroke_rect</code>. Each takes <code>~Canvas</code> (mutable receiver) and delegates to the underlying <code>@web/canvas</code> free functions.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>html <span class='moth-code-parenthesis'>{</span>get_canvas<span class='moth-code-parenthesis'>}</span>
+</table><p>The <code>Canvas</code> struct provides receiver methods for drawing: <code>set_fill_style</code>, <code>fill_rect</code>, <code>clear_rect</code> and <code>stroke_rect</code>. Each takes <code>~Canvas</code> (mutable receiver) and delegates to the underlying <code>@web/canvas</code> free functions.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @html<span class='moth-code-string'>@html</span> <span class='moth-code-delimiter'>{</span>get_canvas<span class='moth-code-delimiter'>}</span>
 
-canvas <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> get_canvas<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;my-canvas&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;canvas not found&quot;</span><span class='moth-code-parenthesis'>)</span>
-;
+canvas <span class='moth-code-operator'>~=</span> <span class='moth-code-function'>get_canvas</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;my-canvas&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span><span class='moth-code-literal'>false</span>, <span class='moth-code-string'>&quot;canvas not found&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-operator'>~</span>canvas.set_fill_style<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;red&quot;</span><span class='moth-code-parenthesis'>)</span>
-<span class='moth-code-operator'>~</span>canvas.fill_rect<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Both <code>get_canvas</code> and <code>get_canvas_context</code> return through <code>Error!</code> because the underlying <code>@web/canvas</code> functions can fail when the canvas element does not exist or the browser denies a 2D context.</p><h3>Backend behaviour</h3><p>The compile-time constants need no runtime assets. They fold into HTML strings during compilation.</p><p>The canvas wrapper functions call through to <code>@web/canvas</code>, which emits JavaScript runtime assets when reachable. See <a href="../canvas">@web/canvas</a> for the runtime asset contract.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path imports such as <code>import @html/p</code> face rejection. Use grouped or namespace imports.</li><li><code>@html</code> does not expose opaque types of its own. <code>Canvas2d</code> comes from <code>@web/canvas</code>.</li><li>Only compile-time constants are visible inside <code>.mtf</code> files. Functions and types require an explicit import in <code>.moth</code> files.</li></ul><h3>Deferred surfaces</h3><p><code>@html</code> ships as a skeleton. Future expansions include richer tag coverage, form components, accessible widget helpers, layout primitives and broader style utilities. The package grows as the language stabilises and the standard library matures. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="../../#import-paths">Import paths</a>.</li><li>For <code>.mtf</code> implicit scope see <a href="../../../moth-templates/#template-scope">Template scope</a>.</li><li>For the <code>@web/canvas</code> runtime package see <a href="../canvas">@web/canvas</a>.</li></ul>
+<span class='moth-code-operator'>~</span>canvas.<span class='moth-code-function'>set_fill_style</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;red&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-operator'>~</span>canvas.<span class='moth-code-function'>fill_rect</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-delimiter'>)</span></code></pre><p>Both <code>get_canvas</code> and <code>get_canvas_context</code> return through <code>Error!</code> because the underlying <code>@web/canvas</code> functions can fail when the canvas element does not exist or the browser denies a 2D context.</p><h3>Backend behaviour</h3><p>The compile-time constants need no runtime assets. They fold into HTML strings during compilation.</p><p>The canvas wrapper functions call through to <code>@web/canvas</code>, which emits JavaScript runtime assets when reachable. See <a href="../canvas">@web/canvas</a> for the runtime asset contract.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path imports such as <code>import @html/p</code> face rejection. Use grouped or namespace imports.</li><li><code>@html</code> does not expose opaque types of its own. <code>Canvas2d</code> comes from <code>@web/canvas</code>.</li><li>Only compile-time constants are visible inside <code>.mtf</code> files. Functions and types require an explicit import in <code>.moth</code> files.</li></ul><h3>Deferred surfaces</h3><p><code>@html</code> ships as a skeleton. Future expansions include richer tag coverage, form components, accessible widget helpers, layout primitives and broader style utilities. The package grows as the language stabilises and the standard library matures. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="../../#import-paths">Import paths</a>.</li><li>For <code>.mtf</code> implicit scope see <a href="../../../moth-templates/#template-scope">Template scope</a>.</li><li>For the <code>@web/canvas</code> runtime package see <a href="../canvas">@web/canvas</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

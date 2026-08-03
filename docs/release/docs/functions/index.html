@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -322,7 +341,7 @@ td {
 <style>.doc-level,
 .doc-pager {
     --doc-level-accent: #3d4e8e;
-    --doc-level-accent-hover: #336b77;
+    --doc-level-accent-hover: #44a0cf;
     --doc-level-border: #d7d9df;
     --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
@@ -720,31 +739,31 @@ td {
 
 
 
-        <p>A function gives a reusable block of code a name.</p><pre style=""><code class='codeblock'>greet <span class='moth-code-operator'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>The function name comes first. Parameters live inside <code>|...|</code>.</p><p>Use <code>||</code> when there are no parameters:</p><pre style=""><code class='codeblock'>say_hello <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Hello&quot;</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>Add an arrow when the function returns a value:</p><pre style=""><code class='codeblock'>double <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+        <p>A function gives a reusable block of code a name.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The function name comes first. Parameters live inside <code>|...|</code>.</p><p>Use <code>||</code> when there are no parameters:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>say_hello</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Hello&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Add an arrow when the function returns a value:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>double</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> value <span class='moth-code-operator'>*</span> <span class='moth-code-number'>2</span>
-;</code></pre><p>The colon opens the body. The semicolon closes it.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The colon opens the body. The semicolon closes it.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>A source function forms a named top-level declaration.</p><pre style=""><code class='codeblock'>greet <span class='moth-code-operator'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
-;
+    <p>A source function forms a named top-level declaration.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span>
 
-double <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+<span class='moth-code-function'>double</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> value <span class='moth-code-operator'>*</span> <span class='moth-code-number'>2</span>
-;</code></pre><h3>Declaration shape</h3><pre style=""><code class='codeblock'>name |parameters|:
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Declaration shape</h3><pre style=""><code class='codeblock'><span class='moth-code-function'>name</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>parameters</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
     body
-;
+<span class='moth-code-delimiter'>;</span>
 
-name |parameters| -&gt; ReturnType:
+<span class='moth-code-function'>name</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>parameters</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-nominal'>ReturnType</span><span class='moth-code-delimiter'>:</span>
     body
-;</code></pre><ul><li>The function name comes first.</li><li>Parameters are enclosed by <code>|...|</code>.</li><li><code>||</code> declares a function with no parameters.</li><li><code>-&gt;</code> introduces one or more return slots.</li><li>Omit the arrow only when the function has no return slots at all.</li><li>A function with only an error slot still writes <code>-&gt; Error!</code>.</li><li><code>Void</code> is not written as a return type.</li><li><code>:</code> opens the body and <code>;</code> closes it.</li><li>Function names use <code>regular_snake_case</code>.</li></ul><p>Functions with required success values must return or otherwise terminate on every reachable path. Terminality is validated before HIR lowering.</p><h3>Generic functions</h3><p>Declaration-site generic parameters appear after the function name.</p><pre style=""><code class='codeblock'>identity type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>value <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>A</span><span class='moth-code-operator'>:</span>
+<span class='moth-code-delimiter'>;</span></code></pre><ul><li>The function name comes first.</li><li>Parameters are enclosed by <code>|...|</code>.</li><li><code>||</code> declares a function with no parameters.</li><li><code>-&gt;</code> introduces one or more return slots.</li><li>Omit the arrow only when the function has no return slots at all.</li><li>A function with only an error slot still writes <code>-&gt; Error!</code>.</li><li><code>Void</code> is not written as a return type.</li><li><code>:</code> opens the body and <code>;</code> closes it.</li><li>Function names use <code>regular_snake_case</code>.</li></ul><p>Functions with required success values must return or otherwise terminate on every reachable path. Terminality is validated before HIR lowering.</p><h3>Generic functions</h3><p>Declaration-site generic parameters appear after the function name.</p><pre style=""><code class='codeblock'>identity <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-nominal'>A</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-nominal'>A</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> value
-;</code></pre><p>Generic inference and bounds are documented by <a href="../generics">Generics</a>.</p><h3>Function values</h3><p>Source functions are named declarations and cannot currently be used as ordinary values. General closures, anonymous function values, generic function values and higher-order polymorphism are outside scope. A narrower future design for references to named, monomorphic, non-capturing functions remains an open design question and has no current syntax or implementation commitment.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Generic inference and bounds are documented by <a href="../generics">Generics</a>.</p><h3>Function values</h3><p>Source functions are named declarations and cannot currently be used as ordinary values. General closures, anonymous function values, generic function values and higher-order polymorphism are outside scope. A narrower future design for references to named, monomorphic, non-capturing functions remains an open design question and has no current syntax or implementation commitment.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -796,29 +815,29 @@ name |parameters| -&gt; ReturnType:
 
 
 
-        <p>Parameters describe the values a function needs.</p><pre style=""><code class='codeblock'>greet <span class='moth-code-operator'>|</span>name <span class='moth-code-struct'>String,</span> excited <span class='moth-code-type'>Bool</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>if</span> excited<span class='moth-code-operator'>:</span>
-        io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span><span class='moth-code-operator'>!</span><span class='moth-code-parenthesis'>]</span><span class='moth-code-parenthesis'>)</span>
-    ;
-;</code></pre><p>Each parameter has a name and a type.</p><p>A default makes a parameter optional at the call site:</p><pre style=""><code class='codeblock'>describe <span class='moth-code-operator'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;item&quot;</span>, subject <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-parenthesis'>]</span>
-;
+        <p>Parameters describe the values a function needs.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span>, excited <span class='moth-code-type'>Bool</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>if</span> excited<span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-delimiter'>;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Each parameter has a name and a type.</p><p>A default makes a parameter optional at the call site:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;item&quot;</span>, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span>
 
-label <span class='moth-code-operator'>=</span> describe<span class='moth-code-parenthesis'>(</span>subject <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;apple&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The call supplies <code>subject</code> by name and keeps the default prefix.</p>
+label <span class='moth-code-operator'>=</span> <span class='moth-code-function'>describe</span><span class='moth-code-delimiter'>(</span>subject <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;apple&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>The call supplies <code>subject</code> by name and keeps the default prefix.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Every function parameter has a name and an explicit type.</p><pre style=""><code class='codeblock'>describe <span class='moth-code-operator'>|</span>prefix <span class='moth-code-struct'>String,</span> subject <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-parenthesis'>]</span>
-;</code></pre><h3>Parameter forms</h3><pre style=""><code class='codeblock'>name <span class='moth-code-struct'>Type</span>
-name <span class='moth-code-operator'>~</span><span class='moth-code-struct'>Type</span>
-name <span class='moth-code-struct'>Type</span> <span class='moth-code-operator'>=</span> default</code></pre><ul><li><code>name Type</code> declares a shared parameter.</li><li><code>name ~Type</code> declares a mutable or exclusive parameter.</li><li><code>= default</code> provides a value when the caller omits that slot.</li><li>Parameter names follow the no-shadowing rule.</li><li>Each parameter name must be unique in the signature.</li></ul><p>Reactive parameters use <code>$Type</code> and are documented by <a href="../reactivity">Reactivity</a>.</p><h3>Defaults</h3><p>A default belongs to the declaration.</p><pre style=""><code class='codeblock'>describe <span class='moth-code-operator'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;item&quot;</span>, subject <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-parenthesis'>]</span>
-;</code></pre><p>A caller can omit a defaulted parameter.</p><p>Named arguments can skip an earlier default:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> describe<span class='moth-code-parenthesis'>(</span>subject <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;apple&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p>A positional call cannot skip a slot in the middle. Use a named argument when the call needs to reach a later parameter.</p><h3>Default value constraints</h3><p>A parameter default must be a compile-time value.</p><p>Accepted:</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>DEFAULT_PREFIX</span> <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;item&quot;</span>
+    <p>Every function parameter has a name and an explicit type.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span>, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Parameter forms</h3><pre style=""><code class='codeblock'>name <span class='moth-code-nominal'>Type</span>
+name <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Type</span>
+name <span class='moth-code-nominal'>Type</span> <span class='moth-code-operator'>=</span> default</code></pre><ul><li><code>name Type</code> declares a shared parameter.</li><li><code>name ~Type</code> declares a mutable or exclusive parameter.</li><li><code>= default</code> provides a value when the caller omits that slot.</li><li>Parameter names follow the no-shadowing rule.</li><li>Each parameter name must be unique in the signature.</li></ul><p>Reactive parameters use <code>$Type</code> and are documented by <a href="../reactivity">Reactivity</a>.</p><h3>Defaults</h3><p>A default belongs to the declaration.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;item&quot;</span>, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A caller can omit a defaulted parameter.</p><p>Named arguments can skip an earlier default:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> <span class='moth-code-function'>describe</span><span class='moth-code-delimiter'>(</span>subject <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;apple&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>A positional call cannot skip a slot in the middle. Use a named argument when the call needs to reach a later parameter.</p><h3>Default value constraints</h3><p>A parameter default must be a compile-time value.</p><p>Accepted:</p><pre style=""><code class='codeblock'>DEFAULT_PREFIX <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;item&quot;</span>
 
-describe <span class='moth-code-operator'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>DEFAULT_PREFIX,</span> subject <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-parenthesis'>]</span>
-;</code></pre><p>Rejected:</p><ul><li>runtime bindings</li><li>runtime function calls</li><li>references to other parameters</li></ul><p>Struct fields share the same <code>= default</code> syntax, but struct defaults have their own compile-time rule. Choice payload fields do not support defaults.</p>
+<span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> DEFAULT_PREFIX, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Rejected:</p><ul><li>runtime bindings</li><li>runtime function calls</li><li>references to other parameters</li></ul><p>Struct fields share the same <code>= default</code> syntax, but struct defaults have their own compile-time rule. Choice payload fields do not support defaults.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -870,23 +889,23 @@ describe <span class='moth-code-operator'>|</span>prefix <span class='moth-code-
 
 
 
-        <p>Call a function by writing its name followed by arguments.</p><pre style=""><code class='codeblock'>result <span class='moth-code-operator'>=</span> double<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>21</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Arguments are positional by default. They can also name their parameter:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> describe<span class='moth-code-parenthesis'>(</span>subject <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;apple&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Positional arguments come first. Named arguments come afterward.</p><p>Mutable parameters need explicit access to an existing mutable value:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
-increment<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>count<span class='moth-code-parenthesis'>)</span></code></pre><p>Fresh values do not use <code>~</code>:</p><pre style=""><code class='codeblock'>increment<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span><span class='moth-code-parenthesis'>)</span></code></pre>
+        <p>Call a function by writing its name followed by arguments.</p><pre style=""><code class='codeblock'>result <span class='moth-code-operator'>=</span> <span class='moth-code-function'>double</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>21</span><span class='moth-code-delimiter'>)</span></code></pre><p>Arguments are positional by default. They can also name their parameter:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> <span class='moth-code-function'>describe</span><span class='moth-code-delimiter'>(</span>subject <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;apple&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>Positional arguments come first. Named arguments come afterward.</p><p>Mutable parameters need explicit access to an existing mutable value:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-function'>increment</span><span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>~</span>count<span class='moth-code-delimiter'>)</span></code></pre><p>Fresh values do not use <code>~</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>increment</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span><span class='moth-code-delimiter'>)</span></code></pre>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Function calls use positional arguments, named arguments or both.</p><pre style=""><code class='codeblock'>render_card<span class='moth-code-parenthesis'>(</span>title, body<span class='moth-code-parenthesis'>)</span>
-render_card<span class='moth-code-parenthesis'>(</span>title <span class='moth-code-operator'>=</span> title, body <span class='moth-code-operator'>=</span> body<span class='moth-code-parenthesis'>)</span>
-render_card<span class='moth-code-parenthesis'>(</span>title, body <span class='moth-code-operator'>=</span> body<span class='moth-code-parenthesis'>)</span></code></pre><h3>Argument routing</h3><ul><li>Positional arguments must come before the first named argument.</li><li>A positional argument is invalid after a named argument.</li><li>A named argument must match a real parameter name.</li><li>Each parameter may be supplied once.</li><li>Omitted defaulted parameters use their declared default.</li><li>Every non-defaulted parameter must receive an argument.</li><li>Extra positional arguments are invalid.</li><li>Argument values are checked and contextually coerced against their parameter types.</li></ul><p>Named arguments can skip earlier defaults.</p><p>User functions, struct constructors, choice payload constructors and source-authored receiver methods share this routing policy.</p><p>Host functions and compiler-owned builtin member calls are positional-only.</p><h3>Shared parameters</h3><p>A shared parameter receives an ordinary argument without <code>~</code>.</p><pre style=""><code class='codeblock'>show <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span>
-;
+    <p>Function calls use positional arguments, named arguments or both.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>render_card</span><span class='moth-code-delimiter'>(</span>title, body<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-function'>render_card</span><span class='moth-code-delimiter'>(</span>title <span class='moth-code-operator'>=</span> title, body <span class='moth-code-operator'>=</span> body<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-function'>render_card</span><span class='moth-code-delimiter'>(</span>title, body <span class='moth-code-operator'>=</span> body<span class='moth-code-delimiter'>)</span></code></pre><h3>Argument routing</h3><ul><li>Positional arguments must come before the first named argument.</li><li>A positional argument is invalid after a named argument.</li><li>A named argument must match a real parameter name.</li><li>Each parameter may be supplied once.</li><li>Omitted defaulted parameters use their declared default.</li><li>Every non-defaulted parameter must receive an argument.</li><li>Extra positional arguments are invalid.</li><li>Argument values are checked and contextually coerced against their parameter types.</li></ul><p>Named arguments can skip earlier defaults.</p><p>User functions, struct constructors, choice payload constructors and source-authored receiver methods share this routing policy.</p><p>Host functions and compiler-owned builtin member calls are positional-only.</p><h3>Shared parameters</h3><p>A shared parameter receives an ordinary argument without <code>~</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>show</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>value<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span>
 
-show<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Passing <code>~value</code> to a shared parameter is invalid.</p><h3>Mutable parameters</h3><p>An existing mutable place needs explicit <code>~</code> at the call site.</p><pre style=""><code class='codeblock'>increment <span class='moth-code-operator'>|</span>value <span class='moth-code-operator'>~</span><span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    value <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
-;
+<span class='moth-code-function'>show</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;hello&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>Passing <code>~value</code> to a shared parameter is invalid.</p><h3>Mutable parameters</h3><p>An existing mutable place needs explicit <code>~</code> at the call site.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>increment</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-operator'>~</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    value <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-delimiter'>;</span>
 
-count <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
-increment<span class='moth-code-parenthesis'>(</span><span class='moth-code-operator'>~</span>count<span class='moth-code-parenthesis'>)</span></code></pre><p>Passing an existing place without <code>~</code> to a mutable parameter is invalid.</p><p>A fresh rvalue can satisfy a mutable parameter without source <code>~</code>:</p><pre style=""><code class='codeblock'>increment<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span><span class='moth-code-parenthesis'>)</span></code></pre><p>Literals, templates, constructor calls and computed values are fresh. Writing <code>~</code> on them is invalid because <code>~</code> is place-only access syntax.</p><p>Binding mutability and call-site access are separate. See <a href="../bindings/#mutable-bindings">Mutable bindings</a>.</p>
+count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-function'>increment</span><span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>~</span>count<span class='moth-code-delimiter'>)</span></code></pre><p>Passing an existing place without <code>~</code> to a mutable parameter is invalid.</p><p>A fresh rvalue can satisfy a mutable parameter without source <code>~</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>increment</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span><span class='moth-code-delimiter'>)</span></code></pre><p>Literals, templates, constructor calls and computed values are fresh. Writing <code>~</code> on them is invalid because <code>~</code> is place-only access syntax.</p><p>Binding mutability and call-site access are separate. See <a href="../bindings/#mutable-bindings">Mutable bindings</a>.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -938,29 +957,29 @@ increment<span class='moth-code-parenthesis'>(</span><span class='moth-code-oper
 
 
 
-        <p>Use <code>return</code> to send a value back to the caller.</p><pre style=""><code class='codeblock'>double <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+        <p>Use <code>return</code> to send a value back to the caller.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>double</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> value <span class='moth-code-operator'>*</span> <span class='moth-code-number'>2</span>
-;</code></pre><p>A function can return more than one success value:</p><pre style=""><code class='codeblock'>pair <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A function can return more than one success value:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>pair</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-number'>2</span>
-;
+<span class='moth-code-delimiter'>;</span>
 
-name, count <span class='moth-code-operator'>=</span> pair<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The number of receiving names must match the number of returned success values.</p><p>Functions that can fail add one final error return marked with <code>!</code>. The Errors page explains how to propagate or recover from that path.</p>
+name, count <span class='moth-code-operator'>=</span> <span class='moth-code-function'>pair</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>The number of receiving names must match the number of returned success values.</p><p>Functions that can fail add one final error return marked with <code>!</code>. The Errors page explains how to propagate or recover from that path.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>return</code> produces the success values declared by a function.</p><pre style=""><code class='codeblock'>double <span class='moth-code-operator'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+    <p><code>return</code> produces the success values declared by a function.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>double</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> value <span class='moth-code-operator'>*</span> <span class='moth-code-number'>2</span>
-;</code></pre><h3>Success returns</h3><ul><li>Return values must match the declared success-slot count.</li><li>Each return value must be compatible with its corresponding slot type.</li><li>A function with required success values must return or otherwise terminate on every reachable path.</li><li>A function with no success slots may reach the end of its body.</li><li><code>return</code> with no values can leave a no-success function early.</li><li><code>Void</code> is not an explicit return-slot type.</li></ul><h3>Multiple success values</h3><p>A function may declare and return more than one success value.</p><pre style=""><code class='codeblock'>pair <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String,</span> <span class='moth-code-type'>Int</span><span class='moth-code-operator'>:</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Success returns</h3><ul><li>Return values must match the declared success-slot count.</li><li>Each return value must be compatible with its corresponding slot type.</li><li>A function with required success values must return or otherwise terminate on every reachable path.</li><li>A function with no success slots may reach the end of its body.</li><li><code>return</code> with no values can leave a no-success function early.</li><li><code>Void</code> is not an explicit return-slot type.</li></ul><h3>Multiple success values</h3><p>A function may declare and return more than one success value.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>pair</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-number'>2</span>
-;
+<span class='moth-code-delimiter'>;</span>
 
-name, count <span class='moth-code-operator'>=</span> pair<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The receiving multi-bind must match the success arity.</p><p>Multiple return values are not a user-visible tuple value. A normal single-target declaration cannot receive a multi-return call.</p><p>Value-producing <code>if</code>, full matches and <code>catch</code> blocks can also satisfy multi-value receiving sites when every producing path has the required arity.</p><h3>Error slot shape</h3><p>A function signature may contain at most one error-channel slot marked with <code>!</code>.</p><p>That slot must be last.</p><pre style=""><code class='codeblock'>load <span class='moth-code-operator'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>if</span> id is <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing id&quot;</span><span class='moth-code-parenthesis'>)</span>
-    ;
+name, count <span class='moth-code-operator'>=</span> <span class='moth-code-function'>pair</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>The receiving multi-bind must match the success arity.</p><p>Multiple return values are not a user-visible tuple value. A normal single-target declaration cannot receive a multi-return call.</p><p>Value-producing <code>if</code>, full matches and <code>catch</code> blocks can also satisfy multi-value receiving sites when every producing path has the required arity.</p><h3>Error slot shape</h3><p>A function signature may contain at most one error-channel slot marked with <code>!</code>.</p><p>That slot must be last.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>load</span> <span class='moth-code-delimiter'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>if</span> id <span class='moth-code-operator'>is</span> <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-keyword'>return!</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Missing id&quot;</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-delimiter'>;</span>
 
     <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;value&quot;</span>
-;</code></pre><p><code>return!</code>, postfix propagation and <code>catch</code> are documented by <a href="../errors">Errors, options and assertions</a>.</p><h3>Return contract</h3><p>Return slots contain types and channels only. Source code has no borrowed, owned, move or parameter-alias return annotation.</p><p>Returning an existing value follows ordinary shared-reference semantics. The compiler infers freshness and alias effects from validated bodies and calls. Public interfaces preserve those inferred relationships. External bindings may declare equivalent alias behaviour because their foreign bodies are unavailable.</p><h3>Binding freshness and allocation identity</h3><p>Every function result enters a fresh caller binding. This does not imply a fresh allocation. Returning an existing record, collection, map, string allocation, opaque handle or projection preserves its allocation identity and lifetime owner. The result binding never points at the callee&#39;s parameter or local binding slot.</p><p>Reassigning one binding does not rebind another binding that received the same allocation through a return. The allocation remains alive while any legal alias retains it.</p><p>Ordinary return does not copy. Use <code>copy</code> when the caller needs an independent result graph.</p><p>Inferred alias relationships govern borrow and lifetime validation without changing the source type.</p><p>External alias metadata describes whether a foreign result aliases an argument allocation. It does not expose binding references to source code and does not allow host code to return a Moth binding cell.</p><h3>Fallible and multiple returns</h3><p>A fallible carrier is fresh while its success payload may alias a parameter allocation. Multiple return values may alias parameters or each other. Each returned value enters its own caller binding. Runtime lowering preserves those allocation relationships. Current analysis may conservatively treat projected results as sharing any parameter root returned by the function. This can produce a stricter alias diagnostic than more precise per-result analysis would require.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>return!</code>, postfix propagation and <code>catch</code> are documented by <a href="../errors">Errors, options and assertions</a>.</p><h3>Return contract</h3><p>Return slots contain types and channels only. Source code has no borrowed, owned, move or parameter-alias return annotation.</p><p>Returning an existing value follows ordinary shared-reference semantics. The compiler infers freshness and alias effects from validated bodies and calls. Public interfaces preserve those inferred relationships. External bindings may declare equivalent alias behaviour because their foreign bodies are unavailable.</p><h3>Binding freshness and allocation identity</h3><p>Every function result enters a fresh caller binding. This does not imply a fresh allocation. Returning an existing record, collection, map, string allocation, opaque handle or projection preserves its allocation identity and lifetime owner. The result binding never points at the callee&#39;s parameter or local binding slot.</p><p>Reassigning one binding does not rebind another binding that received the same allocation through a return. The allocation remains alive while any legal alias retains it.</p><p>Ordinary return does not copy. Use <code>copy</code> when the caller needs an independent result graph.</p><p>Inferred alias relationships govern borrow and lifetime validation without changing the source type.</p><p>External alias metadata describes whether a foreign result aliases an argument allocation. It does not expose binding references to source code and does not allow host code to return a Moth binding cell.</p><h3>Fallible and multiple returns</h3><p>A fallible carrier is fresh while its success payload may alias a parameter allocation. Multiple return values may alias parameters or each other. Each returned value enters its own caller binding. Runtime lowering preserves those allocation relationships. Current analysis may conservatively treat projected results as sharing any parameter root returned by the function. This can produce a stricter alias diagnostic than more precise per-result analysis would require.</p>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

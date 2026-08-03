@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -322,7 +341,7 @@ td {
 <style>.doc-level,
 .doc-pager {
     --doc-level-accent: #3d4e8e;
-    --doc-level-accent-hover: #336b77;
+    --doc-level-accent-hover: #44a0cf;
     --doc-level-border: #d7d9df;
     --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
@@ -779,20 +798,20 @@ ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'
 
 
 
-        <p>Whole numbers are <code>Int</code> values:</p><pre style=""><code class='codeblock'>score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span></code></pre><p>Numbers with a decimal point are <code>Float</code> values:</p><pre style=""><code class='codeblock'>progress <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span></code></pre><p>Large and tiny values can use lowercase <code>e</code> notation:</p><pre style=""><code class='codeblock'>population <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>e<span class='moth-code-number'>6</span>
-tolerance <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>e<span class='moth-code-operator'>-</span><span class='moth-code-number'>6</span></code></pre><p>Keep a minus sign attached to the value:</p><pre style=""><code class='codeblock'>temperature <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span><span class='moth-code-number'>5</span>
+        <p>Whole numbers are <code>Int</code> values:</p><pre style=""><code class='codeblock'>score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span></code></pre><p>Numbers with a decimal point are <code>Float</code> values:</p><pre style=""><code class='codeblock'>progress <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span></code></pre><p>Large and tiny values can use lowercase <code>e</code> notation:</p><pre style=""><code class='codeblock'>population <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1e6</span>
+tolerance <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1e-6</span></code></pre><p>Keep a minus sign attached to the value:</p><pre style=""><code class='codeblock'>temperature <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span><span class='moth-code-number'>5</span>
 opposite <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span>count</code></pre><p><code>1E6</code>, <code>+1</code> and <code>- count</code> are not valid numeric forms.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>The source spelling of a number determines its natural type.</p><pre style=""><code class='codeblock'>whole <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
 decimal <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
-large <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>e<span class='moth-code-number'>6</span>
-small <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>e<span class='moth-code-operator'>-</span><span class='moth-code-number'>6</span>
-precise <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1.0</span>e<span class='moth-code-operator'>+</span><span class='moth-code-number'>21</span></code></pre><h3>Contract</h3><ul><li>A whole-number literal is naturally <code>Int</code>.</li><li>A decimal-point literal is naturally <code>Float</code>.</li><li>Exponents use lowercase <code>e</code>.</li><li>Uppercase <code>E</code> is rejected.</li><li>Unary <code>+</code> is rejected.</li><li>A leading <code>-</code> must be attached to the literal or expression it negates.</li><li><code>-1</code>, <code>-1e6</code> and <code>-count</code> are valid prefix forms.</li><li><code>- count</code> is invalid.</li><li>Integer literals must fit the <code>Int</code> range.</li><li>Float literals must materialise to a finite <code>Float</code>.</li></ul><pre style=""><code class='codeblock'>valid_literal <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span><span class='moth-code-number'>42</span>
+large <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1e6</span>
+small <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1e-6</span>
+precise <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1.0e+21</span></code></pre><h3>Contract</h3><ul><li>A whole-number literal is naturally <code>Int</code>.</li><li>A decimal-point literal is naturally <code>Float</code>.</li><li>Exponents use lowercase <code>e</code>.</li><li>Uppercase <code>E</code> is rejected.</li><li>Unary <code>+</code> is rejected.</li><li>A leading <code>-</code> must be attached to the literal or expression it negates.</li><li><code>-1</code>, <code>-1e6</code> and <code>-count</code> are valid prefix forms.</li><li><code>- count</code> is invalid.</li><li>Integer literals must fit the <code>Int</code> range.</li><li>Float literals must materialise to a finite <code>Float</code>.</li></ul><pre style=""><code class='codeblock'>valid_literal <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span><span class='moth-code-number'>42</span>
 valid_expression <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span>count
 
-invalid_exponent <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span><span class='moth-code-struct'>E</span><span class='moth-code-number'>6</span>
+invalid_exponent <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span><span class='moth-code-nominal'>E6</span>
 invalid_plus <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>+</span><span class='moth-code-number'>1</span>
 invalid_spacing <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span> count</code></pre><p>The invalid lines above demonstrate rejected syntax. They are not valid program forms.</p>
 </div>
@@ -847,24 +866,24 @@ invalid_spacing <span class='moth-code-operator'>=</span> <span class='moth-code
 
 
         <p>Put spaces around symbolic operators.</p><pre style=""><code class='codeblock'>total <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
-count <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span></code></pre><p>Moth uses words for equality and logic:</p><pre style=""><code class='codeblock'>same <span class='moth-code-operator'>=</span> left is right
-different <span class='moth-code-operator'>=</span> left is not right
-ready <span class='moth-code-operator'>=</span> loaded and valid
-retry <span class='moth-code-operator'>=</span> timed_out or disconnected
-blocked <span class='moth-code-operator'>=</span> not ready</code></pre><p>Division has two forms:</p><pre style=""><code class='codeblock'>real_result <span class='moth-code-operator'>=</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>/</span> <span class='moth-code-number'>2</span>
-whole_result <span class='moth-code-operator'>=</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>/</span><span class='moth-code-operator'>/</span> <span class='moth-code-number'>2</span></code></pre><p><code>/</code> produces a real <code>Float</code> result. <code>//</code> performs integer division and produces an <code>Int</code>.</p><p>Use templates to join text:</p><pre style=""><code class='codeblock'>greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-string'>&quot;Hello, &quot;</span>, <span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>]</span></code></pre><p>Templates handle all string joining and interpolation. <code>+</code> is for numbers only.</p>
+count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span></code></pre><p>Moth uses words for equality and logic:</p><pre style=""><code class='codeblock'>same <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> right
+different <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> <span class='moth-code-operator'>not</span> right
+ready <span class='moth-code-operator'>=</span> loaded <span class='moth-code-operator'>and</span> valid
+retry <span class='moth-code-operator'>=</span> timed_out <span class='moth-code-operator'>or</span> disconnected
+blocked <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>not</span> ready</code></pre><p>Division has two forms:</p><pre style=""><code class='codeblock'>real_result <span class='moth-code-operator'>=</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>/</span> <span class='moth-code-number'>2</span>
+whole_result <span class='moth-code-operator'>=</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>//</span> <span class='moth-code-number'>2</span></code></pre><p><code>/</code> produces a real <code>Float</code> result. <code>//</code> performs integer division and produces an <code>Int</code>.</p><p>Use templates to join text:</p><pre style=""><code class='codeblock'>greeting <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;Hello, &quot;</span>, <span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>]</span></code></pre><p>Templates handle all string joining and interpolation. <code>+</code> is for numbers only.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Moth keeps equality and logical operators readable.</p><pre style=""><code class='codeblock'>same <span class='moth-code-operator'>=</span> left is right
-different <span class='moth-code-operator'>=</span> left is not right
-ready <span class='moth-code-operator'>=</span> has_input and is_valid
-should_retry <span class='moth-code-operator'>=</span> timed_out or disconnected
-blocked <span class='moth-code-operator'>=</span> not ready</code></pre><ul><li><code>and</code> and <code>or</code> require <code>Bool</code> operands.</li><li><code>not</code> requires one <code>Bool</code> operand.</li><li>Symbolic equality and symbolic logical-not forms are not language operators.</li></ul><h3>Arithmetic results</h3><ul><li><code>Int</code>, <code>Int</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>%</code>, <code>^</code>, <code>//</code> produces <code>Int</code></li><li><code>Int</code>, <code>Int</code> with <code>/</code> produces <code>Float</code></li><li><code>Float</code>, <code>Float</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code> produces <code>Float</code></li><li>mixed <code>Int</code> and <code>Float</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code> produces <code>Float</code></li></ul><p><code>//</code> is integer division and is valid only for two <code>Int</code> operands.</p><h3>Comparisons</h3><ul><li><code>Int</code> and <code>Float</code> support equality and ordering, including mixed numeric comparisons.</li><li><code>Char</code> supports equality and ordering.</li><li><code>Bool</code> supports equality only.</li><li><code>String</code> supports <code>is</code> and <code>is not</code>. It does not support ordering operators.</li><li>Choices and options have additional equality rules in their own references.</li></ul><p><code>+</code> is a numeric operator only. Source string concatenation uses templates. See <a href="../language-overview/#strings-and-characters">Strings and characters</a> for the canonical concatenation form.</p><h3>Precedence and associativity</h3><p>From highest to lowest:</p><ul><li>level 6: unary <code>not</code>, unary <code>-</code></li><li>level 5: <code>^</code></li><li>level 4: <code>*</code>, <code>/</code>, <code>//</code>, <code>%</code></li><li>level 3: <code>+</code>, <code>-</code></li><li>level 2: <code>is</code>, <code>is not</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code></li><li>level 1: <code>and</code></li><li>level 0: <code>or</code></li></ul><p><code>^</code> is right-associative. Other binary operators are left-associative.</p><p>Parentheses override normal precedence.</p><h3>Spacing</h3><p>Symbolic binary operators require spaces on both sides. Assignment <code>=</code> follows the same outer-spacing rule, but it is not a binary operator.</p><pre style=""><code class='codeblock'>total <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
+    <p>Moth keeps equality and logical operators readable.</p><pre style=""><code class='codeblock'>same <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> right
+different <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> <span class='moth-code-operator'>not</span> right
+ready <span class='moth-code-operator'>=</span> has_input <span class='moth-code-operator'>and</span> is_valid
+should_retry <span class='moth-code-operator'>=</span> timed_out <span class='moth-code-operator'>or</span> disconnected
+blocked <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>not</span> ready</code></pre><ul><li><code>and</code> and <code>or</code> require <code>Bool</code> operands.</li><li><code>not</code> requires one <code>Bool</code> operand.</li><li>Symbolic equality and symbolic logical-not forms are not language operators.</li></ul><h3>Arithmetic results</h3><ul><li><code>Int</code>, <code>Int</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>%</code>, <code>^</code>, <code>//</code> produces <code>Int</code></li><li><code>Int</code>, <code>Int</code> with <code>/</code> produces <code>Float</code></li><li><code>Float</code>, <code>Float</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code> produces <code>Float</code></li><li>mixed <code>Int</code> and <code>Float</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code> produces <code>Float</code></li></ul><p><code>//</code> is integer division and is valid only for two <code>Int</code> operands.</p><h3>Comparisons</h3><ul><li><code>Int</code> and <code>Float</code> support equality and ordering, including mixed numeric comparisons.</li><li><code>Char</code> supports equality and ordering.</li><li><code>Bool</code> supports equality only.</li><li><code>String</code> supports <code>is</code> and <code>is not</code>. It does not support ordering operators.</li><li>Choices and options have additional equality rules in their own references.</li></ul><p><code>+</code> is a numeric operator only. Source string concatenation uses templates. See <a href="../language-overview/#strings-and-characters">Strings and characters</a> for the canonical concatenation form.</p><h3>Precedence and associativity</h3><p>From highest to lowest:</p><ul><li>level 6: unary <code>not</code>, unary <code>-</code></li><li>level 5: <code>^</code></li><li>level 4: <code>*</code>, <code>/</code>, <code>//</code>, <code>%</code></li><li>level 3: <code>+</code>, <code>-</code></li><li>level 2: <code>is</code>, <code>is not</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code></li><li>level 1: <code>and</code></li><li>level 0: <code>or</code></li></ul><p><code>^</code> is right-associative. Other binary operators are left-associative.</p><p>Parentheses override normal precedence.</p><h3>Spacing</h3><p>Symbolic binary operators require spaces on both sides. Assignment <code>=</code> follows the same outer-spacing rule, but it is not a binary operator.</p><pre style=""><code class='codeblock'>total <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
 count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span></code></pre><p>These forms are invalid:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- INVALID: missing required spacing</span>
 total<span class='moth-code-operator'>=</span>left<span class='moth-code-operator'>+</span>right
-count<span class='moth-code-operator'>=</span><span class='moth-code-number'>1</span></code></pre><p>The compound forms <code>+=</code>, <code>-=</code>, <code>*=</code>, <code>/=</code>, <code>//=</code>, <code>%=</code> and <code>^=</code> follow the same rule:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>+</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
-count <span class='moth-code-operator'>/</span><span class='moth-code-operator'>/</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>2</span></code></pre><p><code>count+=1</code>, <code>count +=1</code> and <code>count+= 1</code> are invalid.</p><p>The mutable declaration spelling <code>~=</code> stays adjacent. It needs whitespace before <code>~</code> and after <code>=</code>:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span></code></pre><p><code>count~= 1</code>, <code>count ~=1</code> and <code>count ~ = 1</code> are invalid.</p><p>Operator overloading is outside Moth&#39;s language design. Operators remain compiler-owned and predictable.</p>
+count<span class='moth-code-operator'>=</span><span class='moth-code-number'>1</span></code></pre><p>The compound forms <code>+=</code>, <code>-=</code>, <code>*=</code>, <code>/=</code>, <code>//=</code>, <code>%=</code> and <code>^=</code> follow the same rule:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+count <span class='moth-code-operator'>//=</span> <span class='moth-code-number'>2</span></code></pre><p><code>count+=1</code>, <code>count +=1</code> and <code>count+= 1</code> are invalid.</p><p>The mutable declaration spelling <code>~=</code> stays adjacent. It needs whitespace before <code>~</code> and after <code>=</code>:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>1</span></code></pre><p><code>count~= 1</code>, <code>count ~=1</code> and <code>count ~ = 1</code> are invalid.</p><p>Operator overloading is outside Moth&#39;s language design. Operators remain compiler-owned and predictable.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -916,19 +935,19 @@ count <span class='moth-code-operator'>/</span><span class='moth-code-operator'>
 
 
 
-        <p>Moth checks arithmetic instead of quietly wrapping or producing invalid floating-point values.</p><p>These operations can fail:</p><ul><li>overflowing an <code>Int</code></li><li>dividing by zero</li><li>using an invalid integer exponent</li><li>producing <code>NaN</code> or infinity</li></ul><p>A function with an <code>Error!</code> return can pass that failure through its normal error path:</p><pre style=""><code class='codeblock'>divide <span class='moth-code-operator'>|</span>left <span class='moth-code-struct'>Int,</span> right <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Float,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+        <p>Moth checks arithmetic instead of quietly wrapping or producing invalid floating-point values.</p><p>These operations can fail:</p><ul><li>overflowing an <code>Int</code></li><li>dividing by zero</li><li>using an invalid integer exponent</li><li>producing <code>NaN</code> or infinity</li></ul><p>A function with an <code>Error!</code> return can pass that failure through its normal error path:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>divide</span> <span class='moth-code-delimiter'>|</span>left <span class='moth-code-type'>Int</span>, right <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Float</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> left <span class='moth-code-operator'>/</span> right
-;</code></pre><p>Outside that kind of function, an unexpected runtime numeric failure stops the current program path.</p><p>A failure the compiler can prove in advance is reported during compilation.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Outside that kind of function, an unexpected runtime numeric failure stops the current program path.</p><p>A failure the compiler can prove in advance is reported during compilation.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Runtime numeric operations are checked.</p><p>Failures include:</p><ul><li>integer overflow</li><li>division or modulo by zero</li><li>invalid integer exponents</li><li>non-finite <code>Float</code> results</li></ul><h3>Failure mode</h3><p>When the enclosing function has builtin <code>Error!</code> as its error return slot, checked numeric failures use that error channel.</p><pre style=""><code class='codeblock'>divide <span class='moth-code-operator'>|</span>left <span class='moth-code-struct'>Int,</span> right <span class='moth-code-type'>Int</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Float,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
+    <p>Runtime numeric operations are checked.</p><p>Failures include:</p><ul><li>integer overflow</li><li>division or modulo by zero</li><li>invalid integer exponents</li><li>non-finite <code>Float</code> results</li></ul><h3>Failure mode</h3><p>When the enclosing function has builtin <code>Error!</code> as its error return slot, checked numeric failures use that error channel.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>divide</span> <span class='moth-code-delimiter'>|</span>left <span class='moth-code-type'>Int</span>, right <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Float</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> left <span class='moth-code-operator'>/</span> right
-;
+<span class='moth-code-delimiter'>;</span>
 
-ratio <span class='moth-code-operator'>=</span> divide<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    then <span class='moth-code-number'>0.0</span>
-;</code></pre><p>Custom fallible channels, non-fallible functions and entry-selected top-level runtime code use trap mode for checked numeric failure.</p><p>Numeric operators remain ordinary source expressions. The compiler lowers their failure path. They are not source-visible <code>Error!</code> values that can be handled in the middle of an arbitrary expression.</p><h3>Compile-time failures</h3><p>A statically known numeric failure is a compile-time diagnostic.</p><p>This remains true inside a function with builtin <code>Error!</code>.</p><h3>Related behaviour</h3><p>Range-loop counter updates use the same checked numeric operations.</p><p>Conversions that may lose information, such as <code>Float -&gt; Int</code>, belong to the Casts documentation rather than implicit arithmetic coercion.</p>
+ratio <span class='moth-code-operator'>=</span> <span class='moth-code-function'>divide</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>0</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0.0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Custom fallible channels, non-fallible functions and entry-selected top-level runtime code use trap mode for checked numeric failure.</p><p>Numeric operators remain ordinary source expressions. The compiler lowers their failure path. They are not source-visible <code>Error!</code> values that can be handled in the middle of an arbitrary expression.</p><h3>Compile-time failures</h3><p>A statically known numeric failure is a compile-time diagnostic.</p><p>This remains true inside a function with builtin <code>Error!</code>.</p><h3>Related behaviour</h3><p>Range-loop counter updates use the same checked numeric operations.</p><p>Conversions that may lose information, such as <code>Float -&gt; Int</code>, belong to the Casts documentation rather than implicit arithmetic coercion.</p>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

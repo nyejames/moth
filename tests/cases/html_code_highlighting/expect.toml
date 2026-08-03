@@ -1,0 +1,56 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<span class='moth-code-contract'>DISPLAY_TEXT</span>",
+    "<span class='moth-code-contract'>SERIALIZABLE</span>",
+    "<span class='moth-code-contract'>COMPARABLE</span>",
+    "<span class='moth-code-contract'>FROZEN</span>",
+    "<span class='moth-code-nominal'>Label</span>",
+    "<span class='moth-code-function'>render</span>",
+    "<span class='moth-code-function'>display</span>",
+    "<span class='moth-code-directive'>$slot</span>",
+    "<span class='moth-code-string'>@core/io</span>",
+    "<span class='moth-code-string'>@web/canvas</span>",
+    "<span class='moth-code-type'>Error</span>",
+    "<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span>",
+    "<span class='moth-code-literal'>true</span>",
+    "<span class='moth-code-operator'>//=</span>",
+    "<span class='moth-code-operator'>..</span>",
+    "<span class='moth-code-operator'>::</span>",
+    "<span class='moth-code-keyword'>async</span>",
+    "<span class='moth-code-keyword'>return!</span>",
+    "<span class='moth-code-keyword'>cast!</span>",
+    "<span class='moth-code-delimiter'>|</span>",
+    "<span class='moth-code-nominal'>E</span>",
+    "group_value <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>",
+    "io <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;plain variable&quot;</span>",
+]
+must_not_contain = [
+    "moth-code-struct",
+    "moth-code-parenthesis",
+    "<span class='moth-code-contract'>PI</span>",
+    "<span class='moth-code-contract'>TAU</span>",
+    "<span class='moth-code-contract'>E</span>",
+    "<span class='moth-code-keyword'>in</span>",
+    "<span class='moth-code-keyword'>group</span>",
+    "<span class='moth-code-keyword'>into</span>",
+    "<span class='moth-code-keyword'>where</span>",
+]
+must_contain_in_order = [
+    "<span class='moth-code-contract'>DISPLAY_TEXT</span>",
+    "<span class='moth-code-function'>render</span>",
+    "<span class='moth-code-directive'>$slot</span>",
+    "<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span>",
+    "<span class='moth-code-literal'>true</span>",
+]
+must_contain_exactly_once = [
+    "<span class='moth-code-operator'>//=</span>",
+    "<span class='moth-code-operator'>::</span>",
+]

@@ -102,6 +102,9 @@ export:
         .container code:not(.codeblock) {
             color: light-dark(hsl(261, 100%, 56%), #c444aff9);
             font-family: var(--moth-font-family-monospace);
+            margin-left: 0.25em;
+            margin-right: 0.2em;
+            font-weight: 600;
         }
 
         .container pre {

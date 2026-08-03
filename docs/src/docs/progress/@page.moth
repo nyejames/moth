@@ -173,9 +173,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Templates and style directives]
             [: Supported]
-            [: Broad template parsing, directive, slot, const/runtime fragment, template control-flow, markdown inline-code, diagnostics, and JS/HTML integration coverage.]
+            [: Broad template parsing, directive, slot, const/runtime fragment, template control-flow, markdown inline-code, diagnostics, and JS/HTML integration coverage. Focused [$html:<code>$code</code>] formatter, escaping, lexical-role and HTML artifact coverage.]
             [: HTML / JS]
-            [: Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, [$html:<code>$children</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, import namespace member access in template heads and const expansion guards. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap.]
+            [: Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, [$html:<code>$children</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, import namespace member access in template heads and const expansion guards. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap. [$html:<code>$code("moth")</code>] uses compiler-owned current word classification, lexical token roles and shared code presentation classes, and performs no semantic symbol resolution. Stateful template-body-aware suppression stays a deferred roadmap follow-up.]
         ]
 
         [data:

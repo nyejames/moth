@@ -43,18 +43,14 @@ pub fn normalize_path(path: &Path) -> PathBuf {
 
 /// Character classification helpers shared by tokenizer and template formatting.
 ///
-/// WHAT: exposes source-level whitespace/bracket checks on `char`.
+/// WHAT: exposes source-level whitespace checks on `char`.
 /// WHY: these checks are lexical formatting policy, not numeric parsing.
 pub trait CharacterParsing {
     fn is_non_newline_whitespace(&self) -> bool;
-    fn is_bracket(&self) -> bool;
 }
 
 impl CharacterParsing for char {
     fn is_non_newline_whitespace(&self) -> bool {
         self.is_whitespace() && self != &'\n' && self != &'\r'
-    }
-    fn is_bracket(&self) -> bool {
-        matches!(self, '(' | ')' | '{' | '}' | '[' | ']')
     }
 }

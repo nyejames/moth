@@ -703,7 +703,7 @@ fn code_without_argument_uses_generic_highlighting() {
     let rendered = folded_template_output("[$code:\nloop(x + 1)\n]");
 
     assert!(rendered.contains("<code class='codeblock'>"));
-    assert!(rendered.contains("<span class='moth-code-parenthesis'>(</span>"));
+    assert!(rendered.contains("<span class='moth-code-delimiter'>(</span>"));
     assert!(!rendered.contains("moth-code-keyword"));
 }
 
@@ -812,6 +812,6 @@ fn code_templates_keep_nested_square_brackets_as_literal_body_text() {
     assert!(rendered.contains("concatenated_strings"));
     assert!(rendered.contains("string_slice"));
     assert!(rendered.contains("a_mutable_string"));
-    assert!(rendered.contains("<span class='moth-code-parenthesis'>[</span>"));
-    assert!(rendered.contains("<span class='moth-code-parenthesis'>]</span>"));
+    assert!(rendered.contains("<span class='moth-code-delimiter'>[</span>"));
+    assert!(rendered.contains("<span class='moth-code-delimiter'>]</span>"));
 }

@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -322,7 +341,7 @@ td {
 <style>.doc-level,
 .doc-pager {
     --doc-level-accent: #3d4e8e;
-    --doc-level-accent-hover: #336b77;
+    --doc-level-accent-hover: #44a0cf;
     --doc-level-border: #d7d9df;
     --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
@@ -720,21 +739,21 @@ td {
 
 
 
-        <p>Collections hold ordered groups of values. You create them with literals and work with them through built-in methods.</p><h3>Creating collections</h3><p>Growable collections use <code>{T}</code>. Fixed collections use <code>{N T}</code> with a compile-time maximum length.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
-empty_values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span>
-fixed_values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>2</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><p>Non-empty literals infer their element type from their items. Empty literals need an explicit collection type.</p><h3>Common methods</h3><p>Collection methods use receiver syntax. <code>push</code>, <code>get</code>, <code>set</code> and <code>remove</code> take the fallible path, so they need <code>!</code> or <code>catch</code>. <code>length</code> stays infallible.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
+        <p>Collections hold ordered groups of values. You create them with literals and work with them through built-in methods.</p><h3>Creating collections</h3><p>Growable collections use <code>{T}</code>. Fixed collections use <code>{N T}</code> with a compile-time maximum length.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>}</span>
+empty_values <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>
+fixed_values <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-number'>2</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span></code></pre><p>Non-empty literals infer their element type from their items. Empty literals need an explicit collection type.</p><h3>Common methods</h3><p>Collection methods use receiver syntax. <code>push</code>, <code>get</code>, <code>set</code> and <code>remove</code> take the fallible path, so they need <code>!</code> or <code>catch</code>. <code>length</code> stays infallible.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>}</span>
 
-<span class='moth-code-operator'>~</span>values.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>4</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-;
+<span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>4</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span>
 
-first <span class='moth-code-operator'>=</span> values.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    then <span class='moth-code-number'>0</span>
-;
+first <span class='moth-code-operator'>=</span> values.<span class='moth-code-function'>get</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>0</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-operator'>~</span>values.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>99</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-;
+<span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>99</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span>
 
-count <span class='moth-code-operator'>=</span> values.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>push</code> appends after the last element. <code>get</code> reads at an index. <code>set</code> replaces an element. <code>remove</code> takes an element out and shifts later elements down. <code>length</code> returns the logical length, not the fixed capacity. For the full language rules around collection literals, mutability and fixed capacity, see <a href="../../../collections">Collections</a>. For the binding-backed contract behind these methods, see <a href="./">Core collections advanced</a>.</p>
+count <span class='moth-code-operator'>=</span> values.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p><code>push</code> appends after the last element. <code>get</code> reads at an index. <code>set</code> replaces an element. <code>remove</code> takes an element out and shifts later elements down. <code>length</code> returns the logical length, not the fixed capacity. For the full language rules around collection literals, mutability and fixed capacity, see <a href="../../../collections">Collections</a>. For the binding-backed contract behind these methods, see <a href="./">Core collections advanced</a>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -760,19 +779,19 @@ count <span class='moth-code-operator'>=</span> values.length<span class='moth-c
              <td style=""><p> <code>__moth_collection_length</code></p></td> <td style=""><p> <code>length()</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><p>These host functions use inferred ABI types for the collection element and value parameters. The index parameter is <code>I32</code>. The length return is <code>I32</code>. Fallible operations return through the builtin <code>Error!</code> channel.</p><h3>Source-visible surface</h3><p>Authors interact with collections through language-level syntax and receiver methods, not through direct imports of <code>@core/collections</code>. The compiler-owned methods include:</p><ul><li><code>get(index)</code> returns the element at <code>index</code> or fails with <code>Error!</code></li><li><code>set(index, value)</code> replaces the element at <code>index</code> or fails with <code>Error!</code></li><li><code>push(value)</code> appends <code>value</code> after the last element or fails with <code>Error!</code></li><li><code>remove(index)</code> removes and returns the element at <code>index</code> or fails with <code>Error!</code></li><li><code>length()</code> returns the logical length as <code>Int</code></li></ul><p><code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> take the fallible path. <code>length</code> stays infallible. <code>set</code>, <code>push</code> and <code>remove</code> require mutable receiver access through <code>~</code>.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
+</table><p>These host functions use inferred ABI types for the collection element and value parameters. The index parameter is <code>I32</code>. The length return is <code>I32</code>. Fallible operations return through the builtin <code>Error!</code> channel.</p><h3>Source-visible surface</h3><p>Authors interact with collections through language-level syntax and receiver methods, not through direct imports of <code>@core/collections</code>. The compiler-owned methods include:</p><ul><li><code>get(index)</code> returns the element at <code>index</code> or fails with <code>Error!</code></li><li><code>set(index, value)</code> replaces the element at <code>index</code> or fails with <code>Error!</code></li><li><code>push(value)</code> appends <code>value</code> after the last element or fails with <code>Error!</code></li><li><code>remove(index)</code> removes and returns the element at <code>index</code> or fails with <code>Error!</code></li><li><code>length()</code> returns the logical length as <code>Int</code></li></ul><p><code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> take the fallible path. <code>length</code> stays infallible. <code>set</code>, <code>push</code> and <code>remove</code> require mutable receiver access through <code>~</code>.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>}</span>
 
-<span class='moth-code-operator'>~</span>values.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>4</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-;
+<span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>4</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span>
 
-first <span class='moth-code-operator'>=</span> values.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    then <span class='moth-code-number'>0</span>
-;
+first <span class='moth-code-operator'>=</span> values.<span class='moth-code-function'>get</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>0</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-operator'>~</span>values.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>99</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-;
+<span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>99</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span>
 
-count <span class='moth-code-operator'>=</span> values.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>No direct import</h3><p><code>@core/collections</code> carries no source-visible import surface. Do not write <code>import @core/collections</code>. The package exists to back the compiler-owned methods that receiver syntax invokes.</p><h3>Unsupported source forms</h3><ul><li>Direct imports of <code>@core/collections</code> are not part of the author surface.</li><li>Square-bracket indexing is not supported. Use <code>get</code> and <code>set</code>.</li><li>Assignment through <code>get</code> was removed.</li><li>Builtin member arguments are positional-only. Named arguments are not supported.</li></ul><h3>Backend behaviour</h3><p>HTML-JS lowers the host functions to JavaScript runtime helpers. HTML-Wasm lacks a Wasm lowering for these functions. See <a href="../../../progress">progress matrix</a> for current target availability.</p><h3>Deferred surfaces</h3><p>Deferred collection surfaces include HTML-Wasm lowering, map operations as direct host functions, collection equality, collection iteration protocol, sortable collections, deque operations, fixed-capacity collections and specialised collection variants. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For collection literal syntax and typing see <a href="../../../collections">Collections</a>.</li><li>For the full collection method contract see <a href="../../../collections/#collection-operations">Collection operations</a>.</li><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li></ul>
+count <span class='moth-code-operator'>=</span> values.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><h3>No direct import</h3><p><code>@core/collections</code> carries no source-visible import surface. Do not write <code>import @core/collections</code>. The package exists to back the compiler-owned methods that receiver syntax invokes.</p><h3>Unsupported source forms</h3><ul><li>Direct imports of <code>@core/collections</code> are not part of the author surface.</li><li>Square-bracket indexing is not supported. Use <code>get</code> and <code>set</code>.</li><li>Assignment through <code>get</code> was removed.</li><li>Builtin member arguments are positional-only. Named arguments are not supported.</li></ul><h3>Backend behaviour</h3><p>HTML-JS lowers the host functions to JavaScript runtime helpers. HTML-Wasm lacks a Wasm lowering for these functions. See <a href="../../../progress">progress matrix</a> for current target availability.</p><h3>Deferred surfaces</h3><p>Deferred collection surfaces include HTML-Wasm lowering, map operations as direct host functions, collection equality, collection iteration protocol, sortable collections, deque operations, fixed-capacity collections and specialised collection variants. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For collection literal syntax and typing see <a href="../../../collections">Collections</a>.</li><li>For the full collection method contract see <a href="../../../collections/#collection-operations">Collection operations</a>.</li><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

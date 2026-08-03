@@ -11648,3 +11648,11 @@ path = "html_code_template_whitespace"
 tags = ["integration", "html", "templates", "formatting"]
 contract = "builder.html.code_template_whitespace_normalization"
 role = "primary"
+
+
+[[case]]
+id = "html_code_highlighting"
+path = "html_code_highlighting"
+tags = ["integration", "html", "templates", "formatting"]
+contract = "builder.html.code_highlighter_lexical_roles"
+role = "primary"

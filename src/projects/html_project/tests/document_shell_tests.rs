@@ -160,3 +160,57 @@ fn extract_css_rule<'a>(css: &'a str, selector: &str) -> &'a str {
 
     &css[block_start..=block_end]
 }
+
+#[test]
+fn renderer_injects_every_shared_code_role_selector() {
+    let html = render_shell(
+        &HtmlDocumentConfig::default(),
+        &HtmlPageMetadata::default(),
+        "index.html",
+        "",
+        "<h1>Hello</h1>\n",
+        "",
+    );
+
+    let roles = [
+        ("moth-code-comment", "moth-code-comment"),
+        ("moth-code-keyword", "moth-code-keyword"),
+        ("moth-code-literal", "moth-code-literal"),
+        ("moth-code-string", "moth-code-string"),
+        ("moth-code-number", "moth-code-number"),
+        ("moth-code-operator", "moth-code-operator"),
+        ("moth-code-nominal", "moth-code-nominal"),
+        ("moth-code-type", "moth-code-type"),
+        ("moth-code-delimiter", "moth-code-delimiter"),
+        ("moth-code-function", "moth-code-function"),
+        ("moth-code-directive", "moth-code-directive"),
+        ("moth-code-contract", "moth-code-contract"),
+    ];
+
+    for (selector, variable) in roles {
+        let rule = extract_css_rule(&html, &format!(".{selector}"));
+        assert!(
+            rule.contains(&format!("var(--{variable})")),
+            "expected {selector} to use var(--{variable}), got: {rule}"
+        );
+    }
+}
+
+#[test]
+fn renderer_no_longer_emits_old_code_role_names() {
+    let html = render_shell(
+        &HtmlDocumentConfig::default(),
+        &HtmlPageMetadata::default(),
+        "index.html",
+        "",
+        "<h1>Hello</h1>\n",
+        "",
+    );
+
+    assert!(!html.contains("moth-code-struct"));
+    assert!(!html.contains("moth-code-parenthesis"));
+    assert!(!html.contains("var(--comment)"));
+    assert!(!html.contains("var(--keyword)"));
+    assert!(!html.contains("var(--struct)"));
+    assert!(!html.contains("var(--parenthesis)"));
+}

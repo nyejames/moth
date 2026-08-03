@@ -173,6 +173,38 @@ These constants produce CSS property values for style slots.
     ]
 ]
 
+### The `$code` directive
+
+`$code` renders a balanced template body as an HTML code block with lexical
+highlighting. It is a frontend template directive, so it works in any Moth
+template.
+
+Supported aliases:
+
+- `text` / `txt`
+- `moth`
+- `javascript` / `js`
+- `typescript` / `ts`
+- `python` / `py`
+- `rust` / `rs`
+- `bash` / `sh` / `shell`
+
+[codeblock, $code("moth"):
+    [codeblock, $code("moth"):
+        render |name String| -> String:
+            return "Hello, " + name
+        ;
+    ]
+]
+
+`$code` escapes HTML-sensitive characters and wraps the body in
+`<code class='codeblock'>`. Highlighting is lexical presentation only. It
+never validates the snippet, resolves names or reports diagnostics. Every
+language profile shares the same general role palette, and the Moth profile
+uses the compiler-owned source-word classification plus bounded lexical roles
+for contracts, functions, directives, import paths and the `io` namespace.
+Stateful template-body-aware highlighting stays deferred.
+
 ### Canvas wrapper
 
 `@html` exports a `Canvas` struct and two functions that wrap `@web/canvas` into a source-owned method-style API.

@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -322,7 +341,7 @@ td {
 <style>.doc-level,
 .doc-pager {
     --doc-level-accent: #3d4e8e;
-    --doc-level-accent-hover: #336b77;
+    --doc-level-accent-hover: #44a0cf;
     --doc-level-border: #d7d9df;
     --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
@@ -720,13 +739,13 @@ td {
 
 
 
-        <p>An <code>Error</code> carries a message and an optional numeric code.</p><pre style=""><code class='codeblock'>missing <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing value&quot;</span><span class='moth-code-parenthesis'>)</span>
-coded <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing value&quot;</span>, <span class='moth-code-number'>200</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The code defaults to <code>0</code>.</p><p>Use the message to explain the failure. Use the code when a stable category is useful to callers or tools.</p>
+        <p>An <code>Error</code> carries a message and an optional numeric code.</p><pre style=""><code class='codeblock'>missing <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Missing value&quot;</span><span class='moth-code-delimiter'>)</span>
+coded <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Missing value&quot;</span>, <span class='moth-code-number'>200</span><span class='moth-code-delimiter'>)</span></code></pre><p>The code defaults to <code>0</code>.</p><p>Use the message to explain the failure. Use the code when a stable category is useful to callers or tools.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>Error</code> carries Moth&#39;s builtin structured error type.</p><p>Its public fields:</p><ul><li><code>message String</code></li><li><code>code Int = 0</code></li></ul><pre style=""><code class='codeblock'>missing <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing value&quot;</span><span class='moth-code-parenthesis'>)</span>
-coded <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span>message <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Missing value&quot;</span>, code <span class='moth-code-operator'>=</span> <span class='moth-code-number'>200</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Contract</h3><ul><li><code>message</code> carries the human-readable explanation.</li><li><code>code</code> carries a stable integer code and defaults to <code>0</code>.</li><li>Positional construction follows field order.</li><li>Named construction follows normal constructor argument rules.</li><li><code>Error</code> is reserved by the language.</li><li><code>ErrorKind</code>, <code>ErrorLocation</code> and <code>StackFrame</code> remain ordinary user-available names.</li></ul><p><code>Error!</code> in a function signature marks an error return channel. It does not create a panic path and it is not a separate ordinary value type.</p><p>Custom structs and other compatible types may also be used as explicit error slot types. The builtin <code>Error</code> type is the common language-owned surface and the only automatic target for checked numeric recovery.</p><p>Casts between <code>String</code> and <code>Error</code> are documented by <a href="../casts">Casts</a>.</p>
+    <p><code>Error</code> carries Moth&#39;s builtin structured error type.</p><p>Its public fields:</p><ul><li><code>message String</code></li><li><code>code Int = 0</code></li></ul><pre style=""><code class='codeblock'>missing <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Missing value&quot;</span><span class='moth-code-delimiter'>)</span>
+coded <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span>message <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Missing value&quot;</span>, code <span class='moth-code-operator'>=</span> <span class='moth-code-number'>200</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Contract</h3><ul><li><code>message</code> carries the human-readable explanation.</li><li><code>code</code> carries a stable integer code and defaults to <code>0</code>.</li><li>Positional construction follows field order.</li><li>Named construction follows normal constructor argument rules.</li><li><code>Error</code> is reserved by the language.</li><li><code>ErrorKind</code>, <code>ErrorLocation</code> and <code>StackFrame</code> remain ordinary user-available names.</li></ul><p><code>Error!</code> in a function signature marks an error return channel. It does not create a panic path and it is not a separate ordinary value type.</p><p>Custom structs and other compatible types may also be used as explicit error slot types. The builtin <code>Error</code> type is the common language-owned surface and the only automatic target for checked numeric recovery.</p><p>Casts between <code>String</code> and <code>Error</code> are documented by <a href="../casts">Casts</a>.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -778,33 +797,33 @@ coded <span class='moth-code-operator'>=</span> <span class='moth-code-struct'>E
 
 
 
-        <p>A function that can fail adds one final return marked with <code>!</code>.</p><pre style=""><code class='codeblock'>parse_number <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>if</span> text is <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing number&quot;</span><span class='moth-code-parenthesis'>)</span>
-    ;
+        <p>A function that can fail adds one final return marked with <code>!</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>parse_number</span> <span class='moth-code-delimiter'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>if</span> text <span class='moth-code-operator'>is</span> <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-keyword'>return!</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Missing number&quot;</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-delimiter'>;</span>
 
     <span class='moth-code-keyword'>return</span> <span class='moth-code-number'>42</span>
-;</code></pre><p>Normal <code>return</code> sends success values.</p><p><code>return!</code> sends one error value.</p><p>The caller must handle that error by propagating it or catching it.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Normal <code>return</code> sends success values.</p><p><code>return!</code> sends one error value.</p><p>The caller must handle that error by propagating it or catching it.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>A fallible function marks one return slot with <code>!</code>.</p><pre style=""><code class='codeblock'>parse_number <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>if</span> text is <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Missing number&quot;</span>, <span class='moth-code-number'>200</span><span class='moth-code-parenthesis'>)</span>
-    ;
+    <p>A fallible function marks one return slot with <code>!</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>parse_number</span> <span class='moth-code-delimiter'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>if</span> text <span class='moth-code-operator'>is</span> <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-keyword'>return!</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Missing number&quot;</span>, <span class='moth-code-number'>200</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-delimiter'>;</span>
 
     <span class='moth-code-keyword'>return</span> <span class='moth-code-number'>42</span>
-;</code></pre><h3>Signature contract</h3><ul><li>A function may declare at most one error-channel slot.</li><li>The error slot must be the final return slot.</li><li>Success slots appear before it.</li><li>A function may have success slots plus one error slot.</li><li>A function may also expose only an error slot.</li><li>Success return slots contain types only. The error slot may carry a channel.</li></ul><p>The error slot type is explicit. <code>Error!</code> is common, but a compatible custom error type can be used when the function contract requires it.</p><h3>Returning an error</h3><p><code>return! expression</code> leaves through the current function&#39;s error channel.</p><ul><li>The current function must declare an error slot.</li><li>Exactly one error value is required.</li><li>The value must be compatible with the declared error type.</li><li><code>return!</code> is terminal for the current path.</li><li>Normal success values use <code>return</code>.</li></ul><h3>Error-only functions</h3><p>A function may declare only an error slot:</p><pre style=""><code class='codeblock'>validate <span class='moth-code-operator'>|</span>ready <span class='moth-code-type'>Bool</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>if</span> not ready<span class='moth-code-operator'>:</span>
-        <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;not ready&quot;</span><span class='moth-code-parenthesis'>)</span>
-    ;
-;</code></pre><ul><li>The arrow is required: <code>-&gt; Error!</code>.</li><li>No success return value is required.</li><li>Normal fallthrough is valid when no error is returned.</li><li>A nested block may use <code>return!</code> too. The statement leaves through the enclosing error-only function&#39;s error channel and terminates that path.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-struct'>Failure</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    message <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Signature contract</h3><ul><li>A function may declare at most one error-channel slot.</li><li>The error slot must be the final return slot.</li><li>Success slots appear before it.</li><li>A function may have success slots plus one error slot.</li><li>A function may also expose only an error slot.</li><li>Success return slots contain types only. The error slot may carry a channel.</li></ul><p>The error slot type is explicit. <code>Error!</code> is common, but a compatible custom error type can be used when the function contract requires it.</p><h3>Returning an error</h3><p><code>return! expression</code> leaves through the current function&#39;s error channel.</p><ul><li>The current function must declare an error slot.</li><li>Exactly one error value is required.</li><li>The value must be compatible with the declared error type.</li><li><code>return!</code> is terminal for the current path.</li><li>Normal success values use <code>return</code>.</li></ul><h3>Error-only functions</h3><p>A function may declare only an error slot:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>validate</span> <span class='moth-code-delimiter'>|</span>ready <span class='moth-code-type'>Bool</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>if</span> <span class='moth-code-operator'>not</span> ready<span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-keyword'>return!</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;not ready&quot;</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-delimiter'>;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><ul><li>The arrow is required: <code>-&gt; Error!</code>.</li><li>No success return value is required.</li><li>Normal fallthrough is valid when no error is returned.</li><li>A nested block may use <code>return!</code> too. The statement leaves through the enclosing error-only function&#39;s error channel and terminates that path.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Failure</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    message <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-fail <span class='moth-code-operator'>|</span>message <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Failure</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Failure</span><span class='moth-code-parenthesis'>(</span>message<span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>Checked numeric operations use automatic recovery only when the current error slot is the builtin <code>Error!</code> channel. Custom error slots do not receive an implicit conversion.</p><p>First-class public <code>Result</code> values and result pattern matching are outside the current language path. Fallible carriers are consumed by <code>!</code> or <code>catch</code> at the call site.</p>
+<span class='moth-code-function'>fail</span> <span class='moth-code-delimiter'>|</span>message <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-nominal'>Failure</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return!</span> <span class='moth-code-nominal'>Failure</span><span class='moth-code-delimiter'>(</span>message<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Checked numeric operations use automatic recovery only when the current error slot is the builtin <code>Error!</code> channel. Custom error slots do not receive an implicit conversion.</p><p>First-class public <code>Result</code> values and result pattern matching are outside the current language path. Fallible carriers are consumed by <code>!</code> or <code>catch</code> at the call site.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -856,19 +875,19 @@ fail <span class='moth-code-operator'>|</span>message <span class='moth-code-typ
 
 
 
-        <p>Add <code>!</code> after a fallible call when the current function should pass the error to its caller.</p><pre style=""><code class='codeblock'>wrapper <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    value <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span>
+        <p>Add <code>!</code> after a fallible call when the current function should pass the error to its caller.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>wrapper</span> <span class='moth-code-delimiter'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span>
     <span class='moth-code-keyword'>return</span> value
-;</code></pre><p>On success, <code>value</code> receives the parsed number.</p><p>On failure, <code>wrapper</code> returns the error immediately.</p><p>The surrounding function needs a compatible error return slot.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>On success, <code>value</code> receives the parsed number.</p><p>On failure, <code>wrapper</code> returns the error immediately.</p><p>The surrounding function needs a compatible error return slot.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Postfix <code>!</code> propagates a fallible value&#39;s error through the enclosing function.</p><pre style=""><code class='codeblock'>wrapper <span class='moth-code-operator'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    value <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span>
+    <p>Postfix <code>!</code> propagates a fallible value&#39;s error through the enclosing function.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>wrapper</span> <span class='moth-code-delimiter'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span>
     <span class='moth-code-keyword'>return</span> value
-;</code></pre><h3>Contract</h3><ul><li>The handled expression must have a fallible error channel.</li><li>The enclosing function must declare an error slot.</li><li>The produced error type must be compatible with that slot.</li><li>On success, the expression yields its success values.</li><li>On failure, the current function returns the error immediately.</li><li>A no-success fallible operation may still use postfix <code>!</code> as a statement.</li><li>Multi-success fallible calls may feed a matching multi-bind.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>items.push<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span></code></pre><p>Postfix propagation is not panic syntax.</p><p><code>cast!</code> uses the same outward error path for a fallible explicit cast, but its target and evidence rules remain owned by <a href="../casts">Casts</a>.</p><h3>Removed forms</h3><p>Old inline fallback and bang-handler spellings are invalid.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- INVALID: old inline fallback and bang-handler spellings</span>
-value <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>!</span><span class='moth-code-number'>0</span>
-value <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> err<span class='moth-code-operator'>!</span></code></pre><p>Use <code>catch then ...</code> or a block <code>catch:</code> handler for recovery.</p><p>Checked numeric recovery is compiler-owned control flow. Numeric operators do not become first-class source-visible <code>Error!</code> expressions.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Contract</h3><ul><li>The handled expression must have a fallible error channel.</li><li>The enclosing function must declare an error slot.</li><li>The produced error type must be compatible with that slot.</li><li>On success, the expression yields its success values.</li><li>On failure, the current function returns the error immediately.</li><li>A no-success fallible operation may still use postfix <code>!</code> as a statement.</li><li>Multi-success fallible calls may feed a matching multi-bind.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>items.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span>value<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span></code></pre><p>Postfix propagation is not panic syntax.</p><p><code>cast!</code> uses the same outward error path for a fallible explicit cast, but its target and evidence rules remain owned by <a href="../casts">Casts</a>.</p><h3>Removed forms</h3><p>Old inline fallback and bang-handler spellings are invalid.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- INVALID: old inline fallback and bang-handler spellings</span>
+value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span><span class='moth-code-number'>0</span>
+value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> err<span class='moth-code-operator'>!</span></code></pre><p>Use <code>catch then ...</code> or a block <code>catch:</code> handler for recovery.</p><p>Checked numeric recovery is compiler-owned control flow. Numeric operators do not become first-class source-visible <code>Error!</code> expressions.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -920,30 +939,30 @@ value <span class='moth-code-operator'>=</span> parse_number<span class='moth-co
 
 
 
-        <p>Use <code>catch</code> when the current code has a useful fallback.</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    then <span class='moth-code-number'>0</span>
-;</code></pre><p>Use <code>catch |err|:</code> when the message or code matters:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span>err.message<span class='moth-code-parenthesis'>)</span>
-    then <span class='moth-code-number'>0</span>
-;</code></pre><p>A short fallback can stay on one line:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> catch then <span class='moth-code-number'>0</span></code></pre><p>Use <code>then</code> to provide the value expected by the surrounding assignment.</p>
+        <p>Use <code>catch</code> when the current code has a useful fallback.</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Use <code>catch |err|:</code> when the message or code matters:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>err</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>err.message<span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A short fallback can stay on one line:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span></code></pre><p>Use <code>then</code> to provide the value expected by the surrounding assignment.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>catch</code> handles a fallible value locally.</p><h3>Block forms</h3><p>Use <code>catch:</code> when the error value is not needed.</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    then <span class='moth-code-number'>0</span>
-;</code></pre><p>Use <code>catch |err|:</code> when the handler needs the error.</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span>err.message<span class='moth-code-parenthesis'>)</span>
-    then <span class='moth-code-number'>0</span>
-;</code></pre><p>The error binding:</p><ul><li>is immutable</li><li>is visible only inside the handler</li><li>must not shadow another visible name</li><li>has the fallible expression&#39;s declared error type</li></ul><h3>Inline forms</h3><p>A simple recovery may stay on one logical line.</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> catch then <span class='moth-code-number'>0</span>
-other <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span> then err.code</code></pre><p>Inline catch:</p><ul><li>uses <code>then</code></li><li>stays on one logical line</li><li>may produce the receiver&#39;s required value list</li><li>binds the error only inside the fallback expression</li><li>does not contain a statement body</li><li>cannot combine with postfix <code>!</code></li></ul><h3>Value requirements</h3><p>When the handled expression has success values and the receiving site needs them, every reachable handler path must:</p><ul><li>produce the required values with <code>then</code></li><li>leave the enclosing function with <code>return</code></li><li>leave through its error channel with <code>return!</code></li></ul><p>A handler that can fall through without producing or terminating is invalid.</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> parse_number<span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span>err.message<span class='moth-code-parenthesis'>)</span>
+    <p><code>catch</code> handles a fallible value locally.</p><h3>Block forms</h3><p>Use <code>catch:</code> when the error value is not needed.</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Use <code>catch |err|:</code> when the handler needs the error.</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>err</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>err.message<span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The error binding:</p><ul><li>is immutable</li><li>is visible only inside the handler</li><li>must not shadow another visible name</li><li>has the fallible expression&#39;s declared error type</li></ul><h3>Inline forms</h3><p>A simple recovery may stay on one logical line.</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+other <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>err</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-keyword'>then</span> err.code</code></pre><p>Inline catch:</p><ul><li>uses <code>then</code></li><li>stays on one logical line</li><li>may produce the receiver&#39;s required value list</li><li>binds the error only inside the fallback expression</li><li>does not contain a statement body</li><li>cannot combine with postfix <code>!</code></li></ul><h3>Value requirements</h3><p>When the handled expression has success values and the receiving site needs them, every reachable handler path must:</p><ul><li>produce the required values with <code>then</code></li><li>leave the enclosing function with <code>return</code></li><li>leave through its error channel with <code>return!</code></li></ul><p>A handler that can fall through without producing or terminating is invalid.</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_number</span><span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>err</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>err.message<span class='moth-code-delimiter'>)</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-number'>0</span>
-;</code></pre><p>A multi-success recovery uses <code>then</code> with the matching arity:</p><pre style=""><code class='codeblock'>name, score <span class='moth-code-operator'>=</span> load_user<span class='moth-code-parenthesis'>(</span>id<span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span>err.message<span class='moth-code-parenthesis'>)</span>
-    then <span class='moth-code-string'>&quot;guest&quot;</span>, <span class='moth-code-number'>0.0</span>
-;</code></pre><p>A fallible operation with no success values does not need <code>then</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>items.push<span class='moth-code-parenthesis'>(</span>value<span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><h3>Context and conflicts</h3><ul><li><code>catch</code> and postfix <code>!</code> are alternative handling paths.</li><li>One expression cannot use both.</li><li><code>catch</code> handles only the selected fallible expression.</li><li>Catch bodies are statement-like and are rejected inside conditions, templates and constants.</li><li>First-class fallible carriers cannot be stored without handling.</li></ul><p><code>then</code> and closed receiving sites are specified by <a href="../branching/#value-producing-if">Value-producing if</a>.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A multi-success recovery uses <code>then</code> with the matching arity:</p><pre style=""><code class='codeblock'>name, score <span class='moth-code-operator'>=</span> <span class='moth-code-function'>load_user</span><span class='moth-code-delimiter'>(</span>id<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>err</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>err.message<span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;guest&quot;</span>, <span class='moth-code-number'>0.0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A fallible operation with no success values does not need <code>then</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>items.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span>value<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Context and conflicts</h3><ul><li><code>catch</code> and postfix <code>!</code> are alternative handling paths.</li><li>One expression cannot use both.</li><li><code>catch</code> handles only the selected fallible expression.</li><li>Catch bodies are statement-like and are rejected inside conditions, templates and constants.</li><li>First-class fallible carriers cannot be stored without handling.</li></ul><p><code>then</code> and closed receiving sites are specified by <a href="../branching/#value-producing-if">Value-producing if</a>.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -995,28 +1014,28 @@ other <span class='moth-code-operator'>=</span> parse_number<span class='moth-co
 
 
 
-        <p>Use <code>T?</code> when a value may be missing and that absence is normal.</p><pre style=""><code class='codeblock'>nickname <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> none</code></pre><p>A normal <code>String</code> can be used where <code>String?</code> is expected.</p><p>Inspect a present value with <code>is |name|</code>:</p><pre style=""><code class='codeblock'>display_name <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> nickname is <span class='moth-code-operator'>|</span>name<span class='moth-code-operator'>|</span> then name <span class='moth-code-keyword'>else</span> <span class='moth-code-string'>&quot;guest&quot;</span></code></pre><p>Use postfix <code>?</code> inside a function that also returns an optional value:</p><pre style=""><code class='codeblock'>get_display_name <span class='moth-code-operator'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span><span class='moth-code-operator'>:</span>
-    user <span class='moth-code-operator'>=</span> find_user<span class='moth-code-parenthesis'>(</span>id<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>?</span>
+        <p>Use <code>T?</code> when a value may be missing and that absence is normal.</p><pre style=""><code class='codeblock'>nickname <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>none</span></code></pre><p>A normal <code>String</code> can be used where <code>String?</code> is expected.</p><p>Inspect a present value with <code>is |name|</code>:</p><pre style=""><code class='codeblock'>display_name <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> nickname <span class='moth-code-operator'>is</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>name</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-keyword'>then</span> name <span class='moth-code-keyword'>else</span> <span class='moth-code-string'>&quot;guest&quot;</span></code></pre><p>Use postfix <code>?</code> inside a function that also returns an optional value:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>get_display_name</span> <span class='moth-code-delimiter'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span><span class='moth-code-delimiter'>:</span>
+    user <span class='moth-code-operator'>=</span> <span class='moth-code-function'>find_user</span><span class='moth-code-delimiter'>(</span>id<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>
     <span class='moth-code-keyword'>return</span> user.name
-;</code></pre><p>If <code>find_user</code> returns <code>none</code>, the current function returns <code>none</code> too.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>If <code>find_user</code> returns <code>none</code>, the current function returns <code>none</code> too.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>T?</code> is an optional value that may contain <code>T</code> or may be absent.</p><p><code>none</code> is the only special absent value.</p><pre style=""><code class='codeblock'>name <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> none
-fallback <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;guest&quot;</span></code></pre><h3>Contextual wrapping</h3><p>A value of <code>T</code> can be used where <code>T?</code> is expected.</p><p><code>none</code> requires an immediate optional receiving context. It is not a standalone inferred type.</p><p>Optional values are not automatically unwrapped.</p><h3>Present-value inspection</h3><p>Inline inspection:</p><pre style=""><code class='codeblock'>display_name <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> maybe_name is <span class='moth-code-operator'>|</span>name<span class='moth-code-operator'>|</span> then name <span class='moth-code-keyword'>else</span> <span class='moth-code-string'>&quot;guest&quot;</span></code></pre><p>Statement inspection:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> maybe_name is none<span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;missing&quot;</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>Full option match:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> maybe_name is<span class='moth-code-operator'>:</span>
-    <span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> then <span class='moth-code-string'>&quot;Hi Priya&quot;</span>
-    <span class='moth-code-operator'>|</span>name<span class='moth-code-operator'>|</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> then name
-    none <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> then <span class='moth-code-string'>&quot;guest&quot;</span>
-;</code></pre><p>Option patterns support:</p><ul><li><code>none</code></li><li>compatible literal present-value patterns</li><li>compatible relational present-value patterns</li><li><code>|name|</code> to capture any present value</li><li>guards</li><li><code>else =&gt;</code></li></ul><p>An option match can be exhaustive without <code>else =&gt;</code> when it has both an unguarded <code>none</code> arm and an unguarded present-value capture.</p><p>Direct fallback syntax such as <code>maybe_name else then &quot;guest&quot;</code> is invalid.</p><h3>Absence inspection</h3><p>Statement <code>if</code> can test for absence:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> maybe_name is none<span class='moth-code-operator'>:</span>
-    io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;missing&quot;</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><h3>Equality and ordering</h3><p>Options support equality comparisons:</p><pre style=""><code class='codeblock'>present <span class='moth-code-operator'>=</span> maybe_name is <span class='moth-code-string'>&quot;Priya&quot;</span>
-absent <span class='moth-code-operator'>=</span> maybe_name is none
-same <span class='moth-code-operator'>=</span> a is b</code></pre><p>Two options can be compared only when they have the same option type and their inner type supports equality. Two absent values compare equal. Present values compare through the inner type&#39;s equality rule, and a present value never equals <code>none</code>.</p><p>Ordering operators such as <code>&lt;</code> on optional values are not supported.</p><h3>Postfix propagation</h3><p>Postfix <code>?</code> unwraps a present value or returns <code>none</code> from the enclosing function.</p><pre style=""><code class='codeblock'>get_display_name <span class='moth-code-operator'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span><span class='moth-code-operator'>:</span>
-    user <span class='moth-code-operator'>=</span> find_user<span class='moth-code-parenthesis'>(</span>id<span class='moth-code-parenthesis'>)</span><span class='moth-code-operator'>?</span>
+    <p><code>T?</code> is an optional value that may contain <code>T</code> or may be absent.</p><p><code>none</code> is the only special absent value.</p><pre style=""><code class='codeblock'>name <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>none</span>
+fallback <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;guest&quot;</span></code></pre><h3>Contextual wrapping</h3><p>A value of <code>T</code> can be used where <code>T?</code> is expected.</p><p><code>none</code> requires an immediate optional receiving context. It is not a standalone inferred type.</p><p>Optional values are not automatically unwrapped.</p><h3>Present-value inspection</h3><p>Inline inspection:</p><pre style=""><code class='codeblock'>display_name <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>name</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-keyword'>then</span> name <span class='moth-code-keyword'>else</span> <span class='moth-code-string'>&quot;guest&quot;</span></code></pre><p>Statement inspection:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-literal'>none</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;missing&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Full option match:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;Hi Priya&quot;</span>
+    <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>name</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-keyword'>then</span> name
+    <span class='moth-code-literal'>none</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;guest&quot;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Option patterns support:</p><ul><li><code>none</code></li><li>compatible literal present-value patterns</li><li>compatible relational present-value patterns</li><li><code>|name|</code> to capture any present value</li><li>guards</li><li><code>else =&gt;</code></li></ul><p>An option match can be exhaustive without <code>else =&gt;</code> when it has both an unguarded <code>none</code> arm and an unguarded present-value capture.</p><p>Direct fallback syntax such as <code>maybe_name else then &quot;guest&quot;</code> is invalid.</p><h3>Absence inspection</h3><p>Statement <code>if</code> can test for absence:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-literal'>none</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;missing&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Equality and ordering</h3><p>Options support equality comparisons:</p><pre style=""><code class='codeblock'>present <span class='moth-code-operator'>=</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+absent <span class='moth-code-operator'>=</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-literal'>none</span>
+same <span class='moth-code-operator'>=</span> a <span class='moth-code-operator'>is</span> b</code></pre><p>Two options can be compared only when they have the same option type and their inner type supports equality. Two absent values compare equal. Present values compare through the inner type&#39;s equality rule, and a present value never equals <code>none</code>.</p><p>Ordering operators such as <code>&lt;</code> on optional values are not supported.</p><h3>Postfix propagation</h3><p>Postfix <code>?</code> unwraps a present value or returns <code>none</code> from the enclosing function.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>get_display_name</span> <span class='moth-code-delimiter'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span><span class='moth-code-delimiter'>:</span>
+    user <span class='moth-code-operator'>=</span> <span class='moth-code-function'>find_user</span><span class='moth-code-delimiter'>(</span>id<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>
     <span class='moth-code-keyword'>return</span> user.name
-;</code></pre><p>The exact contract is:</p><ul><li>the operand must be optional</li><li>the enclosing function must have exactly one success return slot</li><li>that success slot must be a compatible optional type</li><li>the present payload becomes the expression result</li><li>absence returns <code>none</code> immediately</li><li><code>?</code> cannot be followed by <code>catch</code></li></ul><p>Options are compiler-owned value shapes. Source code does not construct public <code>Option</code> variants.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The exact contract is:</p><ul><li>the operand must be optional</li><li>the enclosing function must have exactly one success return slot</li><li>that success slot must be a compatible optional type</li><li>the present payload becomes the expression result</li><li>absence returns <code>none</code> immediately</li><li><code>?</code> cannot be followed by <code>catch</code></li></ul><p>Options are compiler-owned value shapes. Source code does not construct public <code>Option</code> variants.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1068,15 +1087,15 @@ same <span class='moth-code-operator'>=</span> a is b</code></pre><p>Two options
 
 
 
-        <p>Use <code>assert</code> for a condition that must already be true.</p><pre style=""><code class='codeblock'>assert<span class='moth-code-parenthesis'>(</span>index <span class='moth-code-operator'>&lt;</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
-assert<span class='moth-code-parenthesis'>(</span>index <span class='moth-code-operator'>&lt;</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>, <span class='moth-code-string'>&quot;index must be in bounds&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p>The message is optional. When you add one it must be a quoted string literal.</p><p>A failed assertion stops the current program path.</p><p>It is not a recoverable error and cannot be caught.</p><p>Use <code>Error!</code> for failures callers are expected to handle. Use <code>assert</code> for broken assumptions and impossible states.</p>
+        <p>Use <code>assert</code> for a condition that must already be true.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>index <span class='moth-code-operator'>&lt;</span> items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>index <span class='moth-code-operator'>&lt;</span> items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>, <span class='moth-code-string'>&quot;index must be in bounds&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>The message is optional. When you add one it must be a quoted string literal.</p><p>A failed assertion stops the current program path.</p><p>It is not a recoverable error and cannot be caught.</p><p>Use <code>Error!</code> for failures callers are expected to handle. Use <code>assert</code> for broken assumptions and impossible states.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>assert</code> provides an always-checked statement intrinsic for invariants.</p><pre style=""><code class='codeblock'>assert<span class='moth-code-parenthesis'>(</span>index <span class='moth-code-operator'>&lt;</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span>
-assert<span class='moth-code-parenthesis'>(</span>index <span class='moth-code-operator'>&lt;</span> items.length<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>, <span class='moth-code-string'>&quot;index must be in bounds&quot;</span><span class='moth-code-parenthesis'>)</span>
-assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;unimplemented backend path&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Accepted forms</h3><pre style=""><code class='codeblock'>assert<span class='moth-code-parenthesis'>(</span>condition<span class='moth-code-parenthesis'>)</span>
-assert<span class='moth-code-parenthesis'>(</span>condition, <span class='moth-code-string'>&quot;literal message&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><ul><li>The condition must resolve to <code>Bool</code>.</li><li>The condition is required.</li><li>The message is optional.</li><li>When present the message must be one quoted string literal.</li><li>Exactly one condition and at most one message are accepted.</li><li>Named arguments are invalid.</li><li>Mutable access markers are invalid.</li><li>Parentheses are required.</li><li>Trailing comma without a message is invalid.</li></ul><h3>Failure behaviour</h3><ul><li>Assertions are checked in development and release builds.</li><li>Failure is unrecoverable in Moth source.</li><li>Failure does not produce <code>Error!</code>.</li><li>Postfix <code>!</code> is invalid.</li><li><code>catch</code> is invalid.</li><li>Expected runtime failures should use a typed error path instead.</li></ul><h3>Statement-only contract</h3><p><code>assert</code>:</p><ul><li>cannot be assigned</li><li>cannot be passed as an argument</li><li>cannot be imported or aliased</li><li>cannot appear in template interpolation</li><li>does not produce a value</li></ul><p><code>assert(false)</code> and <code>assert(false, &quot;message&quot;)</code> are statically terminal.</p><p>They may end a function path that otherwise requires a value.</p><p>A dynamic <code>assert(condition)</code> is not statically terminal because the condition may succeed.</p>
+    <p><code>assert</code> provides an always-checked statement intrinsic for invariants.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>index <span class='moth-code-operator'>&lt;</span> items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>index <span class='moth-code-operator'>&lt;</span> items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>, <span class='moth-code-string'>&quot;index must be in bounds&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span><span class='moth-code-literal'>false</span>, <span class='moth-code-string'>&quot;unimplemented backend path&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Accepted forms</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>condition<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>condition, <span class='moth-code-string'>&quot;literal message&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><ul><li>The condition must resolve to <code>Bool</code>.</li><li>The condition is required.</li><li>The message is optional.</li><li>When present the message must be one quoted string literal.</li><li>Exactly one condition and at most one message are accepted.</li><li>Named arguments are invalid.</li><li>Mutable access markers are invalid.</li><li>Parentheses are required.</li><li>Trailing comma without a message is invalid.</li></ul><h3>Failure behaviour</h3><ul><li>Assertions are checked in development and release builds.</li><li>Failure is unrecoverable in Moth source.</li><li>Failure does not produce <code>Error!</code>.</li><li>Postfix <code>!</code> is invalid.</li><li><code>catch</code> is invalid.</li><li>Expected runtime failures should use a typed error path instead.</li></ul><h3>Statement-only contract</h3><p><code>assert</code>:</p><ul><li>cannot be assigned</li><li>cannot be passed as an argument</li><li>cannot be imported or aliased</li><li>cannot appear in template interpolation</li><li>does not produce a value</li></ul><p><code>assert(false)</code> and <code>assert(false, &quot;message&quot;)</code> are statically terminal.</p><p>They may end a function path that otherwise requires a value.</p><p>A dynamic <code>assert(condition)</code> is not statically terminal because the condition may succeed.</p>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

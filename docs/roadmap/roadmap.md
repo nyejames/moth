@@ -11,7 +11,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [$code directive moth highlighting improvements](./plans/code-block-highlighting-expansion-and-optimisation-plan.md)
 - [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md) (resume at R5C1)
 
 ## Queued implementation chain
@@ -39,6 +38,7 @@ Do not mark a plan active unless its current-state capsule says it is active.
 ## Completed
 
 - Module root marker migration from `#` to `@`
+- [Code-block highlighting expansion and optimisation](./plans/code-block-highlighting-expansion-and-optimisation-plan.md): allocation-conscious single-pass scanner, compiler-owned Moth word classification, maximal-munch operators, shared general palette and bounded Moth lexical/contextual roles
 
 ---
 
@@ -68,12 +68,19 @@ work remains in the
 
 ## Code-block highlighting follow-ups
 
-The built-in `$code` formatter already supports generic and plain-text blocks plus Moth,
-JavaScript, TypeScript, Python, Rust and shell profiles. Future formats should extend the single
-`CodeLanguage` owner in `src/projects/html_project/styles/code.rs`, including its aliases,
-comment syntax, keyword/type rules, supported-values diagnostic and focused formatter tests.
+The built-in `$code` formatter now supports generic and plain-text blocks plus Moth,
+JavaScript, TypeScript, Python, Rust and shell profiles on one shared role palette. The current
+baseline includes:
 
-Active work: [code-block highlighting expansion and optimisation plan](./plans/code-block-highlighting-expansion-and-optimisation-plan.md).
+- an allocation-conscious single-pass byte-slice scanner
+- compiler-owned Moth source-word classification
+- maximal-munch Moth operators
+- a general language-neutral palette shared by every profile
+- bounded Moth lexical and contextual roles for contracts, functions, directives, paths and `io`
+
+Future formats should extend the single `CodeLanguage` owner in
+`src/projects/html_project/styles/code.rs`, including its aliases, comment syntax,
+keyword/type rules, supported-values diagnostic and focused formatter tests.
 
 Suggested extension order:
 
@@ -87,6 +94,10 @@ Prefer the conventional short and long aliases where both are widely used, such 
 `markdown`/`md` and `cpp`/`c++`. Only add a profile when its language-specific rules improve on the
 generic formatter; preserve HTML escaping and add tests for aliases, comments, keywords and the
 rendered span classes.
+
+Stateful Moth template-body-aware highlighting remains deferred. Full semantic or editor grammar
+parity stays owned by editor tooling, not the compile-time formatter. The built-in formatter never
+performs semantic symbol resolution or syntax diagnostics.
 
 ## Genuinely deferred items
 

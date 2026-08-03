@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -322,7 +341,7 @@ td {
 <style>.doc-level,
 .doc-pager {
     --doc-level-accent: #3d4e8e;
-    --doc-level-accent-hover: #336b77;
+    --doc-level-accent-hover: #44a0cf;
     --doc-level-border: #d7d9df;
     --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
@@ -720,17 +739,17 @@ td {
 
 
 
-        <p>A trait names a behaviour that a type can promise to provide.</p><h3>A trait with one requirement</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;</code></pre><p>This says: any type that claims to be <code>DISPLAY_TEXT</code> must provide a <code>display</code> method that returns a <code>String</code>.</p><h3>A marker trait</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>SERIALIZABLE</span> must<span class='moth-code-operator'>:</span>
-;</code></pre><p>A marker trait has no methods. It is still a real contract that a type can explicitly adopt.</p>
+        <p>A trait names a behaviour that a type can promise to provide.</p><h3>A trait with one requirement</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>This says: any type that claims to be <code>DISPLAY_TEXT</code> must provide a <code>display</code> method that returns a <code>String</code>.</p><h3>A marker trait</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>SERIALIZABLE</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A marker trait has no methods. It is still a real contract that a type can explicitly adopt.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>A trait forms an explicit nominal method contract. A type satisfies a trait only when source declares conformance.</p><h3>Syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;</code></pre><h3>Exact contract</h3><ul><li>A trait is an explicit nominal method contract.</li><li>Trait names use all-caps identifiers.</li><li>Trait declarations are top-level.</li><li><code>TRAIT must:</code> opens a trait declaration.</li><li>One final semicolon closes the declaration.</li><li>Requirements are method signatures only.</li><li>Marker traits with no requirements are valid.</li><li>Traits are compile-time static contracts.</li><li>Traits are not runtime values.</li><li>Static non-method requirements are deferred.</li><li>Generic traits and generic trait methods are outside scope.</li></ul><h3>Marker traits</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>SERIALIZABLE</span> must<span class='moth-code-operator'>:</span>
-;</code></pre><p>A marker trait carries no requirements but still represents a deliberate contract that a type may declare.</p><h3>Traits are not value types</h3><p>A trait name may appear in trait declarations, conformance declarations and generic bounds. It is invalid as an ordinary variable, parameter, field, return, collection element, choice payload or alias target type.</p><h3>Related concepts</h3><ul><li>For requirement syntax see <a href="#trait-requirements">Trait requirements</a>.</li><li>For conformance see <a href="#conformance">Conformance</a>.</li></ul>
+    <p>A trait forms an explicit nominal method contract. A type satisfies a trait only when source declares conformance.</p><h3>Syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Exact contract</h3><ul><li>A trait is an explicit nominal method contract.</li><li>Trait names use all-caps identifiers.</li><li>Trait declarations are top-level.</li><li><code>TRAIT must:</code> opens a trait declaration.</li><li>One final semicolon closes the declaration.</li><li>Requirements are method signatures only.</li><li>Marker traits with no requirements are valid.</li><li>Traits are compile-time static contracts.</li><li>Traits are not runtime values.</li><li>Static non-method requirements are deferred.</li><li>Generic traits and generic trait methods are outside scope.</li></ul><h3>Marker traits</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>SERIALIZABLE</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A marker trait carries no requirements but still represents a deliberate contract that a type may declare.</p><h3>Traits are not value types</h3><p>A trait name may appear in trait declarations, conformance declarations and generic bounds. It is invalid as an ordinary variable, parameter, field, return, collection element, choice payload or alias target type.</p><h3>Related concepts</h3><ul><li>For requirement syntax see <a href="#trait-requirements">Trait requirements</a>.</li><li>For conformance see <a href="#conformance">Conformance</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -782,29 +801,29 @@ td {
 
 
 
-        <p>Trait requirements describe the methods a conforming type must have. The receiver has a special name.</p><h3><code>This</code> means the implementing type</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;</code></pre><p><code>This</code> is a placeholder for whatever type later declares conformance.</p><h3>Mutable receiver</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>RESETTABLE</span> must<span class='moth-code-operator'>:</span>
-    reset <span class='moth-code-operator'>|</span><span class='moth-code-operator'>~</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span>
-;</code></pre><p><code>~This</code> means the method may mutate the receiver.</p><h3>Named <code>This</code> parameters</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>SAME</span> must<span class='moth-code-operator'>:</span>
-    equals <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This,</span> other <span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Bool</span>
-;</code></pre><p>When <code>This</code> is not the receiver, it must have a parameter name like <code>other This</code>.</p>
+        <p>Trait requirements describe the methods a conforming type must have. The receiver has a special name.</p><h3><code>This</code> means the implementing type</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>This</code> is a placeholder for whatever type later declares conformance.</p><h3>Mutable receiver</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>RESETTABLE</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>reset</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-operator'>~</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>~This</code> means the method may mutate the receiver.</p><h3>Named <code>This</code> parameters</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>SAME</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>equals</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span>, other <span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Bool</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>When <code>This</code> is not the receiver, it must have a parameter name like <code>other This</code>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Trait requirements describe the method shapes a conforming type must provide. The receiver is always <code>This</code> or <code>~This</code>.</p><h3>Receiver syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>RESETTABLE</span> must<span class='moth-code-operator'>:</span>
-    reset <span class='moth-code-operator'>|</span><span class='moth-code-operator'>~</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span>
-;
+    <p>Trait requirements describe the method shapes a conforming type must provide. The receiver is always <code>This</code> or <code>~This</code>.</p><h3>Receiver syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>RESETTABLE</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>reset</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-operator'>~</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>COMPARABLE_WITH_SELF</span> must<span class='moth-code-operator'>:</span>
-    same <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This,</span> other <span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Bool</span>
-    clone_value <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>This</span>
-;</code></pre><h3>Exact contract</h3><ul><li>Requirement receivers use <code>This</code> or <code>~This</code>.</li><li>Lowercase <code>this</code> is source-method syntax and invalid in a requirement.</li><li>Bare <code>This</code> and <code>~This</code> are valid only as the first receiver parameter.</li><li><code>This</code> is a shared receiver.</li><li><code>~This</code> is a mutable receiver.</li><li>Direct non-receiver <code>This</code> parameters must be named, such as <code>other This</code>.</li><li>Direct return <code>This</code> is supported.</li><li>Composed <code>This</code> forms such as <code>This?</code>, <code>{This}</code> and <code>Box of This</code> are rejected in the Alpha surface.</li><li><code>This</code> is trait-local and invalid outside trait declarations.</li><li>Requirements have no body.</li><li>Parameter names are not part of the later conformance shape.</li><li>Parameter access modes, types, return types and return channels are part of the shape.</li></ul><h3>Multiple requirements</h3><p>Multiple method requirements may appear in one trait. The current separator between requirements is a newline. Each requirement has no body and no standalone semicolon. The trait itself closes with a final semicolon.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>NAMED</span> must<span class='moth-code-operator'>:</span>
-    name <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-    id <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Int</span>
-;</code></pre><h3>Non-receiver <code>This</code></h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>SAME</span> must<span class='moth-code-operator'>:</span>
-    equals <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This,</span> other <span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>Bool</span>
-;</code></pre><p><code>This</code> as a non-receiver parameter must carry a name.</p><h3>Related concepts</h3><ul><li>For trait declarations see <a href="#trait-declarations">Trait declarations</a>.</li><li>For conformance matching see <a href="#conformance">Conformance</a>.</li></ul>
+<span class='moth-code-contract'>COMPARABLE_WITH_SELF</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>same</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span>, other <span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Bool</span>
+    <span class='moth-code-function'>clone_value</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-keyword'>This</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Exact contract</h3><ul><li>Requirement receivers use <code>This</code> or <code>~This</code>.</li><li>Lowercase <code>this</code> is source-method syntax and invalid in a requirement.</li><li>Bare <code>This</code> and <code>~This</code> are valid only as the first receiver parameter.</li><li><code>This</code> is a shared receiver.</li><li><code>~This</code> is a mutable receiver.</li><li>Direct non-receiver <code>This</code> parameters must be named, such as <code>other This</code>.</li><li>Direct return <code>This</code> is supported.</li><li>Composed <code>This</code> forms such as <code>This?</code>, <code>{This}</code> and <code>Box of This</code> are rejected in the Alpha surface.</li><li><code>This</code> is trait-local and invalid outside trait declarations.</li><li>Requirements have no body.</li><li>Parameter names are not part of the later conformance shape.</li><li>Parameter access modes, types, return types and return channels are part of the shape.</li></ul><h3>Multiple requirements</h3><p>Multiple method requirements may appear in one trait. The current separator between requirements is a newline. Each requirement has no body and no standalone semicolon. The trait itself closes with a final semicolon.</p><pre style=""><code class='codeblock'><span class='moth-code-contract'>NAMED</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>name</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+    <span class='moth-code-function'>id</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Non-receiver <code>This</code></h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>SAME</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>equals</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span>, other <span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Bool</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>This</code> as a non-receiver parameter must carry a name.</p><h3>Related concepts</h3><ul><li>For trait declarations see <a href="#trait-declarations">Trait declarations</a>.</li><li>For conformance matching see <a href="#conformance">Conformance</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -856,44 +875,44 @@ td {
 
 
 
-        <p>A type does not satisfy a trait because it happens to have the right methods. It must say so explicitly.</p><h3>Method plus conformance</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;
+        <p>A type does not satisfy a trait because it happens to have the right methods. It must say so explicitly.</p><h3>Method plus conformance</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    text <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    text <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-display <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> this.text
-;
+<span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.text
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span></code></pre><p><code>Label must DISPLAY_TEXT</code> is the explicit promise. Without it, the compiler does not treat <code>Label</code> as <code>DISPLAY_TEXT</code>.</p><h3>Shape must match exactly</h3><p>The method must have the same receiver mutability, parameter types, return type and return channel. Parameter names do not matter.</p><h3>Only same-file nominal types</h3><p>You can conform structs, choices and aligned generic constructors declared in the same file. You cannot conform builtins, imported types or types from another file.</p>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>DISPLAY_TEXT</span></code></pre><p><code>Label must DISPLAY_TEXT</code> is the explicit promise. Without it, the compiler does not treat <code>Label</code> as <code>DISPLAY_TEXT</code>.</p><h3>Shape must match exactly</h3><p>The method must have the same receiver mutability, parameter types, return type and return channel. Parameter names do not matter.</p><h3>Only same-file nominal types</h3><p>You can conform structs, choices and aligned generic constructors declared in the same file. You cannot conform builtins, imported types or types from another file.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>A conformance declaration states that a type implements one or more traits. Matching method shapes alone are not conformance.</p><h3>Syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    text <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span>
+    <p>A conformance declaration states that a type implements one or more traits. Matching method shapes alone are not conformance.</p><h3>Syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    text <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-display <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> this.text
-;
+<span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.text
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span></code></pre><h3>Exact contract</h3><ul><li>Conformance is explicit.</li><li>A matching method without <code>Type must TRAIT</code> is not conformance.</li><li>A conformance declaration is top-level.</li><li>It is bodyless.</li><li>It is newline-terminated and has no semicolon.</li><li>Several traits may be listed with commas.</li><li>Every requirement must resolve to a method with exact:<ul><li>receiver mutability</li><li>non-receiver parameter access mode</li><li>parameter types</li><li>return types</li><li>return channels</li></ul></li><li>Parameter names do not affect conformance.</li><li>Accepted user-authored targets are same-file structs, choices and aligned generic constructors.</li><li>Rejected targets include builtins, imported types, dependency package types, external opaque types and nominal types declared in another file.</li><li>Canonical evidence is reusable wherever both target type and trait are visible.</li><li>Conformance does not independently import receiver methods.</li><li>Concrete values use ordinary visible receiver methods.</li><li>Specialise-by-concrete-instance conformance is outside scope.</li></ul><h3>Multiple traits</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT,</span> <span class='moth-code-struct'>SERIALIZABLE</span></code></pre><h3>Aligned generic constructor conformance</h3><p>A generic type declared in the same file may declare conformance. The trait requirements use <code>This</code>. The source implementation uses the concrete receiver type and lowercase <code>this</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Box</span> type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    value <span class='moth-code-struct'>A,</span>
-<span class='moth-code-operator'>|</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>DISPLAY_TEXT</span></code></pre><h3>Exact contract</h3><ul><li>Conformance is explicit.</li><li>A matching method without <code>Type must TRAIT</code> is not conformance.</li><li>A conformance declaration is top-level.</li><li>It is bodyless.</li><li>It is newline-terminated and has no semicolon.</li><li>Several traits may be listed with commas.</li><li>Every requirement must resolve to a method with exact:<ul><li>receiver mutability</li><li>non-receiver parameter access mode</li><li>parameter types</li><li>return types</li><li>return channels</li></ul></li><li>Parameter names do not affect conformance.</li><li>Accepted user-authored targets are same-file structs, choices and aligned generic constructors.</li><li>Rejected targets include builtins, imported types, dependency package types, external opaque types and nominal types declared in another file.</li><li>Canonical evidence is reusable wherever both target type and trait are visible.</li><li>Conformance does not independently import receiver methods.</li><li>Concrete values use ordinary visible receiver methods.</li><li>Specialise-by-concrete-instance conformance is outside scope.</li></ul><h3>Multiple traits</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>DISPLAY_TEXT</span>, <span class='moth-code-contract'>SERIALIZABLE</span></code></pre><h3>Aligned generic constructor conformance</h3><p>A generic type declared in the same file may declare conformance. The trait requirements use <code>This</code>. The source implementation uses the concrete receiver type and lowercase <code>this</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    value <span class='moth-code-nominal'>A</span>,
+<span class='moth-code-delimiter'>|</span>
 
-<span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;
+<span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-display type <span class='moth-code-struct'>A</span> <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Box</span> of <span class='moth-code-struct'>A</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> box<span class='moth-code-parenthesis'>]</span>
-;
+display <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-nominal'>A</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> box<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Box</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span></code></pre><h3>Rejected targets</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Error: builtin types cannot declare user-authored conformance</span>
-<span class='moth-code-type'>Int</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span></code></pre><p>Use a local wrapper choice or struct when adapting a value owned by another file or package.</p><h3>Related concepts</h3><ul><li>For trait declarations see <a href="#trait-declarations">Trait declarations</a>.</li><li>For generic bounds see <a href="#generic-trait-bounds">Generic trait bounds</a>.</li><li>For receiver methods see <a href="../structs/#receiver-methods">Receiver methods</a>.</li></ul>
+<span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>DISPLAY_TEXT</span></code></pre><h3>Rejected targets</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Error: builtin types cannot declare user-authored conformance</span>
+<span class='moth-code-type'>Int</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>CASTABLE_TO_STRING</span></code></pre><p>Use a local wrapper choice or struct when adapting a value owned by another file or package.</p><h3>Related concepts</h3><ul><li>For trait declarations see <a href="#trait-declarations">Trait declarations</a>.</li><li>For generic bounds see <a href="#generic-trait-bounds">Generic trait bounds</a>.</li><li>For receiver methods see <a href="../structs/#receiver-methods">Receiver methods</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -945,47 +964,47 @@ display type <span class='moth-code-struct'>A</span> <span class='moth-code-oper
 
 
 
-        <p>A generic bound says: this placeholder type must provide a specific trait.</p><h3>One bound</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;
+        <p>A generic bound says: this placeholder type must provide a specific trait.</p><h3>One bound</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>Inside <code>render</code>, <code>Item</code> is known to have a <code>display</code> method.</p><h3>Several bounds</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>NAMED</span> must<span class='moth-code-operator'>:</span>
-    name <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;
+render <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>Item</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-delimiter'>|</span>item <span class='moth-code-nominal'>Item</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> item.<span class='moth-code-function'>display</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Inside <code>render</code>, <code>Item</code> is known to have a <code>display</code> method.</p><h3>Several bounds</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>NAMED</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>name</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-render_named type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> and <span class='moth-code-struct'>NAMED</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p><code>and</code> adds another bound to the same parameter.</p>
+render_named <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>Item</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-operator'>and</span> <span class='moth-code-contract'>NAMED</span> <span class='moth-code-delimiter'>|</span>item <span class='moth-code-nominal'>Item</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> item.<span class='moth-code-function'>display</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>and</code> adds another bound to the same parameter.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Generic bounds use traits to promise that a generic parameter provides certain behaviour inside the generic declaration.</p><h3>Syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>DISPLAY_TEXT</span> must<span class='moth-code-operator'>:</span>
-    display <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;
+    <p>Generic bounds use traits to promise that a generic parameter provides certain behaviour inside the generic declaration.</p><h3>Syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><h3>Exact contract</h3><ul><li>Generic bounds use <code>is</code>, not <code>must</code>.</li><li><code>and</code> adds bounds to one parameter.</li><li>Commas separate generic parameters.</li><li>Bounds apply to generic functions, structs and choices.</li><li>Each concrete argument requires visible reusable evidence.</li><li>Trait names are static contracts, not concrete type arguments.</li><li>A bound may enable a unique required receiver call inside the generic declaration.</li><li>Bound calls resolve statically to concrete source methods.</li><li>Concrete values still use ordinary visible methods.</li><li>Conformance does not import methods into scope.</li><li>Backends do not receive trait objects or runtime evidence tables.</li><li><code>where</code> syntax is rejected.</li><li>File-local evidence-backed dispatch outside reusable conformance is outside scope.</li></ul><h3>Multiple bounds on one parameter</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>NAMED</span> must<span class='moth-code-operator'>:</span>
-    name <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;
+render <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>Item</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-delimiter'>|</span>item <span class='moth-code-nominal'>Item</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> item.<span class='moth-code-function'>display</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Exact contract</h3><ul><li>Generic bounds use <code>is</code>, not <code>must</code>.</li><li><code>and</code> adds bounds to one parameter.</li><li>Commas separate generic parameters.</li><li>Bounds apply to generic functions, structs and choices.</li><li>Each concrete argument requires visible reusable evidence.</li><li>Trait names are static contracts, not concrete type arguments.</li><li>A bound may enable a unique required receiver call inside the generic declaration.</li><li>Bound calls resolve statically to concrete source methods.</li><li>Concrete values still use ordinary visible methods.</li><li>Conformance does not import methods into scope.</li><li>Backends do not receive trait objects or runtime evidence tables.</li><li><code>where</code> syntax is rejected.</li><li>File-local evidence-backed dispatch outside reusable conformance is outside scope.</li></ul><h3>Multiple bounds on one parameter</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>NAMED</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>name</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-render_named type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> and <span class='moth-code-struct'>NAMED</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><h3>Multiple parameters with bounds</h3><pre style=""><code class='codeblock'>render_pair type <span class='moth-code-struct'>A</span> is <span class='moth-code-struct'>DISPLAY_TEXT,</span> <span class='moth-code-struct'>B</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>left <span class='moth-code-struct'>A,</span> right <span class='moth-code-struct'>B</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-parenthesis'>[</span>left.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>, right.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>]</span>
-;</code></pre><h3>Evidence must be visible</h3><p>Concrete calls and instantiations require reusable evidence. User-authored reusable evidence originates from the canonical conformance declared with the same-file target type. Callers may reuse that evidence wherever both the type and trait are visible.</p><p>Compiler-owned evidence also exists for the builtin cast table.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    text <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span>
+render_named <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>Item</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-operator'>and</span> <span class='moth-code-contract'>NAMED</span> <span class='moth-code-delimiter'>|</span>item <span class='moth-code-nominal'>Item</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> item.<span class='moth-code-function'>display</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Multiple parameters with bounds</h3><pre style=""><code class='codeblock'>render_pair <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span>, <span class='moth-code-nominal'>B</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-delimiter'>|</span>left <span class='moth-code-nominal'>A</span>, right <span class='moth-code-nominal'>B</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>left.<span class='moth-code-function'>display</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>, right.<span class='moth-code-function'>display</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Evidence must be visible</h3><p>Concrete calls and instantiations require reusable evidence. User-authored reusable evidence originates from the canonical conformance declared with the same-file target type. Callers may reuse that evidence wherever both the type and trait are visible.</p><p>Compiler-owned evidence also exists for the builtin cast table.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    text <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-display <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> this.text
-;
+<span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.text
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>DISPLAY_TEXT</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>DISPLAY_TEXT</span>
 
-value <span class='moth-code-operator'>=</span> render<span class='moth-code-parenthesis'>(</span><span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;ok&quot;</span><span class='moth-code-parenthesis'>)</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Related concepts</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For generics see <a href="../generics">Generics</a>.</li></ul>
+value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>render</span><span class='moth-code-delimiter'>(</span><span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;ok&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Related concepts</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For generics see <a href="../generics">Generics</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1037,27 +1056,27 @@ value <span class='moth-code-operator'>=</span> render<span class='moth-code-par
 
 
 
-        <p>Some trait contracts are mutually exclusive. A type cannot claim both.</p><h3>Two ways to produce text</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>TEXT</span> must<span class='moth-code-operator'>:</span>
-    text <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;
+        <p>Some trait contracts are mutually exclusive. A type cannot claim both.</p><h3>Two ways to produce text</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>text</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>FALLIBLE_TEXT</span> must<span class='moth-code-operator'>:</span>
-    try_text <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span>
-;
+<span class='moth-code-contract'>FALLIBLE_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>try_text</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>TEXT</span> must not <span class='moth-code-struct'>FALLIBLE_TEXT</span></code></pre><p><code>TEXT</code> promises a <code>String</code> directly. <code>FALLIBLE_TEXT</code> promises a <code>String</code> or an error. A type cannot be both at once.</p><h3>Symmetric</h3><p>The relation goes both ways. Saying <code>A must not B</code> also means <code>B must not A</code> in effect.</p>
+<span class='moth-code-contract'>TEXT</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-operator'>not</span> <span class='moth-code-contract'>FALLIBLE_TEXT</span></code></pre><p><code>TEXT</code> promises a <code>String</code> directly. <code>FALLIBLE_TEXT</code> promises a <code>String</code> or an error. A type cannot be both at once.</p><h3>Symmetric</h3><p>The relation goes both ways. Saying <code>A must not B</code> also means <code>B must not A</code> in effect.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Trait incompatibility records that two traits cannot both be claimed by the same concrete type.</p><h3>Syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>TEXT</span> must<span class='moth-code-operator'>:</span>
-    text <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
-;
+    <p>Trait incompatibility records that two traits cannot both be claimed by the same concrete type.</p><h3>Syntax</h3><pre style=""><code class='codeblock'><span class='moth-code-contract'>TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>text</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>FALLIBLE_TEXT</span> must<span class='moth-code-operator'>:</span>
-    try_text <span class='moth-code-operator'>|</span><span class='moth-code-struct'>This</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span>
-;
+<span class='moth-code-contract'>FALLIBLE_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>try_text</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>TEXT</span> must not <span class='moth-code-struct'>FALLIBLE_TEXT</span></code></pre><h3>Exact contract</h3><ul><li>Incompatibility is trait metadata.</li><li>It is symmetric.</li><li>A concrete type cannot explicitly conform to both sides.</li><li>Several incompatible traits may be listed.</li><li>It affects conformance validation only.</li><li>It does not:<ul><li>add requirements</li><li>imply negative conformance</li><li>create trait composition</li><li>create inheritance</li><li>affect runtime dispatch</li></ul></li></ul><h3>Compiler-owned pairs</h3><p>The compiler uses <code>must not</code> for incompatible core cast trait pairs. For example, <code>CASTABLE_TO_STRING</code> and <code>TRY_CASTABLE_TO_STRING</code> cannot both be claimed for the same source type. The conforming type is the cast source type. The trait name identifies the cast target.</p><h3>Related concepts</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For core cast traits see <a href="#core-cast-traits">Core cast traits</a>.</li></ul>
+<span class='moth-code-contract'>TEXT</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-operator'>not</span> <span class='moth-code-contract'>FALLIBLE_TEXT</span></code></pre><h3>Exact contract</h3><ul><li>Incompatibility is trait metadata.</li><li>It is symmetric.</li><li>A concrete type cannot explicitly conform to both sides.</li><li>Several incompatible traits may be listed.</li><li>It affects conformance validation only.</li><li>It does not:<ul><li>add requirements</li><li>imply negative conformance</li><li>create trait composition</li><li>create inheritance</li><li>affect runtime dispatch</li></ul></li></ul><h3>Compiler-owned pairs</h3><p>The compiler uses <code>must not</code> for incompatible core cast trait pairs. For example, <code>CASTABLE_TO_STRING</code> and <code>TRY_CASTABLE_TO_STRING</code> cannot both be claimed for the same source type. The conforming type is the cast source type. The trait name identifies the cast target.</p><h3>Related concepts</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For core cast traits see <a href="#core-cast-traits">Core cast traits</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1109,64 +1128,64 @@ value <span class='moth-code-operator'>=</span> render<span class='moth-code-par
 
 
 
-        <p>The compiler owns a fixed set of traits that let user types work with <code>cast</code>.</p><h3>String conversion</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    text <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span>
+        <p>The compiler owns a fixed set of traits that let user types work with <code>cast</code>.</p><h3>String conversion</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    text <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-to_string <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> this.text
-;
+<span class='moth-code-function'>to_string</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.text
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>CASTABLE_TO_STRING</span>
 
-value <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;docs&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>CASTABLE_TO_STRING</code> means: this type can become a <code>String</code> without failing.</p><h3>Fallible conversion</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    text <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span>
+value <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;docs&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p><code>CASTABLE_TO_STRING</code> means: this type can become a <code>String</code> without failing.</p><h3>Fallible conversion</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    text <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-try_to_int <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span><span class='moth-code-operator'>!</span> <span class='moth-code-struct'>Error</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;not a number&quot;</span><span class='moth-code-parenthesis'>)</span>
-;
+<span class='moth-code-function'>try_to_int</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return!</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;not a number&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>TRY_CASTABLE_TO_INT</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>TRY_CASTABLE_TO_INT</span>
 
-number <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;42&quot;</span><span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    then <span class='moth-code-number'>0</span>
-;</code></pre><p><code>TRY_CASTABLE_TO_INT</code> means: this type may become an <code>Int</code>, but it can also fail. The method signals failure with <code>return!</code> and the caller recovers with <code>cast ... catch</code>.</p>
+number <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;42&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>err</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>TRY_CASTABLE_TO_INT</code> means: this type may become an <code>Int</code>, but it can also fail. The method signals failure with <code>return!</code> and the caller recovers with <code>cast ... catch</code>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>The compiler owns a closed set of static cast traits. They provide source evidence for explicit <code>cast</code> and <code>cast!</code> conversions.</p><h3>Trait table</h3><p>Each trait requires one receiver method:</p><ul><li><code>CASTABLE_TO_INT</code> requires <code>to_int |This| -&gt; Int</code></li><li><code>TRY_CASTABLE_TO_INT</code> requires <code>try_to_int |This| -&gt; Int, Error!</code></li><li><code>CASTABLE_TO_FLOAT</code> requires <code>to_float |This| -&gt; Float</code></li><li><code>TRY_CASTABLE_TO_FLOAT</code> requires <code>try_to_float |This| -&gt; Float, Error!</code></li><li><code>CASTABLE_TO_BOOL</code> requires <code>to_bool |This| -&gt; Bool</code></li><li><code>TRY_CASTABLE_TO_BOOL</code> requires <code>try_to_bool |This| -&gt; Bool, Error!</code></li><li><code>CASTABLE_TO_STRING</code> requires <code>to_string |This| -&gt; String</code></li><li><code>TRY_CASTABLE_TO_STRING</code> requires <code>try_to_string |This| -&gt; String, Error!</code></li><li><code>CASTABLE_TO_CHAR</code> requires <code>to_char |This| -&gt; Char</code></li><li><code>TRY_CASTABLE_TO_CHAR</code> requires <code>try_to_char |This| -&gt; Char, Error!</code></li><li><code>CASTABLE_TO_ERROR</code> requires <code>to_error |This| -&gt; Error</code></li><li><code>TRY_CASTABLE_TO_ERROR</code> requires <code>try_to_error |This| -&gt; Error, Error!</code></li></ul><h3>Contract</h3><ul><li>These traits resolve without imports.</li><li>They cannot be redeclared, imported, exported, aliased or shadowed.</li><li>They cannot be used as values.</li><li>The compiler registers builtin evidence for the builtin cast table.</li><li>Same-file nominal source types and aligned generic constructors may provide evidence.</li><li>Source method implementations use lowercase <code>this</code> and the concrete receiver type.</li><li>Explicit conformance is required.</li><li>Infallible and fallible pairs for one target are incompatible.</li><li>Evidence resolves before HIR.</li><li>The traits prove source evidence only.</li><li>They do not create user-defined target types or a general conversion framework.</li></ul><h3>Example</h3><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    text <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span>
+    <p>The compiler owns a closed set of static cast traits. They provide source evidence for explicit <code>cast</code> and <code>cast!</code> conversions.</p><h3>Trait table</h3><p>Each trait requires one receiver method:</p><ul><li><code>CASTABLE_TO_INT</code> requires <code>to_int |This| -&gt; Int</code></li><li><code>TRY_CASTABLE_TO_INT</code> requires <code>try_to_int |This| -&gt; Int, Error!</code></li><li><code>CASTABLE_TO_FLOAT</code> requires <code>to_float |This| -&gt; Float</code></li><li><code>TRY_CASTABLE_TO_FLOAT</code> requires <code>try_to_float |This| -&gt; Float, Error!</code></li><li><code>CASTABLE_TO_BOOL</code> requires <code>to_bool |This| -&gt; Bool</code></li><li><code>TRY_CASTABLE_TO_BOOL</code> requires <code>try_to_bool |This| -&gt; Bool, Error!</code></li><li><code>CASTABLE_TO_STRING</code> requires <code>to_string |This| -&gt; String</code></li><li><code>TRY_CASTABLE_TO_STRING</code> requires <code>try_to_string |This| -&gt; String, Error!</code></li><li><code>CASTABLE_TO_CHAR</code> requires <code>to_char |This| -&gt; Char</code></li><li><code>TRY_CASTABLE_TO_CHAR</code> requires <code>try_to_char |This| -&gt; Char, Error!</code></li><li><code>CASTABLE_TO_ERROR</code> requires <code>to_error |This| -&gt; Error</code></li><li><code>TRY_CASTABLE_TO_ERROR</code> requires <code>try_to_error |This| -&gt; Error, Error!</code></li></ul><h3>Contract</h3><ul><li>These traits resolve without imports.</li><li>They cannot be redeclared, imported, exported, aliased or shadowed.</li><li>They cannot be used as values.</li><li>The compiler registers builtin evidence for the builtin cast table.</li><li>Same-file nominal source types and aligned generic constructors may provide evidence.</li><li>Source method implementations use lowercase <code>this</code> and the concrete receiver type.</li><li>Explicit conformance is required.</li><li>Infallible and fallible pairs for one target are incompatible.</li><li>Evidence resolves before HIR.</li><li>The traits prove source evidence only.</li><li>They do not create user-defined target types or a general conversion framework.</li></ul><h3>Example</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    text <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-to_string <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> this.text
-;
+<span class='moth-code-function'>to_string</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.text
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>CASTABLE_TO_STRING</span>
 
-value <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;docs&quot;</span><span class='moth-code-parenthesis'>)</span></code></pre><h3>Infallible versus fallible</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Infallible: source always produces the target</span>
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>CASTABLE_TO_STRING</span>
+value <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;docs&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Infallible versus fallible</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Infallible: source always produces the target</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>CASTABLE_TO_STRING</span>
 
 <span class='moth-code-comment'>-- Fallible: source may produce the target or an error</span>
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>TRY_CASTABLE_TO_INT</span></code></pre><p>A fallible conformance requires the matching <code>try_to_*</code> method. The method returns success with <code>return</code> and failure with <code>return!</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>|</span>
-    text <span class='moth-code-struct'>String,</span>
-<span class='moth-code-operator'>|</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>TRY_CASTABLE_TO_INT</span></code></pre><p>A fallible conformance requires the matching <code>try_to_*</code> method. The method returns success with <code>return</code> and failure with <code>return!</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    text <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-try_to_int <span class='moth-code-operator'>|</span>this <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast<span class='moth-code-operator'>!</span> this.text
+<span class='moth-code-function'>try_to_int</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast!</span> <span class='moth-code-keyword'>this</span>.text
     <span class='moth-code-keyword'>return</span> value
-;
+<span class='moth-code-delimiter'>;</span>
 
-<span class='moth-code-struct'>Label</span> must <span class='moth-code-struct'>TRY_CASTABLE_TO_INT</span>
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>TRY_CASTABLE_TO_INT</span>
 
 <span class='moth-code-comment'>-- Local recovery with `cast ... catch`.</span>
-number <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast <span class='moth-code-struct'>Label</span><span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;42&quot;</span><span class='moth-code-parenthesis'>)</span> catch <span class='moth-code-operator'>|</span>err<span class='moth-code-operator'>|</span><span class='moth-code-operator'>:</span>
-    then <span class='moth-code-number'>0</span>
-;</code></pre><p>Propagation through a compatible <code>Error!</code> function uses <code>cast!</code>:</p><pre style=""><code class='codeblock'>parse_label <span class='moth-code-operator'>|</span>label <span class='moth-code-struct'>Label</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>Int,</span> <span class='moth-code-struct'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-operator'>:</span>
-    value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> cast<span class='moth-code-operator'>!</span> label
+number <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;42&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>err</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Propagation through a compatible <code>Error!</code> function uses <code>cast!</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>parse_label</span> <span class='moth-code-delimiter'>|</span>label <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast!</span> label
     <span class='moth-code-keyword'>return</span> value
-;</code></pre><p><code>cast!</code> and <code>catch</code> are mutually exclusive. <code>cast! ... catch</code> is rejected.</p><h3>Related concepts</h3><ul><li>For cast target selection and fallible handling see <a href="../casts">Casts</a>.</li><li>For trait incompatibility see <a href="#trait-incompatibility">Trait incompatibility</a>.</li></ul>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>cast!</code> and <code>catch</code> are mutually exclusive. <code>cast! ... catch</code> is rejected.</p><h3>Related concepts</h3><ul><li>For cast target selection and fallible handling see <a href="../casts">Casts</a>.</li><li>For trait incompatibility see <a href="#trait-incompatibility">Trait incompatibility</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1218,23 +1237,23 @@ number <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>
 
 
 
-        <p>Traits are for static reuse, not runtime flexibility.</p><h3>Static reuse</h3><pre style=""><code class='codeblock'>render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-keyword'>return</span> item.display<span class='moth-code-parenthesis'>(</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>The compiler knows at compile time which concrete <code>display</code> method to call.</p><h3>Runtime heterogeneity with choices</h3><p>When you need different types at runtime, use a choice instead.</p><pre style=""><code class='codeblock'><span class='moth-code-struct'>Renderable</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-struct'>LabelItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>|</span>,
-    <span class='moth-code-struct'>ButtonItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Button</span> <span class='moth-code-operator'>|</span>,
-;</code></pre><p>A choice is a tagged union. The variant tag decides which code to run.</p>
+        <p>Traits are for static reuse, not runtime flexibility.</p><h3>Static reuse</h3><pre style=""><code class='codeblock'>render <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>Item</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-delimiter'>|</span>item <span class='moth-code-nominal'>Item</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> item.<span class='moth-code-function'>display</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The compiler knows at compile time which concrete <code>display</code> method to call.</p><h3>Runtime heterogeneity with choices</h3><p>When you need different types at runtime, use a choice instead.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Renderable</span> <span class='moth-code-operator'>::</span>
+    <span class='moth-code-nominal'>LabelItem</span> <span class='moth-code-delimiter'>|</span> value <span class='moth-code-nominal'>Label</span> <span class='moth-code-delimiter'>|</span>,
+    <span class='moth-code-nominal'>ButtonItem</span> <span class='moth-code-delimiter'>|</span> value <span class='moth-code-nominal'>Button</span> <span class='moth-code-delimiter'>|</span>,
+<span class='moth-code-delimiter'>;</span></code></pre><p>A choice is a tagged union. The variant tag decides which code to run.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>Moth traits stay static. They name behaviour before runtime begins and stay out of the type system as runtime values.</p><h3>Static model</h3><p>Trait names are valid in:</p><ul><li>trait declarations</li><li>conformance declarations</li><li>generic bounds</li></ul><p>Trait names are invalid as ordinary:</p><ul><li>variables</li><li>parameters</li><li>fields</li><li>returns</li><li>collection elements</li><li>map types</li><li>choice payloads</li><li>alias targets</li></ul><p>Use a generic bound for static reuse. Use a choice for runtime heterogeneity.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Static reuse</span>
-render type <span class='moth-code-struct'>Item</span> is <span class='moth-code-struct'>DISPLAY_TEXT</span> <span class='moth-code-operator'>|</span>item <span class='moth-code-struct'>Item</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span>
+render <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>Item</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-delimiter'>|</span>item <span class='moth-code-nominal'>Item</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
 
 <span class='moth-code-comment'>-- Runtime heterogeneity</span>
-<span class='moth-code-struct'>Renderable</span> <span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>
-    <span class='moth-code-struct'>LabelItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Label</span> <span class='moth-code-operator'>|</span>,
-    <span class='moth-code-struct'>ButtonItem</span> <span class='moth-code-operator'>|</span> value <span class='moth-code-struct'>Button</span> <span class='moth-code-operator'>|</span>,
-;</code></pre><p>Static traits are backend-independent. Backends do not receive trait objects, erased dispatch or runtime evidence tables.</p><h3>Deferred</h3><ul><li>static non-method requirements</li><li>additional compiler-owned builtin conformance families beyond the current closed core-cast evidence table</li><li>broader standard trait taxonomy that does not create runtime trait values</li></ul><h3>Outside scope</h3><ul><li>default methods</li><li>associated types and constants</li><li>inheritance</li><li>trait aliases and composition</li><li>generic traits and generic methods</li><li>blanket, conditional, negative or specialised conformance</li><li>structural conformance</li><li>dynamic trait values and trait objects</li><li>downcasting and reflection</li><li>output coercion</li><li>operator integration</li><li>automatic primitive conformance</li><li>derive-style hashing, ordering, formatting, iteration or serialization families</li></ul><p>Do not treat compiler-owned test-only or scaffold traits as public language features.</p><h3>Related concepts</h3><ul><li>For runtime heterogeneity see <a href="../choices">Choices</a>.</li><li>For generic bounds see <a href="#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
+<span class='moth-code-nominal'>Renderable</span> <span class='moth-code-operator'>::</span>
+    <span class='moth-code-nominal'>LabelItem</span> <span class='moth-code-delimiter'>|</span> value <span class='moth-code-nominal'>Label</span> <span class='moth-code-delimiter'>|</span>,
+    <span class='moth-code-nominal'>ButtonItem</span> <span class='moth-code-delimiter'>|</span> value <span class='moth-code-nominal'>Button</span> <span class='moth-code-delimiter'>|</span>,
+<span class='moth-code-delimiter'>;</span></code></pre><p>Static traits are backend-independent. Backends do not receive trait objects, erased dispatch or runtime evidence tables.</p><h3>Deferred</h3><ul><li>static non-method requirements</li><li>additional compiler-owned builtin conformance families beyond the current closed core-cast evidence table</li><li>broader standard trait taxonomy that does not create runtime trait values</li></ul><h3>Outside scope</h3><ul><li>default methods</li><li>associated types and constants</li><li>inheritance</li><li>trait aliases and composition</li><li>generic traits and generic methods</li><li>blanket, conditional, negative or specialised conformance</li><li>structural conformance</li><li>dynamic trait values and trait objects</li><li>downcasting and reflection</li><li>output coercion</li><li>operator integration</li><li>automatic primitive conformance</li><li>derive-style hashing, ordering, formatting, iteration or serialization families</li></ul><p>Do not treat compiler-owned test-only or scaffold traits as public language features.</p><h3>Related concepts</h3><ul><li>For runtime heterogeneity see <a href="../choices">Choices</a>.</li><li>For generic bounds see <a href="#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

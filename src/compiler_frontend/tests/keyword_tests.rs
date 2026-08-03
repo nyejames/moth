@@ -1,4 +1,5 @@
 use crate::compiler_frontend::keywords::{
+    ClassifiedSourceWord, SourceWordClass, attached_bang_keyword_token_kind, classify_source_word,
     is_identifier_continue, is_keyword, is_valid_identifier, keyword_token_kind,
 };
 use crate::compiler_frontend::symbols::identifier_policy::keyword_shadow_match;
@@ -60,4 +61,148 @@ fn identifier_policy_matches_tokenizer_identifier_characters() {
     assert!(is_valid_identifier("_valid_12"));
     assert!(!is_valid_identifier("12_invalid"));
     assert!(!is_valid_identifier("bad-name"));
+}
+
+#[test]
+fn source_word_classifier_maps_keyword_words() {
+    let keywords = [
+        ("import", TokenKind::Import),
+        ("export", TokenKind::Export),
+        ("if", TokenKind::If),
+        ("return", TokenKind::Return),
+        ("catch", TokenKind::Catch),
+        ("then", TokenKind::Then),
+        ("else", TokenKind::Else),
+        ("block", TokenKind::Block),
+        ("checked", TokenKind::Checked),
+        ("cast", TokenKind::Cast),
+        ("as", TokenKind::As),
+        ("type", TokenKind::Type),
+        ("of", TokenKind::Of),
+        ("must", TokenKind::Must),
+        ("this", TokenKind::This),
+        ("This", TokenKind::TraitThis),
+        ("async", TokenKind::Async),
+        ("yield", TokenKind::Yield),
+        ("loop", TokenKind::Loop),
+        ("to", TokenKind::ExclusiveRange),
+        ("by", TokenKind::By),
+        ("break", TokenKind::Break),
+        ("continue", TokenKind::Continue),
+        ("copy", TokenKind::Copy),
+        ("assert", TokenKind::Assert),
+    ];
+
+    for (source, expected_kind) in keywords {
+        let classified = classify_source_word(source)
+            .unwrap_or_else(|| panic!("expected {source:?} to classify as a keyword"));
+        assert_eq!(classified.class, SourceWordClass::Keyword);
+        assert_eq!(classified.token_kind, expected_kind);
+        assert_eq!(keyword_token_kind(source), Some(expected_kind));
+    }
+}
+
+#[test]
+fn source_word_classifier_maps_word_operator_words() {
+    let operators = [
+        ("is", TokenKind::Is),
+        ("not", TokenKind::Not),
+        ("and", TokenKind::And),
+        ("or", TokenKind::Or),
+    ];
+
+    for (source, expected_kind) in operators {
+        let classified = classify_source_word(source)
+            .unwrap_or_else(|| panic!("expected {source:?} to classify as a word operator"));
+        assert_eq!(classified.class, SourceWordClass::WordOperator);
+        assert_eq!(classified.token_kind, expected_kind);
+        assert_eq!(keyword_token_kind(source), Some(expected_kind));
+    }
+}
+
+#[test]
+fn source_word_classifier_maps_literal_words() {
+    let literals = [
+        ("true", TokenKind::BoolLiteral(true)),
+        ("false", TokenKind::BoolLiteral(false)),
+        ("none", TokenKind::NoneLiteral),
+    ];
+
+    for (source, expected_kind) in literals {
+        let classified = classify_source_word(source)
+            .unwrap_or_else(|| panic!("expected {source:?} to classify as a literal"));
+        assert_eq!(classified.class, SourceWordClass::Literal);
+        assert_eq!(classified.token_kind, expected_kind);
+        assert_eq!(keyword_token_kind(source), Some(expected_kind));
+    }
+}
+
+#[test]
+fn source_word_classifier_maps_builtin_type_words() {
+    let types = [
+        ("Int", TokenKind::DatatypeInt),
+        ("Float", TokenKind::DatatypeFloat),
+        ("Bool", TokenKind::DatatypeBool),
+        ("String", TokenKind::DatatypeString),
+        ("Char", TokenKind::DatatypeChar),
+        ("None", TokenKind::DatatypeNone),
+        ("True", TokenKind::DatatypeTrue),
+        ("False", TokenKind::DatatypeFalse),
+    ];
+
+    for (source, expected_kind) in types {
+        let classified = classify_source_word(source)
+            .unwrap_or_else(|| panic!("expected {source:?} to classify as a builtin type"));
+        assert_eq!(classified.class, SourceWordClass::BuiltinType);
+        assert_eq!(classified.token_kind, expected_kind);
+        assert_eq!(keyword_token_kind(source), Some(expected_kind));
+    }
+}
+
+#[test]
+fn source_word_classifier_is_case_sensitive() {
+    assert_eq!(classify_source_word("Import"), None);
+    assert_eq!(classify_source_word("RETURN"), None);
+    assert_eq!(
+        classify_source_word("Int"),
+        Some(ClassifiedSourceWord {
+            token_kind: TokenKind::DatatypeInt,
+            class: SourceWordClass::BuiltinType,
+        })
+    );
+    assert_eq!(classify_source_word("int"), None);
+    assert_eq!(classify_source_word("TRUE"), None);
+    assert_eq!(
+        classify_source_word("none"),
+        Some(ClassifiedSourceWord {
+            token_kind: TokenKind::NoneLiteral,
+            class: SourceWordClass::Literal,
+        })
+    );
+}
+
+#[test]
+fn source_word_classifier_keeps_planned_and_invalid_words_unclassified() {
+    for source in ["in", "fn", "group", "into", "where"] {
+        assert_eq!(
+            classify_source_word(source),
+            None,
+            "{source:?} must stay unclassified"
+        );
+        assert_eq!(keyword_token_kind(source), None);
+    }
+}
+
+#[test]
+fn attached_bang_keyword_authority_covers_return_and_cast() {
+    assert_eq!(
+        attached_bang_keyword_token_kind("return"),
+        Some(TokenKind::ReturnBang)
+    );
+    assert_eq!(
+        attached_bang_keyword_token_kind("cast"),
+        Some(TokenKind::CastBang)
+    );
+    assert_eq!(attached_bang_keyword_token_kind("if"), None);
+    assert_eq!(attached_bang_keyword_token_kind("return!"), None);
 }

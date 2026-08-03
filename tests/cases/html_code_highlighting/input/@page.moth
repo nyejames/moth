@@ -1,0 +1,80 @@
+import @html { codeblock }
+
+-- The two code blocks below exercise the full shared role vocabulary through the
+-- compile-time HTML formatter. The Rust block proves non-Moth profiles consume
+-- the same general palette classes.
+
+#[$md:
+    [codeblock, $code("moth"):
+        -- trait declaration
+        DISPLAY_TEXT must:
+            display |this Label| -> String
+        ;
+
+        -- nominal types
+        Label = |
+            text String,
+            count Int,
+        |
+
+        -- conformances
+        Label must DISPLAY_TEXT
+        Label must SERIALIZABLE and COMPARABLE
+        Color must not FROZEN
+
+        -- functions, calls and methods
+        render |title String| -> String:
+            return title
+        ;
+
+        render_page |value Label| -> String:
+            return value.display()
+        ;
+
+        -- directives and paths
+        import @core/io {print, line}
+        import @web/canvas {Canvas, draw_rect}
+        page #= $slot("title")
+
+        -- operators and numbers
+        total //= 1_000
+        total += 5
+        ratio #= 1.5e-6
+        range 1..10
+        status -> ready
+        value => next
+        TypeName :: Variant
+
+        -- deferred and planned words
+        async load |url String| -> String:
+            yield result
+            return result
+        ;
+
+        group_value = 1
+        into_value = 2
+
+        -- ALL_CAPS constants stay plain outside contract context
+        PI #= 3.14159
+        TAU #= 6.28318
+        E #= 2.71828
+
+        -- builtin namespace, Error, attached bangs
+        io.line("hello")
+        io = "plain variable"
+        error_message #= Error("failed")
+        return! value
+        cast! value
+    ]
+
+    [codeblock, $code("rust"):
+        trait Display {
+            fn render(&self) -> String;
+        }
+
+        fn main() -> String {
+            let value = true;
+            value.to_string()
+        }
+    ]
+]

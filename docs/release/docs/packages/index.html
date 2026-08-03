@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -322,7 +341,7 @@ td {
 <style>.doc-level,
 .doc-pager {
     --doc-level-accent: #3d4e8e;
-    --doc-level-accent-hover: #336b77;
+    --doc-level-accent-hover: #44a0cf;
     --doc-level-border: #d7d9df;
     --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
@@ -720,7 +739,7 @@ td {
 
 
 
-        <p>Imports make names visible. Every source import resolves from the importing file&#39;s owning module root, not the file&#39;s directory.</p><h3>A module-root-relative import</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>card <span class='moth-code-parenthesis'>{</span>render_card<span class='moth-code-parenthesis'>}</span></code></pre><p><code>@card</code> resolves to <code>card.moth</code> under the importing file&#39;s owning module root, regardless of how deep the importing file is inside the module.</p><h3>A support package import</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>markdown <span class='moth-code-parenthesis'>{</span>render<span class='moth-code-parenthesis'>}</span></code></pre><p><code>@markdown</code> resolves to a scoped <code>+*.moth</code> support package visible in the importing module&#39;s lexical scope.</p>
+        <p>Imports make names visible. Every source import resolves from the importing file&#39;s owning module root, not the file&#39;s directory.</p><h3>A module-root-relative import</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @card<span class='moth-code-string'>@card</span> <span class='moth-code-delimiter'>{</span>render_card<span class='moth-code-delimiter'>}</span></code></pre><p><code>@card</code> resolves to <code>card.moth</code> under the importing file&#39;s owning module root, regardless of how deep the importing file is inside the module.</p><h3>A support package import</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @markdown<span class='moth-code-string'>@markdown</span> <span class='moth-code-delimiter'>{</span>render<span class='moth-code-delimiter'>}</span></code></pre><p><code>@markdown</code> resolves to a scoped <code>+*.moth</code> support package visible in the importing module&#39;s lexical scope.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -776,28 +795,28 @@ td {
 
 
 
-        <p>Grouped imports bring multiple symbols. Namespace imports bring a whole surface.</p><h3>Two colliding render symbols</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>blog <span class='moth-code-parenthesis'>{</span> render <span class='moth-code-keyword'>as</span> render_blog <span class='moth-code-parenthesis'>}</span>
-import <span class='moth-code-operator'>@</span>docs <span class='moth-code-parenthesis'>{</span> render <span class='moth-code-keyword'>as</span> render_docs <span class='moth-code-parenthesis'>}</span></code></pre><p>Two modules both export <code>render</code>. Aliases keep them apart.</p><h3>A namespace alias</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-keyword'>as</span> math
+        <p>Grouped imports bring multiple symbols. Namespace imports bring a whole surface.</p><h3>Two colliding render symbols</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @blog<span class='moth-code-string'>@blog</span> <span class='moth-code-delimiter'>{</span> render <span class='moth-code-keyword'>as</span> render_blog <span class='moth-code-delimiter'>}</span>
+<span class='moth-code-keyword'>import</span> @docs<span class='moth-code-string'>@docs</span> <span class='moth-code-delimiter'>{</span> render <span class='moth-code-keyword'>as</span> render_docs <span class='moth-code-delimiter'>}</span></code></pre><p>Two modules both export <code>render</code>. Aliases keep them apart.</p><h3>A namespace alias</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/math<span class='moth-code-string'>@core/math</span> <span class='moth-code-keyword'>as</span> math
 
-result <span class='moth-code-operator'>=</span> math.sin<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>1.0</span><span class='moth-code-parenthesis'>)</span></code></pre><p><code>math</code> gives you field access to the whole math package.</p>
+result <span class='moth-code-operator'>=</span> math.<span class='moth-code-function'>sin</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1.0</span><span class='moth-code-delimiter'>)</span></code></pre><p><code>math</code> gives you field access to the whole math package.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Grouped and namespace imports provide compact syntax for importing multiple symbols or a whole declaration surface.</p><h3>Grouped symbol imports</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>sin, cos, <span class='moth-code-struct'>PI</span><span class='moth-code-parenthesis'>}</span>
+    <p>Grouped and namespace imports provide compact syntax for importing multiple symbols or a whole declaration surface.</p><h3>Grouped symbol imports</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/math<span class='moth-code-string'>@core/math</span> <span class='moth-code-delimiter'>{</span>sin, cos, PI<span class='moth-code-delimiter'>}</span>
 
-import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>
+<span class='moth-code-keyword'>import</span> @components<span class='moth-code-string'>@components</span> <span class='moth-code-delimiter'>{</span>
     render <span class='moth-code-keyword'>as</span> render_component,
-    <span class='moth-code-struct'>Button</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>UiButton,</span>
-    <span class='moth-code-struct'>Card,</span>
-<span class='moth-code-parenthesis'>}</span></code></pre><p>Each entry in a grouped import brings one symbol into the file. <code>as</code> creates a file-local alias. Grouped imports expand into individual symbol imports.</p><h3>Namespace imports</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math
+    <span class='moth-code-nominal'>Button</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>UiButton</span>,
+    <span class='moth-code-nominal'>Card</span>,
+<span class='moth-code-delimiter'>}</span></code></pre><p>Each entry in a grouped import brings one symbol into the file. <code>as</code> creates a file-local alias. Grouped imports expand into individual symbol imports.</p><h3>Namespace imports</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/math<span class='moth-code-string'>@core/math</span>
 
 angle <span class='moth-code-operator'>=</span> math.PI
-result <span class='moth-code-operator'>=</span> math.sin<span class='moth-code-parenthesis'>(</span>angle<span class='moth-code-parenthesis'>)</span></code></pre><p>A namespace import brings the whole surface as a field-access-only record. Use <code>math.sin(1.0)</code> for values and <code>math.PI</code> for constants, but do not pass the namespace record itself as a value.</p><h3>Namespace alias</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-keyword'>as</span> math
+result <span class='moth-code-operator'>=</span> math.<span class='moth-code-function'>sin</span><span class='moth-code-delimiter'>(</span>angle<span class='moth-code-delimiter'>)</span></code></pre><p>A namespace import brings the whole surface as a field-access-only record. Use <code>math.sin(1.0)</code> for values and <code>math.PI</code> for constants, but do not pass the namespace record itself as a value.</p><h3>Namespace alias</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/math<span class='moth-code-string'>@core/math</span> <span class='moth-code-keyword'>as</span> math
 
-import <span class='moth-code-operator'>@</span>vendor<span class='moth-code-operator'>/</span>drawing.js <span class='moth-code-keyword'>as</span> drawing</code></pre><p>A namespace alias gives the namespace a local name. This is the standard form for external package namespaces.</p><h3>Grouped symbol alias</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>
+<span class='moth-code-keyword'>import</span> @vendor/drawing.js<span class='moth-code-string'>@vendor/drawing.js</span> <span class='moth-code-keyword'>as</span> drawing</code></pre><p>A namespace alias gives the namespace a local name. This is the standard form for external package namespaces.</p><h3>Grouped symbol alias</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/math<span class='moth-code-string'>@core/math</span> <span class='moth-code-delimiter'>{</span>
     sin <span class='moth-code-keyword'>as</span> sine,
-    <span class='moth-code-struct'>PI</span> <span class='moth-code-keyword'>as</span> pi,
-<span class='moth-code-parenthesis'>}</span></code></pre><p>Each entry can have its own alias. There is no trailing group-level alias.</p><h3>Importable symbol categories</h3><ul><li>functions</li><li>structs</li><li>choices</li><li>type aliases</li><li>traits</li><li>compile-time constants</li></ul><p>Runtime top-level bindings are not importable. See <a href="#module-visibility">Module visibility</a>.</p><h3>Namespaced access</h3><p>Source and module namespace imports are shallow. External package namespaces can expose nested package-local symbols. Use field-access syntax on the namespace record, but do not pass the namespace itself as a first-class value. Source-authored receiver methods are called through receiver-call syntax rather than as namespace fields.</p><h3>Imports are compile-time declarations</h3><p>Import records are not first-class runtime values. They exist at compile time to make names visible.</p><h3>Collision and no-shadowing policy</h3><ul><li>Ordinary import aliases are file-local.</li><li>An import alias cannot hide an existing visible name.</li><li>If <code>render</code> is already declared in the file, <code>import @other { render }</code> is an error. Pick a different local name.</li><li>Leading-case mismatches warn. For example, importing a struct with a lowercase alias or a function with an uppercase alias triggers a warning.</li></ul><h3>No trailing alias for a group</h3><p>A grouped import cannot have a trailing group-level alias. Each entry gets its own alias individually.</p><h3>Related concepts</h3><ul><li>For import alias rules see <a href="../aliases/#import-aliases">Import aliases</a>.</li><li>For import path resolution see <a href="#import-paths">Import paths</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li></ul>
+    PI <span class='moth-code-keyword'>as</span> pi,
+<span class='moth-code-delimiter'>}</span></code></pre><p>Each entry can have its own alias. There is no trailing group-level alias.</p><h3>Importable symbol categories</h3><ul><li>functions</li><li>structs</li><li>choices</li><li>type aliases</li><li>traits</li><li>compile-time constants</li></ul><p>Runtime top-level bindings are not importable. See <a href="#module-visibility">Module visibility</a>.</p><h3>Namespaced access</h3><p>Source and module namespace imports are shallow. External package namespaces can expose nested package-local symbols. Use field-access syntax on the namespace record, but do not pass the namespace itself as a first-class value. Source-authored receiver methods are called through receiver-call syntax rather than as namespace fields.</p><h3>Imports are compile-time declarations</h3><p>Import records are not first-class runtime values. They exist at compile time to make names visible.</p><h3>Collision and no-shadowing policy</h3><ul><li>Ordinary import aliases are file-local.</li><li>An import alias cannot hide an existing visible name.</li><li>If <code>render</code> is already declared in the file, <code>import @other { render }</code> is an error. Pick a different local name.</li><li>Leading-case mismatches warn. For example, importing a struct with a lowercase alias or a function with an uppercase alias triggers a warning.</li></ul><h3>No trailing alias for a group</h3><p>A grouped import cannot have a trailing group-level alias. Each entry gets its own alias individually.</p><h3>Related concepts</h3><ul><li>For import alias rules see <a href="../aliases/#import-aliases">Import aliases</a>.</li><li>For import path resolution see <a href="#import-paths">Import paths</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -850,13 +869,13 @@ import <span class='moth-code-operator'>@</span>vendor<span class='moth-code-ope
 
 
         <p>Declarations are private to their module. The export block makes them public.</p><h3>An internal helper file</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/components/utils.moth</span>
-internal_value <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span></code></pre><h3>The child root uses it directly</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/components/@api.moth</span>
-import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
+internal_value <span class='moth-code-operator'>#=</span> <span class='moth-code-number'>42</span></code></pre><h3>The child root uses it directly</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/components/@api.moth</span>
+<span class='moth-code-keyword'>import</span> @utils<span class='moth-code-string'>@utils</span> <span class='moth-code-delimiter'>{</span>internal_value<span class='moth-code-delimiter'>}</span>
 
-export<span class='moth-code-operator'>:</span>
-    import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span>
-;</code></pre><p>Same-module imports see everything. No export block needed.</p><h3>Other modules need the export block</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/@site.moth</span>
-import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>internal_value<span class='moth-code-parenthesis'>}</span></code></pre><p>Now the parent module can import <code>internal_value</code> through the <code>@components</code> public surface. It cannot bypass that surface with <code>@components/utils</code>.</p>
+<span class='moth-code-keyword'>export</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>import</span> @utils<span class='moth-code-string'>@utils</span> <span class='moth-code-delimiter'>{</span>internal_value<span class='moth-code-delimiter'>}</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Same-module imports see everything. No export block needed.</p><h3>Other modules need the export block</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/@site.moth</span>
+<span class='moth-code-keyword'>import</span> @components<span class='moth-code-string'>@components</span> <span class='moth-code-delimiter'>{</span>internal_value<span class='moth-code-delimiter'>}</span></code></pre><p>Now the parent module can import <code>internal_value</code> through the <code>@components</code> public surface. It cannot bypass that surface with <code>@components/utils</code>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -865,24 +884,24 @@ import <span class='moth-code-operator'>@</span>components <span class='moth-cod
 └── components/
     ├── @api.moth
     └── utils.moth</code></pre><p><code>utils.moth</code> and <code>@api.moth</code> belong to the same <code>components</code> child module. Same-module imports can see private declarations.</p><p>Internal helper:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/components/utils.moth</span>
-internal_value <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+internal_value <span class='moth-code-operator'>#=</span> <span class='moth-code-number'>42</span>
 
-internal_fn <span class='moth-code-operator'>|</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>:</span>
+<span class='moth-code-function'>internal_fn</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;internal&quot;</span>
-;</code></pre><p>Child root:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/components/@api.moth</span>
-import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Child root:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/components/@api.moth</span>
+<span class='moth-code-keyword'>import</span> @utils<span class='moth-code-string'>@utils</span> <span class='moth-code-delimiter'>{</span>
     internal_value,
     internal_fn,
-<span class='moth-code-parenthesis'>}</span>
+<span class='moth-code-delimiter'>}</span>
 
-export<span class='moth-code-operator'>:</span>
-    import <span class='moth-code-operator'>@</span>utils <span class='moth-code-parenthesis'>{</span>
+<span class='moth-code-keyword'>export</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>import</span> @utils<span class='moth-code-string'>@utils</span> <span class='moth-code-delimiter'>{</span>
         internal_value,
-    <span class='moth-code-parenthesis'>}</span>
-;</code></pre><p>Same-module imports bypass the public-surface boundary. The importing file sees all declarations in the target file.</p><h3>Cross-module public boundary</h3><p>A different module can only access declarations marked public by the module root&#39;s <code>export:</code> block. Cross-module imports cannot bypass the public API.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/@site.moth</span>
-import <span class='moth-code-operator'>@</span>components <span class='moth-code-parenthesis'>{</span>
+    <span class='moth-code-delimiter'>}</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Same-module imports bypass the public-surface boundary. The importing file sees all declarations in the target file.</p><h3>Cross-module public boundary</h3><p>A different module can only access declarations marked public by the module root&#39;s <code>export:</code> block. Cross-module imports cannot bypass the public API.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- src/@site.moth</span>
+<span class='moth-code-keyword'>import</span> @components<span class='moth-code-string'>@components</span> <span class='moth-code-delimiter'>{</span>
     internal_value,
-<span class='moth-code-parenthesis'>}</span></code></pre><p>The parent module sees only the <code>components</code> child module&#39;s <code>export:</code> surface. It cannot bypass that boundary with <code>import @components/utils {internal_value}</code>. The <code>@components/utils</code> path cannot bypass the child facade.</p><p>Without the root export block, the public import is rejected with <code>MOTH-IMPORT-0011</code>.</p><h3>Normal modules are not source packages</h3><p>An <code>@*.moth</code> normal module is not a source package. Use <code>+package.moth</code> when the example intends to teach a scoped package. See <a href="#project-local-packages">Project-local packages</a> for the support-package contract.</p><h3>Root-private declarations</h3><p>Declarations in the module root file outside the <code>export:</code> block are private to the root. They are not available to other modules even through the public surface.</p><h3>Direct root import rejection</h3><p>Direct imports of normal module-root files are rejected. Import the module through its directory path, not through the root filename.</p><h3>Runtime top-level bindings not importable</h3><p>Runtime top-level bindings are start-body code. They are not importable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are importable.</p><h3>Receiver method visibility</h3><p>Receiver methods are visible through a module&#39;s public surface when the module exports the receiver type&#39;s source surface. A type alias in the export block does not automatically re-export private implementation methods. Export the receiver type&#39;s source surface or a wrapper explicitly.</p><h3>Import cycles</h3><p>Circular imports between files in the same module are accepted when the declarations resolve in dependency order. Circular constant dependencies are rejected with <code>MOTH-RULE-0033</code>.</p><h3>No public access through filesystem tricks</h3><p>There is no way to bypass the module public-surface boundary by choosing a different import path. All cross-module imports go through the same resolution and visibility check.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For re-export syntax see <a href="#public-reexports">Public re-exports</a>.</li></ul>
+<span class='moth-code-delimiter'>}</span></code></pre><p>The parent module sees only the <code>components</code> child module&#39;s <code>export:</code> surface. It cannot bypass that boundary with <code>import @components/utils {internal_value}</code>. The <code>@components/utils</code> path cannot bypass the child facade.</p><p>Without the root export block, the public import is rejected with <code>MOTH-IMPORT-0011</code>.</p><h3>Normal modules are not source packages</h3><p>An <code>@*.moth</code> normal module is not a source package. Use <code>+package.moth</code> when the example intends to teach a scoped package. See <a href="#project-local-packages">Project-local packages</a> for the support-package contract.</p><h3>Root-private declarations</h3><p>Declarations in the module root file outside the <code>export:</code> block are private to the root. They are not available to other modules even through the public surface.</p><h3>Direct root import rejection</h3><p>Direct imports of normal module-root files are rejected. Import the module through its directory path, not through the root filename.</p><h3>Runtime top-level bindings not importable</h3><p>Runtime top-level bindings are start-body code. They are not importable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are importable.</p><h3>Receiver method visibility</h3><p>Receiver methods are visible through a module&#39;s public surface when the module exports the receiver type&#39;s source surface. A type alias in the export block does not automatically re-export private implementation methods. Export the receiver type&#39;s source surface or a wrapper explicitly.</p><h3>Import cycles</h3><p>Circular imports between files in the same module are accepted when the declarations resolve in dependency order. Circular constant dependencies are rejected with <code>MOTH-RULE-0033</code>.</p><h3>No public access through filesystem tricks</h3><p>There is no way to bypass the module public-surface boundary by choosing a different import path. All cross-module imports go through the same resolution and visibility check.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For import path families see <a href="#import-paths">Import paths</a>.</li><li>For re-export syntax see <a href="#public-reexports">Public re-exports</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -934,26 +953,26 @@ import <span class='moth-code-operator'>@</span>components <span class='moth-cod
 
 
 
-        <p>The export block can re-export imported symbols so other modules can use them.</p><h3>A public re-export</h3><pre style=""><code class='codeblock'>export<span class='moth-code-operator'>:</span>
-    import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span>
-        <span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Card,</span>
+        <p>The export block can re-export imported symbols so other modules can use them.</p><h3>A public re-export</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>export</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>import</span> @components/card<span class='moth-code-string'>@components/card</span> <span class='moth-code-delimiter'>{</span>
+        <span class='moth-code-nominal'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>Card</span>,
         render_card,
-    <span class='moth-code-parenthesis'>}</span>
-;</code></pre><p>Other modules can now import <code>Card</code> and <code>render_card</code> through the module&#39;s public surface. <code>CardData</code> is not also exported unless the block lists it separately.</p><h3>Local alias is not public</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span><span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>LocalCard</span><span class='moth-code-parenthesis'>}</span></code></pre><p><code>LocalCard</code> is file-local. It is not public. Only imports inside the <code>export:</code> block become public re-exports.</p>
+    <span class='moth-code-delimiter'>}</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Other modules can now import <code>Card</code> and <code>render_card</code> through the module&#39;s public surface. <code>CardData</code> is not also exported unless the block lists it separately.</p><h3>Local alias is not public</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @components/card<span class='moth-code-string'>@components/card</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-nominal'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>LocalCard</span><span class='moth-code-delimiter'>}</span></code></pre><p><code>LocalCard</code> is file-local. It is not public. Only imports inside the <code>export:</code> block become public re-exports.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>The <code>export:</code> block can re-export grouped imports from other files, creating a public API surface that exposes imported declarations under controlled names.</p><h3>Grouped re-export</h3><pre style=""><code class='codeblock'>export<span class='moth-code-operator'>:</span>
-    import <span class='moth-code-operator'>@</span>components<span class='moth-code-operator'>/</span>card <span class='moth-code-parenthesis'>{</span>
-        <span class='moth-code-struct'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-struct'>Card,</span>
+    <p>The <code>export:</code> block can re-export grouped imports from other files, creating a public API surface that exposes imported declarations under controlled names.</p><h3>Grouped re-export</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>export</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>import</span> @components/card<span class='moth-code-string'>@components/card</span> <span class='moth-code-delimiter'>{</span>
+        <span class='moth-code-nominal'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>Card</span>,
         render_card,
-    <span class='moth-code-parenthesis'>}</span>
+    <span class='moth-code-delimiter'>}</span>
 
-    import <span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>math <span class='moth-code-parenthesis'>{</span>
-        <span class='moth-code-struct'>PI,</span>
+    <span class='moth-code-keyword'>import</span> @core/math<span class='moth-code-string'>@core/math</span> <span class='moth-code-delimiter'>{</span>
+        PI,
         sin,
-    <span class='moth-code-parenthesis'>}</span>
-;</code></pre><p><code>Card</code>, <code>render_card</code>, <code>PI</code> and <code>sin</code> become accessible to cross-module imports. A grouped alias inside <code>export:</code> becomes the public name. The original <code>CardData</code> name is not also exported unless it is listed separately.</p><h3>Renamed public re-export</h3><p>The <code>as</code> alias inside an export-block re-export defines the public API name. The original source name is what the module imports privately. The alias is what other modules see when importing the module&#39;s public surface.</p><h3>Exported imported types, constants and functions</h3><p>Any importable declaration can be re-exported: functions, structs, choices, type aliases, traits and compile-time constants.</p><h3>Re-export does not make local import alias automatically public</h3><p>A private <code>import @path { Symbol as LocalName }</code> outside the export block creates a file-local alias. It does not become public. Only an <code>import</code> inside the <code>export:</code> block creates a public re-export.</p><h3>Public name collisions</h3><p>Public names in the export block must not collide with each other. Duplicate public names are rejected.</p><h3>Invalid unknown or private targets</h3><p>Re-exporting a symbol that does not exist in the target file is rejected. Re-exporting a private declaration that is not visible in the target file is rejected.</p><h3>No legacy inline export syntax</h3><p>Legacy inline <code>export</code> syntax (without the <code>:</code> block delimiter) is rejected with <code>MOTH-SYNTAX-0001</code>. The strict <code>export:</code> block is the only public API marker. See <a href="../project-structure/#public-api">Public API</a> for the full export-block rules.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li><li>For import alias rules see <a href="../aliases/#import-aliases">Import aliases</a>.</li></ul>
+    <span class='moth-code-delimiter'>}</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>Card</code>, <code>render_card</code>, <code>PI</code> and <code>sin</code> become accessible to cross-module imports. A grouped alias inside <code>export:</code> becomes the public name. The original <code>CardData</code> name is not also exported unless it is listed separately.</p><h3>Renamed public re-export</h3><p>The <code>as</code> alias inside an export-block re-export defines the public API name. The original source name is what the module imports privately. The alias is what other modules see when importing the module&#39;s public surface.</p><h3>Exported imported types, constants and functions</h3><p>Any importable declaration can be re-exported: functions, structs, choices, type aliases, traits and compile-time constants.</p><h3>Re-export does not make local import alias automatically public</h3><p>A private <code>import @path { Symbol as LocalName }</code> outside the export block creates a file-local alias. It does not become public. Only an <code>import</code> inside the <code>export:</code> block creates a public re-export.</p><h3>Public name collisions</h3><p>Public names in the export block must not collide with each other. Duplicate public names are rejected.</p><h3>Invalid unknown or private targets</h3><p>Re-exporting a symbol that does not exist in the target file is rejected. Re-exporting a private declaration that is not visible in the target file is rejected.</p><h3>No legacy inline export syntax</h3><p>Legacy inline <code>export</code> syntax (without the <code>:</code> block delimiter) is rejected with <code>MOTH-SYNTAX-0001</code>. The strict <code>export:</code> block is the only public API marker. See <a href="../project-structure/#public-api">Public API</a> for the full export-block rules.</p><h3>Related concepts</h3><ul><li>For the export block see <a href="../project-structure/#public-api">Public API</a>.</li><li>For visibility rules see <a href="#module-visibility">Module visibility</a>.</li><li>For import alias rules see <a href="../aliases/#import-aliases">Import aliases</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1009,7 +1028,7 @@ import <span class='moth-code-operator'>@</span>components <span class='moth-cod
 ├── @site.moth
 └── blog/
     ├── +package.moth
-    └── helpers/dates.moth</code></pre><p><code>+package.moth</code> makes <code>@blog</code> a scoped support package visible to <code>@site</code> and its sibling modules.</p><h3>Importing from a package</h3><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>blog <span class='moth-code-parenthesis'>{</span>post_title<span class='moth-code-parenthesis'>}</span></code></pre><p><code>@blog</code> resolves to the <code>blog</code> directory&#39;s support root. The package&#39;s public surface comes from its <code>export:</code> block.</p>
+    └── helpers/dates.moth</code></pre><p><code>+package.moth</code> makes <code>@blog</code> a scoped support package visible to <code>@site</code> and its sibling modules.</p><h3>Importing from a package</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @blog<span class='moth-code-string'>@blog</span> <span class='moth-code-delimiter'>{</span>post_title<span class='moth-code-delimiter'>}</span></code></pre><p><code>@blog</code> resolves to the <code>blog</code> directory&#39;s support root. The package&#39;s public surface comes from its <code>export:</code> block.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -1157,24 +1176,24 @@ import <span class='moth-code-operator'>@</span>components <span class='moth-cod
 
 
 
-        <p>External binding packages give you typed functions and opaque types from code written outside Moth. The HTML builder supports annotated JavaScript imports and will support WIT component imports in the future.</p><h3>Annotated JavaScript</h3><p>You can import <code>.js</code> files that use <code>@moth.opaque</code> and <code>@moth.sig</code> annotations. The annotations tell the compiler what Moth names and types to expose.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>vendor<span class='moth-code-operator'>/</span>drawing.js <span class='moth-code-keyword'>as</span> drawing</code></pre><p>JavaScript export names are runtime details. Moth names come from annotations, not from the JavaScript export.</p><h3>What JavaScript can export</h3><p>The builder accepts <code>export function name(...) { ... }</code> and block-bodied arrow exports. <code>@moth.sig</code> annotations expose free functions.</p><h3>What JavaScript can&#39;t export</h3><p>The builder rejects default exports, re-exports, CommonJS, classes, callbacks, async functions, property accessors and multi-success returns. These don&#39;t map to Moth&#39;s type system.</p><h3>Values cross by value</h3><p>Moth values that cross into JavaScript go by value. JavaScript can&#39;t hold references into Moth storage. Opaque handles represent foreign identities, not Moth references.</p><h3>WIT is deferred</h3><p>Future Wasm component imports will use a value-only WIT profile. WIT resources, callbacks, async and streams remain deferred. See <a href="#external-binding-contracts">External binding contracts advanced</a> for the full contract and deferred surface.</p>
+        <p>External binding packages give you typed functions and opaque types from code written outside Moth. The HTML builder supports annotated JavaScript imports and will support WIT component imports in the future.</p><h3>Annotated JavaScript</h3><p>You can import <code>.js</code> files that use <code>@moth.opaque</code> and <code>@moth.sig</code> annotations. The annotations tell the compiler what Moth names and types to expose.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @vendor/drawing.js<span class='moth-code-string'>@vendor/drawing.js</span> <span class='moth-code-keyword'>as</span> drawing</code></pre><p>JavaScript export names are runtime details. Moth names come from annotations, not from the JavaScript export.</p><h3>What JavaScript can export</h3><p>The builder accepts <code>export function name(...) { ... }</code> and block-bodied arrow exports. <code>@moth.sig</code> annotations expose free functions.</p><h3>What JavaScript can&#39;t export</h3><p>The builder rejects default exports, re-exports, CommonJS, classes, callbacks, async functions, property accessors and multi-success returns. These don&#39;t map to Moth&#39;s type system.</p><h3>Values cross by value</h3><p>Moth values that cross into JavaScript go by value. JavaScript can&#39;t hold references into Moth storage. Opaque handles represent foreign identities, not Moth references.</p><h3>WIT is deferred</h3><p>Future Wasm component imports will use a value-only WIT profile. WIT resources, callbacks, async and streams remain deferred. See <a href="#external-binding-contracts">External binding contracts advanced</a> for the full contract and deferred surface.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder supports two binding profiles: annotated project-local JavaScript imports and future value-only WIT component imports.</p><h3>Annotated JavaScript imports</h3><p>The HTML builder supports annotated single-file <code>.js</code> imports through <code>@moth.opaque</code> and <code>@moth.sig</code>. <code>@moth.sig</code> declares each exposed function. <code>@moth.opaque</code> is required only when signatures use foreign opaque handle types. A function-only module may use <code>@moth.sig</code> without <code>@moth.opaque</code>. JavaScript export names are runtime implementation details. Moth names come from annotations.</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>vendor<span class='moth-code-operator'>/</span>drawing.js <span class='moth-code-keyword'>as</span> drawing</code></pre><h4>Annotated JavaScript example</h4><pre style=""><code class='codeblock'><span class='moth-code-operator'>/</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span>
- <span class='moth-code-operator'>*</span> <span class='moth-code-operator'>@</span>moth.sig emphasize <span class='moth-code-operator'>|</span>text <span class='moth-code-struct'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String</span>
+    <p>External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder supports two binding profiles: annotated project-local JavaScript imports and future value-only WIT component imports.</p><h3>Annotated JavaScript imports</h3><p>The HTML builder supports annotated single-file <code>.js</code> imports through <code>@moth.opaque</code> and <code>@moth.sig</code>. <code>@moth.sig</code> declares each exposed function. <code>@moth.opaque</code> is required only when signatures use foreign opaque handle types. A function-only module may use <code>@moth.sig</code> without <code>@moth.opaque</code>. JavaScript export names are runtime implementation details. Moth names come from annotations.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @vendor/drawing.js<span class='moth-code-string'>@vendor/drawing.js</span> <span class='moth-code-keyword'>as</span> drawing</code></pre><h4>Annotated JavaScript example</h4><pre style=""><code class='codeblock'><span class='moth-code-operator'>/</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span>
+ <span class='moth-code-operator'>*</span> <span class='moth-code-operator'>@</span>moth.sig emphasize <span class='moth-code-operator'>|</span>text <span class='moth-code-nominal'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-nominal'>String</span>
  <span class='moth-code-operator'>*</span><span class='moth-code-operator'>/</span>
-export <span class='moth-code-keyword'>const</span> emphasize <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>(</span>text<span class='moth-code-parenthesis'>)</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-parenthesis'>{</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-operator'>`</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span>text<span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>`</span>;
-<span class='moth-code-parenthesis'>}</span>;
+export <span class='moth-code-keyword'>const</span> emphasize <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-delimiter'>{</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-operator'>`</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>$</span><span class='moth-code-delimiter'>{</span>text<span class='moth-code-delimiter'>}</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>`</span>;
+<span class='moth-code-delimiter'>}</span>;
 
 
 <span class='moth-code-operator'>/</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span>
- <span class='moth-code-operator'>*</span> <span class='moth-code-operator'>@</span>moth.sig join_label <span class='moth-code-operator'>|</span>prefix <span class='moth-code-struct'>String,</span> body <span class='moth-code-struct'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-struct'>String</span>
+ <span class='moth-code-operator'>*</span> <span class='moth-code-operator'>@</span>moth.sig join_label <span class='moth-code-operator'>|</span>prefix <span class='moth-code-nominal'>String</span>, body <span class='moth-code-nominal'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-nominal'>String</span>
  <span class='moth-code-operator'>*</span><span class='moth-code-operator'>/</span>
-export <span class='moth-code-keyword'>function</span> joinLabel<span class='moth-code-parenthesis'>(</span>prefix, body<span class='moth-code-parenthesis'>)</span> <span class='moth-code-parenthesis'>{</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-operator'>`</span><span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span>prefix<span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>:</span> <span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span>body<span class='moth-code-parenthesis'>}</span><span class='moth-code-operator'>`</span>;
-<span class='moth-code-parenthesis'>}</span></code></pre><p>The Moth import uses the annotation names, not the JavaScript export names:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>vendor<span class='moth-code-operator'>/</span>drawing.js <span class='moth-code-parenthesis'>{</span> emphasize, join_label <span class='moth-code-parenthesis'>}</span></code></pre><h4>Supported JavaScript export forms</h4><ul><li><code>export function name(...) { ... }</code></li><li>block-bodied arrow exports</li></ul><p><code>@moth.sig</code> annotations expose free functions. <code>this</code> receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports.</p><h4>Exact signature subset</h4><ul><li>parameters are positional and typed</li><li>mutable parameters use <code>name ~Type</code></li><li>signatures have zero or one success return</li><li>an optional final <code>Error!</code> channel is allowed</li><li><code>Error!</code> must be final</li><li>generic signatures are rejected</li><li>option and collection types are rejected</li><li>callbacks are rejected</li><li>multi-success returns are rejected</li><li><code>this</code> receiver-shaped signatures are rejected for external package registration</li><li>opaque types must be declared through <code>@moth.opaque</code> before use where required</li><li>JavaScript export names are runtime implementation details</li><li>Moth names come from annotations</li></ul><h4>Rejected JavaScript features</h4><ul><li>arbitrary dependency graphs</li><li>default exports</li><li>re-exports</li><li>CommonJS</li><li>classes</li><li>JS constants</li><li>property accessors</li><li>callbacks</li><li>async functions</li><li>collections or options in JS signatures</li><li>generic external type</li><li>receiver methods</li><li>multi-success JS returns</li></ul><h3>Restricted host-binding profile</h3><p>Existing Core, Builder and JavaScript-backed bindings follow a restricted host-binding profile:</p><ul><li>ordinary Moth values cross by value</li><li>host code may not retain references into ordinary Moth storage</li><li>opaque handles represent foreign identities rather than Moth reference types</li></ul><p>Observable external resources require explicit close or teardown. Host finalisation timing does not define language behaviour.</p><h3>WIT value-only component profile</h3><p>WIT component imports are accepted but deferred. Future general Wasm library imports use a value-only WIT component profile:</p><ul><li>supported arguments lower from shared reads into independent component values</li><li>results lift into independent Moth result graphs</li><li>no Moth alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary</li></ul><h3>Deferred WIT surfaces</h3><p>The V1 value-only profile defers WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="#import-paths">Import paths</a>.</li><li>For Core package API details see <a href="./core">Core packages</a>.</li><li>For Builder package API details see <a href="./builder">Builder packages</a>.</li></ul>
+export <span class='moth-code-keyword'>function</span> <span class='moth-code-function'>joinLabel</span><span class='moth-code-delimiter'>(</span>prefix, body<span class='moth-code-delimiter'>)</span> <span class='moth-code-delimiter'>{</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-operator'>`</span><span class='moth-code-operator'>$</span><span class='moth-code-delimiter'>{</span>prefix<span class='moth-code-delimiter'>}</span><span class='moth-code-operator'>:</span> <span class='moth-code-operator'>$</span><span class='moth-code-delimiter'>{</span>body<span class='moth-code-delimiter'>}</span><span class='moth-code-operator'>`</span>;
+<span class='moth-code-delimiter'>}</span></code></pre><p>The Moth import uses the annotation names, not the JavaScript export names:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @vendor/drawing.js<span class='moth-code-string'>@vendor/drawing.js</span> <span class='moth-code-delimiter'>{</span> emphasize, join_label <span class='moth-code-delimiter'>}</span></code></pre><h4>Supported JavaScript export forms</h4><ul><li><code>export function name(...) { ... }</code></li><li>block-bodied arrow exports</li></ul><p><code>@moth.sig</code> annotations expose free functions. <code>this</code> receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports.</p><h4>Exact signature subset</h4><ul><li>parameters are positional and typed</li><li>mutable parameters use <code>name ~Type</code></li><li>signatures have zero or one success return</li><li>an optional final <code>Error!</code> channel is allowed</li><li><code>Error!</code> must be final</li><li>generic signatures are rejected</li><li>option and collection types are rejected</li><li>callbacks are rejected</li><li>multi-success returns are rejected</li><li><code>this</code> receiver-shaped signatures are rejected for external package registration</li><li>opaque types must be declared through <code>@moth.opaque</code> before use where required</li><li>JavaScript export names are runtime implementation details</li><li>Moth names come from annotations</li></ul><h4>Rejected JavaScript features</h4><ul><li>arbitrary dependency graphs</li><li>default exports</li><li>re-exports</li><li>CommonJS</li><li>classes</li><li>JS constants</li><li>property accessors</li><li>callbacks</li><li>async functions</li><li>collections or options in JS signatures</li><li>generic external type</li><li>receiver methods</li><li>multi-success JS returns</li></ul><h3>Restricted host-binding profile</h3><p>Existing Core, Builder and JavaScript-backed bindings follow a restricted host-binding profile:</p><ul><li>ordinary Moth values cross by value</li><li>host code may not retain references into ordinary Moth storage</li><li>opaque handles represent foreign identities rather than Moth reference types</li></ul><p>Observable external resources require explicit close or teardown. Host finalisation timing does not define language behaviour.</p><h3>WIT value-only component profile</h3><p>WIT component imports are accepted but deferred. Future general Wasm library imports use a value-only WIT component profile:</p><ul><li>supported arguments lower from shared reads into independent component values</li><li>results lift into independent Moth result graphs</li><li>no Moth alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary</li></ul><h3>Deferred WIT surfaces</h3><p>The V1 value-only profile defers WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="#package-origins-and-backing">Package origins and backing</a>.</li><li>For import path rules see <a href="#import-paths">Import paths</a>.</li><li>For Core package API details see <a href="./core">Core packages</a>.</li><li>For Builder package API details see <a href="./builder">Builder packages</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><h2>Package reference pages</h2><ul><li><a href="./core">Core packages</a></li><li><a href="./builder">Builder packages</a></li></ul></section>

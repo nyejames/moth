@@ -30,6 +30,20 @@ directly.
 - `img` for images with `src`, `alt` and `style` slots
 - `center`, `right`, `left`, `smaller`, `medium`, `larger` for style inserts
 
+### `$code` code blocks
+
+`$code` highlights a balanced template body as a code block.
+
+[codeblock, $code("moth"):
+    [codeblock, $code("moth"): value = 42]
+]
+
+Supported aliases: `text`/`txt`, `moth`, `javascript`/`js`, `typescript`/`ts`,
+`python`/`py`, `rust`/`rs`, `bash`/`sh`/`shell`.
+
+`$code` escapes HTML and applies lexical presentation only. It never checks
+the snippet or reports errors. All profiles share the same palette.
+
 ### Canvas
 
 `@html` wraps `@web/canvas` drawing into a `Canvas` struct with methods.

@@ -36,15 +36,19 @@
   --moth-spacing: 1rem;
   --moth-spacing-small: 0.5rem;
 
-  /* Code block colours */
-  --comment: #8e8e8e;
-  --keyword: #fdbe82;
-  --string: #64d721;
-  --number: #c09eea;
-  --operator: #a6a9fd;
-  --struct: #fca1e7;
-  --type: #46ceff;
-  --parenthesis: #dece74;
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #fdbe82;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c09eea;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #dece74;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #c3e88d;
+  --moth-code-contract: #f07178;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -108,28 +112,40 @@ body {
   tab-size: 4;
 }
 .moth-code-comment {
-  color: var(--comment);
+  color: var(--moth-code-comment);
 }
 .moth-code-keyword {
-  color: var(--keyword);
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
 }
 .moth-code-string {
-  color: var(--string);
+  color: var(--moth-code-string);
 }
 .moth-code-number {
-  color: var(--number);
+  color: var(--moth-code-number);
 }
 .moth-code-operator {
-  color: var(--operator);
+  color: var(--moth-code-operator);
 }
-.moth-code-struct {
-  color: var(--struct);
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
 }
 .moth-code-type {
-  color: var(--type);
+  color: var(--moth-code-type);
 }
-.moth-code-parenthesis {
-  color: var(--parenthesis);
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -222,7 +238,7 @@ body {
 }
 
 a {
-    color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
 }
 
 h1 {
@@ -238,8 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
     font-family: var(--moth-font-family-monospace);
+    margin-left: 0.25em;
+    margin-right: 0.2em;
+    font-weight: 600;
 }
 
 .container pre {
@@ -398,7 +417,7 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 05. Tokenization</p><p>Lexical analysis cuts character streams into located tokens and prepares document source kinds for shared later stages.</p></section>
-<section class="container"><h1>From characters to located tokens</h1><p>A parser that stares at an undifferentiated character stream spends its life guessing. Where does the identifier end? Is <code>=</code> part of <code>==</code> or a lonely assignment? Did a string already open?</p><p><strong>Tokenization</strong> (lexical analysis) cuts the stream into <strong>tokens</strong>: small classified chunks with spelling and source locations. Later stages stop arguing about character boundaries and start arguing about meaning.</p><h2>Token boundaries and spelling</h2><p>A token carries at least:</p><ul><li>a <strong>kind</strong> (identifier, string literal, keyword-like form, delimiter, operator, ...)</li><li>the <strong>authored spelling</strong> as it appeared in source</li><li>a <strong>source location</strong> span pointing back at the file</li></ul><p>Take the page import:</p><pre style=""><code class='codeblock'>import <span class='moth-code-operator'>@</span>greeting <span class='moth-code-parenthesis'>{</span> greet <span class='moth-code-parenthesis'>}</span></code></pre><p>A lexer might emit a sequence in this spirit:</p><table style="">
+<section class="container"><h1>From characters to located tokens</h1><p>A parser that stares at an undifferentiated character stream spends its life guessing. Where does the identifier end? Is <code>=</code> part of <code>==</code> or a lonely assignment? Did a string already open?</p><p><strong>Tokenization</strong> (lexical analysis) cuts the stream into <strong>tokens</strong>: small classified chunks with spelling and source locations. Later stages stop arguing about character boundaries and start arguing about meaning.</p><h2>Token boundaries and spelling</h2><p>A token carries at least:</p><ul><li>a <strong>kind</strong> (identifier, string literal, keyword-like form, delimiter, operator, ...)</li><li>the <strong>authored spelling</strong> as it appeared in source</li><li>a <strong>source location</strong> span pointing back at the file</li></ul><p>Take the page import:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @greeting<span class='moth-code-string'>@greeting</span> <span class='moth-code-delimiter'>{</span> greet <span class='moth-code-delimiter'>}</span></code></pre><p>A lexer might emit a sequence in this spirit:</p><table style="">
             
             <tr style="">
                 
