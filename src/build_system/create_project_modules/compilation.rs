@@ -19,6 +19,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::ImportShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -31,6 +32,8 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use rustc_hash::FxHashMap;
 
 use super::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage, DiagnosedModule,
@@ -498,8 +501,11 @@ struct DirectoryModuleCompileContext<'a> {
     builder_surface: &'a BuilderSurface,
     provider_store: &'a ModuleArtifactStore,
     provider_bindings: &'a [ResolvedDependencyEdge],
+    provider_binding_index: &'a FxHashMap<(ModuleId, ImportShellId), usize>,
     source_package_imports: &'a [ResolvedSourcePackageImport],
+    source_package_import_index: &'a FxHashMap<(ModuleId, ImportShellId), usize>,
     completed_source_packages: &'a [CompiledSourcePackage],
+    completed_package_by_prefix: &'a FxHashMap<&'a str, usize>,
 }
 
 struct SourcePackageModuleInventory {
@@ -513,151 +519,190 @@ struct SourcePackageModuleInventory {
     source_package_imports: Vec<ResolvedSourcePackageImport>,
 }
 
-fn build_source_provider_imports<'a>(
-    consumer_module_id: ModuleId,
-    prepared: &PreparedModule,
-    builder_surface: &BuilderSurface,
+/// Index every resolved provider edge once by consumer module and retained import shell.
+///
+/// WHAT: gives module binding a direct shell lookup instead of scanning all edges and comparing
+///       path components for each retained import.
+/// WHY: the shell identity is stamped during header preparation and copied onto the graph edge,
+///       so a duplicate key here means the same retained shell resolved twice, which is a proven
+///       build invariant violation rather than a user failure.
+pub(crate) fn build_provider_binding_index(
     provider_bindings: &[ResolvedDependencyEdge],
-    provider_store: &'a ModuleArtifactStore,
-    source_package_imports: &[ResolvedSourcePackageImport],
-    completed_source_packages: &'a [CompiledSourcePackage],
-) -> Result<SourceProviderImportSet<'a>, CompilerError> {
-    let mut imports = Vec::new();
-
-    for (importer_source, file_imports) in &prepared
-        .prepared_header_syntax
-        .module_symbols
-        .file_imports_by_source
-    {
-        for import in file_imports {
-            if let Some(binding) = provider_bindings.iter().find(|binding| {
-                binding.consumer_module_id == consumer_module_id
-                    && provider_binding_matches_import(
-                        &binding.provider,
-                        import,
-                        &prepared.string_table,
-                    )
-            }) {
-                let interface = provider_store
-                    .interface(binding.provider_module_id)?
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
-                            "ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
-                            consumer_module_id.index(),
-                            binding.provider_module_id.index()
-                        ))
-                    })?;
-
-                imports.push(SourceProviderImport {
-                    importer_source: owned_path_components(importer_source, &prepared.string_table),
-                    imported_path: owned_path_components(
-                        &import.provider.path,
-                        &prepared.string_table,
-                    ),
-                    from_grouped: import.from_grouped,
-                    implicit_template_scope: false,
-                    interface,
-                });
-                continue;
-            }
-
-            let Some(package_import) = source_package_imports.iter().find(|package_import| {
-                package_import.consumer_module_id == consumer_module_id
-                    && provider_binding_matches_import(
-                        &package_import.provider,
-                        import,
-                        &prepared.string_table,
-                    )
-            }) else {
-                continue;
-            };
-            let completed_package = completed_source_packages
-                .iter()
-                .find(|package| package.import_prefix() == package_import.import_prefix)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "ModuleId {} started semantic binding before source package @{} completed",
-                        consumer_module_id.index(),
-                        package_import.import_prefix
-                    ))
-                })?;
-
-            imports.push(SourceProviderImport {
-                importer_source: owned_path_components(importer_source, &prepared.string_table),
-                imported_path: owned_path_components(&import.provider.path, &prepared.string_table),
-                from_grouped: import.from_grouped,
-                implicit_template_scope: false,
-                interface: completed_package.root_interface()?,
-            });
+) -> Result<FxHashMap<(ModuleId, ImportShellId), usize>, CompilerError> {
+    let mut index = FxHashMap::default();
+    for (binding_index, binding) in provider_bindings.iter().enumerate() {
+        let import_shell_id = binding.provider.import_shell_id.ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "ModuleId {} produced a provider edge without a retained import shell identity",
+                binding.consumer_module_id.index()
+            ))
+        })?;
+        let key = (binding.consumer_module_id, import_shell_id);
+        if index.insert(key, binding_index).is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "ModuleId {} resolved import shell {:?} to more than one provider edge",
+                binding.consumer_module_id.index(),
+                import_shell_id
+            )));
         }
     }
 
-    // Builder source-backed packages are implicitly available only to modules that actually
-    // contain a `.mtf` semantic source. The package capability is supplied by the active
-    // builder surface; generic orchestration must not infer it from a package-name list.
-    if prepared.contains_moth_template {
-        let implicit_provider_imports: Vec<SourceProviderImport<'a>> = completed_source_packages
-            .iter()
-            .filter(|package| {
-                builder_surface
-                    .implicit_template_scope_source_packages
-                    .contains(package.import_prefix())
-            })
-            .map(|package| {
-                let interface = package.root_interface()?;
-                Ok(SourceProviderImport {
-                    importer_source: Vec::new(),
-                    imported_path: vec![package.import_prefix().to_owned()],
-                    from_grouped: false,
-                    implicit_template_scope: true,
-                    interface,
+    Ok(index)
+}
+
+/// Index every resolved source-package import once by consumer module and retained shell.
+pub(crate) fn build_source_package_import_index(
+    provider_binding_index: &FxHashMap<(ModuleId, ImportShellId), usize>,
+    source_package_imports: &[ResolvedSourcePackageImport],
+) -> Result<FxHashMap<(ModuleId, ImportShellId), usize>, CompilerError> {
+    let mut index = FxHashMap::default();
+    for (import_index, package_import) in source_package_imports.iter().enumerate() {
+        let import_shell_id = package_import.provider.import_shell_id.ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "ModuleId {} produced a source-package import without a retained import shell identity",
+                package_import.consumer_module_id.index()
+            ))
+        })?;
+        let key = (package_import.consumer_module_id, import_shell_id);
+        if provider_binding_index.contains_key(&key) {
+            return Err(CompilerError::compiler_error(format!(
+                "ModuleId {} resolved import shell {:?} to both a provider module and a source package",
+                package_import.consumer_module_id.index(),
+                import_shell_id
+            )));
+        }
+        if index.insert(key, import_index).is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "ModuleId {} resolved import shell {:?} to more than one source-package import",
+                package_import.consumer_module_id.index(),
+                import_shell_id
+            )));
+        }
+    }
+
+    Ok(index)
+}
+
+/// Index completed source packages once by import prefix.
+pub(crate) fn build_completed_package_index(
+    completed_source_packages: &[CompiledSourcePackage],
+) -> Result<FxHashMap<&str, usize>, CompilerError> {
+    let mut index = FxHashMap::default();
+    for (package_index, package) in completed_source_packages.iter().enumerate() {
+        let prefix = package.import_prefix();
+        if index.insert(prefix, package_index).is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "source package @{} completed more than once",
+                prefix
+            )));
+        }
+    }
+
+    Ok(index)
+}
+
+impl<'a> DirectoryModuleCompileContext<'a> {
+    /// Build the per-module provider input set by direct retained-shell lookup.
+    ///
+    /// WHAT: resolves every retained import shell through the boundary indexes built once per
+    ///       graph, so binding never scans all edges, all source-package imports or all
+    ///       completed packages for each shell.
+    fn build_source_provider_imports(
+        &self,
+        consumer_module_id: ModuleId,
+        prepared: &PreparedModule,
+    ) -> Result<SourceProviderImportSet<'a>, CompilerError> {
+        let mut imports = Vec::new();
+
+        for file_imports in prepared
+            .prepared_header_syntax
+            .module_symbols
+            .file_imports_by_source
+            .values()
+        {
+            for import in file_imports {
+                if let Some(binding_index) = self
+                    .provider_binding_index
+                    .get(&(consumer_module_id, import.import_shell_id))
+                {
+                    let binding = &self.provider_bindings[*binding_index];
+                    let interface = self
+                        .provider_store
+                        .interface(binding.provider_module_id)?
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(format!(
+                                "ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
+                                consumer_module_id.index(),
+                                binding.provider_module_id.index()
+                            ))
+                        })?;
+
+                    imports.push(SourceProviderImport {
+                        import_shell_id: Some(import.import_shell_id),
+                        import_prefix: None,
+                        implicit_template_scope: false,
+                        interface,
+                    });
+                    continue;
+                }
+
+                let Some(package_index) = self
+                    .source_package_import_index
+                    .get(&(consumer_module_id, import.import_shell_id))
+                else {
+                    continue;
+                };
+                let package_import = &self.source_package_imports[*package_index];
+                let package_index = self
+                    .completed_package_by_prefix
+                    .get(package_import.import_prefix.as_str())
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "ModuleId {} started semantic binding before source package @{} completed",
+                            consumer_module_id.index(),
+                            package_import.import_prefix
+                        ))
+                    })?;
+                let completed_package = &self.completed_source_packages[*package_index];
+
+                imports.push(SourceProviderImport {
+                    import_shell_id: Some(import.import_shell_id),
+                    import_prefix: None,
+                    implicit_template_scope: false,
+                    interface: completed_package.root_interface()?,
+                });
+            }
+        }
+
+        // Builder source-backed packages are implicitly available only to modules that actually
+        // contain a `.mtf` semantic source. The package capability is supplied by the active
+        // builder surface; generic orchestration must not infer it from a package-name list.
+        if prepared.contains_moth_template {
+            let implicit_provider_imports: Vec<SourceProviderImport<'a>> = self
+                .completed_source_packages
+                .iter()
+                .filter(|package| {
+                    self.builder_surface
+                        .implicit_template_scope_source_packages
+                        .contains(package.import_prefix())
                 })
-            })
-            .collect::<Result<_, CompilerError>>()?;
+                .map(|package| {
+                    let interface = package.root_interface()?;
+                    Ok(SourceProviderImport {
+                        import_shell_id: None,
+                        import_prefix: Some(package.import_prefix()),
+                        implicit_template_scope: true,
+                        interface,
+                    })
+                })
+                .collect::<Result<_, CompilerError>>()?;
 
-        imports.extend(implicit_provider_imports);
+            imports.extend(implicit_provider_imports);
+        }
+
+        Ok(SourceProviderImportSet::new(imports))
     }
 
-    Ok(SourceProviderImportSet::new(imports))
-}
-
-fn owned_path_components(path: &InternedPath, string_table: &StringTable) -> Vec<String> {
-    path.as_components()
-        .iter()
-        .map(|component| string_table.resolve(*component).to_owned())
-        .collect()
-}
-
-/// Match one Stage 0 authored provider edge to its header-normalized import shell.
-///
-/// Header normalization prefixes module-root-relative paths with the active module's canonical
-/// namespace. Stage 0 retains the authored path, so a normalized import may have additional
-/// leading components but must end with the complete authored path. Matching the full suffix
-/// preserves the imported symbol and provider path and avoids the former parent-only fallback.
-fn provider_binding_matches_import(
-    binding: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
-    import: &crate::compiler_frontend::headers::parse_file_headers::FileImport,
-    string_table: &StringTable,
-) -> bool {
-    if binding.from_grouped != import.from_grouped {
-        return false;
-    }
-
-    let binding_components = binding.path.as_components();
-    let import_components = import.provider.path.as_components();
-    if binding_components.len() > import_components.len() {
-        return false;
-    }
-
-    import_components[import_components.len() - binding_components.len()..]
-        .iter()
-        .zip(binding_components)
-        .all(|(import_component, binding_component)| {
-            string_table.resolve(*import_component) == string_table.resolve(*binding_component)
-        })
-}
-
-impl DirectoryModuleCompileContext<'_> {
     fn compile(
         &self,
         job: module_inventory::ModuleCompilationJob,
@@ -686,15 +731,8 @@ impl DirectoryModuleCompileContext<'_> {
         // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
         // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and
         // runs borrow validation.
-        let source_provider_imports = match build_source_provider_imports(
-            module_id,
-            &prepared,
-            self.builder_surface,
-            self.provider_bindings,
-            self.provider_store,
-            self.source_package_imports,
-            self.completed_source_packages,
-        ) {
+        let source_provider_imports = match self.build_source_provider_imports(module_id, &prepared)
+        {
             Ok(imports) => imports,
             Err(error) => {
                 return DirectoryModuleTaskResult {
@@ -779,6 +817,16 @@ fn compile_module_waves(
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     }
 
+    // One direct lookup index per boundary so module binding never scans every provider edge,
+    // source-package import or completed package for each retained import shell.
+    let provider_binding_index = build_provider_binding_index(provider_bindings)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let source_package_import_index =
+        build_source_package_import_index(&provider_binding_index, source_package_imports)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let completed_package_by_prefix = build_completed_package_index(completed_source_packages)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
     let mut diagnosed = Vec::new();
     let mut blocked = Vec::new();
 
@@ -816,9 +864,8 @@ fn compile_module_waves(
                     .iter()
                     .filter(|source_import| source_import.consumer_module_id == job.module_id)
                 {
-                    let package = completed_source_packages
-                        .iter()
-                        .find(|package| package.import_prefix() == package_import.import_prefix)
+                    let package_index = completed_package_by_prefix
+                        .get(package_import.import_prefix.as_str())
                         .ok_or_else(|| {
                             CompilerMessages::from_error_ref(
                                 CompilerError::compiler_error(format!(
@@ -829,6 +876,7 @@ fn compile_module_waves(
                                 string_table,
                             )
                         })?;
+                    let package = &completed_source_packages[*package_index];
 
                     match package
                         .root_slot()
@@ -882,8 +930,11 @@ fn compile_module_waves(
                     builder_surface,
                     provider_store: &provider_store,
                     provider_bindings,
+                    provider_binding_index: &provider_binding_index,
                     source_package_imports,
+                    source_package_import_index: &source_package_import_index,
                     completed_source_packages,
+                    completed_package_by_prefix: &completed_package_by_prefix,
                 };
                 compile_context.compile(job, generated_store.session())
             };

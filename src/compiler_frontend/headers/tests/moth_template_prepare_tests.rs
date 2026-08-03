@@ -342,9 +342,8 @@ impl MothTemplateScopeFixture {
     ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
         let html_interface = empty_provider_interface("html");
         let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-            importer_source: Vec::new(),
-            imported_path: vec!["html".to_owned()],
-            from_grouped: false,
+            import_shell_id: None,
+            import_prefix: Some("html"),
             implicit_template_scope: true,
             interface: &html_interface,
         }]);
@@ -432,9 +431,8 @@ impl MothTemplateScopeFixture {
     > {
         let html_interface = empty_provider_interface("html");
         let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-            importer_source: Vec::new(),
-            imported_path: vec!["html".to_owned()],
-            from_grouped: false,
+            import_shell_id: None,
+            import_prefix: Some("html"),
             implicit_template_scope: true,
             interface: &html_interface,
         }]);
@@ -1156,16 +1154,14 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
 
     let provider_imports = SourceProviderImportSet::new(vec![
         SourceProviderImport {
-            importer_source: Vec::new(),
-            imported_path: vec!["html".to_owned()],
-            from_grouped: false,
+            import_shell_id: None,
+            import_prefix: Some("html"),
             implicit_template_scope: true,
             interface: &html_interface,
         },
         SourceProviderImport {
-            importer_source: Vec::new(),
-            imported_path: vec!["custom".to_owned()],
-            from_grouped: false,
+            import_shell_id: None,
+            import_prefix: Some("custom"),
             implicit_template_scope: true,
             interface: &custom_interface,
         },
@@ -1231,9 +1227,8 @@ fn provider_interface_collision_remaps_authored_declaration_location() {
         concrete_call_summaries: Vec::new(),
     };
     let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        importer_source: Vec::new(),
-        imported_path: vec!["html".to_owned()],
-        from_grouped: false,
+        import_shell_id: None,
+        import_prefix: Some("html"),
         implicit_template_scope: true,
         interface: &html_interface,
     }]);

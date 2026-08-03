@@ -102,7 +102,10 @@ fn cross_module_child_import_resolves_through_public_surface() {
     let mut child_exports = FxHashSet::default();
     child_exports.insert(PublicExportEntry {
         export_name: greet_name,
-        target: PublicExportTarget::Source(greet_source.clone()),
+        target: PublicExportTarget::Source {
+            path: greet_source.clone(),
+            import_shell_id: None,
+        },
     });
 
     let mut module_root_public_exports = FxHashMap::default();

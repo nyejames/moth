@@ -876,7 +876,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         excluded_source_file: Option<&InternedPath>,
     ) {
         for entry in entries {
-            let PublicExportTarget::Source(path) = &entry.target else {
+            let PublicExportTarget::Source { path, .. } = &entry.target else {
                 continue;
             };
 
@@ -1074,10 +1074,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         source_file: &InternedPath,
         importable_symbol_paths: &FxHashSet<InternedPath>,
     ) -> BuilderResult<()> {
-        if let Some(interface) =
-            self.source_provider_imports
-                .resolve(source_file, import, self.string_table)
-        {
+        if let Some(interface) = self.source_provider_imports.resolve(import.import_shell_id) {
             return self.register_source_provider_import(
                 file_visibility,
                 registry,
@@ -1279,10 +1276,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             )));
         }
 
-        if let Some(interface) =
-            self.source_provider_imports
-                .resolve(source_file, import, self.string_table)
-        {
+        if let Some(interface) = self.source_provider_imports.resolve(import.import_shell_id) {
             return self.register_source_provider_namespace_import(
                 file_visibility,
                 registry,

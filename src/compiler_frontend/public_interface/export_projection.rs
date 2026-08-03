@@ -284,12 +284,13 @@ fn collect_binding_exports(
                         symbol_id
                     ))
                 })?,
-            PublicExportTarget::Source(target_path) => {
-                let Some(provider_interface) = source_provider_imports.resolve_reexport(
-                    active_root_source,
-                    target_path,
-                    string_table,
-                ) else {
+            PublicExportTarget::Source {
+                path: target_path,
+                import_shell_id: Some(import_shell_id),
+            } => {
+                let Some(provider_interface) =
+                    source_provider_imports.resolve_reexport(*import_shell_id)
+                else {
                     continue;
                 };
                 let imported_name = target_path.name_str(string_table).ok_or_else(|| {
@@ -303,6 +304,10 @@ fn collect_binding_exports(
                 };
                 binding.target.clone()
             }
+            PublicExportTarget::Source {
+                import_shell_id: None,
+                ..
+            } => continue,
         };
 
         exports.push(PublicBindingExport {
@@ -791,9 +796,9 @@ fn portable_source_location(
 /// `source_package_public_exports` entries that target same-module source declarations.
 ///
 /// WHAT: iterates the header-built public export maps for the active module root and source
-///       packages. Each `PublicExportTarget::Source(path)` entry whose target declaration path
-///       belongs to the active module is resolved to an `ExportBinding` with the export name and
-///       the declaration's stable origin. `External` targets are deferred to the binding-backed
+///       packages. Each `PublicExportTarget::Source` entry whose target declaration path belongs
+///       to the active module is resolved to an `ExportBinding` with the export name and the
+///       declaration's stable origin. `External` targets are deferred to the binding-backed
 ///       re-export owner.
 /// WHY: the `export:` block may re-export declarations from private files within the same module.
 /// Those declarations are not in the active root file, so `is_directly_defined_public_export`
@@ -812,8 +817,6 @@ fn collect_reexport_bindings(
     }
 
     let active_module_root = resolve_active_module_root_membership(module_symbols)?;
-    let active_root_source = resolve_active_root_source(module_symbols, active_module_root)?;
-
     // Build a lookup from canonical source path to header so re-export targets can find their
     // declaration header without iterating the full header list for each entry.
     let mut header_by_path: FxHashMap<&InternedPath, &Header> = FxHashMap::default();
@@ -840,7 +843,7 @@ fn collect_reexport_bindings(
         .get(active_module_root)
     {
         for entry in entries {
-            collect_one_reexport_binding(&mut bindings, active_root_source, entry, &context)?;
+            collect_one_reexport_binding(&mut bindings, entry, &context)?;
         }
     }
 
@@ -926,22 +929,25 @@ fn resolve_optional_active_module_root_membership(
 /// declaration.
 fn collect_one_reexport_binding(
     bindings: &mut Vec<ReexportBinding>,
-    exporting_source: &InternedPath,
     entry: &PublicExportEntry,
     context: &ReexportBindingContext<'_>,
 ) -> Result<(), CompilerError> {
-    let PublicExportTarget::Source(target_path) = &entry.target else {
+    let PublicExportTarget::Source {
+        path: target_path,
+        import_shell_id,
+    } = &entry.target
+    else {
         // External targets are deferred to the binding-backed re-export owner.
         return Ok(());
     };
 
     // Cross-module re-exports resolve through the immutable provider interface selected by
     // Stage 0. The origin remains provider-owned while this module owns the public alias.
-    if let Some(provider_interface) = context.source_provider_imports.resolve_reexport(
-        exporting_source,
-        target_path,
-        context.string_table,
-    ) {
+    if let Some(import_shell_id) = import_shell_id
+        && let Some(provider_interface) = context
+            .source_provider_imports
+            .resolve_reexport(*import_shell_id)
+    {
         let imported_name = target_path.name_str(context.string_table).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "re-export binding construction: a provider target has no resolvable imported name (path: {:?})",

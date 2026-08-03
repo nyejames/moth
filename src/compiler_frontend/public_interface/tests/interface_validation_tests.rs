@@ -38,6 +38,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::identity::ImportShellId;
 
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
@@ -287,9 +288,8 @@ fn rejects_binding_target_with_wrong_symbol_category_on_consumer_admission() {
         category: ExternalSymbolCategory::Type,
     });
     let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        importer_source: vec!["consumer".to_owned()],
-        imported_path: vec!["provider".to_owned()],
-        from_grouped: true,
+        import_shell_id: Some(ImportShellId::new(None, 0)),
+        import_prefix: None,
         implicit_template_scope: false,
         interface: &interface,
     }]);
@@ -686,9 +686,8 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
         ),
     ];
     let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        importer_source: Vec::new(),
-        imported_path: Vec::new(),
-        from_grouped: true,
+        import_shell_id: None,
+        import_prefix: None,
         implicit_template_scope: false,
         interface: &provider,
     }]);

@@ -31,7 +31,7 @@ use crate::compiler_frontend::semantic_identity::{
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
+use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -96,7 +96,6 @@ struct ExportProjectionFixture {
     source_module_origins: SourceModuleOriginTable,
     string_table: StringTable,
     active_root_file_id: FileId,
-    active_root_source: InternedPath,
     module_root: InternedPath,
     module_origin: StableModuleOriginIdentity,
 }
@@ -149,7 +148,6 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
 
     let mut headers = Vec::new();
     let mut module_symbols = ModuleSymbols::empty();
-    let mut active_root_source = None;
     for (output, path) in prepared_outputs.into_iter().zip(canonical_paths.iter()) {
         let source_file = output.source_file.clone();
         module_symbols
@@ -158,9 +156,6 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
         module_symbols
             .file_module_membership
             .insert(source_file.clone(), module_root.clone());
-        if output.file_role.is_active_module_root() {
-            active_root_source = Some(source_file.clone());
-        }
 
         let file_id = source_files
             .get_by_canonical_path(path)
@@ -178,8 +173,6 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
         source_module_origins,
         string_table,
         active_root_file_id,
-        active_root_source: active_root_source
-            .expect("the projection fixture should have one active root source"),
         module_root,
         module_origin,
     }
@@ -319,7 +312,10 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
         fixture.module_root.clone(),
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicValue"),
-            target: PublicExportTarget::Source(target_path),
+            target: PublicExportTarget::Source {
+                path: target_path,
+                import_shell_id: None,
+            },
         }]
         .into_iter()
         .collect(),
@@ -409,18 +405,8 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         concrete_call_summaries: Vec::new(),
     };
     let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        importer_source: fixture
-            .active_root_source
-            .as_components()
-            .iter()
-            .map(|component| fixture.string_table.resolve(*component).to_owned())
-            .collect(),
-        imported_path: target_path
-            .as_components()
-            .iter()
-            .map(|component| fixture.string_table.resolve(*component).to_owned())
-            .collect(),
-        from_grouped: true,
+        import_shell_id: Some(ImportShellId::new(None, 0)),
+        import_prefix: None,
         implicit_template_scope: false,
         interface: &provider_interface,
     }]);
@@ -428,7 +414,10 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         fixture.module_root.clone(),
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicImported"),
-            target: PublicExportTarget::Source(target_path),
+            target: PublicExportTarget::Source {
+                path: target_path,
+                import_shell_id: Some(ImportShellId::new(None, 0)),
+            },
         }]
         .into_iter()
         .collect(),
@@ -819,7 +808,10 @@ fn module_symbols_with_module_root_export_targets(
             export_name: target
                 .name()
                 .expect("an export target path must carry a defining name"),
-            target: PublicExportTarget::Source(target.clone()),
+            target: PublicExportTarget::Source {
+                path: target.clone(),
+                import_shell_id: None,
+            },
         })
         .collect();
     let mut module_symbols = ModuleSymbols::empty();
@@ -840,7 +832,10 @@ fn add_source_package_export_target(
         export_name: target
             .name()
             .expect("an export target path must carry a defining name"),
-        target: PublicExportTarget::Source(target.clone()),
+        target: PublicExportTarget::Source {
+            path: target.clone(),
+            import_shell_id: None,
+        },
     };
     module_symbols
         .source_package_public_exports

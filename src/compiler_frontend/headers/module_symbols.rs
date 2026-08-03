@@ -36,6 +36,7 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_dat
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileImport, FileRole, Header, HeaderKind,
 };
+use crate::compiler_frontend::symbols::identity::ImportShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -50,7 +51,15 @@ use std::path::PathBuf;
 /// through a module-root public surface.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PublicExportTarget {
-    Source(InternedPath),
+    Source {
+        path: InternedPath,
+        /// Retained import-shell identity when this target came from a grouped provider
+        /// re-export. `None` for direct declaration targets in the same module.
+        ///
+        /// WHAT: lets provider re-export projection resolve the completed interface by shell
+        ///       identity instead of re-comparing the authored and normalized path spellings.
+        import_shell_id: Option<ImportShellId>,
+    },
     External(crate::compiler_frontend::external_packages::ExternalSymbolId),
 }
 
@@ -65,7 +74,13 @@ impl PublicExportTarget {
     ///      instead of duplicating the source/external match arms, so nameability and origin
     ///      indexing cannot drift on what a public export targets.
     pub(crate) fn is_source_path(&self, path: &InternedPath) -> bool {
-        matches!(self, PublicExportTarget::Source(exported_path) if exported_path == path)
+        matches!(
+            self,
+            PublicExportTarget::Source {
+                path: exported_path,
+                ..
+            } if exported_path == path
+        )
     }
 }
 

@@ -6,6 +6,7 @@
 
 use super::*;
 
+use crate::compiler_frontend::symbols::identity::ImportShellId;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 /// Boxed diagnostic result for the connected import-clause family.
@@ -24,6 +25,15 @@ type ImportClauseResult<T> = Result<T, Box<CompilerDiagnostic>>;
 pub struct StructuralProviderReference {
     pub path: InternedPath,
     pub path_location: SourceLocation,
+    /// The retained import shell identity assigned by header preparation, when this reference
+    /// was produced by the retained-header path rather than the raw Stage 0 token scan.
+    ///
+    /// WHAT: lets Stage 0 graph edges and header binding join by shell identity instead of
+    ///       re-comparing path components between the authored and normalized spellings.
+    /// WHY: header preparation stamps one `ImportShellId` per retained import shell; the raw
+    ///       token scan that precedes preparation has no shell yet, so the field stays `None`
+    ///       there and the reference is resolved by path alone.
+    pub import_shell_id: Option<ImportShellId>,
     /// Whether the last path component is an imported item rather than part of the provider.
     ///
     /// WHAT: grouped syntax such as `@helper { greet }` is tokenized as the complete path
@@ -170,6 +180,7 @@ fn parse_path_clause_items(
             provider: StructuralProviderReference {
                 path: item.path.clone(),
                 path_location: item.path_location.clone(),
+                import_shell_id: None,
                 from_grouped: item.from_grouped,
             },
             alias: item.alias.or(trailing_alias),

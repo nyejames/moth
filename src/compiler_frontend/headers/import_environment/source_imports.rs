@@ -111,9 +111,17 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     ) -> bool {
         match access {
             SourceImportAccess::Internal | SourceImportAccess::DirectSourceExport => true,
-            SourceImportAccess::PublicExport { exported_entries } => exported_entries.iter().any(
-                |entry| matches!(&entry.target, PublicExportTarget::Source(path) if path == nominal_type_path),
-            ),
+            SourceImportAccess::PublicExport { exported_entries } => {
+                exported_entries.iter().any(|entry| {
+                    matches!(
+                        &entry.target,
+                        PublicExportTarget::Source {
+                            path,
+                            ..
+                        } if path == nominal_type_path
+                    )
+                })
+            }
         }
     }
 

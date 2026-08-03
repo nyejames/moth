@@ -169,7 +169,10 @@ fn build_source_package_public_exports(
                 )?;
                 collector.insert(
                     export_name,
-                    PublicExportTarget::Source(header.tokens.src_path.clone()),
+                    PublicExportTarget::Source {
+                        path: header.tokens.src_path.clone(),
+                        import_shell_id: None,
+                    },
                     header.name_location.clone(),
                     string_table,
                 )?;
@@ -296,7 +299,10 @@ fn build_module_root_public_exports_pass1(
                 .or_default();
             exports.insert(PublicExportEntry {
                 export_name,
-                target: PublicExportTarget::Source(header.tokens.src_path.clone()),
+                target: PublicExportTarget::Source {
+                    path: header.tokens.src_path.clone(),
+                    import_shell_id: None,
+                },
             });
         }
     }
@@ -395,10 +401,13 @@ fn resolve_public_export_import_or_provider(
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<PublicExportTarget> {
     if source_provider_imports
-        .resolve(exporting_source, import, string_table)
+        .resolve(import.import_shell_id)
         .is_some()
     {
-        return Ok(PublicExportTarget::Source(import.provider.path.clone()));
+        return Ok(PublicExportTarget::Source {
+            path: import.provider.path.clone(),
+            import_shell_id: Some(import.import_shell_id),
+        });
     }
 
     resolve_public_export_import(
@@ -415,7 +424,10 @@ fn reject_public_export_target_if_source_receiver_method(
     target: &PublicExportTarget,
     location: SourceLocation,
 ) -> PublicExportDataResult<()> {
-    let PublicExportTarget::Source(method_path) = target else {
+    let PublicExportTarget::Source {
+        path: method_path, ..
+    } = target
+    else {
         return Ok(());
     };
 
@@ -508,7 +520,10 @@ fn resolve_public_export_import(
     if let Some(public_boundary_result) = resolve_public_export_boundary(&public_boundary_input) {
         match public_boundary_result {
             PublicExportLookupResult::ExportedSource { path, .. } => {
-                return Ok(PublicExportTarget::Source(path));
+                return Ok(PublicExportTarget::Source {
+                    path,
+                    import_shell_id: None,
+                });
             }
             PublicExportLookupResult::ExportedExternal { symbol_id } => {
                 return Ok(PublicExportTarget::External(symbol_id));
@@ -586,7 +601,10 @@ fn resolve_public_export_import(
                 })?;
             }
 
-            Ok(PublicExportTarget::Source(symbol_path))
+            Ok(PublicExportTarget::Source {
+                path: symbol_path,
+                import_shell_id: None,
+            })
         }
         ResolvedImportTarget::External { symbol_id } => Ok(PublicExportTarget::External(symbol_id)),
     }

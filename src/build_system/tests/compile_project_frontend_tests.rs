@@ -2240,3 +2240,91 @@ fn source_package_warning_retained_by_frontend_outcome() {
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
+
+#[test]
+fn same_module_import_never_cross_binds_to_suffix_provider_edge() {
+    // WHAT: a same-module grouped import whose normalized path ends with a cross-module edge's
+    //       authored path must stay a local binding.
+    // WHY: the removed suffix matcher compared normalized import paths against authored edge
+    //       paths, so `@a/child { value }` (normalized `.../a/child/value`) could match the edge
+    //       authored by `@child { value }`. The shell identity makes the join exact, and
+    //       same-module imports never enter the provider-interface map.
+    let dir = temp_dir("same_module_suffix_cross_bind");
+    fs::create_dir_all(dir.join("src/child")).expect("should create child module dir");
+    fs::create_dir_all(dir.join("src/a/child")).expect("should create local file dir");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("src/@page.moth"),
+        "import @child { value as child_value }\nimport @other { result }\nio.line([: [child_value()] [result]])\n",
+    )
+    .expect("should write page root");
+    fs::write(
+        dir.join("src/other.moth"),
+        "import @a/child { value as local_value }\nresult #= local_value\n",
+    )
+    .expect("should write same-module file");
+    fs::write(
+        dir.join("src/child/@child.moth"),
+        "export:\n    value || -> Int:\n        return 2\n    ;\n;\n",
+    )
+    .expect("should write child module");
+    fs::write(dir.join("src/a/child/value.moth"), "value #= \"local\"\n")
+        .expect("should write local value file");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .expect("the frontend outcome must build");
+
+    assert!(
+        !frontend.has_diagnosed_or_blocked(),
+        "the same-module import must stay a local binding; binding it to the child function \
+         would diagnose the function-as-value constant"
+    );
+
+    let page_module = frontend
+        .project
+        .modules
+        .successful_artefacts_in_module_id_order()
+        .map(|artifact| &artifact.module)
+        .find(|module| {
+            module
+                .metadata
+                .entry_point
+                .file_name()
+                .and_then(|name| name.to_str())
+                == Some("@page.moth")
+        })
+        .expect("page module should compile");
+
+    // The cross-module child import must still resolve through its own edge while the
+    // suffix-sharing same-module import resolves locally.
+    assert!(
+        page_module
+            .executable
+            .hir
+            .blocks
+            .iter()
+            .any(|block| block.statements.iter().any(|statement| {
+                matches!(
+                    &statement.kind,
+                    crate::compiler_frontend::hir::statements::HirStatementKind::Call {
+                        target: crate::compiler_frontend::external_packages::CallTarget::CrossModule(origin),
+                        ..
+                    } if origin.defining_name() == "value"
+                        && origin.module_origin().logical_module_path() == "src/child"
+                )
+            })),
+        "the child module edge must bind the explicit cross-module import"
+    );
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}

@@ -239,7 +239,10 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         match access {
             SourceImportAccess::PublicExport { exported_entries } => {
                 for entry in exported_entries {
-                    let PublicExportTarget::Source(type_path) = &entry.target else {
+                    let PublicExportTarget::Source {
+                        path: type_path, ..
+                    } = &entry.target
+                    else {
                         continue;
                     };
 
@@ -616,7 +619,9 @@ impl<'a> ImportEnvironmentBuilder<'a> {
 
         for entry in exported_entries {
             match &entry.target {
-                PublicExportTarget::Source(symbol_path) => {
+                PublicExportTarget::Source {
+                    path: symbol_path, ..
+                } => {
                     if self
                         .module_symbols
                         .receiver_method_paths

@@ -1,23 +1,25 @@
 //! Build-resolved source-provider inputs consumed by header interface binding.
 //!
 //! WHAT: associates one retained import shell in one consumer source file with the immutable
-//! public semantic interface selected by Stage 0.
+//! public semantic interface selected by Stage 0, keyed directly by the shell identity.
 //! WHY: the compiler binds names and semantic facts, while the build system owns graph and
 //! namespace resolution. This narrow borrowed input keeps build-local `ModuleId` values out of
-//! the compiler and prevents header binding from probing the filesystem or opening provider
-//! syntax.
+//! the compiler and prevents header binding from probing the filesystem or comparing path
+//! components to rediscover a provider.
 
 use super::model::PublicSemanticInterface;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::headers::parse_file_headers::FileImport;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::identity::ImportShellId;
+
+use rustc_hash::FxHashMap;
 
 pub(crate) struct SourceProviderImport<'a> {
-    pub(crate) importer_source: Vec<String>,
-    pub(crate) imported_path: Vec<String>,
-    pub(crate) from_grouped: bool,
+    /// Retained shell this binding belongs to. `None` marks a builder-selected implicit template
+    /// scope provider, which has no authored import shell.
+    pub(crate) import_shell_id: Option<ImportShellId>,
+    /// Import prefix of the completed source package, used only for implicit template scope.
+    pub(crate) import_prefix: Option<&'a str>,
     /// Marks a provider selected by the active builder for `.mtf` implicit scope.
     ///
     /// Explicit source imports remain ordinary provider bindings. The build system sets this
@@ -30,11 +32,26 @@ pub(crate) struct SourceProviderImport<'a> {
 #[derive(Default)]
 pub(crate) struct SourceProviderImportSet<'a> {
     imports: Vec<SourceProviderImport<'a>>,
+    /// Transient direct lookup by retained shell identity.
+    ///
+    /// The map is built once per module when the set is constructed and dropped after the
+    /// module's bound inputs are built; it is never a durable semantic artefact.
+    by_shell_id: FxHashMap<ImportShellId, usize>,
 }
 
 impl<'a> SourceProviderImportSet<'a> {
     pub(crate) fn new(imports: Vec<SourceProviderImport<'a>>) -> Self {
-        Self { imports }
+        let mut by_shell_id = FxHashMap::default();
+        for (index, binding) in imports.iter().enumerate() {
+            if let Some(import_shell_id) = binding.import_shell_id {
+                by_shell_id.insert(import_shell_id, index);
+            }
+        }
+
+        Self {
+            imports,
+            by_shell_id,
+        }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -56,51 +73,22 @@ impl<'a> SourceProviderImportSet<'a> {
         Ok(())
     }
 
+    /// Resolve the completed provider selected for one retained import shell.
     pub(crate) fn resolve(
         &self,
-        importer_source: &InternedPath,
-        import: &FileImport,
-        string_table: &StringTable,
+        import_shell_id: ImportShellId,
     ) -> Option<&'a PublicSemanticInterface> {
-        self.imports
-            .iter()
-            .find(|binding| {
-                path_matches_owned_components(
-                    importer_source,
-                    &binding.importer_source,
-                    string_table,
-                ) && path_matches_owned_components(
-                    &import.provider.path,
-                    &binding.imported_path,
-                    string_table,
-                ) && binding.from_grouped == import.from_grouped
-            })
-            .map(|binding| binding.interface)
+        self.by_shell_id
+            .get(&import_shell_id)
+            .map(|index| self.imports[*index].interface)
     }
 
-    /// Resolve the completed provider selected for one grouped public re-export target.
+    /// Resolve the completed provider selected for one grouped public re-export shell.
     pub(crate) fn resolve_reexport(
         &self,
-        exporting_source: &InternedPath,
-        target_path: &InternedPath,
-        string_table: &StringTable,
+        import_shell_id: ImportShellId,
     ) -> Option<&'a PublicSemanticInterface> {
-        self.imports
-            .iter()
-            .find(|binding| {
-                binding.from_grouped
-                    && path_matches_owned_components(
-                        exporting_source,
-                        &binding.importer_source,
-                        string_table,
-                    )
-                    && path_matches_owned_components(
-                        target_path,
-                        &binding.imported_path,
-                        string_table,
-                    )
-            })
-            .map(|binding| binding.interface)
+        self.resolve(import_shell_id)
     }
 
     pub(super) fn interfaces(&self) -> impl Iterator<Item = &'a PublicSemanticInterface> + '_ {
@@ -122,22 +110,8 @@ impl<'a> SourceProviderImportSet<'a> {
             }
 
             binding
-                .imported_path
-                .first()
-                .map(|prefix| (prefix.as_str(), binding.interface))
+                .import_prefix
+                .map(|prefix| (prefix, binding.interface))
         })
     }
-}
-
-fn path_matches_owned_components(
-    path: &InternedPath,
-    expected: &[String],
-    string_table: &StringTable,
-) -> bool {
-    path.as_components().len() == expected.len()
-        && path
-            .as_components()
-            .iter()
-            .zip(expected)
-            .all(|(component, expected)| string_table.resolve(*component) == expected)
 }

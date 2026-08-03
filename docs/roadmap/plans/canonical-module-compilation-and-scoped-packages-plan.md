@@ -22,31 +22,34 @@ The architecture is accepted. Phase 5 now needs bounded closeout work, not anoth
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
-WORK_SOURCE: parent R5C1 correction handoff (resume commit 75ccd4aaad28510308c525bc306c9a0af2b80f46)
-BASE_REVISION: 18b7870f7 (current clean main HEAD; R5C1 changes from the parent review are already committed)
-STATUS: active - R5C1 correction complete and validated; stop for parent review before R5C2
-CURRENT_SLICE: R5C1 correction - retain explicit graph boundaries, typed frontend outcomes, graph-identity entry selection and cross-boundary warnings (implemented)
-LAST_ACCEPTED_COMMIT: 3d5310196 (R5C1 correction checkpoint)
-WORKTREE: clean before this correction; implemented directly on main per user direction
-REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, frontend_orchestration.rs, generated_worklist.rs, module_artifact_store.rs, compiled_boundary.rs, build.rs, check.rs, benchmarking/frontend.rs and html_project_builder.rs
+WORK_SOURCE: parent instruction to continue through the rest of the plan (R5C1 accepted; resume at commit 6750c9a57)
+BASE_REVISION: 18b7870f7 (R5C1 correction committed in 6750c9a57; worktree clean on main)
+STATUS: active - R5C2 complete and audited; checkpoint pending
+CURRENT_SLICE: R5C2 - build-local import-shell identity, direct provider and source-package lookup, no path-component joins (implemented)
+LAST_ACCEPTED_COMMIT: 6750c9a57 (R5C1 correction checkpoint, accepted by parent continuation instruction; user commit 469accd60 sits on top with unrelated docs fixes and the tests/mod.rs declaration line this slice needs)
+WORKTREE: R5C2 changes uncommitted on main; no unrelated working-tree changes remain
+REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, import_bindings.rs, file_imports.rs, import_clauses.rs and module_inventory.rs
 RELEVANT_CONTEXT_NOW:
-- R5C1 architecture accepted: artefacts are not flattened into Vec<Module>, package root_activity is not cleared, Deref<[Module]> is gone, builders consume module views and interfaces stay owned
-- implemented: CompiledGraphBoundary/CompiledSourcePackage retain structure, dense ModuleId->artifact mapping, generated store, diagnosed and blocked outcomes per boundary; ProjectFrontendCompilation is the typed outcome; build/dev gate on success-only boundaries; entry selection resolves graph normal-entry identities; warnings flow from every successful boundary; transitional test APIs removed
+- R5C1 accepted: CompiledGraphBoundary/CompiledSourcePackage retain structure, dense ModuleId->artifact mapping, typed frontend outcomes, entry selection by graph identity, cross-boundary warnings
+- R5C2 implemented: ImportShellId stamped per retained shell during header preparation; StructuralProviderReference and graph edges carry it; provider/source-package bindings index by (consumer ModuleId, shell ID); completed packages indexed once by prefix; SourceProviderImportSet direct lookup; owned path copies and suffix matcher deleted; same-module imports stay local
 ACCEPTANCE_CRITERIA:
-- one CompiledGraphBoundary per project and source-package graph retaining structure, dense artifact mapping, generated store, diagnosed and blocked outcomes
-- build/dev assemble ProjectCompilation only from success-only boundaries; check retains successful independent artifacts and reports diagnosed work
-- entry selection resolves graph normal-entry ModuleIds through the retained mapping; package metadata never mutates
-- warnings from every successful boundary are consistent across build, check and frontend benchmarks
-- no R5C2 import indexing, fingerprints, module-vector APIs, wrappers or duplicate graph representations
+- header preparation assigns one ID to each retained import shell
+- each structural provider reference carries or resolves back to that ID
+- project and package graph edges retain the exact importing shell ID
+- provider bindings and source-package bindings index by consumer ModuleId and import-shell ID
+- completed source packages are indexed once by import prefix
+- SourceProviderImportSet performs direct lookup; no path-component comparison or suffix matching
+- owned Vec<String> importer/imported path copies are removed from provider binding records
+- same-module imports never enter the provider-interface map
 VALIDATION_STATE:
- - cargo fmt --all; just validate passes on the final tree (ci-clippy native/linux/windows, 3945 unit + 17 + 538 workspace tests, 1816 integration cases, docs check, bench-ci with all 58 preflight cases). bench-ci records small positive frontend/build deltas; treated as attribution evidence, not correctness proof
-DOCS_IMPACT: compiler and build-system architecture remain unchanged; plan current-state block updated only
-BLOCKERS_OR_OPEN_DECISIONS: none for R5C1 correction
-AUDIT_STATE: interim auditor (pass 1) findings resolved (single frontend timing record, no debug prints, cross-boundary blocked-provider guard with regression test). final_auditor completed with findings: generated-sidecar warnings were omitted from render/build traversal, and Unavailable module slots could pass the success-only gate. Resolved: boundary-owned successful_module_views now includes generated sidecars and is used by frontend rendering, build warning collection and ProjectCompilation::modules; ModuleArtifactStore rejects unfinished slots at boundary finalization and ProjectCompilation requires every slot successful; focused tests added for both. Full gate rerun on the final tree.
-DELEGATION_DECISION: coordinator implements the architecture-owning correction; auditor routes used for read-only review
-NEXT_WORKER_ORDER: R5C1 correction only; stop for review before R5C2
+ - cargo fmt --all; just validate passes on the final R5C2 tree (ci-clippy native/linux/windows, 3954 unit + 17 + 538 workspace tests, 1816 integration cases, docs check, bench-ci all 58 preflight cases). bench-ci records small positive frontend/build deltas; treated as attribution evidence, not correctness proof
+DOCS_IMPACT: plan current-state block only; no architecture doc change
+BLOCKERS_OR_OPEN_DECISIONS: none for R5C2
+AUDIT_STATE: interim auditor route terminated twice by the launcher before a handoff (child referenced out-of-workspace paths; provider later hit usage limit). final_auditor completed with two required findings, both resolved: (1) unstamped/duplicate/cross-category graph edges now fail through CompilerError in the boundary index builders, with three focused malformed-index tests; (2) the end-to-end suffix regression now makes the second file reachable and asserts semantically (no diagnosed/blocked outcome plus a typed cross-module call); the function-as-value discriminator was verified to diagnose MOTH-RULE-0053. Focused verification re-audit could not run: codex provider usage limit blocks until 2026-08-08; corrections are covered by focused tests and the full gate.
+DELEGATION_DECISION: coordinator implements the architecture-owning slice; interim auditor and final_auditor routes review
+NEXT_WORKER_ORDER: R5C3 index interface closure and binding views
 STOP_REASON: none
-NEXT_RESUME_ACTION: parent review of the R5C1 correction; do not start R5C2
+NEXT_RESUME_ACTION: create the R5C2 checkpoint commit, then begin R5C3
 ```
 
 

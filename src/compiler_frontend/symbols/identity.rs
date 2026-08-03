@@ -13,6 +13,26 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
 
+/// Build-local identity of one retained import shell inside one source file.
+///
+/// WHAT: pairs the source file's stable `FileId` with the shell's ordinal within that file so
+///       Stage 0 edges and header import shells join by identity instead of path text.
+/// WHY: provider binding must not compare path components or suffixes; the header preparation
+///      pass assigns one ID per retained shell and the graph keeps that exact ID on its edges.
+///      `source` is `None` only in synthetic test contexts that parse headers without a
+///      `SourceFileTable`; every production module shell carries a real file identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ImportShellId {
+    pub source: Option<FileId>,
+    pub ordinal: u32,
+}
+
+impl ImportShellId {
+    pub fn new(source: Option<FileId>, ordinal: u32) -> Self {
+        Self { source, ordinal }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SourceFileIdentity {
     pub file_id: FileId,

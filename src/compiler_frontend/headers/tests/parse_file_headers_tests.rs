@@ -2537,6 +2537,52 @@ fn per_file_prepare_output_preserves_file_role_and_imports_on_output() {
 }
 
 #[test]
+fn retained_import_shells_get_deterministic_ordinals_and_collapse_duplicates() {
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let output = prepare_single_file(
+        "import @one { a }\nimport @two\nexport:\n    import @one { a }\n;\n",
+        &file_path,
+        &file_path,
+        &mut string_table,
+    );
+
+    assert_eq!(
+        output.file_imports.len(),
+        2,
+        "the duplicate grouped import must collapse into its first retained shell"
+    );
+
+    let grouped = &output.file_imports[0];
+    assert_eq!(grouped.import_shell_id.ordinal, 0);
+    assert!(grouped.from_grouped);
+    assert_eq!(
+        grouped.export_mode,
+        crate::compiler_frontend::headers::types::HeaderExportMode::Public,
+        "the duplicate public occurrence must upgrade the collapsed shell without replacing it"
+    );
+    assert_eq!(
+        grouped.provider.import_shell_id,
+        Some(grouped.import_shell_id),
+        "the normalized provider reference must keep the exact shell identity"
+    );
+    assert_eq!(
+        grouped.authored_provider.import_shell_id,
+        Some(grouped.import_shell_id),
+        "the authored provider reference must keep the exact shell identity"
+    );
+
+    let bare = &output.file_imports[1];
+    assert_eq!(bare.import_shell_id.ordinal, 1);
+    assert!(!bare.from_grouped);
+    assert_eq!(
+        bare.provider.import_shell_id,
+        Some(bare.import_shell_id),
+        "bare imports receive their own shell identity"
+    );
+}
+
+#[test]
 fn imported_module_root_prepare_output_has_imported_root_role() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@mod.moth");

@@ -119,7 +119,7 @@ fn try_resolve_package_public_export(
     for entry in exports {
         if entry.export_name == symbol_name {
             match &entry.target {
-                PublicExportTarget::Source(path) => {
+                PublicExportTarget::Source { path, .. } => {
                     return Some(PublicExportLookupResult::ExportedSource {
                         path: path.clone(),
                         exported_entries: exports.clone(),
@@ -214,7 +214,7 @@ fn try_resolve_module_root_public_export(
 
             if prefix_len == 0 {
                 for entry in exports {
-                    if let PublicExportTarget::Source(path) = &entry.target
+                    if let PublicExportTarget::Source { path, .. } = &entry.target
                         && suffix_matches_with_optional_source_extension(
                             path,
                             &effective_path,
@@ -253,7 +253,7 @@ fn try_resolve_module_root_public_export(
             for entry in exports {
                 if entry.export_name == symbol_name {
                     match &entry.target {
-                        PublicExportTarget::Source(path) => {
+                        PublicExportTarget::Source { path, .. } => {
                             return Some(PublicExportLookupResult::ExportedSource {
                                 path: path.clone(),
                                 exported_entries: exports.clone(),

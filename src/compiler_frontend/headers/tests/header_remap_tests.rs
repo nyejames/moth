@@ -29,6 +29,7 @@ use crate::compiler_frontend::headers::types::{
     HeaderExportMode, HeaderKind, LocalDeclarationOrderingHint, TopLevelConstFragment,
 };
 use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
+use crate::compiler_frontend::symbols::identity::ImportShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
@@ -127,9 +128,11 @@ fn file_import_remaps_all_fields_without_alias() {
     let provider = StructuralProviderReference {
         path: header_path,
         path_location,
+        import_shell_id: None,
         from_grouped: false,
     };
     let mut import = FileImport {
+        import_shell_id: ImportShellId::new(None, 0),
         authored_provider: provider.clone(),
         provider,
         alias: None,
@@ -167,9 +170,11 @@ fn file_import_remaps_all_fields_with_alias() {
     let provider = StructuralProviderReference {
         path: header_path,
         path_location,
+        import_shell_id: None,
         from_grouped: false,
     };
     let mut import = FileImport {
+        import_shell_id: ImportShellId::new(None, 1),
         authored_provider: provider.clone(),
         provider,
         alias: Some(alias_name),
@@ -211,9 +216,11 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
     let provider = StructuralProviderReference {
         path: header_path,
         path_location,
+        import_shell_id: None,
         from_grouped: false,
     };
     let mut import = FileImport {
+        import_shell_id: ImportShellId::new(None, 2),
         authored_provider: provider.clone(),
         provider,
         alias: Some(alias_name),
@@ -632,9 +639,11 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     let provider = StructuralProviderReference {
         path: InternedPath::from_single_str("@html/head", &mut local),
         path_location: make_location("test.moth", &mut local),
+        import_shell_id: None,
         from_grouped: false,
     };
     let import = FileImport {
+        import_shell_id: ImportShellId::new(None, 0),
         authored_provider: provider.clone(),
         provider,
         alias: Some(local.intern("h")),

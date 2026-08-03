@@ -11,6 +11,7 @@ use crate::compiler_frontend::headers::types::{FileImport, HeaderExportMode, Hea
 use crate::compiler_frontend::paths::const_paths::{
     StructuralProviderReference, parse_import_clause_items,
 };
+use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 
@@ -107,10 +108,12 @@ fn parse_and_record_import_clause(
 
         record_import_item(
             state,
+            token_stream.file_id,
             ImportItemRecord {
                 provider: StructuralProviderReference {
                     path: normalized_path,
                     path_location: item.provider.path_location,
+                    import_shell_id: None,
                     from_grouped: item.from_grouped,
                 },
                 authored_provider,
@@ -134,7 +137,11 @@ fn parse_and_record_import_clause(
 /// import record.
 /// WHY: a module root may repeat an import as a re-export, or import and re-export the same symbol
 /// under the same local name. Normalization avoids duplicate records while preserving visibility.
-fn record_import_item(state: &mut HeaderFileParseState, record: ImportItemRecord) {
+fn record_import_item(
+    state: &mut HeaderFileParseState,
+    file_id: Option<FileId>,
+    record: ImportItemRecord,
+) {
     let local_name = record.alias.or_else(|| record.provider.path.name());
     if let Some(name) = local_name {
         state
@@ -148,9 +155,17 @@ fn record_import_item(state: &mut HeaderFileParseState, record: ImportItemRecord
         state
             .file_import_paths
             .insert(record.provider.path.to_owned());
+        // The ordinal is the next retained shell index in this file, so duplicates that collapse
+        // into an existing record keep the earlier shell identity.
+        let import_shell_id = ImportShellId::new(file_id, state.file_imports.len() as u32);
+        let mut provider = record.provider;
+        provider.import_shell_id = Some(import_shell_id);
+        let mut authored_provider = record.authored_provider;
+        authored_provider.import_shell_id = Some(import_shell_id);
         state.file_imports.push(FileImport {
-            provider: record.provider,
-            authored_provider: record.authored_provider,
+            import_shell_id,
+            provider,
+            authored_provider,
             alias: record.alias,
             location: record.location,
             alias_location: record.alias_location,

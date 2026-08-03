@@ -19,7 +19,7 @@ use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
@@ -496,6 +496,14 @@ impl Header {
 
 #[derive(Clone, Debug)]
 pub struct FileImport {
+    /// Build-local identity of this retained import shell inside its source file.
+    ///
+    /// WHAT: Stage 0 assigns one ordinal per retained shell during header preparation and keeps
+    ///       the same `ImportShellId` on graph edges, so provider binding is a direct lookup
+    ///       rather than a path-component or suffix comparison.
+    /// WHY: the authored and normalized spellings of one shell may differ; only the shell
+    ///       identity is stable across both representations.
+    pub import_shell_id: ImportShellId,
     /// Structural provider reference: the normalized import path and its exact source location.
     ///
     /// WHAT: carries the provider path Stage 0 resolves today plus the `path_location` retained

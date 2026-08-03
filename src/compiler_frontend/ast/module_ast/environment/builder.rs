@@ -118,8 +118,10 @@ fn collect_reexport_target_paths(
     };
     for entries in module_symbols.module_root_public_exports.values() {
         for entry in entries {
-            let crate::compiler_frontend::headers::module_symbols::PublicExportTarget::Source(path) =
-                &entry.target
+            let crate::compiler_frontend::headers::module_symbols::PublicExportTarget::Source {
+                path,
+                ..
+            } = &entry.target
             else {
                 continue;
             };

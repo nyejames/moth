@@ -1,5 +1,7 @@
+use super::module_identity::ModuleId;
 use super::prepared_source::PreparedSourceInput;
 use super::prepared_source_store::PreparedSourceStore;
+use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageImport};
 use super::*;
 use crate::build_system::build::BackendBuilder;
 use crate::build_system::create_project_modules::module_namespace::{
@@ -32,6 +34,7 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::ImportShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::temp_dir;
 use std::collections::HashSet;
@@ -319,6 +322,7 @@ fn grouped_provider(
     StructuralProviderReference {
         path,
         path_location: SourceLocation::default(),
+        import_shell_id: None,
         from_grouped: true,
     }
 }
@@ -6022,4 +6026,135 @@ fn indexed_namespace_rejects_direct_nested_child_root_import() {
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
+}
+
+#[test]
+fn provider_binding_index_rejects_edges_without_shell_identity() {
+    let edge = ResolvedDependencyEdge {
+        provider_module_id: ModuleId::from_index(1),
+        consumer_module_id: ModuleId::from_index(0),
+        provider: StructuralProviderReference {
+            path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
+            path_location: SourceLocation::default(),
+            import_shell_id: None,
+            from_grouped: false,
+        },
+        graph_location: SourceLocation::default(),
+    };
+
+    let error = super::compilation::build_provider_binding_index(&[edge])
+        .expect_err("an unstamped edge is malformed graph metadata");
+
+    assert!(
+        error
+            .msg
+            .contains("without a retained import shell identity"),
+        "unexpected error: {}",
+        error.msg
+    );
+}
+
+#[test]
+fn provider_binding_index_rejects_duplicate_shell_edges() {
+    let shell = ImportShellId::new(None, 0);
+    let edges = vec![
+        ResolvedDependencyEdge {
+            provider_module_id: ModuleId::from_index(1),
+            consumer_module_id: ModuleId::from_index(0),
+            provider: StructuralProviderReference {
+                path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
+                path_location: SourceLocation::default(),
+                import_shell_id: Some(shell),
+                from_grouped: false,
+            },
+            graph_location: SourceLocation::default(),
+        },
+        ResolvedDependencyEdge {
+            provider_module_id: ModuleId::from_index(2),
+            consumer_module_id: ModuleId::from_index(0),
+            provider: StructuralProviderReference {
+                path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
+                path_location: SourceLocation::default(),
+                import_shell_id: Some(shell),
+                from_grouped: false,
+            },
+            graph_location: SourceLocation::default(),
+        },
+    ];
+
+    let error = super::compilation::build_provider_binding_index(&edges)
+        .expect_err("one retained shell must resolve to exactly one provider edge");
+
+    assert!(
+        error.msg.contains("more than one provider edge"),
+        "unexpected error: {}",
+        error.msg
+    );
+}
+
+#[test]
+fn source_package_import_index_rejects_cross_category_or_duplicate_shells() {
+    let shell = ImportShellId::new(None, 0);
+    let provider_edge = ResolvedDependencyEdge {
+        provider_module_id: ModuleId::from_index(1),
+        consumer_module_id: ModuleId::from_index(0),
+        provider: StructuralProviderReference {
+            path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
+            path_location: SourceLocation::default(),
+            import_shell_id: Some(shell),
+            from_grouped: false,
+        },
+        graph_location: SourceLocation::default(),
+    };
+    let provider_binding_index = super::compilation::build_provider_binding_index(&[provider_edge])
+        .expect("one provider edge should index");
+
+    let package_import = ResolvedSourcePackageImport {
+        consumer_module_id: ModuleId::from_index(0),
+        import_prefix: "markdown".to_owned(),
+        provider: StructuralProviderReference {
+            path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
+            path_location: SourceLocation::default(),
+            import_shell_id: Some(shell),
+            from_grouped: false,
+        },
+    };
+
+    let error = super::compilation::build_source_package_import_index(
+        &provider_binding_index,
+        &[package_import],
+    )
+    .expect_err("one shell cannot address both a provider module and a source package");
+
+    assert!(
+        error
+            .msg
+            .contains("both a provider module and a source package"),
+        "unexpected error: {}",
+        error.msg
+    );
+
+    // A source-package import without a shell identity is equally malformed.
+    let unstamped = ResolvedSourcePackageImport {
+        consumer_module_id: ModuleId::from_index(0),
+        import_prefix: "markdown".to_owned(),
+        provider: StructuralProviderReference {
+            path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
+            path_location: SourceLocation::default(),
+            import_shell_id: None,
+            from_grouped: false,
+        },
+    };
+    let error = super::compilation::build_source_package_import_index(
+        &provider_binding_index,
+        &[unstamped],
+    )
+    .expect_err("an unstamped package import is malformed graph metadata");
+    assert!(
+        error
+            .msg
+            .contains("without a retained import shell identity"),
+        "unexpected error: {}",
+        error.msg
+    );
 }

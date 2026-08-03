@@ -19,6 +19,7 @@ use crate::compiler_frontend::headers::import_environment::{
 use crate::compiler_frontend::headers::module_symbols::{ModuleRootBoundary, ModuleSymbols};
 use crate::compiler_frontend::headers::types::{FileImport, HeaderExportMode};
 use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
+use crate::compiler_frontend::symbols::identity::ImportShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -55,9 +56,11 @@ fn test_import(header_path: InternedPath, string_table: &mut StringTable) -> Fil
     let provider = StructuralProviderReference {
         path: header_path,
         path_location: location_for(&["src", "@page.moth"], string_table),
+        import_shell_id: None,
         from_grouped: false,
     };
     FileImport {
+        import_shell_id: ImportShellId::new(None, 0),
         authored_provider: provider.clone(),
         provider,
         alias: None,
@@ -471,9 +474,11 @@ fn explicit_external_symbol_import_retains_authored_location() {
     let provider = StructuralProviderReference {
         path: intern_path(&["test", "explicit_symbols", "run"], &mut string_table),
         path_location: import_location.clone(),
+        import_shell_id: None,
         from_grouped: true,
     };
     let import = FileImport {
+        import_shell_id: ImportShellId::new(None, 1),
         authored_provider: provider.clone(),
         provider,
         alias: None,
@@ -630,9 +635,11 @@ fn prelude_namespace_alias_coexists_with_explicit_import_of_same_target() {
     let provider = StructuralProviderReference {
         path: import_path,
         path_location: location_for(&["src", "@page.moth"], &mut string_table),
+        import_shell_id: None,
         from_grouped: false,
     };
     let import = FileImport {
+        import_shell_id: ImportShellId::new(None, 2),
         authored_provider: provider.clone(),
         provider,
         alias: None,

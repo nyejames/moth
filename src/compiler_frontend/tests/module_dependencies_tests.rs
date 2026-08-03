@@ -630,7 +630,10 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
         .or_default()
         .insert(PublicExportEntry {
             export_name: widget_name,
-            target: PublicExportTarget::Source(concrete_target),
+            target: PublicExportTarget::Source {
+                path: concrete_target,
+                import_shell_id: None,
+            },
         });
 
     let sorted = resolve_module_dependencies(headers, &mut string_table)
