@@ -58,17 +58,17 @@ export:
 
     -- Basic table components
     table #String = [$html:
-    <table style="[$slot("style")]">
-        [$note: The first row can be styled differently to the rest of the table rows.]
-        <tr style="[$slot("header_style")]">
-            [$slot(1)]
-        </tr>
+        <table style="[$slot("style")]">
+            [$note: The first row can be styled differently to the rest of the table rows.]
+            <tr style="[$slot("header_style")]">
+                [$slot(1)]
+            </tr>
 
-        [$note: Each remaining row can be styled differently.]
-        [$children([$html:<tr style="[$slot("row_style")]">[$slot]</tr>]):
-            [$slot]
-        ]
-    </table>
+            [$note: Each remaining row can be styled differently.]
+            [$children([$html:<tr style="[$slot("row_style")]">[$slot]</tr>]):
+                [$slot]
+            ]
+        </table>
     ]
 
     td #= [$html:

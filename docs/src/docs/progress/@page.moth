@@ -1,13 +1,14 @@
-import @html {center}
+import @html {center, span}
 import @styles {navbar, title, section, styled_table, header, data, codeblock, theme_head}
 
 page_title #= "Progress Matrix"
 page_description #= "Current implementation status, coverage and feature progress for the Moth compiler."
 page_head #= theme_head
 
-red #= [$css("inline"): background-color: rgb(232, 109, 171)]
-orange #= [$css("inline"): background-color: rgb(223, 162, 100)]
-green #= [$css("inline"): background-color: rgb(109, 232, 138)]
+red #= [$css("inline"): background-color: rgb(239, 112, 112); color: black;]
+pink #= [$css("inline"): background-color: rgb(231, 133, 218); color: black;]
+orange #= [$css("inline"): background-color: rgb(223, 162, 100); color: black;]
+green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
 #[navbar]
 #[title, center: PROGRESS MATRIX]
@@ -58,22 +59,22 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
     [styled_table:
         [header: [: Status] [: Meaning] ]
 
-        [data, green:
+        [data:
             [: Supported]
             [: Implemented for the Alpha surface and expected to compile, type check, lower, and run through the JS / HTML pipeline.]
         ]
 
-        [data, orange:
+        [data:
             [: Partial]
             [: A useful subset is implemented, but some sub-surfaces are intentionally deferred, target-gated, or still being shaped before Alpha.]
         ]
 
-        [data, red:
+        [data:
             [: Experimental]
             [: Present in the repo, but not part of the Alpha stability promise.]
         ]
 
-        [data, red:
+        [data:
             [: Deferred]
             [: Planned or design-compatible, but not part of the current implemented Alpha surface.]
         ]
