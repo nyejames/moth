@@ -574,7 +574,7 @@ impl OriginFunctionId {
 /// location, ordinary source-file path, declaration order, export alias or dense build-local ID.
 /// WHY: cross-module constant references key off this origin so renaming a constant or moving it
 /// between modules alters identity while reordering and aliasing do not.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct OriginConstantId {
     module_origin: StableModuleOriginIdentity,
     defining_name: String,
@@ -651,7 +651,7 @@ impl OriginTraitId {
 /// WHY: public-interface binding and exported-symbol tables key over one stable identity value
 /// while still distinguishing declaration category. Identity still derives only from module
 /// origin, defining name, category and receiver type identity where applicable.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum OriginDeclarationId {
     Function(OriginFunctionId),
     Type(OriginTypeId),

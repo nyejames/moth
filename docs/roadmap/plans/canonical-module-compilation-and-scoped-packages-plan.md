@@ -24,32 +24,33 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: parent instruction to continue through the rest of the plan (R5C1 accepted; resume at commit 6750c9a57)
 BASE_REVISION: 18b7870f7 (R5C1 correction committed in 6750c9a57; worktree clean on main)
-STATUS: active - R5C2 complete and audited; checkpoint pending
-CURRENT_SLICE: R5C2 - build-local import-shell identity, direct provider and source-package lookup, no path-component joins (implemented)
-LAST_ACCEPTED_COMMIT: 6750c9a57 (R5C1 correction checkpoint, accepted by parent continuation instruction; user commit 469accd60 sits on top with unrelated docs fixes and the tests/mod.rs declaration line this slice needs)
-WORKTREE: R5C2 changes uncommitted on main; no unrelated working-tree changes remain
-REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, import_bindings.rs, file_imports.rs, import_clauses.rs and module_inventory.rs
+STATUS: active - R5C3 complete and gated; checkpoint pending
+CURRENT_SLICE: R5C3 - transient indexed interface view, declaration/evidence work queue, direct-record move, deterministic publication order (implemented)
+LAST_ACCEPTED_COMMIT: 8b030a112 (R5C2 checkpoint; user commits 469accd60 and 6951f1b36 sit on top with unrelated docs fixes)
+WORKTREE: R5C3 changes uncommitted on main; no unrelated working-tree changes remain
+REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, interface_closure.rs, interface_view.rs, interface_validation.rs, model.rs and export_projection.rs
 RELEVANT_CONTEXT_NOW:
 - R5C1 accepted: CompiledGraphBoundary/CompiledSourcePackage retain structure, dense ModuleId->artifact mapping, typed frontend outcomes, entry selection by graph identity, cross-boundary warnings
-- R5C2 implemented: ImportShellId stamped per retained shell during header preparation; StructuralProviderReference and graph edges carry it; provider/source-package bindings index by (consumer ModuleId, shell ID); completed packages indexed once by prefix; SourceProviderImportSet direct lookup; owned path copies and suffix matcher deleted; same-module imports stay local
+- R5C2 accepted (8b030a112): ImportShellId joins replace path/suffix matching; final_auditor findings resolved; verification audit deferred to provider availability
+- R5C3 implemented: InterfaceView indexes export names, binding exports, declaration origins, summary origins and evidence identities with duplicate-key validation; interface closure uses combined origin maps and a declaration/evidence work queue; evidence eligibility is precomputed per record; direct records move once, provider records clone once; final vectors sorted by semantic origin; provider dedup is by interface identity so disagreeing publishers fail deterministically; re-export binding projection uses per-operation binding views
 ACCEPTANCE_CRITERIA:
-- header preparation assigns one ID to each retained import shell
-- each structural provider reference carries or resolves back to that ID
-- project and package graph edges retain the exact importing shell ID
-- provider bindings and source-package bindings index by consumer ModuleId and import-shell ID
-- completed source packages are indexed once by import prefix
-- SourceProviderImportSet performs direct lookup; no path-component comparison or suffix matching
-- owned Vec<String> importer/imported path copies are removed from provider binding records
-- same-module imports never enter the provider-interface map
+- build each view at most once per closure or binding operation
+- validate duplicate keys while constructing the view
+- interface closure uses a declaration/evidence work queue over indexes
+- do not scan every provider for each selected declaration or summary
+- do not clone all evidence candidates on each fixed-point iteration
+- borrow direct records during closure and move final records once
+- sort final vectors by semantic order before publication
+- final PublicSemanticInterface stays deterministic and contains no durable lookup map
 VALIDATION_STATE:
- - cargo fmt --all; just validate passes on the final R5C2 tree (ci-clippy native/linux/windows, 3954 unit + 17 + 538 workspace tests, 1816 integration cases, docs check, bench-ci all 58 preflight cases). bench-ci records small positive frontend/build deltas; treated as attribution evidence, not correctness proof
+ - cargo fmt --all; just validate passes on the final R5C3 tree (ci-clippy native/linux/windows, 3960 unit + 17 + 538 workspace tests, 1816 integration cases, docs check, bench-ci all 58 preflight cases). bench-ci records small positive frontend/build deltas; treated as attribution evidence, not correctness proof. One validate rerun was needed because a user docs commit landed during the first bench-ci run (commit-changed guard).
 DOCS_IMPACT: plan current-state block only; no architecture doc change
-BLOCKERS_OR_OPEN_DECISIONS: none for R5C2
-AUDIT_STATE: interim auditor route terminated twice by the launcher before a handoff (child referenced out-of-workspace paths; provider later hit usage limit). final_auditor completed with two required findings, both resolved: (1) unstamped/duplicate/cross-category graph edges now fail through CompilerError in the boundary index builders, with three focused malformed-index tests; (2) the end-to-end suffix regression now makes the second file reachable and asserts semantically (no diagnosed/blocked outcome plus a typed cross-module call); the function-as-value discriminator was verified to diagnose MOTH-RULE-0053. Focused verification re-audit could not run: codex provider usage limit blocks until 2026-08-08; corrections are covered by focused tests and the full gate.
+BLOCKERS_OR_OPEN_DECISIONS: none for R5C3
+AUDIT_STATE: delegated audits unavailable: codex provider usage limit blocks until 2026-08-08 (R5C2 verification audit and R5C3 final audit both deferred). R5C3 requirements are covered by six focused closure tests plus the full gate; a fresh final_auditor run is queued once provider access resumes.
 DELEGATION_DECISION: coordinator implements the architecture-owning slice; interim auditor and final_auditor routes review
-NEXT_WORKER_ORDER: R5C3 index interface closure and binding views
+NEXT_WORKER_ORDER: R5C4 compact immutable generic materialisation metadata
 STOP_REASON: none
-NEXT_RESUME_ACTION: create the R5C2 checkpoint commit, then begin R5C3
+NEXT_RESUME_ACTION: create the R5C3 checkpoint commit, then begin R5C4
 ```
 
 

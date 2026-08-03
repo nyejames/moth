@@ -65,6 +65,7 @@ mod export_projection;
 mod import_bindings;
 mod interface_closure;
 mod interface_validation;
+mod interface_view;
 mod local_finalization;
 mod model;
 mod receiver_projection;

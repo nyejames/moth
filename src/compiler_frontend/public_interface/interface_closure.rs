@@ -4,9 +4,12 @@
 //! immutable completed interfaces and retains every declaration, callable summary, canonical
 //! type, trait and reusable evidence fact reachable from that surface.
 //! WHY: consumers bind from one provider interface only. A facade must carry the closed semantic
-//! facts behind its aliases instead of forcing consumers to reopen transitive providers.
+//! facts behind its aliases instead of forcing consumers to reopen transitive providers. Closure
+//! runs against one transient indexed view per completed interface and a declaration/evidence
+//! work queue, so it never scans every provider for each selected fact.
 
 use super::SourceProviderImportSet;
+use super::interface_view::InterfaceView;
 use super::model::{
     ConcreteCallSummaryRecord, LocalPublicInterface, PublicChoiceSemantics,
     PublicDeclarationRecord, PublicDeclarationSemantics, PublicEvidenceRecord,
@@ -15,13 +18,14 @@ use super::model::{
     PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics, TraitSurfaceTypeIdentity,
 };
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalTraitIdentity, CanonicalTypeIdentity,
+    CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginFunctionId};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
 impl PublicSemanticInterface {
@@ -44,7 +48,7 @@ impl PublicSemanticInterface {
             reusable_evidence,
         } = draft;
 
-        let direct = Self {
+        let mut direct = Self {
             module_origin: module_origin.clone(),
             export_bindings: export_bindings.clone(),
             export_diagnostic_provenance: export_diagnostic_provenance.clone(),
@@ -57,22 +61,27 @@ impl PublicSemanticInterface {
 
         let mut providers: Vec<&PublicSemanticInterface> = provider_imports.interfaces().collect();
         providers.sort_by(|left, right| left.module_origin.cmp(&right.module_origin));
-        providers.dedup_by(|left, right| left.module_origin == right.module_origin);
+        // Collapse repeated references to one completed interface, but keep two distinct
+        // interfaces that claim the same module origin so the closure agreement check rejects
+        // their disagreement deterministically instead of silently preferring one.
+        providers.dedup_by(|left, right| std::ptr::eq(*left, *right));
 
-        let mut closure = InterfaceClosure::new(&direct, providers);
+        let mut closure = InterfaceClosure::new(&direct, providers)?;
         for binding in &export_bindings {
-            closure.enqueue_declaration(binding.origin().clone());
+            closure.work.enqueue_declaration(binding.origin().clone());
         }
         closure.compute()?;
+        let (declarations, reusable_evidence, concrete_call_summaries) =
+            closure.into_selection().materialize(&mut direct)?;
 
         let interface = Self {
             module_origin,
             export_bindings,
             export_diagnostic_provenance,
             binding_exports,
-            declarations: closure.declarations,
-            reusable_evidence: closure.reusable_evidence,
-            concrete_call_summaries: closure.concrete_call_summaries,
+            declarations,
+            reusable_evidence,
+            concrete_call_summaries,
         };
         interface.validate_for_publication()?;
         interface.validate_binding_targets(external_registry)?;
@@ -80,34 +89,236 @@ impl PublicSemanticInterface {
     }
 }
 
-struct InterfaceClosure<'a> {
-    direct: &'a PublicSemanticInterface,
-    providers: Vec<&'a PublicSemanticInterface>,
-    pending_declarations: VecDeque<OriginDeclarationId>,
-    selected_declarations: FxHashSet<OriginDeclarationId>,
-    selected_summaries: FxHashSet<OriginFunctionId>,
-    selected_evidence:
-        FxHashSet<crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity>,
-    declarations: Vec<PublicDeclarationRecord>,
-    reusable_evidence: Vec<PublicEvidenceRecord>,
-    concrete_call_summaries: Vec<ConcreteCallSummaryRecord>,
+/// The three closed fact vectors produced by one interface closure.
+type ClosedInterfaceRecords = (
+    Vec<PublicDeclarationRecord>,
+    Vec<PublicEvidenceRecord>,
+    Vec<ConcreteCallSummaryRecord>,
+);
+
+/// Index position of one record inside one source interface.
+///
+/// `source` is 0 for the direct interface and `provider_index + 1` for each provider.
+#[derive(Clone, Copy, Debug)]
+struct RecordRef {
+    source: usize,
+    record: usize,
 }
 
-impl<'a> InterfaceClosure<'a> {
+/// Immutable indexed lookup state shared by the closure work queue.
+///
+/// Combined origin maps are built once. Agreement checks stay O(k) for the few interfaces that
+/// publish the same origin, and every lookup is direct instead of a per-provider linear scan.
+/// Keeping the state separate from the mutable queues lets closure steps borrow records from the
+/// state while enqueuing new work.
+struct ClosureState<'direct, 'provider> {
+    direct_view: InterfaceView<'direct>,
+    provider_views: Vec<InterfaceView<'provider>>,
+    declarations_by_origin: FxHashMap<OriginDeclarationId, Vec<RecordRef>>,
+    summaries_by_origin: FxHashMap<OriginFunctionId, Vec<RecordRef>>,
+    evidence_by_origin: FxHashMap<OriginDeclarationId, Vec<RecordRef>>,
+}
+
+impl<'direct, 'provider> ClosureState<'direct, 'provider> {
     fn new(
-        direct: &'a PublicSemanticInterface,
-        providers: Vec<&'a PublicSemanticInterface>,
-    ) -> Self {
+        direct: &'direct PublicSemanticInterface,
+        providers: &[&'provider PublicSemanticInterface],
+    ) -> Result<Self, CompilerError> {
+        let direct_view = InterfaceView::build(direct)?;
+        let mut provider_views = Vec::with_capacity(providers.len());
+        for provider in providers {
+            provider_views.push(InterfaceView::build(provider)?);
+        }
+
+        let mut declarations_by_origin: FxHashMap<OriginDeclarationId, Vec<RecordRef>> =
+            FxHashMap::default();
+        let mut summaries_by_origin: FxHashMap<OriginFunctionId, Vec<RecordRef>> =
+            FxHashMap::default();
+        let mut evidence_by_origin: FxHashMap<OriginDeclarationId, Vec<RecordRef>> =
+            FxHashMap::default();
+
+        for (record, declaration) in direct.declarations.iter().enumerate() {
+            declarations_by_origin
+                .entry(declaration.origin.clone())
+                .or_default()
+                .push(RecordRef { source: 0, record });
+        }
+        for (record, summary) in direct.concrete_call_summaries.iter().enumerate() {
+            summaries_by_origin
+                .entry(summary.origin.clone())
+                .or_default()
+                .push(RecordRef { source: 0, record });
+        }
+        for (record, evidence) in direct.reusable_evidence.iter().enumerate() {
+            index_evidence(evidence, 0, record, &mut evidence_by_origin);
+        }
+
+        for (provider_index, view) in provider_views.iter().enumerate() {
+            let source = provider_index + 1;
+            for (record, declaration) in view.interface().declarations.iter().enumerate() {
+                declarations_by_origin
+                    .entry(declaration.origin.clone())
+                    .or_default()
+                    .push(RecordRef { source, record });
+            }
+            for (record, summary) in view.interface().concrete_call_summaries.iter().enumerate() {
+                summaries_by_origin
+                    .entry(summary.origin.clone())
+                    .or_default()
+                    .push(RecordRef { source, record });
+            }
+            for (record, evidence) in view.interface().reusable_evidence.iter().enumerate() {
+                index_evidence(evidence, source, record, &mut evidence_by_origin);
+            }
+        }
+
+        Ok(Self {
+            direct_view,
+            provider_views,
+            declarations_by_origin,
+            summaries_by_origin,
+            evidence_by_origin,
+        })
+    }
+
+    fn declaration(
+        &self,
+        source: usize,
+        origin: &OriginDeclarationId,
+    ) -> Option<&PublicDeclarationRecord> {
+        if source == 0 {
+            self.direct_view.declaration(origin)
+        } else {
+            self.provider_views[source - 1].declaration(origin)
+        }
+    }
+
+    fn summary(&self, source: usize, origin: &OriginFunctionId) -> Option<&PublicCallSummary> {
+        if source == 0 {
+            self.direct_view.concrete_call_summary(origin)
+        } else {
+            self.provider_views[source - 1].concrete_call_summary(origin)
+        }
+    }
+
+    fn evidence(
+        &self,
+        source: usize,
+        identity: &CanonicalEvidenceIdentity,
+    ) -> Option<&PublicEvidenceRecord> {
+        if source == 0 {
+            self.direct_view.evidence(identity)
+        } else {
+            self.provider_views[source - 1].evidence(identity)
+        }
+    }
+
+    fn evidence_identity(&self, reference: RecordRef) -> &CanonicalEvidenceIdentity {
+        if reference.source == 0 {
+            &self.direct_view.interface().reusable_evidence[reference.record].identity
+        } else {
+            &self.provider_views[reference.source - 1]
+                .interface()
+                .reusable_evidence[reference.record]
+                .identity
+        }
+    }
+
+    /// Find one declaration record across the direct interface and providers.
+    ///
+    /// All publishers of one origin must agree; the record is borrowed through the indexed view
+    /// and moved or cloned once at finalization.
+    fn find_declaration(
+        &self,
+        origin: &OriginDeclarationId,
+    ) -> Result<&PublicDeclarationRecord, CompilerError> {
+        let references = self.declarations_by_origin.get(origin).ok_or_else(|| {
+            closure_error(format!(
+                "reachable declaration origin {:?} is absent from the local and completed provider interfaces",
+                origin
+            ))
+        })?;
+        let first_record = self
+            .declaration(references[0].source, origin)
+            .ok_or_else(|| {
+                closure_error(format!(
+                    "declaration view lost origin {:?} during index construction",
+                    origin
+                ))
+            })?;
+
+        for reference in &references[1..] {
+            let candidate = self.declaration(reference.source, origin).ok_or_else(|| {
+                closure_error(format!(
+                    "declaration view lost origin {:?} during index construction",
+                    origin
+                ))
+            })?;
+            if first_record != candidate {
+                return Err(closure_error(format!(
+                    "provider interfaces disagree on declaration origin {:?}",
+                    origin
+                )));
+            }
+        }
+
+        Ok(first_record)
+    }
+
+    /// Validate that every interface publishing one concrete summary agrees on it.
+    fn validate_summary_agreement(&self, origin: &OriginFunctionId) -> Result<(), CompilerError> {
+        let references = self.summaries_by_origin.get(origin).ok_or_else(|| {
+            closure_error(format!(
+                "reachable concrete callable {:?} has no completed call summary",
+                origin
+            ))
+        })?;
+        let first = self.summary(references[0].source, origin).ok_or_else(|| {
+            closure_error(format!(
+                "summary view lost origin {:?} during index construction",
+                origin
+            ))
+        })?;
+
+        for reference in &references[1..] {
+            let candidate = self.summary(reference.source, origin).ok_or_else(|| {
+                closure_error(format!(
+                    "summary view lost origin {:?} during index construction",
+                    origin
+                ))
+            })?;
+            if first != candidate {
+                return Err(closure_error(format!(
+                    "provider interfaces disagree on concrete call summary {:?}",
+                    origin
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Mutable closure queues and selection sets.
+///
+/// Kept separate from [`ClosureState`] so dependency walking can borrow records from the state
+/// while enqueueing new declarations and evidence.
+struct ClosureWork {
+    pending_declarations: VecDeque<OriginDeclarationId>,
+    pending_evidence: VecDeque<RecordRef>,
+    selected_declarations: FxHashSet<OriginDeclarationId>,
+    selected_summaries: FxHashSet<OriginFunctionId>,
+    selected_evidence: FxHashSet<CanonicalEvidenceIdentity>,
+}
+
+impl ClosureWork {
+    fn new() -> Self {
         Self {
-            direct,
-            providers,
             pending_declarations: VecDeque::new(),
+            pending_evidence: VecDeque::new(),
             selected_declarations: FxHashSet::default(),
             selected_summaries: FxHashSet::default(),
             selected_evidence: FxHashSet::default(),
-            declarations: Vec::new(),
-            reusable_evidence: Vec::new(),
-            concrete_call_summaries: Vec::new(),
         }
     }
 
@@ -117,101 +328,49 @@ impl<'a> InterfaceClosure<'a> {
         }
     }
 
-    fn compute(&mut self) -> Result<(), CompilerError> {
-        loop {
-            while let Some(origin) = self.pending_declarations.pop_front() {
-                if !self.selected_declarations.insert(origin.clone()) {
-                    continue;
-                }
-
-                let declaration = self.find_declaration(&origin)?;
-                self.enqueue_declaration_dependencies(&declaration);
-                self.copy_callable_summaries(&declaration)?;
-                self.declarations.push(declaration);
-            }
-
-            if !self.select_reachable_evidence()? {
-                break;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn find_declaration(
-        &self,
-        origin: &OriginDeclarationId,
-    ) -> Result<PublicDeclarationRecord, CompilerError> {
-        let mut found = self.direct.declaration(origin);
-        for provider in &self.providers {
-            let Some(candidate) = provider.declaration(origin) else {
-                continue;
-            };
-            if let Some(existing) = found
-                && existing != candidate
-            {
-                return Err(closure_error(format!(
-                    "provider interfaces disagree on declaration origin {:?}",
-                    origin
-                )));
-            }
-            found = Some(candidate);
-        }
-
-        found.cloned().ok_or_else(|| {
-            closure_error(format!(
-                "reachable declaration origin {:?} is absent from the local and completed provider interfaces",
-                origin
-            ))
-        })
-    }
-
     fn copy_callable_summaries(
         &mut self,
+        state: &ClosureState<'_, '_>,
         declaration: &PublicDeclarationRecord,
     ) -> Result<(), CompilerError> {
         let mut callable_origins = Vec::new();
         collect_concrete_callable_origins(declaration, &mut callable_origins);
 
         for origin in callable_origins {
-            if !self.selected_summaries.insert(origin.clone()) {
-                continue;
+            if self.selected_summaries.insert(origin.clone()) {
+                state.validate_summary_agreement(&origin)?;
             }
-            let summary = self.find_summary(&origin)?;
-            self.concrete_call_summaries
-                .push(ConcreteCallSummaryRecord { origin, summary });
         }
 
         Ok(())
     }
 
-    fn find_summary(
-        &self,
-        origin: &OriginFunctionId,
-    ) -> Result<crate::compiler_frontend::public_call_summary::PublicCallSummary, CompilerError>
-    {
-        let mut found = self.direct.concrete_call_summary(origin);
-        for provider in &self.providers {
-            let Some(candidate) = provider.concrete_call_summary(origin) else {
+    fn process_pending_evidence(
+        &mut self,
+        state: &ClosureState<'_, '_>,
+    ) -> Result<bool, CompilerError> {
+        let mut added = false;
+        while let Some(reference) = self.pending_evidence.pop_front() {
+            let identity = state.evidence_identity(reference).clone();
+            if !self.selected_evidence.insert(identity.clone()) {
                 continue;
-            };
-            if let Some(existing) = found
-                && existing != candidate
-            {
-                return Err(closure_error(format!(
-                    "provider interfaces disagree on concrete call summary {:?}",
-                    origin
-                )));
             }
-            found = Some(candidate);
+
+            let evidence = state.evidence(reference.source, &identity).ok_or_else(|| {
+                closure_error(format!(
+                    "evidence view lost identity {:?} during index construction",
+                    identity
+                ))
+            })?;
+            self.enqueue_type(evidence.identity.target_type_identity());
+            self.enqueue_trait(evidence.identity.trait_identity());
+            for mapping in &evidence.requirement_mappings {
+                self.enqueue_trait(mapping.requirement_identity.trait_identity());
+            }
+            added = true;
         }
 
-        found.cloned().ok_or_else(|| {
-            closure_error(format!(
-                "reachable concrete callable {:?} has no completed call summary",
-                origin
-            ))
-        })
+        Ok(added)
     }
 
     fn enqueue_declaration_dependencies(&mut self, declaration: &PublicDeclarationRecord) {
@@ -358,39 +517,260 @@ impl<'a> InterfaceClosure<'a> {
             self.enqueue_type(&identity);
         }
     }
+}
 
-    fn select_reachable_evidence(&mut self) -> Result<bool, CompilerError> {
-        let mut added = false;
-        let candidates: Vec<PublicEvidenceRecord> = self
-            .evidence_sources()
-            .flat_map(|interface| interface.reusable_evidence.iter().cloned())
-            .collect();
+/// Work-queue closure over indexed completed interfaces.
+struct InterfaceClosure<'direct, 'provider> {
+    state: ClosureState<'direct, 'provider>,
+    work: ClosureWork,
+}
 
-        for evidence in candidates {
-            if self.selected_evidence.contains(&evidence.identity)
-                || !type_references_selected_declaration(
-                    evidence.identity.target_type_identity(),
-                    &self.selected_declarations,
-                )
-            {
-                continue;
-            }
-
-            self.enqueue_type(evidence.identity.target_type_identity());
-            self.enqueue_trait(evidence.identity.trait_identity());
-            for mapping in &evidence.requirement_mappings {
-                self.enqueue_trait(mapping.requirement_identity.trait_identity());
-            }
-            self.selected_evidence.insert(evidence.identity.clone());
-            self.reusable_evidence.push(evidence);
-            added = true;
-        }
-
-        Ok(added)
+impl<'direct, 'provider> InterfaceClosure<'direct, 'provider> {
+    fn new(
+        direct: &'direct PublicSemanticInterface,
+        providers: Vec<&'provider PublicSemanticInterface>,
+    ) -> Result<Self, CompilerError> {
+        Ok(Self {
+            state: ClosureState::new(direct, &providers)?,
+            work: ClosureWork::new(),
+        })
     }
 
-    fn evidence_sources(&self) -> impl Iterator<Item = &PublicSemanticInterface> {
-        std::iter::once(self.direct).chain(self.providers.iter().copied())
+    fn compute(&mut self) -> Result<(), CompilerError> {
+        loop {
+            while let Some(origin) = self.work.pending_declarations.pop_front() {
+                if !self.work.selected_declarations.insert(origin.clone()) {
+                    continue;
+                }
+
+                let declaration = self.state.find_declaration(&origin)?;
+                self.work.enqueue_declaration_dependencies(declaration);
+                self.work
+                    .copy_callable_summaries(&self.state, declaration)?;
+                if let Some(evidence_refs) = self.state.evidence_by_origin.get(&origin) {
+                    self.work
+                        .pending_evidence
+                        .extend(evidence_refs.iter().copied());
+                }
+            }
+
+            if !self.work.process_pending_evidence(&self.state)? {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Consume the closure into its selection facts for final materialization.
+    fn into_selection(self) -> ClosureSelection<'provider> {
+        let InterfaceClosure { state, work } = self;
+        let ClosureState {
+            provider_views,
+            declarations_by_origin,
+            summaries_by_origin,
+            ..
+        } = state;
+        let ClosureWork {
+            selected_declarations,
+            selected_summaries,
+            selected_evidence,
+            ..
+        } = work;
+
+        ClosureSelection {
+            provider_views,
+            declarations_by_origin,
+            summaries_by_origin,
+            selected_declarations,
+            selected_summaries,
+            selected_evidence,
+        }
+    }
+}
+
+/// Owned selection facts used to materialize the final closed interface.
+///
+/// The direct view is dropped with the closure so the owned direct interface can be moved from;
+/// provider records stay reachable through these borrowed views.
+struct ClosureSelection<'provider> {
+    provider_views: Vec<InterfaceView<'provider>>,
+    declarations_by_origin: FxHashMap<OriginDeclarationId, Vec<RecordRef>>,
+    summaries_by_origin: FxHashMap<OriginFunctionId, Vec<RecordRef>>,
+    selected_declarations: FxHashSet<OriginDeclarationId>,
+    selected_summaries: FxHashSet<OriginFunctionId>,
+    selected_evidence: FxHashSet<CanonicalEvidenceIdentity>,
+}
+
+impl<'provider> ClosureSelection<'provider> {
+    /// Move the selected direct records out once and clone the selected provider records.
+    ///
+    /// Final vectors are sorted by stable semantic identity so publication order never depends
+    /// on provider import order.
+    fn materialize(
+        self,
+        direct: &mut PublicSemanticInterface,
+    ) -> Result<ClosedInterfaceRecords, CompilerError> {
+        let mut declarations = Vec::with_capacity(self.selected_declarations.len());
+        let mut moved_declarations = FxHashSet::default();
+        move_selected_direct_records(
+            &mut direct.declarations,
+            &self.selected_declarations,
+            |declaration| declaration.origin.clone(),
+            &mut moved_declarations,
+            &mut declarations,
+        );
+        for origin in self
+            .selected_declarations
+            .iter()
+            .filter(|origin| !moved_declarations.contains(*origin))
+        {
+            let reference = self
+                .declarations_by_origin
+                .get(origin)
+                .and_then(|references| references.iter().find(|reference| reference.source != 0))
+                .ok_or_else(|| {
+                    closure_error(format!(
+                        "selected declaration origin {:?} lost its provider record",
+                        origin
+                    ))
+                })?;
+            declarations.push(
+                self.provider_views[reference.source - 1]
+                    .interface()
+                    .declarations[reference.record]
+                    .clone(),
+            );
+        }
+        declarations.sort_by(|left, right| left.origin.cmp(&right.origin));
+
+        let mut reusable_evidence = Vec::with_capacity(self.selected_evidence.len());
+        let mut moved_evidence = FxHashSet::default();
+        move_selected_direct_records(
+            &mut direct.reusable_evidence,
+            &self.selected_evidence,
+            |evidence| evidence.identity.clone(),
+            &mut moved_evidence,
+            &mut reusable_evidence,
+        );
+        for identity in self
+            .selected_evidence
+            .iter()
+            .filter(|identity| !moved_evidence.contains(*identity))
+        {
+            let reference = self
+                .provider_views
+                .iter()
+                .enumerate()
+                .find_map(|(provider_index, view)| {
+                    view.evidence(identity).map(|_| RecordRef {
+                        source: provider_index + 1,
+                        record: view
+                            .interface()
+                            .reusable_evidence
+                            .iter()
+                            .position(|record| &record.identity == identity)
+                            .expect("evidence view index must match its vector"),
+                    })
+                })
+                .ok_or_else(|| {
+                    closure_error(format!(
+                        "selected evidence identity {:?} lost its provider record",
+                        identity
+                    ))
+                })?;
+            reusable_evidence.push(
+                self.provider_views[reference.source - 1]
+                    .interface()
+                    .reusable_evidence[reference.record]
+                    .clone(),
+            );
+        }
+        reusable_evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
+
+        let mut concrete_call_summaries = Vec::with_capacity(self.selected_summaries.len());
+        let mut moved_summaries = FxHashSet::default();
+        move_selected_direct_records(
+            &mut direct.concrete_call_summaries,
+            &self.selected_summaries,
+            |summary| summary.origin.clone(),
+            &mut moved_summaries,
+            &mut concrete_call_summaries,
+        );
+        for origin in self
+            .selected_summaries
+            .iter()
+            .filter(|origin| !moved_summaries.contains(*origin))
+        {
+            let reference = self
+                .summaries_by_origin
+                .get(origin)
+                .and_then(|references| references.iter().find(|reference| reference.source != 0))
+                .ok_or_else(|| {
+                    closure_error(format!(
+                        "selected summary origin {:?} lost its provider record",
+                        origin
+                    ))
+                })?;
+            let summary = self.provider_views[reference.source - 1]
+                .interface()
+                .concrete_call_summaries[reference.record]
+                .summary
+                .clone();
+            concrete_call_summaries.push(ConcreteCallSummaryRecord {
+                origin: origin.clone(),
+                summary,
+            });
+        }
+        concrete_call_summaries.sort_by(|left, right| left.origin.cmp(&right.origin));
+
+        Ok((declarations, reusable_evidence, concrete_call_summaries))
+    }
+}
+
+/// Index one evidence record by every declaration origin its target type references.
+fn index_evidence(
+    evidence: &PublicEvidenceRecord,
+    source: usize,
+    record: usize,
+    evidence_by_origin: &mut FxHashMap<OriginDeclarationId, Vec<RecordRef>>,
+) {
+    let mut referenced_origins = Vec::new();
+    collect_type_origins(
+        evidence.identity.target_type_identity(),
+        &mut referenced_origins,
+    );
+    for origin in referenced_origins {
+        evidence_by_origin
+            .entry(origin)
+            .or_default()
+            .push(RecordRef { source, record });
+    }
+}
+
+/// Move every selected direct record out exactly once, in descending index order.
+///
+/// `swap_remove` is safe in strictly descending order because lower indices never move.
+fn move_selected_direct_records<K, T>(
+    records: &mut Vec<T>,
+    selected: &FxHashSet<K>,
+    key_of: impl Fn(&T) -> K,
+    moved: &mut FxHashSet<K>,
+    output: &mut Vec<T>,
+) where
+    K: std::hash::Hash + Eq + Clone,
+{
+    let mut selected_positions = Vec::new();
+    for (index, record) in records.iter().enumerate() {
+        let key = key_of(record);
+        if selected.contains(&key) {
+            selected_positions.push((key, index));
+        }
+    }
+    selected_positions.sort_by_key(|(_, index)| std::cmp::Reverse(*index));
+    for (key, index) in selected_positions {
+        moved.insert(key);
+        output.push(records.swap_remove(index));
     }
 }
 
@@ -429,43 +809,42 @@ fn collect_concrete_receiver_origins(
     }
 }
 
-fn type_references_selected_declaration(
-    identity: &CanonicalTypeIdentity,
-    selected: &FxHashSet<OriginDeclarationId>,
-) -> bool {
+/// Collect every declaration origin referenced by one canonical type identity.
+///
+/// This precomputes the evidence eligibility predicate once per evidence record at closure
+/// setup, so the fixed point never re-scans all candidates or re-walks type shapes.
+fn collect_type_origins(identity: &CanonicalTypeIdentity, origins: &mut Vec<OriginDeclarationId>) {
     match identity {
         CanonicalTypeIdentity::SourceNominal(origin) => {
-            selected.contains(&OriginDeclarationId::Type(origin.clone()))
+            origins.push(OriginDeclarationId::Type(origin.clone()));
         }
         CanonicalTypeIdentity::Collection(collection) => {
-            type_references_selected_declaration(collection.element(), selected)
+            collect_type_origins(collection.element(), origins);
         }
         CanonicalTypeIdentity::OrderedMap(map) => {
-            type_references_selected_declaration(map.key(), selected)
-                || type_references_selected_declaration(map.value(), selected)
+            collect_type_origins(map.key(), origins);
+            collect_type_origins(map.value(), origins);
         }
-        CanonicalTypeIdentity::Option(inner) => {
-            type_references_selected_declaration(inner, selected)
-        }
+        CanonicalTypeIdentity::Option(inner) => collect_type_origins(inner, origins),
         CanonicalTypeIdentity::FallibleCarrier(carrier) => {
-            type_references_selected_declaration(carrier.success(), selected)
-                || type_references_selected_declaration(carrier.error(), selected)
+            collect_type_origins(carrier.success(), origins);
+            collect_type_origins(carrier.error(), origins);
         }
         CanonicalTypeIdentity::GenericInstance(instance) => {
-            selected.contains(&OriginDeclarationId::Type(instance.base().clone()))
-                || instance
-                    .arguments()
-                    .iter()
-                    .any(|argument| type_references_selected_declaration(argument, selected))
+            origins.push(OriginDeclarationId::Type(instance.base().clone()));
+            for argument in instance.arguments() {
+                collect_type_origins(argument, origins);
+            }
         }
-        CanonicalTypeIdentity::ModulePrivateGenericInstance(instance) => instance
-            .arguments()
-            .iter()
-            .any(|argument| type_references_selected_declaration(argument, selected)),
+        CanonicalTypeIdentity::ModulePrivateGenericInstance(instance) => {
+            for argument in instance.arguments() {
+                collect_type_origins(argument, origins);
+            }
+        }
         CanonicalTypeIdentity::Builtin(_)
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
         | CanonicalTypeIdentity::ExternalOpaque(_)
-        | CanonicalTypeIdentity::GenericParameter(_) => false,
+        | CanonicalTypeIdentity::GenericParameter(_) => {}
     }
 }
 

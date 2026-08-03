@@ -13,6 +13,7 @@ mod evidence_projection_tests;
 mod export_projection_tests;
 mod folded_value_tests;
 mod import_bindings_tests;
+mod interface_closure_tests;
 mod interface_validation_tests;
 mod local_finalization_tests;
 mod test_support;
