@@ -84,7 +84,7 @@ export:
         }
 
         a {
-            color: light-dark(hsl(210, 100%, 37%), hsl(225, 82%, 67%));
+            color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
         }
 
         h1 {
@@ -100,7 +100,7 @@ export:
         }
 
         .container code:not(.codeblock) {
-            color: light-dark(hsl(196, 100%, 50%), #c444aff9);
+            color: light-dark(hsl(261, 100%, 56%), #c444aff9);
             font-family: var(--moth-font-family-monospace);
         }
 
