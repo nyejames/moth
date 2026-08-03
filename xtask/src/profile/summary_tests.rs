@@ -386,7 +386,7 @@ fn root_hotspots_json_is_valid() {
         ProfileFilterMode::Terse,
         None,
     );
-    let json = format_root_hotspots_json(&root);
+    let json = format_root_hotspots_json(&root).expect("root hotspots should serialize");
 
     // Must be valid JSON.
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("JSON should parse");

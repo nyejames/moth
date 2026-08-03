@@ -25,11 +25,11 @@
 
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric};
+use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::hotspots::HotspotExtractionResult;
-use super::json::escape;
 use super::observations::ProfileObservation;
 use super::options::ProfileFilterMode;
 use super::parse::ProfileShapeDump;
@@ -38,7 +38,7 @@ use super::parse::ProfileShapeDump;
 const OBSERVATIONS_FORMAT_VERSION: u32 = 2;
 
 /// Current on-disk format version for the root run manifest.
-const RUN_MANIFEST_FORMAT_VERSION: u32 = 3;
+const RUN_MANIFEST_FORMAT_VERSION: u32 = 4;
 
 /// Current on-disk format version for per-case hotspot data.
 const HOTSPOTS_FORMAT_VERSION: u32 = 1;
@@ -97,7 +97,7 @@ pub(crate) struct ProfileCasePaths {
 /// phases can discover cases without scanning directories.
 pub(crate) struct ProfileCaseManifest {
     pub(crate) case_id: String,
-    pub(crate) identity: Option<BenchmarkMeasurementIdentity>,
+    pub(crate) identity: BenchmarkMeasurementIdentity,
     pub(crate) group_name: String,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
@@ -208,7 +208,9 @@ impl ProfileCasePaths {
         &self,
         observation: &ProfileObservation,
     ) -> Result<(), String> {
-        let json = format_observations_json(observation);
+        validate_observation_finite(observation)?;
+        let json = serde_json::to_string_pretty(&DetailedObservationsFile::from(observation))
+            .map_err(|error| format!("Failed to serialize detailed observations: {error}"))?;
         fs::write(&self.observations_json, json).map_err(|e| {
             format!(
                 "Failed to write detailed-observations.json '{}': {}",
@@ -231,7 +233,9 @@ pub(crate) fn write_hotspots_json(
     case_paths: &ProfileCasePaths,
     result: &HotspotExtractionResult,
 ) -> Result<(), String> {
-    let json = format_hotspots_json(result);
+    validate_hotspots_finite(result)?;
+    let json = serde_json::to_string_pretty(&HotspotsFile::from(result))
+        .map_err(|error| format!("Failed to serialize hotspots: {error}"))?;
     fs::write(&case_paths.hotspots_json, json).map_err(|e| {
         format!(
             "Failed to write hotspots.json '{}': {}",
@@ -264,7 +268,10 @@ pub(crate) fn write_run_manifest(
     samply_rate_hz: Option<f64>,
     cases: &[ProfileCaseManifest],
 ) -> Result<(), String> {
-    let json = format_run_manifest_json(run_id, git_revision, filter, samply_rate_hz, cases);
+    validate_manifest_finite(cases)?;
+    let manifest = RunManifestFile::new(run_id, git_revision, filter, samply_rate_hz, cases);
+    let json = serde_json::to_string_pretty(&manifest)
+        .map_err(|error| format!("Failed to serialize run-manifest.json: {error}"))?;
     fs::write(run_paths.manifest_path(), json).map_err(|e| {
         format!(
             "Failed to write run-manifest.json '{}': {}",
@@ -294,52 +301,6 @@ pub(crate) fn write_index_md(
 // ---------------------------------------------------------------------------
 //  JSON formatting
 // ---------------------------------------------------------------------------
-
-/// Format detailed-observations.json for a single case.
-///
-/// Profile-owned manual writers use the narrow escaping helper in `json.rs`.
-fn format_observations_json(observation: &ProfileObservation) -> String {
-    let stage_timings_json = format_metric_array_json(&observation.observations.stage_timings);
-    let counters_json = format_metric_array_json(&observation.observations.counters);
-
-    // The command array includes the command as the first element, followed by args.
-    let mut command_parts = vec![format!("\"{}\"", escape(&observation.command))];
-    for arg in &observation.command_args {
-        command_parts.push(format!("\"{}\"", escape(arg)));
-    }
-    let command_json = command_parts.join(",");
-
-    format!(
-        "{{\n  \"format_version\": {},\n  \"case_id\": \"{}\",\n  \"group\": \"{}\",\n  \"command\": [{}],\n  \"wall_ms\": {},\n  \"stage_timings\": {},\n  \"counters\": {}\n}}",
-        OBSERVATIONS_FORMAT_VERSION,
-        escape(&observation.case_id),
-        escape(&observation.group_name),
-        command_json,
-        observation.wall_ms,
-        stage_timings_json,
-        counters_json,
-    )
-}
-
-/// Format a slice of metrics as a JSON array of `{name, value}` objects.
-fn format_metric_array_json(metrics: &[BenchmarkMetric]) -> String {
-    if metrics.is_empty() {
-        return "[]".to_string();
-    }
-
-    let items: Vec<String> = metrics
-        .iter()
-        .map(|metric| {
-            format!(
-                "    {{\"name\": \"{}\", \"value\": {}}}",
-                escape(&metric.name),
-                metric.value
-            )
-        })
-        .collect();
-
-    format!("[\n{}\n  ]", items.join(",\n"))
-}
 
 fn format_profile_shape_dump(shape: &ProfileShapeDump) -> String {
     let mut lines = Vec::new();
@@ -397,115 +358,240 @@ fn append_bullets(lines: &mut Vec<String>, items: &[String]) {
     }
 }
 
-/// Format run-manifest.json through serde_json so optional paths and identities remain valid JSON.
-fn format_run_manifest_json(
-    run_id: &str,
-    git_revision: Option<&crate::bench_types::GitRevision>,
-    filter: ProfileFilterMode,
+fn validate_observation_finite(observation: &ProfileObservation) -> Result<(), String> {
+    super::observations::require_finite(observation.wall_ms, "wall_ms")?;
+    for metric in observation
+        .observations
+        .stage_timings
+        .iter()
+        .chain(&observation.observations.counters)
+    {
+        super::observations::require_finite(metric.value, "metric value")?;
+    }
+    Ok(())
+}
+
+fn validate_manifest_finite(cases: &[ProfileCaseManifest]) -> Result<(), String> {
+    for case in cases {
+        super::observations::require_finite(case.observation_wall_ms, "observation_wall_ms")?;
+    }
+    Ok(())
+}
+
+fn validate_hotspots_finite(result: &HotspotExtractionResult) -> Result<(), String> {
+    super::observations::require_finite(result.total_sample_weight, "total_sample_weight")?;
+    super::observations::require_finite(result.wall_time_ms, "wall_time_ms")?;
+    for function in &result.functions {
+        super::observations::require_finite(function.inclusive_samples, "inclusive_samples")?;
+        super::observations::require_finite(function.self_samples, "self_samples")?;
+        super::observations::require_finite(function.inclusive_pct, "inclusive_pct")?;
+        super::observations::require_finite(function.self_pct, "self_pct")?;
+        super::observations::require_finite(
+            function.estimated_inclusive_ms,
+            "estimated_inclusive_ms",
+        )?;
+        super::observations::require_finite(function.estimated_self_ms, "estimated_self_ms")?;
+    }
+    Ok(())
+}
+
+/// Serde-backed shape of detailed-observations.json.
+///
+/// Every profile-owned writer returns `Result`; there is no manual string
+/// assembly and no fallback payload.
+#[derive(Serialize)]
+struct DetailedObservationsFile {
+    format_version: u32,
+    case_id: String,
+    group: String,
+    command: Vec<String>,
+    wall_ms: f64,
+    stage_timings: Vec<BenchmarkMetric>,
+    counters: Vec<BenchmarkMetric>,
+}
+
+impl From<&ProfileObservation> for DetailedObservationsFile {
+    fn from(observation: &ProfileObservation) -> Self {
+        let mut command = Vec::with_capacity(observation.command_args.len() + 1);
+        command.push(observation.command.clone());
+        command.extend(observation.command_args.iter().cloned());
+
+        Self {
+            format_version: OBSERVATIONS_FORMAT_VERSION,
+            case_id: observation.case_id.clone(),
+            group: observation.group_name.clone(),
+            command,
+            wall_ms: observation.wall_ms,
+            stage_timings: observation.observations.stage_timings.clone(),
+            counters: observation.observations.counters.clone(),
+        }
+    }
+}
+
+/// Serde-backed shape of the root run-manifest.json.
+#[derive(Serialize)]
+struct RunManifestFile {
+    format_version: u32,
+    run_id: String,
+    timestamp: String,
+    commit: Option<String>,
+    git_dirty: Option<bool>,
+    filter: String,
     samply_rate_hz: Option<f64>,
-    cases: &[ProfileCaseManifest],
-) -> String {
-    let cases_json: Vec<serde_json::Value> = cases
-        .iter()
-        .map(|case| {
-            let identity = case.identity.as_ref();
-            serde_json::json!({
-                "case_id": case.case_id,
-                "group_name": case.group_name,
-                "workload_id": identity.map(|value| &value.workload_id),
-                "source_fingerprint": identity.map(|value| &value.source_fingerprint),
-                "measurement_fingerprint": identity.map(|value| &value.measurement_fingerprint),
-                "command": case.command,
-                "args": case.args,
-                "observation_wall_ms": case.observation_wall_ms,
-                "profile_path": case.profile_path,
-                "stdout_path": case.stdout_path,
-                "stderr_path": case.stderr_path,
-                "summary_path": case.summary_path,
-            })
-        })
-        .collect();
-
-    let output = serde_json::json!({
-        "format_version": RUN_MANIFEST_FORMAT_VERSION,
-        "run_id": run_id,
-        "timestamp": BenchmarkTimestamp::now().format_run_header(),
-        "commit": git_revision.and_then(|revision| revision.commit.as_deref()),
-        "git_dirty": git_revision.and_then(|revision| revision.dirty),
-        "filter": filter.display_label(),
-        "samply_rate_hz": samply_rate_hz,
-        "cases": cases_json,
-    });
-
-    serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
+    cases: Vec<RunManifestCase>,
 }
 
-/// Format hotspots.json for a single case using serde_json.
-///
-/// WHAT: Serializes the hotspot extraction output as compact JSON with
-/// ranked functions, percentages, estimated milliseconds, owner buckets,
-/// caller/callee edges, and warnings.
-///
-/// WHY: Using serde_json ensures correct JSON escaping and consistent
-/// formatting. The output is designed to be compact enough for agent
-/// consumption without post-processing.
-fn format_hotspots_json(result: &HotspotExtractionResult) -> String {
-    let functions_json: Vec<serde_json::Value> = result
-        .functions
-        .iter()
-        .map(|func| {
-            let callers_json = format_edges_json(&func.top_callers);
-            let callees_json = format_edges_json(&func.top_callees);
-
-            serde_json::json!({
-                "name": func.name,
-                "bucket": {
-                    "label": func.bucket.label,
-                    "suggested_paths": func.bucket.suggested_paths,
-                },
-                "inclusive_samples": func.inclusive_samples,
-                "self_samples": func.self_samples,
-                "inclusive_pct": round_2dp(func.inclusive_pct),
-                "self_pct": round_2dp(func.self_pct),
-                "estimated_inclusive_ms": round_2dp(func.estimated_inclusive_ms),
-                "estimated_self_ms": round_2dp(func.estimated_self_ms),
-                "top_callers": callers_json,
-                "top_callees": callees_json,
-            })
-        })
-        .collect();
-
-    let output = serde_json::json!({
-        "format_version": HOTSPOTS_FORMAT_VERSION,
-        "total_sample_count": result.total_sample_count,
-        "total_sample_weight": round_2dp(result.total_sample_weight),
-        "wall_time_ms": round_2dp(result.wall_time_ms),
-        "hot_function_count": result.functions.len(),
-        "symbolication": {
-            "status": result.symbolication.status.as_str(),
-            "raw_address_function_count": result.symbolication.raw_address_function_count,
-            "hot_function_count": result.symbolication.hot_function_count,
-            "raw_address_ratio": round_2dp(result.symbolication.raw_address_ratio),
-        },
-        "functions": functions_json,
-        "warnings": result.warnings,
-    });
-
-    serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
+/// One case entry in the root run-manifest.json.
+#[derive(Serialize)]
+struct RunManifestCase {
+    case_id: String,
+    group_name: String,
+    workload_id: String,
+    source_fingerprint: String,
+    measurement_fingerprint: String,
+    command: String,
+    args: Vec<String>,
+    observation_wall_ms: f64,
+    profile_path: String,
+    stdout_path: String,
+    stderr_path: String,
+    summary_path: Option<String>,
 }
 
-/// Format a slice of profile edges as serde_json values.
-fn format_edges_json(edges: &[super::parse::ProfileEdge]) -> Vec<serde_json::Value> {
-    edges
-        .iter()
-        .map(|edge| {
-            serde_json::json!({
-                "function_name": edge.function_name,
-                "samples": round_2dp(edge.samples),
-                "pct": round_2dp(edge.pct),
-            })
-        })
-        .collect()
+impl RunManifestFile {
+    fn new(
+        run_id: &str,
+        git_revision: Option<&crate::bench_types::GitRevision>,
+        filter: ProfileFilterMode,
+        samply_rate_hz: Option<f64>,
+        cases: &[ProfileCaseManifest],
+    ) -> Self {
+        Self {
+            format_version: RUN_MANIFEST_FORMAT_VERSION,
+            run_id: run_id.to_string(),
+            timestamp: BenchmarkTimestamp::now().format_run_header(),
+            commit: git_revision.and_then(|revision| revision.commit.clone()),
+            git_dirty: git_revision.and_then(|revision| revision.dirty),
+            filter: filter.display_label().to_string(),
+            samply_rate_hz,
+            cases: cases.iter().map(RunManifestCase::from).collect(),
+        }
+    }
+}
+
+impl From<&ProfileCaseManifest> for RunManifestCase {
+    fn from(case: &ProfileCaseManifest) -> Self {
+        Self {
+            case_id: case.case_id.clone(),
+            group_name: case.group_name.clone(),
+            workload_id: case.identity.workload_id.clone(),
+            source_fingerprint: case.identity.source_fingerprint.clone(),
+            measurement_fingerprint: case.identity.measurement_fingerprint.clone(),
+            command: case.command.clone(),
+            args: case.args.clone(),
+            observation_wall_ms: case.observation_wall_ms,
+            profile_path: case.profile_path.clone(),
+            stdout_path: case.stdout_path.clone(),
+            stderr_path: case.stderr_path.clone(),
+            summary_path: case.summary_path.clone(),
+        }
+    }
+}
+
+/// Serde-backed shape of per-case hotspots.json.
+#[derive(Serialize)]
+struct HotspotsFile {
+    format_version: u32,
+    total_sample_count: usize,
+    total_sample_weight: f64,
+    wall_time_ms: f64,
+    hot_function_count: usize,
+    symbolication: SymbolicationFile,
+    functions: Vec<HotspotFunctionFile>,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SymbolicationFile {
+    status: String,
+    raw_address_function_count: usize,
+    hot_function_count: usize,
+    raw_address_ratio: f64,
+}
+
+#[derive(Serialize)]
+struct HotspotFunctionFile {
+    name: String,
+    bucket: HotspotBucketFile,
+    inclusive_samples: f64,
+    self_samples: f64,
+    inclusive_pct: f64,
+    self_pct: f64,
+    estimated_inclusive_ms: f64,
+    estimated_self_ms: f64,
+    top_callers: Vec<HotspotEdgeFile>,
+    top_callees: Vec<HotspotEdgeFile>,
+}
+
+#[derive(Serialize)]
+struct HotspotBucketFile {
+    label: String,
+    suggested_paths: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct HotspotEdgeFile {
+    function_name: String,
+    samples: f64,
+    pct: f64,
+}
+
+impl From<&HotspotExtractionResult> for HotspotsFile {
+    fn from(result: &HotspotExtractionResult) -> Self {
+        Self {
+            format_version: HOTSPOTS_FORMAT_VERSION,
+            total_sample_count: result.total_sample_count,
+            total_sample_weight: round_2dp(result.total_sample_weight),
+            wall_time_ms: round_2dp(result.wall_time_ms),
+            hot_function_count: result.functions.len(),
+            symbolication: SymbolicationFile {
+                status: result.symbolication.status.as_str().to_string(),
+                raw_address_function_count: result.symbolication.raw_address_function_count,
+                hot_function_count: result.symbolication.hot_function_count,
+                raw_address_ratio: round_2dp(result.symbolication.raw_address_ratio),
+            },
+            functions: result
+                .functions
+                .iter()
+                .map(|func| HotspotFunctionFile {
+                    name: func.name.clone(),
+                    bucket: HotspotBucketFile {
+                        label: func.bucket.label.clone(),
+                        suggested_paths: func.bucket.suggested_paths.clone(),
+                    },
+                    inclusive_samples: func.inclusive_samples,
+                    self_samples: func.self_samples,
+                    inclusive_pct: round_2dp(func.inclusive_pct),
+                    self_pct: round_2dp(func.self_pct),
+                    estimated_inclusive_ms: round_2dp(func.estimated_inclusive_ms),
+                    estimated_self_ms: round_2dp(func.estimated_self_ms),
+                    top_callers: func.top_callers.iter().map(HotspotEdgeFile::from).collect(),
+                    top_callees: func.top_callees.iter().map(HotspotEdgeFile::from).collect(),
+                })
+                .collect(),
+            warnings: result.warnings.clone(),
+        }
+    }
+}
+
+impl From<&super::parse::ProfileEdge> for HotspotEdgeFile {
+    fn from(edge: &super::parse::ProfileEdge) -> Self {
+        Self {
+            function_name: edge.function_name.clone(),
+            samples: round_2dp(edge.samples),
+            pct: round_2dp(edge.pct),
+        }
+    }
 }
 
 /// Round a floating-point value to 2 decimal places.

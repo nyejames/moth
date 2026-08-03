@@ -18,7 +18,9 @@ use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
 use crate::profile::drift::{
     DriftCaseInput, DriftHotFunction, compute_drift, find_comparable_previous,
 };
-use crate::profile::history::{PROFILE_RUNS_JSONL_PATH, ProfileHistoryRecord, read_profile_runs};
+use crate::profile::history::{
+    PROFILE_RUNS_JSONL_PATH, ProfileHistoryRecord, StoredProfileHistoryRecord, read_profile_runs,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -226,6 +228,15 @@ pub(crate) struct LatestProfileRun {
     pub(crate) top_drift_item: String,
     /// Relative path to the run's `agent-summary.md`.
     pub(crate) agent_summary_path: String,
+    /// Latest legacy profile run, listed for context but never comparable.
+    pub(crate) legacy_run: Option<LegacyProfileRunInfo>,
+}
+
+/// Compact identity of the latest legacy profile run.
+#[derive(Debug, Clone)]
+pub(crate) struct LegacyProfileRunInfo {
+    pub(crate) format_version: u32,
+    pub(crate) run_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1023,6 +1034,12 @@ fn append_latest_profile_run(output: &mut String, report: &BenchmarkReport) {
         "  Summary:   {}\n",
         profile_run.agent_summary_path
     ));
+    if let Some(legacy) = &profile_run.legacy_run {
+        output.push_str(&format!(
+            "  Legacy:    latest v{} run '{}' (listed, not comparable)\n",
+            legacy.format_version, legacy.run_id
+        ));
+    }
 }
 
 /// Collect the latest profile run info from `profile-runs.jsonl`.
@@ -1039,7 +1056,12 @@ fn collect_latest_profile_run(
     let history_path = Path::new(PROFILE_RUNS_JSONL_PATH);
     let records = read_profile_runs(history_path).ok()?;
 
-    let latest = records.last()?;
+    // Only current-format records surface in the report; legacy records stay
+    // readable history but never become the latest displayed run.
+    let latest = records.iter().rev().find_map(|stored| match stored {
+        StoredProfileHistoryRecord::Current(record) => Some(record),
+        StoredProfileHistoryRecord::Legacy(_) => None,
+    })?;
 
     // Filter by system UUID if a system identity is available.
     if let Some(system) = current_system
@@ -1060,6 +1082,16 @@ fn collect_latest_profile_run(
             )
         });
 
+    // The latest legacy record is listed for context; it never becomes a
+    // comparison baseline because it predates the current protocol.
+    let legacy_run = records.iter().rev().find_map(|stored| match stored {
+        StoredProfileHistoryRecord::Legacy(record) => Some(LegacyProfileRunInfo {
+            format_version: record.format_version,
+            run_id: record.run_id.clone(),
+        }),
+        StoredProfileHistoryRecord::Current(_) => None,
+    });
+
     // Find the comparable previous record for drift.
     let top_drift_item = format_top_drift_item(&records, current_system, latest);
 
@@ -1069,6 +1101,7 @@ fn collect_latest_profile_run(
         case_count,
         top_drift_item,
         agent_summary_path,
+        legacy_run,
     })
 }
 
@@ -1082,7 +1115,7 @@ fn collect_latest_profile_run(
 /// WHY: A single top drift item gives a quick pointer to the most
 /// interesting change without duplicating the full drift table.
 fn format_top_drift_item(
-    records: &[ProfileHistoryRecord],
+    records: &[StoredProfileHistoryRecord],
     current_system: Option<&BenchmarkSystem>,
     latest: &ProfileHistoryRecord,
 ) -> String {

@@ -157,7 +157,7 @@ impl BenchmarkSuiteKind {
 /// Combines the workload identity with the case measurement fingerprint so
 /// comparisons can distinguish source changes from runner/expectation changes
 /// without loose optional strings.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BenchmarkMeasurementIdentity {
     /// Authored workload identity from the manifest.
     pub workload_id: String,
@@ -189,7 +189,7 @@ pub struct BenchmarkCaseResult {
 }
 
 /// One named timing or counter value captured from detailed compiler output.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BenchmarkMetric {
     pub name: String,
     pub value: f64,
@@ -1036,9 +1036,10 @@ pub struct BenchmarkRun {
 }
 
 /// Best-effort source revision metadata for one benchmark run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GitRevision {
     pub commit: Option<String>,
+    #[serde(rename = "git_dirty")]
     pub dirty: Option<bool>,
 }
 

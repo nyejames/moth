@@ -11,10 +11,11 @@
 //! line, append-only, with `format_version` for forward compatibility.
 //!
 //! # What this module owns
-//! - `ProfileHistoryRecord` and related structs for JSONL schema
-//! - `append_profile_run()` to write one record after a successful run
-//! - `read_profile_runs()` to load all records for drift comparison
-//! - Profile-owned JSON serialization and one explicit v1 identity adapter
+//! - `ProfileHistoryRecord` and the stored current/legacy record split
+//! - `append_profile_run()` to write one current record after a successful run
+//! - `read_profile_runs()` to load current and legacy records for drift comparison
+//! - Explicit legacy v1-v3 adapters; optional identity and missing revision
+//!   exist only in the legacy shapes
 //!
 //! # What this module does NOT own
 //! - Drift detection and reporting (see `drift.rs`)
@@ -23,10 +24,9 @@
 
 use crate::bench_system::{SystemIdentityMode, load_or_create_system};
 use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric, GitRevision};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-
-use super::json::escape;
 
 /// Path to the profile history file, relative to repo root.
 pub const PROFILE_RUNS_JSONL_PATH: &str = "benchmarks/local-data/profile-runs.jsonl";
@@ -35,16 +35,16 @@ pub const PROFILE_RUNS_JSONL_PATH: &str = "benchmarks/local-data/profile-runs.js
 ///
 /// Increment this only when measurement methodology, identity semantics, or
 /// drift comparison rules change enough to make direct comparison invalid.
-pub const PROFILE_PROTOCOL_VERSION: u32 = 1;
+pub const PROFILE_PROTOCOL_VERSION: u32 = 2;
 
 /// Current on-disk format version for profile history records.
-const HISTORY_FORMAT_VERSION: u32 = 3;
+const HISTORY_FORMAT_VERSION: u32 = 4;
 
 // ---------------------------------------------------------------------------
 //  Data model
 // ---------------------------------------------------------------------------
 
-/// A complete profile run record stored in JSONL history.
+/// A complete current profile run record stored in JSONL history.
 ///
 /// WHAT: Captures one profiling run's identity, system, filter mode,
 /// sample rate, and per-case derived metadata (observations, hotspots).
@@ -52,7 +52,7 @@ const HISTORY_FORMAT_VERSION: u32 = 3;
 /// WHY: A single run-level record keeps the JSONL file compact and
 /// makes drift comparison straightforward: find the latest previous
 /// record matching system/case/filter/rate, then compare per-case data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProfileHistoryRecord {
     /// Schema version for forward compatibility.
     pub format_version: u32,
@@ -63,7 +63,8 @@ pub struct ProfileHistoryRecord {
     /// ISO-style timestamp string.
     pub timestamp: String,
     /// Start repository revision captured before compiler construction.
-    pub git_revision: Option<GitRevision>,
+    #[serde(flatten)]
+    pub git_revision: GitRevision,
     /// Stable system UUID from `benchmarks/local-data/system.toml`.
     pub system_uuid: String,
     /// Human-readable system display name.
@@ -76,7 +77,7 @@ pub struct ProfileHistoryRecord {
     pub cases: Vec<HistoryCaseRecord>,
 }
 
-/// Per-case derived metadata within a profile history record.
+/// Per-case derived metadata within a current profile history record.
 ///
 /// WHAT: Stores the observation data and hotspot summary for one case
 /// so that drift comparison can access wall time, stage timings,
@@ -84,12 +85,12 @@ pub struct ProfileHistoryRecord {
 ///
 /// WHY: One record per case keeps the history file self-contained
 /// and avoids coupling drift comparison to the filesystem layout.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistoryCaseRecord {
     /// Authored case ID from the typed benchmark manifest.
     pub case_id: String,
     /// Typed measurement identity covering source and measurement fingerprints.
-    pub identity: Option<BenchmarkMeasurementIdentity>,
+    pub identity: BenchmarkMeasurementIdentity,
     /// Group name for the case.
     pub group_name: String,
     /// The command executed (e.g., "check", "build").
@@ -110,19 +111,17 @@ pub struct HistoryCaseRecord {
     pub hot_functions: Vec<HistoryHotFunction>,
     /// Top bucket label for the hottest function.
     pub top_bucket_label: String,
-    /// Relative path to the run directory from repo root.
+    /// Relative run directory path used to locate per-case summary artifacts.
     pub run_directory_path: String,
 }
 
-/// A hot function entry within a history case record.
+/// One ranked hot function inside a profile history case.
 ///
-/// WHAT: Stores the minimal data needed for drift comparison: function
-/// name, bucket, inclusive/self samples and percentages.
-///
+/// WHAT: Stores only the function facts drift comparison needs.
 /// WHY: Drift comparison only needs percentages and sample counts;
 /// callers, callees, and estimated milliseconds are derived during
 /// comparison rather than stored.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistoryHotFunction {
     /// Resolved function name from the profile.
     pub name: String,
@@ -138,19 +137,73 @@ pub struct HistoryHotFunction {
     pub self_pct: f64,
 }
 
+/// One stored profile history line, split by format generation.
+///
+/// Current v4 records are typed with mandatory identity and revision.
+/// Legacy v1-v3 records stay readable through explicit legacy adapters but
+/// are never selected as comparable drift baselines.
+#[derive(Debug, Clone)]
+pub enum StoredProfileHistoryRecord {
+    Current(ProfileHistoryRecord),
+    Legacy(LegacyProfileHistoryRecord),
+}
+
+/// A legacy (v1-v3) profile run record.
+///
+/// Optional identity and missing revision live only in this legacy shape.
+#[derive(Debug, Clone, Serialize)]
+pub struct LegacyProfileHistoryRecord {
+    pub format_version: u32,
+    pub profile_protocol_version: u32,
+    pub run_id: String,
+    pub timestamp: String,
+    pub git_revision: Option<GitRevision>,
+    pub system_uuid: String,
+    pub system_display: String,
+    pub filter_mode: String,
+    pub sample_rate_hz: Option<f64>,
+    pub cases: Vec<LegacyHistoryCaseRecord>,
+}
+
+/// A legacy per-case record with an optional measurement identity.
+#[derive(Debug, Clone, Serialize)]
+pub struct LegacyHistoryCaseRecord {
+    pub case_id: String,
+    pub identity: Option<BenchmarkMeasurementIdentity>,
+    pub group_name: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub observation_wall_ms: f64,
+    pub sample_count: usize,
+    pub sample_weight: f64,
+    pub stage_timings: Vec<BenchmarkMetric>,
+    pub counters: Vec<BenchmarkMetric>,
+    pub hot_functions: Vec<HistoryHotFunction>,
+    pub top_bucket_label: String,
+    pub run_directory_path: String,
+}
+
 // ---------------------------------------------------------------------------
 //  Public entry points
 // ---------------------------------------------------------------------------
 
-/// Append one profile run record to the history JSONL file.
+/// Append one current profile run record to the history JSONL file.
 ///
-/// WHAT: Writes a single JSON line to `benchmarks/local-data/profile-runs.jsonl`,
-/// creating the file and parent directory if they do not exist.
+/// WHAT: Serializes the record through serde and appends one line, creating
+/// the file and parent directory if they do not exist.
 ///
-/// WHY: Append-only writes keep the history file safe for concurrent
-/// reads and avoid corrupting previous records. The format matches
-/// `bench_history::append_local_run()` style.
+/// WHY: Append-only writes keep the history file safe for concurrent reads
+/// and avoid corrupting previous records. Clean persisted history requires a
+/// known commit and `dirty == Some(false)`, so a non-clean record is rejected.
 pub fn append_profile_run(path: &Path, record: &ProfileHistoryRecord) -> Result<(), String> {
+    if !record.git_revision.is_clean_committed() {
+        return Err(
+            "refusing to append profile history from a run that is not clean and committed"
+                .to_string(),
+        );
+    }
+    validate_finite(record)?;
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
             format!(
@@ -161,7 +214,8 @@ pub fn append_profile_run(path: &Path, record: &ProfileHistoryRecord) -> Result<
         })?;
     }
 
-    let line = format_record_as_jsonl(record);
+    let line = serde_json::to_string(record)
+        .map_err(|error| format!("Failed to serialize profile history record: {error}"))?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -169,18 +223,18 @@ pub fn append_profile_run(path: &Path, record: &ProfileHistoryRecord) -> Result<
         .map_err(|e| format!("Failed to open profile-runs.jsonl: {}", e))?;
 
     use std::io::Write;
-    writeln!(file, "{}", line).map_err(|e| format!("Failed to append to profile-runs.jsonl: {}", e))
+    writeln!(file, "{line}").map_err(|e| format!("Failed to append to profile-runs.jsonl: {e}"))
 }
 
 /// Read all profile run records from the history JSONL file.
 ///
-/// WHAT: Loads every line from the JSONL file, skipping malformed lines
-/// with warnings (matching `bench_history::read_local_runs()` style).
+/// WHAT: Loads every line, splitting current v4 records from explicit legacy
+/// v1-v3 adapters. Malformed current records fail their line with a warning;
+/// unknown future versions are skipped with a warning.
 ///
-/// WHY: Drift comparison needs the full history to find the latest
-/// comparable previous record. Malformed lines are skipped rather
-/// than failing the entire read so old data does not block new runs.
-pub fn read_profile_runs(path: &Path) -> Result<Vec<ProfileHistoryRecord>, String> {
+/// WHY: Drift comparison needs the full history to find the latest comparable
+/// previous record. One bad line must not make the complete history unreadable.
+pub fn read_profile_runs(path: &Path) -> Result<Vec<StoredProfileHistoryRecord>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -203,6 +257,9 @@ pub fn read_profile_runs(path: &Path) -> Result<Vec<ProfileHistoryRecord>, Strin
         };
 
         if format_version > HISTORY_FORMAT_VERSION {
+            eprintln!(
+                "Warning: skipping profile-runs.jsonl line with future format version {format_version}"
+            );
             continue;
         }
 
@@ -217,7 +274,7 @@ pub fn read_profile_runs(path: &Path) -> Result<Vec<ProfileHistoryRecord>, Strin
     Ok(records)
 }
 
-/// Build a `ProfileHistoryRecord` from a completed profiling run.
+/// Build a current `ProfileHistoryRecord` from a completed profiling run.
 ///
 /// WHAT: Assembles the run identity, system info, filter mode, sample rate,
 /// and per-case data into a single record ready for JSONL append.
@@ -245,7 +302,7 @@ pub fn build_history_record(
         profile_protocol_version: PROFILE_PROTOCOL_VERSION,
         run_id: run_id.to_string(),
         timestamp: timestamp.to_string(),
-        git_revision: Some(git_revision.clone()),
+        git_revision: git_revision.clone(),
         system_uuid,
         system_display,
         filter_mode: filter_mode.to_string(),
@@ -254,164 +311,56 @@ pub fn build_history_record(
     })
 }
 
-// ---------------------------------------------------------------------------
-//  Profile JSON serialization
-// ---------------------------------------------------------------------------
-
-/// Serialize a `ProfileHistoryRecord` to a single JSONL line.
+/// Reject non-finite numeric facts before a current record is written.
 ///
-/// WHAT: Produces compact, valid JSON using manual formatting to match
-/// the profile-local schema.
-fn format_record_as_jsonl(record: &ProfileHistoryRecord) -> String {
-    let mut parts = Vec::new();
-
-    parts.push(format!(r#""format_version":{}"#, record.format_version));
-    parts.push(format!(
-        r#""profile_protocol_version":{}"#,
-        record.profile_protocol_version
-    ));
-    parts.push(format!(r#""run_id":"{}""#, escape(&record.run_id)));
-    parts.push(format!(r#""timestamp":"{}""#, escape(&record.timestamp)));
-
-    match &record.git_revision {
-        Some(revision) => {
-            match &revision.commit {
-                Some(commit) => parts.push(format!(r#""commit":"{}""#, escape(commit))),
-                None => parts.push(r#""commit":null"#.to_string()),
-            }
-            match revision.dirty {
-                Some(true) => parts.push(r#""git_dirty":true"#.to_string()),
-                Some(false) => parts.push(r#""git_dirty":false"#.to_string()),
-                None => parts.push(r#""git_dirty":null"#.to_string()),
-            }
+/// serde_json would silently emit `null` for NaN or infinite floats, so the
+/// finite check happens explicitly before serialization.
+fn validate_finite(record: &ProfileHistoryRecord) -> Result<(), String> {
+    for case in &record.cases {
+        super::observations::require_finite(case.observation_wall_ms, "observation_wall_ms")?;
+        super::observations::require_finite(case.sample_weight, "sample_weight")?;
+        for metric in case.stage_timings.iter().chain(&case.counters) {
+            super::observations::require_finite(metric.value, "metric value")?;
         }
-        None => {
-            parts.push(r#""commit":null"#.to_string());
-            parts.push(r#""git_dirty":null"#.to_string());
+        for function in &case.hot_functions {
+            super::observations::require_finite(function.inclusive_samples, "inclusive_samples")?;
+            super::observations::require_finite(function.self_samples, "self_samples")?;
+            super::observations::require_finite(function.inclusive_pct, "inclusive_pct")?;
+            super::observations::require_finite(function.self_pct, "self_pct")?;
         }
     }
-
-    parts.push(format!(
-        r#""system_uuid":"{}""#,
-        escape(&record.system_uuid)
-    ));
-    parts.push(format!(
-        r#""system_display":"{}""#,
-        escape(&record.system_display)
-    ));
-    parts.push(format!(
-        r#""filter_mode":"{}""#,
-        escape(&record.filter_mode)
-    ));
-
-    match record.sample_rate_hz {
-        Some(rate) => parts.push(format!(r#""sample_rate_hz":{}"#, rate)),
-        None => parts.push(r#""sample_rate_hz":null"#.to_string()),
-    }
-
-    let cases_json: Vec<String> = record.cases.iter().map(format_case_record_json).collect();
-    parts.push(format!(r#""cases":[{}]"#, cases_json.join(",")));
-
-    format!("{{{}}}", parts.join(","))
-}
-
-/// Format a single `HistoryCaseRecord` as a JSON object string.
-fn format_case_record_json(case: &HistoryCaseRecord) -> String {
-    let mut parts = Vec::new();
-
-    parts.push(format!(r#""case_id":"{}""#, escape(&case.case_id)));
-
-    if let Some(identity) = &case.identity {
-        parts.push(format!(
-            r#""workload_id":"{}""#,
-            escape(&identity.workload_id)
-        ));
-        parts.push(format!(
-            r#""source_fingerprint":"{}""#,
-            escape(&identity.source_fingerprint)
-        ));
-        parts.push(format!(
-            r#""measurement_fingerprint":"{}""#,
-            escape(&identity.measurement_fingerprint)
-        ));
-    } else {
-        parts.push(r#""workload_id":null"#.to_string());
-        parts.push(r#""source_fingerprint":null"#.to_string());
-        parts.push(r#""measurement_fingerprint":null"#.to_string());
-    }
-
-    parts.push(format!(r#""group_name":"{}""#, escape(&case.group_name)));
-    parts.push(format!(r#""command":"{}""#, escape(&case.command)));
-
-    let args_json: Vec<String> = case
-        .args
-        .iter()
-        .map(|a| format!(r#""{}""#, escape(a)))
-        .collect();
-    parts.push(format!(r#""args":[{}]"#, args_json.join(",")));
-
-    parts.push(format!(
-        r#""observation_wall_ms":{}"#,
-        case.observation_wall_ms
-    ));
-    parts.push(format!(r#""sample_count":{}"#, case.sample_count));
-    parts.push(format!(r#""sample_weight":{}"#, case.sample_weight));
-
-    let stages_json: Vec<String> = case.stage_timings.iter().map(format_metric_json).collect();
-    parts.push(format!(r#""stage_timings":[{}]"#, stages_json.join(",")));
-
-    let counters_json: Vec<String> = case.counters.iter().map(format_metric_json).collect();
-    parts.push(format!(r#""counters":[{}]"#, counters_json.join(",")));
-
-    let functions_json: Vec<String> = case
-        .hot_functions
-        .iter()
-        .map(format_hot_function_json)
-        .collect();
-    parts.push(format!(r#""hot_functions":[{}]"#, functions_json.join(",")));
-
-    parts.push(format!(
-        r#""top_bucket_label":"{}""#,
-        escape(&case.top_bucket_label)
-    ));
-    parts.push(format!(
-        r#""run_directory_path":"{}""#,
-        escape(&case.run_directory_path)
-    ));
-
-    format!("{{{}}}", parts.join(","))
-}
-
-/// Format a single `BenchmarkMetric` as a JSON object string.
-fn format_metric_json(metric: &BenchmarkMetric) -> String {
-    format!(
-        r#"{{"name":"{}","value":{}}}"#,
-        escape(&metric.name),
-        metric.value
-    )
-}
-
-/// Format a single `HistoryHotFunction` as a JSON object string.
-fn format_hot_function_json(func: &HistoryHotFunction) -> String {
-    format!(
-        r#"{{"name":"{}","bucket_label":"{}","inclusive_samples":{},"self_samples":{},"inclusive_pct":{},"self_pct":{}}}"#,
-        escape(&func.name),
-        escape(&func.bucket_label),
-        func.inclusive_samples,
-        func.self_samples,
-        func.inclusive_pct,
-        func.self_pct,
-    )
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 //  Profile JSON parsing
 // ---------------------------------------------------------------------------
 
-/// Parse a single JSONL line into a `ProfileHistoryRecord`.
-fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
+/// Parse a single JSONL line into a stored record.
+fn parse_jsonl_record(line: &str) -> Result<StoredProfileHistoryRecord, String> {
     let format_version =
         extract_u32_field(line, "format_version").ok_or("missing format_version")?;
+
+    if format_version == HISTORY_FORMAT_VERSION {
+        let record: ProfileHistoryRecord = serde_json::from_str(line)
+            .map_err(|error| format!("invalid current profile history record: {error}"))?;
+        if record
+            .git_revision
+            .commit
+            .as_deref()
+            .is_none_or(str::is_empty)
+        {
+            return Err("current profile history record has no captured commit".to_string());
+        }
+        if record
+            .cases
+            .iter()
+            .any(|case| case.identity.workload_id.is_empty())
+        {
+            return Err("current profile history case has an empty workload identity".to_string());
+        }
+        return Ok(StoredProfileHistoryRecord::Current(record));
+    }
 
     let run_id = extract_string_field(line, "run_id").ok_or("missing run_id")?;
     let timestamp = extract_string_field(line, "timestamp").ok_or("missing timestamp")?;
@@ -434,9 +383,9 @@ fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
             let cases = extract_cases_array(line, parse_legacy_v2_case_object)?;
             (0, cases)
         }
-        HISTORY_FORMAT_VERSION => {
+        3 => {
             let protocol_version = extract_u32_field(line, "profile_protocol_version").unwrap_or(0);
-            let cases = extract_cases_array(line, parse_case_object)?;
+            let cases = extract_cases_array(line, parse_legacy_v3_case_object)?;
             (protocol_version, cases)
         }
         _ => {
@@ -446,18 +395,20 @@ fn parse_jsonl_record(line: &str) -> Result<ProfileHistoryRecord, String> {
         }
     };
 
-    Ok(ProfileHistoryRecord {
-        format_version,
-        profile_protocol_version,
-        run_id,
-        timestamp,
-        git_revision,
-        system_uuid,
-        system_display,
-        filter_mode,
-        sample_rate_hz,
-        cases,
-    })
+    Ok(StoredProfileHistoryRecord::Legacy(
+        LegacyProfileHistoryRecord {
+            format_version,
+            profile_protocol_version,
+            run_id,
+            timestamp,
+            git_revision,
+            system_uuid,
+            system_display,
+            filter_mode,
+            sample_rate_hz,
+            cases,
+        },
+    ))
 }
 
 /// Build a `GitRevision` from the `commit` and `git_dirty` fields in a JSONL line.
@@ -474,32 +425,11 @@ fn build_git_revision_from_line(line: &str) -> Option<GitRevision> {
     }
 }
 
-/// Extract a boolean field value from a JSON object line.
-fn extract_bool_field(line: &str, field: &str) -> Option<bool> {
-    let key = format!(r#""{}":"#, field);
-    let start = line.find(&key)? + key.len();
-    let rest = &line[start..];
-
-    let mut idx = 0;
-    while idx < rest.len() && rest.as_bytes()[idx].is_ascii_whitespace() {
-        idx += 1;
-    }
-
-    let remaining = &rest[idx..];
-    if remaining.starts_with("true") {
-        Some(true)
-    } else if remaining.starts_with("false") {
-        Some(false)
-    } else {
-        None
-    }
-}
-
 /// Extract the "cases" array from a JSON object line.
 fn extract_cases_array(
     line: &str,
-    parse_case: fn(&str) -> Result<HistoryCaseRecord, String>,
-) -> Result<Vec<HistoryCaseRecord>, String> {
+    parse_case: fn(&str) -> Result<LegacyHistoryCaseRecord, String>,
+) -> Result<Vec<LegacyHistoryCaseRecord>, String> {
     let key = r#""cases":"#;
     let start = line
         .find(key)
@@ -515,24 +445,24 @@ fn extract_cases_array(
         .collect()
 }
 
-/// Parse a single v3 case JSON object into a `HistoryCaseRecord`.
-fn parse_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
+/// Parse a single v3 case JSON object into a legacy record shape.
+fn parse_legacy_v3_case_object(obj: &str) -> Result<LegacyHistoryCaseRecord, String> {
     let case_id = extract_string_field(obj, "case_id").ok_or("case missing case_id")?;
     let identity = build_identity_from_case_object(obj);
-    parse_case_fields(obj, case_id, identity)
+    parse_legacy_case_fields(obj, case_id, identity)
 }
 
-/// Adapt the v2 case shape into the current domain with no identity.
-fn parse_legacy_v2_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
+/// Adapt the v2 case shape into the legacy record shape with no identity.
+fn parse_legacy_v2_case_object(obj: &str) -> Result<LegacyHistoryCaseRecord, String> {
     let case_id = extract_string_field(obj, "case_id").ok_or("case missing case_id")?;
-    parse_case_fields(obj, case_id, None)
+    parse_legacy_case_fields(obj, case_id, None)
 }
 
 /// Adapt the v1 case shape, which used `case_name` instead of `case_id`.
-fn parse_legacy_v1_case_object(obj: &str) -> Result<HistoryCaseRecord, String> {
+fn parse_legacy_v1_case_object(obj: &str) -> Result<LegacyHistoryCaseRecord, String> {
     let legacy_case_name =
         extract_string_field(obj, "case_name").ok_or("legacy v1 case missing case_name")?;
-    parse_case_fields(obj, legacy_case_name, None)
+    parse_legacy_case_fields(obj, legacy_case_name, None)
 }
 
 /// Build a `BenchmarkMeasurementIdentity` from the identity fields in a case
@@ -554,11 +484,11 @@ fn build_identity_from_case_object(obj: &str) -> Option<BenchmarkMeasurementIden
     })
 }
 
-fn parse_case_fields(
+fn parse_legacy_case_fields(
     obj: &str,
     case_id: String,
     identity: Option<BenchmarkMeasurementIdentity>,
-) -> Result<HistoryCaseRecord, String> {
+) -> Result<LegacyHistoryCaseRecord, String> {
     let group_name =
         extract_string_field(obj, "group_name").unwrap_or_else(|| "ungrouped".to_string());
     let command = extract_string_field(obj, "command").ok_or("case missing command")?;
@@ -573,7 +503,7 @@ fn parse_case_fields(
         extract_string_field(obj, "top_bucket_label").unwrap_or_else(|| "unknown".to_string());
     let run_directory_path = extract_string_field(obj, "run_directory_path").unwrap_or_default();
 
-    Ok(HistoryCaseRecord {
+    Ok(LegacyHistoryCaseRecord {
         case_id,
         identity,
         group_name,
@@ -647,7 +577,7 @@ fn extract_metric_array(obj: &str, field: &str) -> Result<Vec<BenchmarkMetric>, 
 }
 
 // ---------------------------------------------------------------------------
-//  Profile JSON field extraction helpers
+//  Profile JSON field extraction helpers (legacy formats only)
 // ---------------------------------------------------------------------------
 
 /// Extract a quoted string field value from a JSON object line.
@@ -662,9 +592,6 @@ fn extract_string_field(line: &str, field: &str) -> Option<String> {
     }
 
     if rest.as_bytes().get(idx) != Some(&b'"') {
-        if rest[idx..].starts_with("null") {
-            return None;
-        }
         return None;
     }
     idx += 1;
@@ -706,6 +633,27 @@ fn extract_string_field(line: &str, field: &str) -> Option<String> {
     }
 
     Some(result)
+}
+
+/// Extract a boolean field value from a JSON object line.
+fn extract_bool_field(line: &str, field: &str) -> Option<bool> {
+    let key = format!(r#""{}":"#, field);
+    let start = line.find(&key)? + key.len();
+    let rest = &line[start..];
+
+    let mut idx = 0;
+    while idx < rest.len() && rest.as_bytes()[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+
+    let remaining = &rest[idx..];
+    if remaining.starts_with("true") {
+        Some(true)
+    } else if remaining.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// Extract an unsigned integer field value from a JSON object line.
