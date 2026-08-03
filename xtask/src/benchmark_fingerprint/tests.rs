@@ -788,6 +788,6 @@ fn versioned_fingerprint_has_stable_hex_encoding() {
 
     assert_eq!(
         source_fingerprint(&manifest).to_string(),
-        "b4b07c90354f2c8937c40b9bd0f5f432"
+        "f4fb277385e7758c6a24f95ddc645637"
     );
 }

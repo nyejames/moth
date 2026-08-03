@@ -33,6 +33,8 @@ Every mode preflights its selected cases before measurement. That successful pre
 
 Non-recording commands never append local JSONL history or change tracked summaries.
 
+Recorded runs (`just bench` and `just bench-frontend`) require a clean committed worktree. The command rejects a dirty or uncommitted repository before fingerprint traversal, compiler construction or history access. Read-only commands (`bench-ci`, `bench-validate`, `bench-check` and `bench-frontend-check`) permit a dirty worktree as long as it stays unchanged during the run.
+
 ## Manifest And Stable Identity
 
 `benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 32 workloads and 58 cases.
@@ -50,7 +52,7 @@ fingerprint_excludes = []
 
 `id` gives the workload a stable authored identity. `entry` selects the file or project passed to the runner. `fingerprint_mode` selects how source identity is computed: `full_tree` uses one root equal to the entry, while `partitioned` uses disjoint strict-descendant roots under a directory entry. `fingerprint_roots` list every authored input boundary that affects compilation. `fingerprint_excludes` remove generated output trees inside those roots, such as `dev` and `release`.
 
-Directory-entry workloads declare `fingerprint_mode = "full_tree"` with the entry as the sole root, or `fingerprint_mode = "partitioned"` with disjoint roots under the entry. Schema 2 validates that full-tree roots equal the entry, partitioned roots are strict descendants, and no root or exclude overlaps another.
+Directory-entry workloads declare `fingerprint_mode = "full_tree"` with the entry as the sole root, or `fingerprint_mode = "partitioned"` with disjoint roots under the entry. Schema 3 validates that full-tree roots equal the entry, partitioned roots are strict descendants, and no root or exclude overlaps another.
 
 Each case connects a workload to one typed runner:
 
@@ -97,7 +99,7 @@ Comparison output distinguishes three states for each matching case ID:
 - **measurement changed**: source matches but measurement fingerprint differs — no speed delta is reported.
 - **timing comparable**: both match — speed deltas and stage movement are computed.
 
-Schema 2 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
+Schema 3 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
 
 ## Execution Contract
 
@@ -125,9 +127,13 @@ Frontend cases call the production in-process API. The same executor checks type
 
 File-entry CLI cases run from isolated temporary directories under `target/benchmark-work/` so compiler output never writes into the tracked checkout. Directory-entry cases run from the repository root because their output folders are project-owned and excluded from workload fingerprints.
 
-After a benchmark run completes, the workspace cleans up compiler output directories (`dev/` and `release/`) left by directory-entry builds. Only untracked directories are removed; tracked generated output like `docs/release/` is preserved. This keeps the repository clean without relying on `.gitignore` alone.
+Directory build workloads declare their generated output roots explicitly in the manifest, for example `generated_output_roots = ["dev", "release"]`. Roots are relative to the workload entry, must be strict descendants of it, must be absent when the run starts and must be covered by an explicit fingerprint exclude. They are cleanup authority only; xtask never parses `config.moth` to rediscover output settings.
 
-Repository state is captured before each run and verified after measurement. If the repository changed during a run — through source edits, commit changes, or unexpected file creation — history persistence is blocked. This prevents recording a baseline from a contaminated worktree.
+Explicit finalisation removes only run-owned roots after measurement. Cleanup completes before repository verification and before any history or summary write. A root that already exists, a tracked root, a symlink replacement or a removal failure aborts persistence. `Drop` is best-effort emergency cleanup only and never defines success.
+
+Repository state is captured before each run and verified after measurement. If the repository changed during a run through source edits, commit changes or unexpected file creation, history persistence is blocked. This prevents recording a baseline from a contaminated worktree.
+
+Recorded CLI and frontend runs require an exactly clean committed worktree at start. Read-only modes permit dirty but unchanged worktrees: they compare and present without appending history. Dirty profile runs still write profile artifacts, but they never append comparable profile history.
 
 ## Timing And Counter Controls
 
@@ -217,11 +223,13 @@ Run `just bench-report` first to identify which case and stage are worth profili
 
 ### Profile drift compatibility
 
-Profile history uses its own protocol version (`PROFILE_PROTOCOL_VERSION`) and format version. Drift comparison selects a previous run only when system UUID, filter mode, sample rate, and profile protocol version all match. Case-level comparison uses source and measurement fingerprints — not command text — as the comparison authority.
+Profile history uses its own protocol version (`PROFILE_PROTOCOL_VERSION`, currently 2) and format version (currently 4). Drift comparison selects a previous run only when system UUID, filter mode, sample rate, and profile protocol version all match. Case-level comparison uses source and measurement fingerprints — not command text — as the comparison authority.
 
 When a case's source fingerprint changed since the previous run, drift reports "workload changed" and the case does not contribute to function, stage, or counter drift. When the measurement fingerprint changed (e.g., runner or protocol changed), drift reports "measurement changed" with the same exclusion. Only cases with identical identity contribute to drift aggregates.
 
 Legacy profile history (format v1 and v2) remains readable but is never selected as a directly comparable previous run because it lacks current protocol version and identity.
+
+Current profile history requires a mandatory measurement identity and a captured revision. Dirty profile runs write artifacts but skip history append, so they never become future drift baselines.
 
 ## Measurement Model
 
@@ -265,7 +273,7 @@ Local history records the suite kind and primary metric so CLI and frontend runs
 
 The typed manifest assigns every case a public summary group. Groups organise reports without changing compiler or runner behaviour.
 
-Groups are public summary labels, not compiler architecture boundaries:
+Groups are public summary labels, not compiler architecture boundaries. The group set is closed and typed in xtask: manifest validation rejects an unknown group value, so a typo cannot silently create a new summary bucket.
 
 - `core`: baseline check/build cases.
 - `docs`: documentation project checking.
@@ -273,6 +281,16 @@ Groups are public summary labels, not compiler architecture boundaries:
 - `module`: module/import/dependency graph and import fanout coverage.
 - `parallelism`: frontend scheduling threshold, source-loading, and module/file fanout coverage.
 - `borrow`: valid borrow and exclusivity coverage.
+
+## Protocol And Format Versions
+
+- Benchmark manifest schema: 3
+- Source workload fingerprint version: 3
+- Benchmark protocol version: 3
+- Normal JSONL history format: 7
+- Profile protocol version: 2
+- Profile history format: 4
+- Profile run-manifest format: 4
 
 ## Summary Interpretation
 

@@ -12,7 +12,7 @@ use std::num::NonZeroUsize;
 ///
 /// Increment this only when measurement methodology or workload fingerprint
 /// semantics change enough to make direct comparisons invalid.
-pub const BENCHMARK_PROTOCOL_VERSION: u32 = 2;
+pub const BENCHMARK_PROTOCOL_VERSION: u32 = 3;
 
 /// Selects which manifest cases proceed to measured benchmark iterations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -21,7 +21,7 @@
 //! - Hotspot extraction and filtering (see `hotspots.rs`)
 //! - Owner bucket definitions (see `buckets.rs`)
 //! - Artifact directory layout (see `artifacts.rs`)
-//! - Profile history or drift (Phase 6)
+//! - Profile history or drift (see `history.rs` and `drift.rs`)
 
 use std::fs;
 

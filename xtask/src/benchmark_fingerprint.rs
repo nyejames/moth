@@ -20,7 +20,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-const SOURCE_FINGERPRINT_VERSION: u32 = 2;
+const SOURCE_FINGERPRINT_VERSION: u32 = 3;
 const MEASUREMENT_FINGERPRINT_VERSION: u32 = 1;
 const FNV_1A_OFFSET_BASIS_64: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_1A_PRIME_64: u64 = 0x0000_0100_0000_01b3;

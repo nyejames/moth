@@ -1,6 +1,6 @@
 //! Typed authority for the repository benchmark inventory.
 //!
-//! WHAT: Loads the schema-1 TOML manifest, validates authored identities and
+//! WHAT: Loads the schema-3 TOML manifest, validates authored identities and
 //! resolves each case to one immutable workload relationship.
 //! WHY: Benchmark commands need one strict source of case order, runner
 //! semantics and filesystem ownership instead of path-derived text lists.

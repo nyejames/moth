@@ -26,7 +26,7 @@ pub enum ProfileFilterMode {
     RawIndex,
 }
 
-// Threshold methods used by Phase 4 hotspot extraction.
+// Threshold methods used by hotspot extraction.
 impl ProfileFilterMode {
     /// Parse a filter mode string, defaulting to `Terse` for empty input.
     pub fn parse(text: &str) -> Option<Self> {
@@ -51,7 +51,7 @@ impl ProfileFilterMode {
     }
 
     /// Maximum number of cases to include in the root agent summary.
-    /// Used by Phase 5 summary generation.
+    /// Used by summary generation.
     #[allow(dead_code)]
     pub fn root_case_limit(self) -> usize {
         match self {

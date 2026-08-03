@@ -126,7 +126,7 @@ fn v6_roundtrip_preserves_protocol_revision_runner_and_workload_identity() {
 
     let json = fs::read_to_string(path).expect("record should be readable");
     assert!(json.contains(r#""format_version":7"#));
-    assert!(json.contains(r#""benchmark_protocol_version":2"#));
+    assert!(json.contains(r#""benchmark_protocol_version":3"#));
     assert!(json.contains(r#""git_dirty":false"#));
     assert!(json.contains(r#""case_id":"speed_test_check""#));
     assert!(json.contains(r#""workload_id":"speed_test""#));

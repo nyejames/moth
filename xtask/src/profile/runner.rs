@@ -21,7 +21,7 @@
 //! - Profiling build helpers (see `compiler_binary.rs`)
 //! - Observation passes or timer parsing (see `observations.rs`)
 //! - Artifact directory layout (see `artifacts.rs`)
-//! - Profile JSON parsing or hotspot extraction (Phase 4)
+//! - Profile JSON parsing or hotspot extraction (see `parse.rs` and `hotspots.rs`)
 
 use flate2::read::GzDecoder;
 use std::fs::File;
@@ -117,7 +117,7 @@ pub(crate) struct ProfileProcessRun {
     pub(crate) command_line: String,
     /// Path where the profile was written.
     ///
-    /// Used by tests now and will be used by Phase 4 hotspot extraction.
+    /// Used by tests and by artifact writing.
     #[allow(dead_code)]
     pub(crate) output_path: PathBuf,
     /// Version-specific Samply presymbolication flag selected for this run.
@@ -304,7 +304,7 @@ fn shell_display_arg(arg: &str) -> String {
 ///
 /// WHY: Samply 0.13.1 writes gzip-compressed profiles regardless of
 /// the output extension. This check catches format mismatches early,
-/// before Phase 4 tries to parse the profile as JSON.
+/// before the parser runs.
 pub(crate) fn peek_profile_first_byte(path: &Path) -> Result<u8, String> {
     let file = File::open(path)
         .map_err(|e| format!("Failed to open profile file '{}': {}", path.display(), e))?;
@@ -342,10 +342,9 @@ pub(crate) fn peek_profile_first_byte(path: &Path) -> Result<u8, String> {
 /// WHAT: Reads the first non-whitespace byte after gzip decompression
 /// and checks that it is `{` (the start of a JSON object).
 ///
-/// WHY: This is the Phase 3 first-run parser compatibility check.
-/// If Samply ever changes its output format, this check will catch
-/// it immediately with a clear error instead of a confusing Phase 4
-/// parse failure.
+/// WHY: This is the first-run parser compatibility check.
+/// If Samply ever changes its output format, this check fails immediately
+/// with a clear error instead of a confusing parse failure.
 pub(crate) fn verify_profile_format(path: &Path) -> Result<(), String> {
     let first_byte = peek_profile_first_byte(path)?;
 

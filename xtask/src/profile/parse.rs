@@ -86,7 +86,7 @@ pub(crate) struct ProfileFunctionSamples {
     /// Self sample weight: counted only when this function is the leaf.
     pub(crate) self_samples: f64,
     /// Thread names where this function appears (deduplicated).
-    /// Used by Phase 5 agent summaries.
+    /// Used by agent summaries.
     #[allow(dead_code)]
     pub(crate) thread_names: Vec<String>,
     /// Caller edges: which functions called this one, sorted by weight descending.
@@ -399,9 +399,9 @@ fn build_edges(edges: &HashMap<String, f64>, total_weight: f64) -> Vec<ProfileEd
 /// the required per-thread table shapes, walks all thread samples, and returns
 /// a `ParsedProfileSummary` with per-function sample accounting.
 ///
-/// WHY: This is the Phase 4 entry point that the orchestrator calls after
-/// Samply recording succeeds. The parser is intentionally narrow: it models
-/// only the Firefox processed-profile subset needed for function hotspots.
+/// WHY: This is the entry point called after Samply recording succeeds. The
+/// parser is intentionally narrow: it models only the Firefox processed-profile
+/// subset needed for function hotspots.
 pub(crate) fn parse_profile(path: &Path) -> Result<ParsedProfileSummary, String> {
     let json = read_profile_json(path)?;
     parse_profile_json(&json, path)

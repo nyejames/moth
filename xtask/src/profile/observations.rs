@@ -7,8 +7,8 @@
 //! WHY: The observation pass gives timer data, plus counters when explicitly
 //! enabled by the profiling build and environment, without profiler
 //! overhead. Separating observation from profiling (Samply) keeps each
-//! concern independently testable and lets Phase 3 add Samply recording
-//! beside the observation artifacts without changing this module.
+//! concern independently testable and lets Samply recording sit beside the
+//! observation artifacts without changing this module.
 //!
 //! # What this module owns
 //! - `ProfileObservation` struct wrapping per-case run data

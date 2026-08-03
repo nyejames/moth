@@ -1656,7 +1656,7 @@ fn workload_path_io_error_renders_complete_context() {
 }
 
 // ------------------------
-//  Phase 3: Fingerprint boundary mode tests
+//  Fingerprint boundary mode tests
 // ------------------------
 
 fn full_tree_manifest(entry: &str, case_id: &str) -> String {

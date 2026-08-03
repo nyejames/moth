@@ -156,9 +156,8 @@ pub(crate) struct ProfileHotFunction {
 /// by inclusive percentage, and produces estimated millisecond values from
 /// the observation pass wall time.
 ///
-/// WHY: This is the Phase 4 entry point that the orchestrator calls after
-/// parsing the profile. The extraction produces the data written to
-/// `hotspots.json`.
+/// WHY: This is the entry point called after parsing the profile. The
+/// extraction produces the data written to `hotspots.json`.
 pub(crate) fn extract_hotspots(
     summary: &ParsedProfileSummary,
     filter: ProfileFilterMode,
