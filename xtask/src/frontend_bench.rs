@@ -33,7 +33,8 @@ use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkManifest, FrontendBenchmarkProfile, load_benchmark_manifest,
 };
 use crate::benchmark_repository::{
-    BenchmarkRepositorySnapshot, verify_after_operation, verify_before_persistence,
+    BenchmarkRepositorySnapshot, require_clean_for_recording, verify_after_operation,
+    verify_before_persistence,
 };
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use std::num::NonZeroUsize;
@@ -61,6 +62,11 @@ pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), 
 
     // Capture repository state before any compiler construction or preflight.
     let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
+        .map_err(|error| error.to_string())?;
+
+    // Recording requires an exactly clean, committed repository before any
+    // fingerprint traversal, compiler construction or history read/write.
+    require_clean_for_recording(policy.recording(), &snapshot)
         .map_err(|error| error.to_string())?;
 
     let fingerprints =

@@ -44,6 +44,78 @@ fn commit_all(root: &Path, message: &str) {
 }
 
 #[test]
+fn clean_committed_recording_eligibility_passes() {
+    let repo = init_git_repo();
+    write_file(repo.path(), "file.moth", "value = 1\n");
+    commit_all(repo.path(), "initial");
+
+    let snapshot =
+        BenchmarkRepositorySnapshot::capture(repo.path()).expect("snapshot should capture");
+
+    assert!(snapshot.is_clean_committed());
+    snapshot
+        .require_clean_committed()
+        .expect("clean committed state should be eligible for recording");
+    require_clean_for_recording(crate::bench_types::BenchmarkRecording::Record, &snapshot)
+        .expect("recording gate should pass for a clean committed worktree");
+    require_clean_for_recording(crate::bench_types::BenchmarkRecording::ReadOnly, &snapshot)
+        .expect("read-only gate should pass for a clean committed worktree");
+}
+
+#[test]
+fn tracked_dirty_recording_eligibility_fails() {
+    let repo = init_git_repo();
+    write_file(repo.path(), "file.moth", "value = 1\n");
+    commit_all(repo.path(), "initial");
+
+    write_file(repo.path(), "file.moth", "value = 2\n");
+    let snapshot =
+        BenchmarkRepositorySnapshot::capture(repo.path()).expect("snapshot should capture");
+
+    assert!(!snapshot.is_clean_committed());
+    let error = snapshot
+        .require_clean_committed()
+        .expect_err("tracked dirty state must not be recording-eligible");
+    assert!(error.to_string().contains("uncommitted tracked changes"));
+    require_clean_for_recording(crate::bench_types::BenchmarkRecording::Record, &snapshot)
+        .expect_err("recording gate must reject a tracked dirty worktree");
+}
+
+#[test]
+fn untracked_dirty_recording_eligibility_fails() {
+    let repo = init_git_repo();
+    write_file(repo.path(), "file.moth", "value = 1\n");
+    commit_all(repo.path(), "initial");
+
+    write_file(repo.path(), "untracked.moth", "value = 1\n");
+    let snapshot =
+        BenchmarkRepositorySnapshot::capture(repo.path()).expect("snapshot should capture");
+
+    assert!(!snapshot.is_clean_committed());
+    let error = snapshot
+        .require_clean_committed()
+        .expect_err("untracked state must not be recording-eligible");
+    assert!(error.to_string().contains("untracked files"));
+}
+
+#[test]
+fn read_only_gate_allows_unchanged_dirty_snapshot() {
+    let repo = init_git_repo();
+    write_file(repo.path(), "file.moth", "value = 1\n");
+    commit_all(repo.path(), "initial");
+
+    write_file(repo.path(), "file.moth", "value = 2\n");
+    let snapshot =
+        BenchmarkRepositorySnapshot::capture(repo.path()).expect("snapshot should capture");
+
+    require_clean_for_recording(crate::bench_types::BenchmarkRecording::ReadOnly, &snapshot)
+        .expect("read-only gate must permit a dirty but unchanged worktree");
+    snapshot
+        .verify_unchanged(repo.path())
+        .expect("read-only unchanged verification must still pass");
+}
+
+#[test]
 fn clean_repository_remains_accepted() {
     let repo = init_git_repo();
     write_file(repo.path(), "file.moth", "value = 1\n");

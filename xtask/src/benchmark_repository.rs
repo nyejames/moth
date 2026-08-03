@@ -48,6 +48,9 @@ pub(crate) enum BenchmarkRepositoryError {
     InvalidUtf8 {
         command: String,
     },
+    NotCleanCommitted {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for BenchmarkRepositoryError {
@@ -66,6 +69,12 @@ impl std::fmt::Display for BenchmarkRepositoryError {
                 write!(
                     formatter,
                     "git command '{command}' produced non-UTF-8 output"
+                )
+            }
+            Self::NotCleanCommitted { reason } => {
+                write!(
+                    formatter,
+                    "benchmark repository is not clean and committed: {reason}"
                 )
             }
         }
@@ -102,6 +111,34 @@ impl BenchmarkRepositorySnapshot {
             commit: Some(self.commit.clone()),
             dirty: Some(!self.tracked_diff.is_empty() || !self.untracked_files.is_empty()),
         }
+    }
+
+    /// Whether the captured state is clean and committed.
+    ///
+    /// Clean committed means a captured HEAD commit, an empty tracked diff
+    /// and no untracked non-ignored files. Derived from already-captured
+    /// fields; no additional Git commands run here.
+    pub(crate) fn is_clean_committed(&self) -> bool {
+        !self.commit.is_empty() && self.tracked_diff.is_empty() && self.untracked_files.is_empty()
+    }
+
+    /// Require the captured state to be clean and committed.
+    ///
+    /// Recording a benchmark run requires an exactly clean, committed
+    /// repository so persisted history and tracked summaries are comparable.
+    pub(crate) fn require_clean_committed(&self) -> Result<(), BenchmarkRepositoryError> {
+        if self.is_clean_committed() {
+            return Ok(());
+        }
+
+        let reason = if self.commit.is_empty() {
+            "no captured HEAD commit".to_string()
+        } else if !self.tracked_diff.is_empty() {
+            "the working tree has uncommitted tracked changes".to_string()
+        } else {
+            "the working tree has untracked files".to_string()
+        };
+        Err(BenchmarkRepositoryError::NotCleanCommitted { reason })
     }
 
     /// Verify that the repository state matches this snapshot.
@@ -150,6 +187,22 @@ impl BenchmarkRepositorySnapshot {
 
         Ok(())
     }
+}
+
+/// Require clean committed state before recording benchmark history.
+///
+/// Read-only modes may run from a dirty worktree when it stays unchanged, so
+/// this gate applies the clean-start requirement only when the caller intends
+/// to persist history or summaries. The rejection happens before fingerprints,
+/// compiler construction, system identity creation or any history access.
+pub(crate) fn require_clean_for_recording(
+    recording: crate::bench_types::BenchmarkRecording,
+    snapshot: &BenchmarkRepositorySnapshot,
+) -> Result<(), BenchmarkRepositoryError> {
+    if recording == crate::bench_types::BenchmarkRecording::Record {
+        snapshot.require_clean_committed()?;
+    }
+    Ok(())
 }
 
 /// Verify the repository immediately before a benchmark recording operation persists history.

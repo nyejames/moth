@@ -22,9 +22,11 @@ BASE_REVISION: 6750c9a57238203ba83b2a31d74d6a19ecf36d70
 BRANCH: codex/benchmark-system-final-hardening (worktree /Users/aneirinjames/projects/beanstalk/moth-benchmark-final-hardening)
 STATUS: active
 ACCEPTED: 32 workloads, 58 typed cases, shared preflight/execution, clean-only benchmark expectations, protocol-aware normal/profile history, isolated file-entry builds, bounded bench-ci, production output-plan integration
-OPEN_CORRECTIONS: dirty recorded baselines, profile snapshot/fingerprint ordering and optional current identity, infallible Drop-only directory cleanup, duplicate CLI/frontend orchestration, stringly benchmark groups, stale documentation
-NEXT_ACTION: implement Phase 1 (clean committed recording), then run the Phase 1 audit and checkpoint commit
-VALIDATION: Phase 0 baseline green on branch 6750c9a57: cargo fmt --all -- --check; cargo test --package xtask (538 passed); just bench-validate (58/58 preflight); just bench-ci (58 preflight, 8 CLI + 10 frontend quick); just validate (clippy native/linux/windows, 3945 workspace tests + 538 xtask, 1816 integration cases, docs check, bench-ci) all pass
+COMPLETED: Phase 1 clean committed recording (snapshot eligibility authority, record-mode gate before fingerprints/compiler, clean-record filters in history/summary/report selection, append and summary dirty rejection, 13 focused tests)
+OPEN_CORRECTIONS: profile snapshot/fingerprint ordering and optional current identity, infallible Drop-only directory cleanup, duplicate CLI/frontend orchestration, stringly benchmark groups, stale documentation
+NEXT_ACTION: implement Phase 2 (centralise run preparation and measurement identity), then run the Phase 2 audit and checkpoint commit
+VALIDATION: Phase 0 baseline green on branch 6750c9a57 (fmt, 538 xtask tests, bench-validate 58/58, bench-ci, full just validate); Phase 1 green: fmt check, 551 xtask tests (15 repository, 19 history, 45 summary, 22 report), bench-validate 58/58, full just validate (clippy native/linux/windows, 3945 workspace + 551 xtask tests, 1816 integration cases, docs check, bench-ci)
+AUDITS: Phase 1 interim audit attempted through launcher auditor route twice; both attempts completed review but returned no valid JSON handoff in this environment, so the Coordinator performed the Phase 1 review against the plan checklist with no open findings
 ```
 
 Keep this capsule concise as work advances. Git history is the implementation record.

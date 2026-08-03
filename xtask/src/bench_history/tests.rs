@@ -59,7 +59,7 @@ fn benchmark_run() -> BenchmarkRun {
         benchmark_protocol_version: BENCHMARK_PROTOCOL_VERSION,
         git_revision: GitRevision {
             commit: Some("abc123".to_string()),
-            dirty: Some(true),
+            dirty: Some(false),
         },
         system: BenchmarkSystem {
             system_uuid: "UUID123".to_string(),
@@ -111,7 +111,7 @@ fn v6_roundtrip_preserves_protocol_revision_runner_and_workload_identity() {
         BENCHMARK_PROTOCOL_VERSION
     );
     assert_eq!(parsed.commit.as_deref(), Some("abc123"));
-    assert_eq!(parsed.git_dirty, Some(true));
+    assert_eq!(parsed.git_dirty, Some(false));
     assert_eq!(parsed.cases[0].case_id, "speed_test_check");
     assert_eq!(parsed.cases[0].workload_id.as_deref(), Some("speed_test"));
     assert_eq!(
@@ -127,7 +127,7 @@ fn v6_roundtrip_preserves_protocol_revision_runner_and_workload_identity() {
     let json = fs::read_to_string(path).expect("record should be readable");
     assert!(json.contains(r#""format_version":7"#));
     assert!(json.contains(r#""benchmark_protocol_version":2"#));
-    assert!(json.contains(r#""git_dirty":true"#));
+    assert!(json.contains(r#""git_dirty":false"#));
     assert!(json.contains(r#""case_id":"speed_test_check""#));
     assert!(json.contains(r#""workload_id":"speed_test""#));
     assert!(json.contains(r#""kind":"cli""#));
@@ -220,6 +220,68 @@ fn v5_adapter_reads_fixed_thread_identity() {
     assert_eq!(record.format_version, 5);
     assert_eq!(record.benchmark_protocol_version, 0);
     assert_eq!(record.thread_count, Some(4));
+}
+
+#[test]
+fn dirty_record_is_ignored_by_latest_comparable_selection() {
+    let mut dirty_newer = current_record();
+    dirty_newer.system_uuid = "sys-a".to_string();
+    dirty_newer.timestamp = "2026-05-11T15:21".to_string();
+    dirty_newer.git_dirty = Some(true);
+
+    let mut clean_older = current_record();
+    clean_older.system_uuid = "sys-a".to_string();
+    clean_older.timestamp = "2026-05-10T15:21".to_string();
+
+    let records = [clean_older.clone(), dirty_newer.clone()];
+    let latest = find_latest_matching_run(&records, "sys-a", BenchmarkSuiteKind::EndToEndCli, None)
+        .expect("a clean record should remain selectable");
+    assert_eq!(latest.timestamp, clean_older.timestamp);
+    assert!(latest.git_dirty == Some(false));
+}
+
+#[test]
+fn unknown_revision_record_is_ignored_by_latest_comparable_selection() {
+    let mut unknown_newer = current_record();
+    unknown_newer.system_uuid = "sys-a".to_string();
+    unknown_newer.timestamp = "2026-05-11T15:21".to_string();
+    unknown_newer.commit = None;
+
+    let mut clean_older = current_record();
+    clean_older.system_uuid = "sys-a".to_string();
+    clean_older.timestamp = "2026-05-10T15:21".to_string();
+
+    let records = [clean_older.clone(), unknown_newer.clone()];
+    let latest = find_latest_matching_run(&records, "sys-a", BenchmarkSuiteKind::EndToEndCli, None)
+        .expect("a clean record should remain selectable");
+    assert_eq!(latest.timestamp, clean_older.timestamp);
+    assert!(latest.commit.is_some());
+}
+
+#[test]
+fn append_rejects_dirty_record() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("runs.jsonl");
+    let mut record = current_record();
+    record.git_dirty = Some(true);
+
+    let error =
+        append_local_run(&path, &record).expect_err("a dirty record must not enter normal history");
+    assert!(error.contains("clean and committed"));
+    assert!(!path.exists());
+}
+
+#[test]
+fn append_rejects_unknown_revision_record() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("runs.jsonl");
+    let mut record = current_record();
+    record.commit = None;
+
+    let error = append_local_run(&path, &record)
+        .expect_err("an unknown-revision record must not enter normal history");
+    assert!(error.contains("clean and committed"));
+    assert!(!path.exists());
 }
 
 #[test]

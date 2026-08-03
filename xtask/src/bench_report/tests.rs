@@ -18,6 +18,52 @@ fn report_handles_no_local_history() {
 }
 
 #[test]
+fn report_ignores_dirty_latest_run() {
+    let system = test_system("SYSTEM-A");
+    let mut dirty_latest = run_record(
+        "2026-05-02T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![case_record("check_core", 42.0, vec![], vec![])],
+    );
+    dirty_latest.git_dirty = Some(true);
+
+    let clean = run_record(
+        "2026-05-01T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![case_record("check_core", 40.0, vec![], vec![])],
+    );
+
+    let report = calculate_benchmark_report(&[clean, dirty_latest], Some(&system));
+    let suite = &report.suites[0];
+    assert_eq!(suite.latest_timestamp, "2026-05-01T12:00");
+}
+
+#[test]
+fn report_ignores_unknown_revision_latest_run() {
+    let system = test_system("SYSTEM-A");
+    let mut unknown_latest = run_record(
+        "2026-05-02T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![case_record("check_core", 42.0, vec![], vec![])],
+    );
+    unknown_latest.commit = None;
+
+    let clean = run_record(
+        "2026-05-01T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![case_record("check_core", 40.0, vec![], vec![])],
+    );
+
+    let report = calculate_benchmark_report(&[clean, unknown_latest], Some(&system));
+    let suite = &report.suites[0];
+    assert_eq!(suite.latest_timestamp, "2026-05-01T12:00");
+}
+
+#[test]
 fn report_names_missing_current_system_history() {
     let system = test_system("SYSTEM-A");
     let report = calculate_benchmark_report(&[], Some(&system));

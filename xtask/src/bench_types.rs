@@ -1042,6 +1042,18 @@ pub struct GitRevision {
     pub dirty: Option<bool>,
 }
 
+impl GitRevision {
+    /// Whether this revision is exactly clean and committed.
+    ///
+    /// Comparable recorded runs require a captured commit and no dirty state.
+    pub(crate) fn is_clean_committed(&self) -> bool {
+        self.commit
+            .as_deref()
+            .is_some_and(|commit| !commit.is_empty())
+            && self.dirty == Some(false)
+    }
+}
+
 /// Calculate mean of a slice of values
 pub fn calculate_mean(values: &[f64]) -> f64 {
     if values.is_empty() {

@@ -347,6 +347,9 @@ fn select_latest_run<'a>(
         if run.benchmark_protocol_version != BENCHMARK_PROTOCOL_VERSION {
             return None;
         }
+        if !run.is_clean_committed() {
+            return None;
+        }
 
         if let Some(system) = current_system
             && run.system_uuid != system.system_uuid
@@ -361,7 +364,8 @@ fn select_latest_run<'a>(
     // The previous run must match the latest run's thread identity so the
     // report never compares runs with different parallelism levels.
     let previous = runs[..latest_index].iter().rev().find(|run| {
-        run.suite_kind == persisted_suite_kind
+        run.is_clean_committed()
+            && run.suite_kind == persisted_suite_kind
             && run.system_uuid == latest.system_uuid
             && run.thread_count == latest.thread_count
             && run.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
