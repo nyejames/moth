@@ -205,20 +205,6 @@ pub(crate) fn require_clean_for_recording(
     Ok(())
 }
 
-/// Verify the repository immediately before a benchmark recording operation persists history.
-///
-/// Recording intentionally changes the local history and, for default-thread runs, the tracked
-/// monthly summary. The unchanged snapshot therefore belongs before persistence; read-only
-/// operations continue to use [`verify_after_operation`] after their complete operation.
-pub(crate) fn verify_before_persistence(
-    snapshot: &BenchmarkRepositorySnapshot,
-    repository_root: &Path,
-) -> Result<(), String> {
-    snapshot
-        .verify_unchanged(repository_root)
-        .map_err(|error| error.to_string())
-}
-
 fn capture_commit(repository_root: &Path) -> Result<String, BenchmarkRepositoryError> {
     let output = run_git(
         repository_root,

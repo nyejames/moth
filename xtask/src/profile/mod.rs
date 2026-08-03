@@ -39,15 +39,12 @@ pub(crate) mod summary;
 pub(crate) use options::{ProfileOptions, ProfileParseResult, parse_profile_args};
 
 use crate::bench_time::BenchmarkTimestamp;
-use crate::bench_types::BenchmarkMeasurementIdentity;
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
-use crate::benchmark_fingerprint::compute_benchmark_fingerprints;
-use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkManifest, BenchmarkRunner, load_benchmark_manifest,
-};
-use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
+use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, BenchmarkRunner};
+use crate::benchmark_repository::verify_after_operation;
+use crate::benchmark_run::PreparedBenchmarkRun;
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::{CompilerBinary, build_profiling_compiler_with_timers};
 use std::collections::HashMap;
@@ -93,17 +90,10 @@ fn profile_artifacts_root(repository_root: &Path) -> PathBuf {
 /// If any case fails, the run directory is left for debugging but no history
 /// is appended.
 pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), String> {
-    // Load and filter benchmark cases.
-    let manifest = load_benchmark_manifest().map_err(|error| error.to_string())?;
-    let selected_cases = select_profile_cases(&manifest, options.case_filter.as_deref())?;
-
-    // Compute fingerprints once for the whole run.
-    let fingerprints =
-        compute_benchmark_fingerprints(&manifest).map_err(|error| error.to_string())?;
-
-    // Capture repository state before compiler construction or preflight.
-    let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
-        .map_err(|error| error.to_string())?;
+    // Prepare one run: manifest, then repository snapshot, then fingerprints.
+    // The snapshot must precede fingerprint traversal and compiler construction.
+    let prepared = PreparedBenchmarkRun::load()?;
+    let selected_cases = select_profile_cases(&prepared.manifest, options.case_filter.as_deref())?;
 
     // Verify Samply is available and learn the version-specific record flags before doing work.
     let samply_capabilities = check_samply_available()?;
@@ -120,11 +110,13 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
 
     // Build the profiling compiler with debug info and frame pointers for Samply.
     println!("Building profiling compiler...");
-    let profiling_binary = build_profiling_compiler_with_timers(&manifest.repository_root)?;
+    let profiling_binary =
+        build_profiling_compiler_with_timers(&prepared.manifest.repository_root)?;
     let moth_path = profiling_binary.as_path();
     let symbol_dirs = profiling_binary.symbol_dirs.clone();
-    let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
-    let execution_context = BenchmarkExecutionContext::new(&manifest, moth_path, &workspace);
+    let workspace = BenchmarkExecutionWorkspace::create(&prepared.manifest.repository_root)?;
+    let execution_context =
+        BenchmarkExecutionContext::new(&prepared.manifest, moth_path, &workspace);
 
     println!(
         "Preflighting {} CLI profile case(s) with the profiling binary...",
@@ -134,11 +126,11 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         .map_err(|failures| format_case_failures("profile preflight", &failures))?;
 
     // Use the start snapshot's commit for the run id.
-    let git_revision = snapshot.git_revision();
+    let git_revision = prepared.snapshot.git_revision();
     let commit = git_revision.commit.clone();
 
     // Create the run directory.
-    let profiles_root = profile_artifacts_root(&manifest.repository_root);
+    let profiles_root = profile_artifacts_root(&prepared.manifest.repository_root);
     let run_paths = ProfileRunPaths::create(&profiles_root, commit.as_deref())?;
 
     println!(
@@ -257,7 +249,12 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         // Build manifest entry for this case.
         case_manifests.push(ProfileCaseManifest {
             case_id: case.id.clone(),
-            identity: build_case_identity(&manifest, &selected_cases, &fingerprints, &case.id),
+            identity: Some(
+                prepared
+                    .fingerprints
+                    .identity_for(&prepared.manifest, case)
+                    .map_err(|error| error.to_string())?,
+            ),
             group_name: case.group_name.clone(),
             command: invocation.command.as_str().to_owned(),
             args: invocation.args.clone(),
@@ -365,7 +362,8 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
             let mut drift_cases = Vec::new();
             let mut wall_times = HashMap::new();
 
-            for (observation, hotspot_result) in &case_summaries {
+            for (case, (observation, hotspot_result)) in selected_cases.iter().zip(&case_summaries)
+            {
                 wall_times.insert(observation.case_id.clone(), observation.wall_ms);
 
                 if let Some(hotspots) = hotspot_result {
@@ -380,16 +378,14 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
                         })
                         .collect();
 
-                    let identity = build_case_identity(
-                        &manifest,
-                        &selected_cases,
-                        &fingerprints,
-                        &observation.case_id,
-                    );
+                    let identity = prepared
+                        .fingerprints
+                        .identity_for(&prepared.manifest, case)
+                        .map_err(|error| error.to_string())?;
 
                     drift_cases.push(DriftCaseInput {
                         case_id: observation.case_id.clone(),
-                        identity,
+                        identity: Some(identity),
                         command: observation.command.clone(),
                         args: observation.command_args.clone(),
                         stage_timings: observation.observations.stage_timings.clone(),
@@ -429,54 +425,52 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     // The collection phase (cases, artifacts, drift) is complete; persistence
     // must not run if the repository changed during the run.
     if options.filter != ProfileFilterMode::RawIndex {
-        let history_cases: Vec<HistoryCaseRecord> = case_summaries
-            .iter()
-            .filter_map(|(observation, hotspot_result)| {
-                hotspot_result.as_ref().map(|hotspots| {
-                    let hot_functions: Vec<HistoryHotFunction> = hotspots
-                        .functions
-                        .iter()
-                        .map(|f| HistoryHotFunction {
-                            name: f.name.clone(),
-                            bucket_label: f.bucket.label.clone(),
-                            inclusive_samples: f.inclusive_samples,
-                            self_samples: f.self_samples,
-                            inclusive_pct: f.inclusive_pct,
-                            self_pct: f.self_pct,
-                        })
-                        .collect();
+        let mut history_cases = Vec::new();
+        for (case, (observation, hotspot_result)) in selected_cases.iter().zip(&case_summaries) {
+            let Some(hotspots) = hotspot_result else {
+                continue;
+            };
 
-                    let top_bucket_label = hot_functions
-                        .first()
-                        .map(|f| f.bucket_label.clone())
-                        .unwrap_or_else(|| "unknown".to_string());
-
-                    // Build typed identity from the computed fingerprints.
-                    let identity = build_case_identity(
-                        &manifest,
-                        &selected_cases,
-                        &fingerprints,
-                        &observation.case_id,
-                    );
-
-                    HistoryCaseRecord {
-                        case_id: observation.case_id.clone(),
-                        identity,
-                        group_name: observation.group_name.clone(),
-                        command: observation.command.clone(),
-                        args: observation.command_args.clone(),
-                        observation_wall_ms: observation.wall_ms,
-                        sample_count: hotspots.total_sample_count,
-                        sample_weight: hotspots.total_sample_weight,
-                        stage_timings: observation.observations.stage_timings.clone(),
-                        counters: observation.observations.counters.clone(),
-                        hot_functions,
-                        top_bucket_label,
-                        run_directory_path: run_paths.root.to_str().unwrap_or("").to_string(),
-                    }
+            let hot_functions: Vec<HistoryHotFunction> = hotspots
+                .functions
+                .iter()
+                .map(|f| HistoryHotFunction {
+                    name: f.name.clone(),
+                    bucket_label: f.bucket.label.clone(),
+                    inclusive_samples: f.inclusive_samples,
+                    self_samples: f.self_samples,
+                    inclusive_pct: f.inclusive_pct,
+                    self_pct: f.self_pct,
                 })
-            })
-            .collect();
+                .collect();
+
+            let top_bucket_label = hot_functions
+                .first()
+                .map(|f| f.bucket_label.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            // Build typed identity from the computed fingerprints.
+            let identity = prepared
+                .fingerprints
+                .identity_for(&prepared.manifest, case)
+                .map_err(|error| error.to_string())?;
+
+            history_cases.push(HistoryCaseRecord {
+                case_id: observation.case_id.clone(),
+                identity: Some(identity),
+                group_name: observation.group_name.clone(),
+                command: observation.command.clone(),
+                args: observation.command_args.clone(),
+                observation_wall_ms: observation.wall_ms,
+                sample_count: hotspots.total_sample_count,
+                sample_weight: hotspots.total_sample_weight,
+                stage_timings: observation.observations.stage_timings.clone(),
+                counters: observation.observations.counters.clone(),
+                hot_functions,
+                top_bucket_label,
+                run_directory_path: run_paths.root.to_str().unwrap_or("").to_string(),
+            });
+        }
 
         let ts = BenchmarkTimestamp::now();
         let timestamp = ts.format_run_header();
@@ -491,14 +485,22 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         )?;
 
         // Verify repository state before appending profile history.
-        verify_after_operation::<(), String>(&snapshot, &manifest.repository_root, Ok(()))
-            .and_then(|()| {
-                let history_path = std::path::Path::new(PROFILE_RUNS_JSONL_PATH);
-                history::append_profile_run(history_path, &history_record)
-            })?;
+        verify_after_operation::<(), String>(
+            &prepared.snapshot,
+            &prepared.manifest.repository_root,
+            Ok(()),
+        )
+        .and_then(|()| {
+            let history_path = std::path::Path::new(PROFILE_RUNS_JSONL_PATH);
+            history::append_profile_run(history_path, &history_record)
+        })?;
     } else {
         // Raw-index mode does not append history, but still verifies.
-        verify_after_operation::<(), String>(&snapshot, &manifest.repository_root, Ok(()))?;
+        verify_after_operation::<(), String>(
+            &prepared.snapshot,
+            &prepared.manifest.repository_root,
+            Ok(()),
+        )?;
     }
 
     println!(
@@ -535,31 +537,6 @@ fn select_profile_cases(
             case.id
         )),
     }
-}
-
-/// Build typed measurement identity for one profile case.
-///
-/// WHAT: Joins the case's workload and measurement fingerprints from the
-/// pre-computed `BenchmarkFingerprints` to produce a `BenchmarkMeasurementIdentity`.
-/// WHY: Profile history must carry the same identity shape as normal benchmark
-/// history so drift comparison can distinguish source changes from measurement
-/// changes without a parallel identity system.
-fn build_case_identity(
-    manifest: &BenchmarkManifest,
-    selected_cases: &[BenchmarkCase],
-    fingerprints: &crate::benchmark_fingerprint::BenchmarkFingerprints,
-    case_id: &str,
-) -> Option<BenchmarkMeasurementIdentity> {
-    let case = selected_cases.iter().find(|c| c.id == case_id)?;
-    let workload = manifest.workload_for(case)?;
-    let source_fingerprint = fingerprints.workloads.get(case.workload_index)?;
-    let measurement_fingerprint = fingerprints.cases.get(case.case_index)?;
-
-    Some(BenchmarkMeasurementIdentity {
-        workload_id: workload.id.clone(),
-        source_fingerprint: source_fingerprint.to_string(),
-        measurement_fingerprint: measurement_fingerprint.to_string(),
-    })
 }
 
 fn print_symbolication_smoke_diagnostic(

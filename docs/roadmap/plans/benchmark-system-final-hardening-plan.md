@@ -22,11 +22,11 @@ BASE_REVISION: 6750c9a57238203ba83b2a31d74d6a19ecf36d70
 BRANCH: codex/benchmark-system-final-hardening (worktree /Users/aneirinjames/projects/beanstalk/moth-benchmark-final-hardening)
 STATUS: active
 ACCEPTED: 32 workloads, 58 typed cases, shared preflight/execution, clean-only benchmark expectations, protocol-aware normal/profile history, isolated file-entry builds, bounded bench-ci, production output-plan integration
-COMPLETED: Phase 1 clean committed recording (snapshot eligibility authority, record-mode gate before fingerprints/compiler, clean-record filters in history/summary/report selection, append and summary dirty rejection, 13 focused tests)
-OPEN_CORRECTIONS: profile snapshot/fingerprint ordering and optional current identity, infallible Drop-only directory cleanup, duplicate CLI/frontend orchestration, stringly benchmark groups, stale documentation
-NEXT_ACTION: implement Phase 2 (centralise run preparation and measurement identity), then run the Phase 2 audit and checkpoint commit
-VALIDATION: Phase 0 baseline green on branch 6750c9a57 (fmt, 538 xtask tests, bench-validate 58/58, bench-ci, full just validate); Phase 1 green: fmt check, 551 xtask tests (15 repository, 19 history, 45 summary, 22 report), bench-validate 58/58, full just validate (clippy native/linux/windows, 3945 workspace + 551 xtask tests, 1816 integration cases, docs check, bench-ci)
-AUDITS: Phase 1 interim audit attempted through launcher auditor route twice; both attempts completed review but returned no valid JSON handoff in this environment, so the Coordinator performed the Phase 1 review against the plan checklist with no open findings
+COMPLETED: Phase 1 clean committed recording (snapshot eligibility authority, record-mode gate before fingerprints/compiler, clean-record filters in history/summary/report selection, append and summary dirty rejection, 13 focused tests); Phase 2 centralised run preparation and identity (PreparedBenchmarkRun::load used by bench, bench-frontend, bench-ci, bench-validate and profile; one checked BenchmarkFingerprints::identity_for replaces CLI/frontend/profile identity reconstruction; profile snapshot now precedes fingerprinting; 7 focused tests)
+OPEN_CORRECTIONS: infallible Drop-only directory cleanup, duplicate CLI/frontend orchestration, stringly benchmark groups, stale documentation
+NEXT_ACTION: implement Phase 3 (profile artifacts/history hardening), then run the Phase 3 audit and checkpoint commit
+VALIDATION: Phase 0 baseline green on branch 6750c9a57; Phase 1 green (551 xtask tests, bench-validate 58/58, full just validate); Phase 2 green: fmt check, 558 xtask tests (24 fingerprint, 2 benchmark_run, 250 profile), bench-validate 58/58, bench-ci, full just validate (clippy native/linux/windows, 3945 workspace + 558 xtask tests, 1816 integration cases, docs check, bench-ci)
+AUDITS: Phase 1 interim audit attempted through launcher auditor route twice; both attempts completed review but returned no valid JSON handoff in this environment, so the Coordinator performed the Phase 1 review against the plan checklist with no open findings; Phase 2 reviewed by Coordinator against plan Phase 2 checklist with no open findings
 ```
 
 Keep this capsule concise as work advances. Git history is the implementation record.

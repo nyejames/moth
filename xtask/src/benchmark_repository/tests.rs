@@ -138,7 +138,8 @@ fn clean_repository_is_verified_before_recording_persistence() {
     let snapshot =
         BenchmarkRepositorySnapshot::capture(repo.path()).expect("snapshot should capture");
 
-    verify_before_persistence(&snapshot, repo.path())
+    snapshot
+        .verify_unchanged(repo.path())
         .expect("clean repository should be accepted before persistence");
 
     write_file(repo.path(), "runs.jsonl", "recorded\n");

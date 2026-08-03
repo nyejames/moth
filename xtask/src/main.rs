@@ -35,6 +35,7 @@ mod benchmark_execution;
 mod benchmark_fingerprint;
 mod benchmark_manifest;
 mod benchmark_repository;
+mod benchmark_run;
 mod benchmark_status;
 mod benchmark_workspace;
 mod compiler_binary;
