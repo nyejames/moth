@@ -321,14 +321,14 @@ td {
 }</style>
 <style>.doc-level,
 .doc-pager {
-    --doc-level-accent: #3f8f4e;
-    --doc-level-accent-hover: #337740;
-    --doc-level-border: #d7dfd8;
-    --doc-level-switch-background: #f1f5f1;
+    --doc-level-accent: #3d4e8e;
+    --doc-level-accent-hover: #336b77;
+    --doc-level-border: #d7d9df;
+    --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
-    --doc-level-text: #202722;
-    --doc-level-muted: #687169;
-    --doc-level-focus: #2877d4;
+    --doc-level-text: #202127;
+    --doc-level-muted: #686971;
+    --doc-level-focus: #28c0d4;
 }
 
 .doc-level {
@@ -549,14 +549,14 @@ td {
 @media (prefers-color-scheme: dark) {
     .doc-level,
     .doc-pager {
-        --doc-level-accent: #80c98c;
-        --doc-level-accent-hover: #a0d9a9;
-        --doc-level-border: #3a493d;
-        --doc-level-switch-background: #202a22;
-        --doc-level-selected-background: #303c32;
-        --doc-level-text: #edf2ee;
-        --doc-level-muted: #a8b3aa;
-        --doc-level-focus: #75b7ff;
+        --doc-level-accent: #aea9f9;
+        --doc-level-accent-hover: #a0b8d9;
+        --doc-level-border: #3a3a49;
+        --doc-level-switch-background: #221d25;
+        --doc-level-selected-background: #353447;
+        --doc-level-text: #edeff2;
+        --doc-level-muted: #a8aab3;
+        --doc-level-focus: #75e1ff;
     }
 }
 
@@ -930,7 +930,7 @@ export<span class='moth-code-operator'>:</span>
 ;</code></pre><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- docs/@docs.moth</span>
 export<span class='moth-code-operator'>:</span>
     my_p <span class='moth-code-operator'>#</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> <span class='moth-code-struct'>Custom</span> paragraph<span class='moth-code-parenthesis'>]</span>
-;</code></pre><p>The collision occurs when the same-directory root and implicit <code>@html</code> surface are combined for a <code>.mtf</code> body.</p><p>This follows the same no-shadowing model as ordinary source visibility.</p><p>The collision model is implemented through one visible-name registry. A same-name constant from the module root and <code>@html</code> is rejected with a structured visible-name collision diagnostic that retains both source locations when available. Unique constants from both surfaces remain visible; neither surface shadows the other.</p><h3>Nested templates</h3><p>Nested templates inside a <code>.mtf</code> body are valid. A nested template with no explicit directive defaults to <code>$md</code>. Any explicit directive (such as <code>$raw</code>, <code>$fresh</code>, <code>$html</code>, <code>$code</code>, <code>$css</code> or <code>$escape_html</code>) overrides the moth template Markdown default for that nested template.</p><pre style=""><code class='codeblock'>[$raw: &lt;div&gt;Raw HTML output&lt;/div&gt;]</code></pre><h3>Constants versus runtime values</h3><p>Only compile-time constants are visible inside a <code>.mtf</code> file. Runtime bindings, runtime functions, types, traits, methods, external runtime APIs and the generated self <code>content</code> constant are not visible.</p><p>A reference to a runtime value is rejected with <code>MOTH-RULE-0034</code> or <code>MOTH-RULE-0053</code>.</p><h3>No runtime capture</h3><p>Moth template bodies are const-required. There is no runtime capture. The entire body must fold at compile time.</p><h3>Allowed template directives</h3><p>All template directives available in the compile-time template environment are valid inside <code>.mtf</code>. This includes <code>$md</code>, <code>$raw</code>, <code>$fresh</code>, <code>$html</code>, <code>$code</code>, <code>$css</code> and <code>$escape_html</code>.</p><h3>Child-template formatting boundary</h3><p>Child templates are opaque barriers to the parent formatter. A child template&#39;s output is not inspected by the parent <code>$md</code> formatter. Template delimiters cannot pair across child boundaries.</p><h3>Literal delimiter output</h3><p>To output literal template delimiters, use string insertion:</p><pre style=""><code class='codeblock'>[&quot;[&quot;]
+;</code></pre><p>The collision occurs when the same-directory root and implicit <code>@html</code> surface are combined for a <code>.mtf</code> body.</p><p>This follows the same no-shadowing model as ordinary source visibility.</p><h3>Nested templates</h3><p>Nested templates inside a <code>.mtf</code> body are valid. A nested template with no explicit directive defaults to <code>$md</code>. Any explicit directive (such as <code>$raw</code>, <code>$fresh</code>, <code>$html</code>, <code>$code</code>, <code>$css</code> or <code>$escape_html</code>) overrides the moth template Markdown default for that nested template.</p><pre style=""><code class='codeblock'>[$raw: &lt;div&gt;Raw HTML output&lt;/div&gt;]</code></pre><h3>Constants versus runtime values</h3><p>Only compile-time constants are visible inside a <code>.mtf</code> file. Runtime bindings, runtime functions, types, traits, methods, external runtime APIs and the generated self <code>content</code> constant are not visible.</p><p>A reference to a runtime value is rejected with <code>MOTH-RULE-0034</code> or <code>MOTH-RULE-0053</code>.</p><h3>No runtime capture</h3><p>Moth template bodies are const-required. There is no runtime capture. The entire body must fold at compile time.</p><h3>Allowed template directives</h3><p>All template directives available in the compile-time template environment are valid inside <code>.mtf</code>. This includes <code>$md</code>, <code>$raw</code>, <code>$fresh</code>, <code>$html</code>, <code>$code</code>, <code>$css</code> and <code>$escape_html</code>.</p><h3>Child-template formatting boundary</h3><p>Child templates are opaque barriers to the parent formatter. A child template&#39;s output is not inspected by the parent <code>$md</code> formatter. Template delimiters cannot pair across child boundaries.</p><h3>Literal delimiter output</h3><p>To output literal template delimiters, use string insertion:</p><pre style=""><code class='codeblock'>[&quot;[&quot;]
 [&quot;]&quot;]
 [&quot;[literal]&quot;]</code></pre><h3>Content helpers</h3><p>Content helpers such as <code>codeblock</code> work only where the builder environment provides them. Do not assume arbitrary normal source imports are available inside <code>.mtf</code>.</p><h3>Related concepts</h3><ul><li>For the full template directive list see <a href="../templates/#template-directives">Template directives</a>.</li><li>For <code>$md</code> formatting see <a href="../templates/#markdown-formatting">Markdown formatting</a>.</li><li>For limitations see <a href="#moth-template-files-limits">Moth template limits</a>.</li></ul>
 </div>

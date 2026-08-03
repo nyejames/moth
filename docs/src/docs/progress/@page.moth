@@ -13,11 +13,12 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 #[title, center: PROGRESS MATRIX]
 
 #[section, $md:
-    This page tracks Moth's current implementation progress.
+    This page tracks current implementation and target status for Moth's accepted design.
+    Accepted deferred surfaces may appear here. Open design questions and outside-scope
+    mechanisms do not. Permanent language exclusions live in @../design-scope (Design scope).
 
-    It is the source of truth for what the compiler currently supports, partially supports,
-    cleanly rejects, keeps experimental, defers, or treats as outside scope. It is not a full
-    language reference, roadmap, or test manifest.
+    Invalid-form diagnostic coverage may appear inside the row for the intended feature. This
+    page is not a full language reference, roadmap, exclusion inventory or test manifest.
 
     The compiler and memory design references may describe accepted end-state architecture that
     has not fully landed. This matrix determines what the compiler supports today.
@@ -77,15 +78,6 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Planned or design-compatible, but not part of the current implemented Alpha surface.]
         ]
 
-        [data, red:
-            [: Rejected]
-            [: Not accepted by the compiler today and expected to fail with a structured diagnostic.]
-        ]
-
-        [data, red:
-            [: Outside Scope]
-            [: Intentionally not planned for Moth's language design. Syntax should be rejected with structured diagnostics when encountered.]
-        ]
     ]
 
     ## Coverage legend
@@ -166,7 +158,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Broad declaration, terminality, call validation, named and positional arguments, defaults, parameter passing, external calls, and return coverage.]
             [: Frontend / JS / HTML]
-            [: Named calls and defaulted parameters are supported. Non-unit success-return functions are validated for all-path terminality before HIR. External and compiler-owned builtin calls remain positional-only. Return slots contain types and channels only. The compiler infers freshness and alias effects from validated bodies and calls. Source-authored return-alias syntax has been removed. User-function returns use a raw-value ABI: ordinary returns preserve allocation identity, only explicit copy creates an independent graph. Call results are slot-backed caller bindings even when their values alias argument allocations, and rebinding clears the result slot's old value roots. Multi-return summaries conservatively union returned parameter roots across projections. Focused coverage includes cross-module and external alias results, collection lookup results, opaque-handle forwarding, fallible success payload reads, reactive template returns, and recursive-summary Unknown.]
+            [: Named calls and defaulted parameters are supported. Non-unit success-return functions are validated for all-path terminality before HIR. External and compiler-owned builtin calls remain positional-only. Source-authored return-alias syntax has been removed. Ordinary return preserves allocation identity, explicit [$html:<code>copy</code>] creates independence, and each call result receives a separate caller binding. Current multi-return alias analysis may conservatively over-approximate relationships between returned values, which can produce stricter alias diagnostics.]
         ]
 
         [data:
@@ -174,7 +166,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Supported]
             [: Broad function parameter default, struct field default, named-call default skipping, constructor default skipping, and diagnostics coverage.]
             [: Frontend / JS / HTML]
-            [: Function parameters and struct fields can define defaults with [$html:<code>=</code>]. Choice payload defaults, choice default variants, and broad default semantics outside function/struct construction remain deferred.]
+            [: Function parameters and struct fields can define defaults with [$html:<code>=</code>].]
         ]
 
         [data:
@@ -182,7 +174,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Supported]
             [: Broad template parsing, directive, slot, const/runtime fragment, template control-flow, markdown inline-code, diagnostics, and JS/HTML integration coverage.]
             [: HTML / JS]
-            [: Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, [$html:<code>$children</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, import namespace member access in template heads (e.g. namespace-dot-member expressions), and const expansion guards. Full match-style template heads and full CommonMark remain outside the current surface. Templates are represented in an AST-local Template IR (TIR) during parsing, composition, folding, formatting, and HIR handoff preparation; TIR is internal, behaviour-preserving, and does not change template language semantics. Post-TIR performance follow-ups are deferred and tracked in the roadmap.]
+            [: Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, [$html:<code>$children</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, import namespace member access in template heads and const expansion guards. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap.]
         ]
 
         [data:
@@ -190,7 +182,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Targeted compiler-integrated import, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics, and integration coverage.]
             [: HTML builder / frontend]
-            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates with no explicit directive also default to [$html:<code>$md</code>], and any explicit nested directive overrides that default. They import extensionlessly into [$html:<code>.moth</code>], can be re-exported through a module root's [$html:<code>export:</code>] block, and must fully fold. They are not entries, config files, standalone HTML files, or general source handlers. The active builder declares the source-backed packages that provide implicit template scope, and only modules whose semantic source set contains [$html:<code>.mtf</code>] files receive those provider interfaces. Same-directory constants and builder constants share one visible-name registry, so collisions report both source locations instead of applying precedence.]
+            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates with no explicit directive also default to [$html:<code>$md</code>], and any explicit nested directive overrides that default. They import extensionlessly into [$html:<code>.moth</code>], can be re-exported through a module root's [$html:<code>export:</code>] block, and must fully fold. Same-directory constants and builder constants remain visible when their names are unique. A collision reports both source locations where available, and neither source shadows the other.]
         ]
 
         [data:
@@ -222,7 +214,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Supported]
             [: Broad declaration, constructor, import, return, assignment, match, payload, JS carrier-shape, and structural equality coverage.]
             [: JS / HTML]
-            [: Unit and record-payload variants are supported. Payload fields are immutable. Payload shorthand, direct payload field access, nested payload patterns, recursive choices, choice defaults, and tagged/default declarations remain deferred or rejected.]
+            [: Unit and record-payload variants are supported. Payload fields are immutable. Accepted incomplete work includes direct payload field access with narrowing, nested payload patterns and recursive choices.]
         ]
 
         [data:
@@ -246,15 +238,15 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Broad frontend, HIR, borrow, JS, backend-validation, diagnostics, and integration coverage.]
             [: JS / HTML / backend validation for other targets]
-            [: V1 supports insertion-ordered scalar-keyed maps with [$html:<code>{K = V}</code>] types, map literals, compiler-owned map members, HIR map operations, borrow validation, and JS runtime lowering. HTML-JS normalizes every String-like key to canonical content, including template-backed keys. Unsupported key families, const maps, equality, language hashsets, and non-JS lowering details remain deferred or outside scope.]
+            [: V1 supports insertion-ordered scalar-keyed maps with [$html:<code>{K = V}</code>] types, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS normalizes every String-like key to canonical content, including template-backed keys. Non-JS map lowering remains the primary accepted target gap.]
         ]
 
         [data:
             [: Results, options, multiple returns, and multi-bind]
-            [: Partial]
+            [: Supported]
             [: Broad option, fallible return, postfix propagation, catch, value-producing block, multi-return, multi-bind, and diagnostic coverage.]
             [: JS / HTML]
-            [: [$html:<code>Error!</code>], postfix [$html:<code>!</code>], [$html:<code>catch</code>], value-producing blocks, and multi-bind are supported. First-class public Result values and result-pattern matching remain deferred.]
+            [: [$html:<code>Error!</code>], postfix [$html:<code>!</code>], [$html:<code>catch</code>], value-producing blocks, options, multiple returns and multi-bind are supported.]
         ]
 
         [data:
@@ -267,10 +259,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 
         [data:
             [: Type aliases]
-            [: Supported]
+            [: Partial]
             [: Broad builtin, imported, collection, option, generic instance, alias-to-alias, remap, and diagnostic coverage.]
             [: Frontend]
-            [: Aliases are transparent and do not create nominal identity. Fully concrete generic aliases are supported. Parameterized aliases remain deferred.]
+            [: Transparent aliases to builtins, source and imported source types, collections, maps, options and concrete generic instances are supported. The compiler still rejects aliases to external opaque types despite the accepted transparent-alias contract.]
         ]
 
         [data:
@@ -302,7 +294,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Partial]
             [: Broad declaration, conformance, visibility, generic-bound receiver-call, trait-name rejection, core cast trait metadata, incompatibility metadata, public API leak, and diagnostics coverage.]
             [: Frontend static semantics]
-            [: Static trait declarations, explicit same-file nominal conformances, reusable evidence, trait incompatibility metadata, and generic bounds are implemented. Dynamic trait values, trait aliases/composition, associated items, inheritance, generic traits/methods, conditional/specialized conformance, default methods, and standard trait taxonomy remain deferred or outside scope.]
+            [: Static trait declarations, explicit same-file nominal conformances, reusable evidence, trait incompatibility metadata and generic bounds are implemented. Accepted incomplete work covers static non-method requirements, additional compiler-owned builtin conformance families and a broader standard trait taxonomy that remains static.]
         ]
 
         [data:
@@ -514,14 +506,6 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
         ]
 
         [data:
-            [: Error helper methods]
-            [: Rejected]
-            [: Public helper-call removal coverage. Hidden JS metadata helper coverage remains backend-internal.]
-            [: Frontend / JS runtime internal]
-            [: Public [$html:<code>err.bubble()</code>], location, trace, and [$html:<code>@core/error</code>] helper calls are not exposed.]
-        ]
-
-        [data:
             [: Receiver methods]
             [: Supported]
             [: Broad same-file struct/choice receiver, aligned generic receiver, imported receiver type, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision, and mutability coverage.]
@@ -628,65 +612,16 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
 ]
 
 #[section, $md:
-    ## Deferred, rejected, and outside-scope surfaces
+    ## Accepted deferred and incomplete surfaces
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage / diagnostic direction] [: Notes] ]
-
-        [data:
-            [: Trait ecosystem extensions]
-            [: Deferred]
-            [: Current implemented trait diagnostics are tracked in the core Traits row.]
-            [: Default methods, associated items, inheritance/composition, generic traits, specialized conformance, deriving, operator traits, formatting/display coercion, hashing, ordering, iteration, serialization, downcasting/reflection, and broad standard trait taxonomy remain outside the Alpha trait slice.]
-        ]
 
         [data:
             [: Post-TIR template performance follow-ups]
             [: Deferred]
             [: Not part of the current Alpha surface.]
             [: Deferred items are source-span-backed template body text, a per-template parse cache, a formatter-output cache, dev-mode source-hash keyed template reuse, dependency-aware invalidation for imported consts/directives, formatter algorithm rewrites if profiling justifies them, incremental module/template compilation after module-boundary incremental builds exist, and parallel nested-template folding after a separate profiling-backed plan.]
-        ]
-
-        [data:
-            [: Async / concurrency scopes]
-            [: Deferred]
-            [: Reserved keyword diagnostics for async statement/declaration positions.]
-            [: Future async syntax is design-only. Current async statement and declaration positions are rejected with structured diagnostics.]
-        ]
-
-        [data:
-            [: Checked scopes]
-            [: Deferred]
-            [: Reserved keyword diagnostics for checked statement/declaration positions.]
-            [: Checked/effect semantics are not designed yet.]
-        ]
-
-        [data:
-            [: Labeled scopes]
-            [: Rejected]
-            [: Targeted labeled-scope diagnostic coverage.]
-            [: Bare [$html:<code>label:</code>] syntax is not supported. Use [$html:<code>block:</code>] for ordinary scoped blocks.]
-        ]
-
-        [data:
-            [: Legacy and foreign-language syntax]
-            [: Rejected]
-            [: Targeted diagnostics for common TypeScript/Rust/JS-shaped mistakes.]
-            [: Compatibility syntax is not planned Alpha surface.]
-        ]
-
-        [data:
-            [: Public panic/recover syntax]
-            [: Rejected]
-            [: Unknown-name and assert result-handling diagnostics.]
-            [: There is no public panic keyword, [$html:<code>#panic</code>] directive, recover, catch_panic, or public panic payload. Expected failures use [$html:<code>Error!</code>] and [$html:<code>catch</code>].]
-        ]
-
-        [data:
-            [: Assertion extensions]
-            [: Deferred]
-            [: Current assert diagnostics and backend trap coverage.]
-            [: Deferred surfaces include debug-only assertions, runtime/const assertion-message expressions, additional explicit stop helpers, catchable panic semantics, and richer non-JS trap payloads.]
         ]
 
         [data:
@@ -701,13 +636,6 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Deferred]
             [: Targeted nested-pattern deferred diagnostics.]
             [: Exhaustiveness is tag-level for now. General pattern binding renames are also deferred outside choice payload capture renames.]
-        ]
-
-        [data:
-            [: Choice defaults and tagged declarations]
-            [: Deferred]
-            [: Targeted diagnostics for choice defaults/default variants where present.]
-            [: Variant defaults, default payload fields, and tagged/default declaration sugar remain deferred.]
         ]
 
         [data:
@@ -749,14 +677,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: External JS package expansion]
             [: Deferred]
             [: JS provider diagnostics reject unsupported public binding forms.]
-            [: The HTML builder supports annotated single-file [$html:<code>.js</code>] imports and builder-owned JS-backed packages. JS constants, classes, dependency graphs, default exports, re-exports, CommonJS, callbacks, async functions, generic external types, collection/option signatures, and multi-success returns remain deferred.]
-        ]
-
-        [data:
-            [: Namespace / wildcard imports]
-            [: Partial]
-            [: Source, module public surface, external package, nested external value/type traversal, and wildcard rejection coverage.]
-            [: Namespace imports are compile-time records. Source and module records stay shallow. External package records can expose nested symbol paths such as [$html:<code>io.input.new</code>] and [$html:<code>io.input.Input</code>]. Wildcard imports remain deferred.]
+            [: The HTML builder supports annotated single-file [$html:<code>.js</code>] imports and builder-owned JS-backed packages. Accepted future binding work includes generic external functions and types.]
         ]
 
         [data:
@@ -770,21 +691,14 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
             [: Generic functions]
             [: Partial]
             [: Broad declaration, body validation, inference, instantiation, module-boundary import, diagnostics, fallible return, and non-value-use coverage.]
-            [: Generic free functions infer from immediate call arguments and immediate expected result context only. They emit concrete instances before HIR and are not first-class values.]
+            [: Generic free functions infer from immediate call arguments and immediate expected result context only, then emit concrete instances before HIR. Explicit call-site type application is not part of the current inference-only rule.]
         ]
 
         [data:
             [: Trait bounds on generics]
             [: Partial]
             [: Broad declaration-site bound, visible evidence, module public-surface privacy, receiver-call, nominal generic instance, and negative diagnostic coverage.]
-            [: Bounds use [$html:<code>is</code>]. Concrete generic calls and nominal generic instances require visible reusable evidence. File-local evidence-backed dispatch remains outside scope.]
-        ]
-
-        [data:
-            [: Explicit generic call-site application]
-            [: Rejected]
-            [: Targeted diagnostics for of, angle, square, and typed-argument call-site forms.]
-            [: Generic calls use ordinary call syntax and inference only. Use annotations at receiving sites when inference needs help.]
+            [: Bounds use [$html:<code>is</code>]. Concrete generic calls and nominal generic instances require visible reusable evidence.]
         ]
 
         [data:
@@ -802,13 +716,6 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
         ]
 
         [data:
-            [: Parameterized generic aliases]
-            [: Deferred]
-            [: Targeted rejection where covered.]
-            [: Aliases to fully concrete generic instances are supported. Aliases with their own parameters remain deferred.]
-        ]
-
-        [data:
             [: Generic external package functions]
             [: Deferred]
             [: External signature validation rejects unsupported generic external surfaces.]
@@ -816,24 +723,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
         ]
 
         [data:
-            [: Type values and type-level compile-time evaluation]
-            [: Outside Scope]
-            [: Invalid syntax or ordinary name/type diagnostics.]
-            [: Type-returning functions, runtime type IDs, type-level conditionals, and compile-time type inspection are outside the current language design.]
-        ]
-
-        [data:
-            [: General function-value surfaces]
-            [: Outside Scope]
-            [: Generic function value diagnostics and invalid syntax diagnostics where covered.]
-            [: General closures, anonymous function values, generic function values, higher-order polymorphism, and hidden event-handler function values are outside the current language design.]
-        ]
-
-        [data:
             [: Rich numeric redesign]
             [: Deferred]
             [: Current numeric coverage is tracked in the core arithmetic and Float rows.]
-            [: Numeric check elision, explicit unchecked numeric modes, narrower numeric types, BigInt, Decimal, and broader numeric tower work remain deferred.]
+            [: The accepted Number and fixed-scale NumberN family, Byte scaffold and conservative numeric check elision remain deferred. Byte runtime support and lossy Float/Number helpers remain later accepted work.]
         ]
     ]
 ]
@@ -850,5 +743,5 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138)]
       language design reference, even when implementation is incomplete.
     - Move syntax examples and beginner explanations to docs pages under `docs/src/docs/**`.
     - Move compiler architecture details to `docs/compiler-design-overview.md`.
-    - Keep this page focused on support status, coverage level, clean rejection, target-gating, and experimental status.
+    - Keep this page focused on support, partial implementation, target gating, experimental work and accepted deferred implementation. Put open design questions and outside-scope features in @../design-scope (Design scope).
 ]

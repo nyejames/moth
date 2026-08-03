@@ -36,14 +36,14 @@ Record the actual starting commit, branch and worktree state before editing.
 WORK_ID: documentation-scope-status-cleanup
 WORK_SOURCE: docs/roadmap/plans/documentation-scope-and-status-cleanup-plan.md
 BASE_REVISION: d398fbeaf8752fef08b3e4d358d05165cfe38a74
-STATUS: active
-CURRENT_SCOPE: checkpoint and merge accepted Design Scope authority consolidation
-COMPLETED: completed drift inventory; consolidated Design Scope into the public route; updated authority links; deleted source and generated codebase routes; completed exact exclusions; restored a mutually exclusive three-way classification test
-NEXT_ACTION: merge this checkpoint into main, remove the isolated worktree and continue with the progress matrix
-VALIDATION: cargo run --quiet -- check docs --terse passed; cargo run --quiet -- build docs --release built 68 files; git diff --check passed; old source and generated route absent
-AUDITS: interim auditor findings corrected; verification confirmed inventory and function-value scope, then identified classifier overlap and stale generated output; both corrected
+STATUS: complete
+CURRENT_SCOPE: complete documentation scope and status cleanup
+COMPLETED: Design Scope checkpoint merged into main; progress matrix narrowed to accepted design; aliases and function-value scope clarified; bounded Advanced implementation detail compressed; 18 straightforward source Sam matches replaced with Rob; generated routes rebuilt
+NEXT_ACTION: none
+VALIDATION: cargo run --quiet -- build docs --release built 68 files after final correction; git diff --check passed; generated audit reports 0 broken local links and 0 missing fragments; old source and generated route absent
+AUDITS: Design Scope and remaining-slice findings resolved; final auditor's duplicate namespace/wildcard finding corrected; focused verification returned clean
 BLOCKERS: none
-NOTES: documentation-only; main is clean at 75ccd4aaad28510308c525bc306c9a0af2b80f46 and the user authorised merging this worktree into main
+NOTES: documentation-only; work now continues on main after user-authorised worktree merge and prune
 ```
 
 ---

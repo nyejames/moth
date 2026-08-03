@@ -26,7 +26,7 @@ Field, item and path-level invalidation are deferred.
 [codeblock, $code("moth"):
     names ${String} = {"Priya"}
 
-    ~names.push("Sam") catch:
+    ~names.push("Rob") catch:
         io.line("push failed")
     ;
 ]

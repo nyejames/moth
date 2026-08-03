@@ -23,6 +23,9 @@ An alias is another spelling of the same type.
 
 `id` has type `UserId`, but it is also an `Int`. You can pass it anywhere an `Int` is expected.
 
+`UserId as Int` makes annotations clearer, but it does not stop an ordinary
+`Int` from being used as `UserId`.
+
 ### Alias versus struct
 
 A struct creates a brand new type with its own fields and constructor. An alias does not.
@@ -44,5 +47,5 @@ An alias can name a collection type.
 [codeblock, $code("moth"):
     Names as {String}
 
-    names Names = {"Priya", "Sam"}
+    names Names = {"Priya", "Rob"}
 ]

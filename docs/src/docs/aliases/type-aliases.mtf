@@ -59,6 +59,21 @@ Because `UserId` is transparent, assigning a `UserId` value to an `Int` binding 
 
 `UserId` is another name for `Int`. `User` is a distinct nominal struct type with its own constructor and fields. Use a struct when the domain concept needs its own identity. Use an alias when only the annotation name matters.
 
+### Alias versus nominal domain type
+
+An alias improves spelling and readability, but it doesn't isolate a domain
+value from its target type. `UserId as Int` still allows an ordinary `Int`
+where `UserId` is expected. Use a wrapper struct today when distinct nominal
+identity matters.
+
+Moth has no accepted primitive-backed nominal wrapper syntax. Such a wrapper
+remains an open design question and any future mechanism would stay separate
+from transparent `as` aliases.
+
+The accepted alias contract includes external package types. The current
+compiler still rejects aliases to external opaque types. See @../progress
+(Progress matrix) for current support.
+
 ### Empty literals and aliases
 
 An alias can provide the explicit element type needed by an empty collection or map literal.

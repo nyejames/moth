@@ -89,7 +89,10 @@ Every returned value enters a fresh caller binding slot. Binding-slot freshness 
     original.x = 4                  -- the original allocation remains independent
 ]
 
-The borrow state therefore tracks binding storage separately from the allocation roots carried by the current value. A call result is slot-backed even when its value aliases an argument. Fallible carriers are likewise fresh carrier slots whose success payload may alias an argument allocation. A slot-backed result must not be modelled as a write-through alias binding, because rebinding it must detach the old value roots from that result slot.
+A call result owns a separate binding even when its value aliases an argument.
+A fallible return also has a separate carrier while its success payload may
+alias an argument allocation. Rebinding either result detaches that binding
+from its old allocation without rebinding another alias.
 
 ### Independent result graphs
 
@@ -107,7 +110,9 @@ Function lifetime summaries cover fresh result roots, parameter aliases, project
 
 Multiple return values may alias one allocation when they remain under one caller lifetime owner. A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination.
 
-The current compact borrow summary conservatively unions parameter roots across all values in one multi-return function. Each projected result may therefore carry the function-wide union until per-result provenance is available; this is intentionally conservative and may reject a mutation that a per-result summary could prove independent.
+Current multi-return analysis may conservatively treat each projected result as
+aliasing any parameter root returned by the function. It may reject a mutation
+that more precise per-result analysis could prove independent.
 
 ### Cycles
 

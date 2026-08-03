@@ -55,12 +55,6 @@ The collision occurs when the same-directory root and implicit `@html` surface a
 
 This follows the same no-shadowing model as ordinary source visibility.
 
-The collision model is implemented through one visible-name registry. A
-same-name constant from the module root and `@html` is rejected with a
-structured visible-name collision diagnostic that retains both source
-locations when available. Unique constants from both surfaces remain visible;
-neither surface shadows the other.
-
 ### Nested templates
 
 Nested templates inside a `.mtf` body are valid. A nested template with no explicit directive defaults to `$md`. Any explicit directive (such as `$raw`, `$fresh`, `$html`, `$code`, `$css` or `$escape_html`) overrides the moth template Markdown default for that nested template.

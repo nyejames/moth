@@ -2,7 +2,7 @@ A collection loop visits the values in a Moth collection in collection
 order.
 
 [codeblock, $code("moth"):
-    names = {"Priya", "Sam", "Emmy"}
+    names = {"Priya", "Rob", "Emmy"}
 
     loop names |name, index|:
         io.line([: [index]: [name]])

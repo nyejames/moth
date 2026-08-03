@@ -49,9 +49,8 @@ Generic inference and bounds are documented by @../generics (Generics).
 
 ### Function values
 
-Source functions are declarations, not ordinary values.
-
-General closures, anonymous function values, generic function values and
-higher-order polymorphism are outside the current language design scope.
-Reactivity is the constrained UI-oriented mechanism for many template cases
-that would otherwise lean on closures.
+Source functions are named declarations and cannot currently be used as
+ordinary values. General closures, anonymous function values, generic function
+values and higher-order polymorphism are outside scope. A narrower future
+design for references to named, monomorphic, non-capturing functions remains an
+open design question and has no current syntax or implementation commitment.

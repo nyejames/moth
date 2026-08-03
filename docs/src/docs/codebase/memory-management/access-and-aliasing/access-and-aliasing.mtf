@@ -297,6 +297,6 @@ rule lives in `docs/src/docs/bindings/shadowing.mtf`.
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): retained edges, escapes and region topology
 - @../declared-memory-groups (Declared memory groups): accepted `group` / `into` placement and destination lifetimes
 - @../ownership-and-drops (Ownership and drops): inferred transfer after access validation
-- @../../../language/ (Language reference): canonical source syntax and semantics
+- @../../language/ (Language reference): canonical source syntax and semantics
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler AST construction): source access and coercion ownership
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler HIR generation): places and hidden mutable-rvalue locals

@@ -62,12 +62,9 @@ owned, move or parameter-alias return annotation.
 
 Returning an existing value follows ordinary shared-reference semantics. The
 compiler infers freshness and alias effects from validated bodies and calls.
-Public interfaces may carry those inferred summaries. External bindings may
-carry explicit compiler-owned alias metadata because their foreign bodies are
+Public interfaces preserve those inferred relationships. External bindings may
+declare equivalent alias behaviour because their foreign bodies are
 unavailable.
-
-The alias and freshness summary lattice is compiler-owned semantic information.
-It is not source syntax, a source type or a signature category.
 
 ### Binding freshness and allocation identity
 
@@ -84,9 +81,8 @@ retains it.
 Ordinary return does not copy. Use `copy` when the caller needs an independent
 result graph.
 
-The compiler's inferred alias summary governs borrow and lifetime validation.
-It does not change the source type and does not select a binding-reference
-return ABI.
+Inferred alias relationships govern borrow and lifetime validation without
+changing the source type.
 
 External alias metadata describes whether a foreign result aliases an argument
 allocation. It does not expose binding references to source code and does not
@@ -97,7 +93,7 @@ allow host code to return a Moth binding cell.
 A fallible carrier is fresh while its success payload may alias a parameter
 allocation. Multiple return values may alias parameters or each other. Each
 returned value enters its own caller binding. Runtime lowering preserves those
-allocation relationships. The current compact borrow summary conservatively
-unions all parameter roots returned by one function across each projected
-result; this is sound but may be imprecise until per-result provenance is
-introduced.
+allocation relationships. Current analysis may conservatively treat projected
+results as sharing any parameter root returned by the function. This can
+produce a stricter alias diagnostic than more precise per-result analysis
+would require.

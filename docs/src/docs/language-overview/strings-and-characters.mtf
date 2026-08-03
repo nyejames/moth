@@ -31,7 +31,7 @@ slice contents mutable.
 
 [codeblock, $code("moth"):
     name ~= "Priya"
-    name = "Sam"  -- reassigns the mutable binding, doesn't mutate the slice
+    name = "Rob"  -- reassigns the mutable binding, doesn't mutate the slice
 ]
 
 ### Characters
@@ -69,13 +69,10 @@ Use ["[left, right]"] for concatenation. Don't use `+`:
     joined = left + right
 ]
 
-Source `String + String` is invalid. The accepted rule is that `+` is a
-numeric operator only and the compiler rejects all string `+` forms. AST
-typing and compile-time folding now follow that rule, while internal template
-lowering uses a compiler-owned append operation. Runtime equality compares
-string content for every `String` origin. HTML-JS normalizes template-backed
-map keys to that same content; HTML-Wasm compares finalized string bytes for
-equality, while non-JS map lowering remains deferred. See @../progress (progress matrix) for the current target status.
+Source `String + String` is invalid because `+` is a numeric operator only.
+Runtime equality compares content for every `String` origin, and String map
+keys use the same content rule. Non-JS map lowering remains target-gated. See
+@../progress (Progress matrix) for current target support.
 
 ### One semantic `String` type
 

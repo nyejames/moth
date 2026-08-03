@@ -3,7 +3,7 @@ Hash maps form insertion-ordered key/value groups.
 ### Types and literals
 
 [codeblock, $code("moth"):
-    scores ~= {"Priya" = 10, "Sam" = 12}
+    scores ~= {"Priya" = 10, "Rob" = 12}
     empty_scores ~{String = Int} = {}
 ]
 
@@ -106,7 +106,7 @@ Insertion order follows these rules:
     ~scores.set("Emmy", 7) catch:
     ;
 
-    removed = ~scores.remove("Sam") catch:
+    removed = ~scores.remove("Rob") catch:
         then 0
     ;
 

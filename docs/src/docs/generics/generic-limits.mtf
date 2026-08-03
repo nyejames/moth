@@ -29,7 +29,7 @@ A trait bound may enable the unique receiver behaviour provided by its static co
     ;
 ]
 
-### Rejected or deferred current Alpha surfaces
+### Current implementation limits
 
 - explicit call-site generic syntax
 - inline generic parameter sugar such as `|value type A|`
@@ -58,6 +58,11 @@ A trait bound may enable the unique receiver behaviour provided by its static co
 - associated types
 
 Deferred surfaces may land in future Alpha iterations. Outside-scope surfaces require an explicit language-philosophy change before they can be added.
+
+General closures, generic function values and higher-order polymorphism remain
+outside scope. A narrower design for references to named, monomorphic,
+non-capturing functions remains an open question rather than deferred generic
+work.
 
 ### Related concepts
 

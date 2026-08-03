@@ -321,14 +321,14 @@ td {
 }</style>
 <style>.doc-level,
 .doc-pager {
-    --doc-level-accent: #3f8f4e;
-    --doc-level-accent-hover: #337740;
-    --doc-level-border: #d7dfd8;
-    --doc-level-switch-background: #f1f5f1;
+    --doc-level-accent: #3d4e8e;
+    --doc-level-accent-hover: #336b77;
+    --doc-level-border: #d7d9df;
+    --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
-    --doc-level-text: #202722;
-    --doc-level-muted: #687169;
-    --doc-level-focus: #2877d4;
+    --doc-level-text: #202127;
+    --doc-level-muted: #686971;
+    --doc-level-focus: #28c0d4;
 }
 
 .doc-level {
@@ -549,14 +549,14 @@ td {
 @media (prefers-color-scheme: dark) {
     .doc-level,
     .doc-pager {
-        --doc-level-accent: #80c98c;
-        --doc-level-accent-hover: #a0d9a9;
-        --doc-level-border: #3a493d;
-        --doc-level-switch-background: #202a22;
-        --doc-level-selected-background: #303c32;
-        --doc-level-text: #edf2ee;
-        --doc-level-muted: #a8b3aa;
-        --doc-level-focus: #75b7ff;
+        --doc-level-accent: #aea9f9;
+        --doc-level-accent-hover: #a0b8d9;
+        --doc-level-border: #3a3a49;
+        --doc-level-switch-background: #221d25;
+        --doc-level-selected-background: #353447;
+        --doc-level-text: #edeff2;
+        --doc-level-muted: #a8aab3;
+        --doc-level-focus: #75e1ff;
     }
 }
 
@@ -721,12 +721,12 @@ td {
 
 
         <p>Collections use curly braces and keep their values in order.</p><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span>, <span class='moth-code-number'>30</span><span class='moth-code-parenthesis'>}</span>
-names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre><p>Every item has the same element type.</p><p>An empty collection needs an explicit type:</p><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><p>Collections start at index <code>0</code>.</p><p>Use collection methods such as <code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> instead of square-bracket indexing.</p>
+names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre><p>Every item has the same element type.</p><p>An empty collection needs an explicit type:</p><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><p>Collections start at index <code>0</code>.</p><p>Use collection methods such as <code>get</code>, <code>set</code>, <code>push</code> and <code>remove</code> instead of square-bracket indexing.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>Collections form ordered, zero-indexed, homogeneous groups.</p><p>Collection types and literals use braces.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-parenthesis'>}</span>
-names <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre><h3>Literal inference</h3><ul><li>A non-empty literal infers one element type from its items.</li><li>Every item must be compatible with that element type.</li><li>A typed collection receiving site may apply normal contextual coercion to each item.</li><li>A mixed literal such as <code>{1, &quot;bad&quot;}</code> is invalid.</li><li>The element type is fixed when the literal is created.</li></ul><p>An empty literal needs an explicit collection type at its declaration or field default site.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><p>The compiler does not infer an empty collection from:</p><ul><li>a later <code>push</code></li><li>later assignment</li><li>a loop</li><li>a function argument</li><li>HIR use</li><li>borrow analysis</li></ul><h3>Collection versus map literals</h3><p>A top-level key/value entry with <code>=</code> makes a non-empty brace literal a map literal.</p><p>Every entry in that literal must then be a key/value pair.</p><p>Collection items and map entries cannot be mixed.</p><h3>Syntax boundaries</h3><ul><li>Collections do not use square-bracket indexing.</li><li>Square brackets belong to templates.</li><li>Element reads and writes use compiler-owned collection members.</li><li><code>~</code> is binding or access mode. It is not part of collection type identity.</li></ul>
+names <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>}</span></code></pre><h3>Literal inference</h3><ul><li>A non-empty literal infers one element type from its items.</li><li>Every item must be compatible with that element type.</li><li>A typed collection receiving site may apply normal contextual coercion to each item.</li><li>A mixed literal such as <code>{1, &quot;bad&quot;}</code> is invalid.</li><li>The element type is fixed when the literal is created.</li></ul><p>An empty literal needs an explicit collection type at its declaration or field default site.</p><pre style=""><code class='codeblock'>values <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><p>The compiler does not infer an empty collection from:</p><ul><li>a later <code>push</code></li><li>later assignment</li><li>a loop</li><li>a function argument</li><li>HIR use</li><li>borrow analysis</li></ul><h3>Collection versus map literals</h3><p>A top-level key/value entry with <code>=</code> makes a non-empty brace literal a map literal.</p><p>Every entry in that literal must then be a key/value pair.</p><p>Collection items and map entries cannot be mixed.</p><h3>Syntax boundaries</h3><ul><li>Collections do not use square-bracket indexing.</li><li>Square brackets belong to templates.</li><li>Element reads and writes use compiler-owned collection members.</li><li><code>~</code> is binding or access mode. It is not part of collection type identity.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -782,7 +782,7 @@ names <span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>S
 
 <span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     assert<span class='moth-code-parenthesis'>(</span>false, <span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
-;</code></pre><p>The binding is mutable because the collection changes.</p><p>An immutable collection can still be read:</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>}</span>
+;</code></pre><p>The binding is mutable because the collection changes.</p><p>An immutable collection can still be read:</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>}</span>
 
 first <span class='moth-code-operator'>=</span> names.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-number'>0</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     then <span class='moth-code-string'>&quot;guest&quot;</span>
@@ -984,19 +984,19 @@ removed <span class='moth-code-operator'>=</span> <span class='moth-code-operato
 
         <p>A hash map stores values under keys.</p><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span>
     <span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>,
-    <span class='moth-code-string'>&quot;Sam&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12</span>,
+    <span class='moth-code-string'>&quot;Rob&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12</span>,
 <span class='moth-code-parenthesis'>}</span></code></pre><p>Use <code>get</code> to read a value:</p><pre style=""><code class='codeblock'>score <span class='moth-code-operator'>=</span> scores.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     then <span class='moth-code-number'>0</span>
 ;</code></pre><p>Use <code>set</code> and <code>remove</code> through a mutable receiver:</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>scores.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Emmy&quot;</span>, <span class='moth-code-number'>7</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
 ;
 
-removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     then <span class='moth-code-number'>0</span>
 ;</code></pre><p>Maps remember insertion order.</p><p><code>length</code> is a property:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> scores.length</code></pre><p>Builtin keys are limited to <code>String</code>, <code>Int</code>, <code>Bool</code> and <code>Char</code>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Hash maps form insertion-ordered key/value groups.</p><h3>Types and literals</h3><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>, <span class='moth-code-string'>&quot;Sam&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12</span><span class='moth-code-parenthesis'>}</span>
+    <p>Hash maps form insertion-ordered key/value groups.</p><h3>Types and literals</h3><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>, <span class='moth-code-string'>&quot;Rob&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12</span><span class='moth-code-parenthesis'>}</span>
 empty_scores <span class='moth-code-operator'>~</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Int</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-parenthesis'>}</span></code></pre><ul><li>A map type is <code>{Key = Value}</code>.</li><li>A map literal contains <code>key = value</code> entries.</li><li>Any top-level <code>=</code> entry makes a non-empty brace literal a map literal.</li><li>Every entry must then be a key/value pair.</li><li>Collection items and map entries cannot be mixed.</li><li>An empty map literal needs an explicit or immediate contextual map type.</li><li>A bare identifier in key position is a variable reference, not string shorthand.</li><li>Map values follow the same runtime-storable rules as collection elements.</li></ul><h3>Key contract</h3><p>Builtin map keys are permanently limited to:</p><ul><li><code>String</code></li><li><code>Int</code></li><li><code>Bool</code></li><li><code>Char</code></li></ul><p>Invalid key families include:</p><ul><li><code>Float</code></li><li>structs</li><li>choices</li><li>collections</li><li>maps</li><li>traits</li><li>functions</li><li>external opaque types</li><li>generic parameters</li></ul><p>The builtin map surface does not expose user-defined <code>HASHABLE</code>, custom hashers or custom comparers.</p><p>Every <code>String</code> key uses content equality and content hashing. Quoted and template-produced strings follow the same key rule because construction origin does not create a second string category.</p><h3>Storage and order</h3><p>Maps own their entry structure. Existing keys and values stored in entries follow the ordinary shared-reference, explicit-copy and inferred-transfer rules.</p><p>Insertion order follows these rules:</p><ol><li>First insertion chooses the entry position.</li><li>Replacing an existing key updates the value without moving the entry.</li><li>Replacement keeps the existing stored key.</li><li>Removing a key removes its entry from the order.</li><li>Re-inserting that key appends a new entry.</li></ol><h3>Operations</h3><p><code>get(key)</code>:</p><ul><li>shared receiver</li><li>fallible</li><li>returns shared access to the stored value</li></ul><p><code>contains(key)</code>:</p><ul><li>shared receiver</li><li>infallible</li><li>returns <code>Bool</code></li></ul><p><code>set(key, value)</code>:</p><ul><li>mutable receiver</li><li>fallible</li><li>inserts or replaces</li><li>returns no old value</li></ul><p><code>remove(key)</code>:</p><ul><li>mutable receiver</li><li>fallible</li><li>removes the entry and returns the removed value under the normal lifetime and ownership rules</li></ul><p><code>clear()</code>:</p><ul><li>mutable receiver</li><li>infallible</li><li>removes every entry</li></ul><p><code>length</code>:</p><ul><li>shared read-only property</li><li>no parentheses</li><li>returns <code>Int</code></li><li>cannot be assigned</li></ul><pre style=""><code class='codeblock'>score <span class='moth-code-operator'>=</span> scores.get<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     then <span class='moth-code-number'>0</span>
 ;
@@ -1006,7 +1006,7 @@ found <span class='moth-code-operator'>=</span> scores.contains<span class='moth
 <span class='moth-code-operator'>~</span>scores.set<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Emmy&quot;</span>, <span class='moth-code-number'>7</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
 ;
 
-removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.remove<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     then <span class='moth-code-number'>0</span>
 ;
 

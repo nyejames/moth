@@ -321,14 +321,14 @@ td {
 }</style>
 <style>.doc-level,
 .doc-pager {
-    --doc-level-accent: #3f8f4e;
-    --doc-level-accent-hover: #337740;
-    --doc-level-border: #d7dfd8;
-    --doc-level-switch-background: #f1f5f1;
+    --doc-level-accent: #3d4e8e;
+    --doc-level-accent-hover: #336b77;
+    --doc-level-border: #d7d9df;
+    --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
-    --doc-level-text: #202722;
-    --doc-level-muted: #687169;
-    --doc-level-focus: #2877d4;
+    --doc-level-text: #202127;
+    --doc-level-muted: #686971;
+    --doc-level-focus: #28c0d4;
 }
 
 .doc-level {
@@ -549,14 +549,14 @@ td {
 @media (prefers-color-scheme: dark) {
     .doc-level,
     .doc-pager {
-        --doc-level-accent: #80c98c;
-        --doc-level-accent-hover: #a0d9a9;
-        --doc-level-border: #3a493d;
-        --doc-level-switch-background: #202a22;
-        --doc-level-selected-background: #303c32;
-        --doc-level-text: #edf2ee;
-        --doc-level-muted: #a8b3aa;
-        --doc-level-focus: #75b7ff;
+        --doc-level-accent: #aea9f9;
+        --doc-level-accent-hover: #a0b8d9;
+        --doc-level-border: #3a3a49;
+        --doc-level-switch-background: #221d25;
+        --doc-level-selected-background: #353447;
+        --doc-level-text: #edeff2;
+        --doc-level-muted: #a8aab3;
+        --doc-level-focus: #75e1ff;
     }
 }
 
@@ -935,7 +935,7 @@ plain <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=
         <p>Changing a reactive source notifies its subscribers.</p><h3>Assignment</h3><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span></code></pre><p>Assigning to <code>count</code> updates the source. Anything subscribed to <code>count</code> will know it may need to update.</p><h3>Mutable collection source</h3><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-<span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+<span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
 ;</code></pre><p>You need <code>~</code> to mutate the collection. Reactivity does not relax the access rules. Fallible operations like <code>push</code> must be handled with <code>catch</code> or propagated inside a compatible <code>Error!</code> function.</p>
 </div>
@@ -944,7 +944,7 @@ count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1
     <p>Mutating a reactive source updates the same stable storage and invalidates its subscribers.</p><h3>Assignment</h3><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
 count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span></code></pre><p>Assignment updates the same stable source. Subscribers to that source are marked invalid.</p><h3>Invalidation in V1</h3><p>Mutation through a source invalidates the whole source in V1. Invalidating operations include:</p><ul><li>assignment</li><li>field writes</li><li>collection mutation</li><li>map mutation</li><li>mutable write-through calls</li></ul><p>Field, item and path-level invalidation are deferred.</p><h3>Mutation still follows access rules</h3><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>$</span><span class='moth-code-parenthesis'>{</span><span class='moth-code-type'>String</span><span class='moth-code-parenthesis'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-parenthesis'>}</span>
 
-<span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
+<span class='moth-code-operator'>~</span>names.push<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>)</span> catch<span class='moth-code-operator'>:</span>
     io.line<span class='moth-code-parenthesis'>(</span><span class='moth-code-string'>&quot;push failed&quot;</span><span class='moth-code-parenthesis'>)</span>
 ;</code></pre><p>Mutation still requires explicit <code>~</code> for mutable or exclusive receiver access. Reactive syntax does not bypass ordinary borrowing. Fallible mutations must be handled with <code>catch</code> or propagated inside a compatible <code>Error!</code> function. Top-level <code>!</code> propagation is rejected when no error channel exists.</p><h3>Subscriptions are not borrows</h3><p>A subscription is a read-only dependency record. It does not capture a mutable borrow, copy the value or extend a source-language lifetime. Subscriptions do not block later valid mutable access by themselves.</p><h3>Borrow validation</h3><p>Borrow validation records source dependencies and conservative invalidation facts. Reactive metadata is separate from active borrow lifetimes.</p><h3>Related concepts</h3><ul><li>For access and aliasing see <a href="../bindings">Values and bindings</a> and <a href="../memory/#reference-semantics">Reference semantics</a>.</li><li>For reactive sources see <a href="#reactive-sources">Reactive sources</a>.</li></ul>
 </div>
@@ -1063,7 +1063,7 @@ view <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesi
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Reactivity V1 is a constrained template and UI mechanism. It is not general closure or function-value support.</p><h3>What V1 covers</h3><ul><li>explicit reactive declarations with <code>$Type</code> and <code>$=</code></li><li>reactive parameters with <code>$Type</code></li><li>template subscriptions with <code>$(source)</code></li><li>whole-source invalidation</li><li>top-level HTML-JS runtime fragments as live sinks</li></ul><h3>Deferred</h3><ul><li>reactive template control flow beyond the accepted source and sink model</li><li>field and path subscriptions</li><li>collection item subscriptions</li><li>expression dependency tracking</li><li>derived reactive values</li><li>reactive IO sinks</li><li>fine-grained DOM text, attribute and style updates</li><li>nested reactive regions</li><li>keyed loop diffing</li><li>template-owned event, action or effect syntax</li><li><code>$bind(...)</code></li><li>typed component events or messages</li><li>HTML-Wasm runtime support</li></ul><h3>Outside current design scope</h3><ul><li>general closures</li><li>anonymous function values</li><li>generic function values</li><li>higher-order polymorphism</li></ul><p>Backend optimisations may become finer without changing source semantics.</p><h3>Related concepts</h3><ul><li>For the design rationale see <a href="../design-scope">Design scope</a>.</li><li>For templates see <a href="../templates">Templates</a>.</li></ul>
+    <p>Reactivity V1 is a constrained template and UI mechanism. It is not general closure or function-value support.</p><h3>What V1 covers</h3><ul><li>explicit reactive declarations with <code>$Type</code> and <code>$=</code></li><li>reactive parameters with <code>$Type</code></li><li>template subscriptions with <code>$(source)</code></li><li>whole-source invalidation</li><li>top-level HTML-JS runtime fragments as live sinks</li></ul><h3>Deferred</h3><ul><li>reactive template control flow beyond the accepted source and sink model</li><li>field and path subscriptions</li><li>collection item subscriptions</li><li>expression dependency tracking</li><li>derived reactive values</li><li>reactive IO sinks</li><li>fine-grained DOM text, attribute and style updates</li><li>nested reactive regions</li><li>keyed loop diffing</li><li>template-owned event, action or effect syntax</li><li><code>$bind(...)</code></li><li>typed component events or messages</li><li>HTML-Wasm runtime support</li></ul><h3>Outside current design scope</h3><ul><li>general closures</li><li>anonymous function values</li><li>generic function values</li><li>higher-order polymorphism</li></ul><p>A narrower design for references to named, monomorphic, non-capturing functions remains an open question. Reactivity neither depends on that question nor creates general function-value support.</p><p>Backend optimisations may become finer without changing source semantics.</p><h3>Related concepts</h3><ul><li>For the design rationale see <a href="../design-scope">Design scope</a>.</li><li>For templates see <a href="../templates">Templates</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

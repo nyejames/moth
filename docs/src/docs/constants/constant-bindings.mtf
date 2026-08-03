@@ -3,7 +3,7 @@
 [codeblock, $code("moth"):
     site_name #= "Moth"
     major_version #Int = 1
-    names #{String} = {"Priya", "Sam"}
+    names #{String} = {"Priya", "Rob"}
     maybe_name #String? = none
 ]
 

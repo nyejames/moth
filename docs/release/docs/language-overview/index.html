@@ -321,14 +321,14 @@ td {
 }</style>
 <style>.doc-level,
 .doc-pager {
-    --doc-level-accent: #3f8f4e;
-    --doc-level-accent-hover: #337740;
-    --doc-level-border: #d7dfd8;
-    --doc-level-switch-background: #f1f5f1;
+    --doc-level-accent: #3d4e8e;
+    --doc-level-accent-hover: #336b77;
+    --doc-level-border: #d7d9df;
+    --doc-level-switch-background: #f1f4f5;
     --doc-level-selected-background: #ffffff;
-    --doc-level-text: #202722;
-    --doc-level-muted: #687169;
-    --doc-level-focus: #2877d4;
+    --doc-level-text: #202127;
+    --doc-level-muted: #686971;
+    --doc-level-focus: #28c0d4;
 }
 
 .doc-level {
@@ -549,14 +549,14 @@ td {
 @media (prefers-color-scheme: dark) {
     .doc-level,
     .doc-pager {
-        --doc-level-accent: #80c98c;
-        --doc-level-accent-hover: #a0d9a9;
-        --doc-level-border: #3a493d;
-        --doc-level-switch-background: #202a22;
-        --doc-level-selected-background: #303c32;
-        --doc-level-text: #edf2ee;
-        --doc-level-muted: #a8b3aa;
-        --doc-level-focus: #75b7ff;
+        --doc-level-accent: #aea9f9;
+        --doc-level-accent-hover: #a0b8d9;
+        --doc-level-border: #3a3a49;
+        --doc-level-switch-background: #221d25;
+        --doc-level-selected-background: #353447;
+        --doc-level-text: #edeff2;
+        --doc-level-muted: #a8aab3;
+        --doc-level-focus: #75e1ff;
     }
 }
 
@@ -872,7 +872,7 @@ name <span class='moth-code-type'>String</span> <span class='moth-code-operator'
 count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
 ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
 letter <span class='moth-code-struct'>Char</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;🦋&#39;</span>
-label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span></code></pre><h3>Core forms</h3><ul><li><code>true</code> and <code>false</code> are <code>Bool</code> values.</li><li>Whole-number literals are naturally <code>Int</code>.</li><li>Decimal-point literals are naturally <code>Float</code>.</li><li>Single-quoted literals create <code>Char</code> values.</li><li>Quoted slices and string templates use the <code>String</code> type.</li><li><code>none</code> requires an optional <code>T?</code> receiving context.</li></ul><p>The Numbers documentation owns exact numeric grammar and arithmetic behaviour. The Strings and characters section owns the implemented string source forms. Options are documented with Errors and options.</p><h3>Composite values</h3><p>Collections use braces. String templates use square brackets.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Sam&quot;</span><span class='moth-code-parenthesis'>}</span>
+label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span></code></pre><h3>Core forms</h3><ul><li><code>true</code> and <code>false</code> are <code>Bool</code> values.</li><li>Whole-number literals are naturally <code>Int</code>.</li><li>Decimal-point literals are naturally <code>Float</code>.</li><li>Single-quoted literals create <code>Char</code> values.</li><li>Quoted slices and string templates use the <code>String</code> type.</li><li><code>none</code> requires an optional <code>T?</code> receiving context.</li></ul><p>The Numbers documentation owns exact numeric grammar and arithmetic behaviour. The Strings and characters section owns the implemented string source forms. Options are documented with Errors and options.</p><h3>Composite values</h3><p>Collections use braces. String templates use square brackets.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-parenthesis'>}</span>
 
 message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
     <span class='moth-code-struct'>Hello</span> from a template.
@@ -945,7 +945,7 @@ name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&q
 message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span>
     <span class='moth-code-struct'>Hello,</span> <span class='moth-code-parenthesis'>[</span>name<span class='moth-code-parenthesis'>]</span>
 <span class='moth-code-parenthesis'>]</span></code></pre><h3>Quoted string slices</h3><p>Double quotes create escaped string slices. They support exactly these escapes:</p><ul><li><code>\\</code> for a backslash</li><li><code>\&quot;</code> for a double quote</li><li><code>\n</code> for a newline</li><li><code>\r</code> for a carriage return</li><li><code>\t</code> for a tab</li></ul><p>Every other escape is invalid. A backslash can&#39;t continue a quoted string across a physical newline.</p><p>A quoted string slice is read-only content. It has no character or substring mutation surface and isn&#39;t concatenated with <code>+</code>. A slice may be read, compared, passed, returned, stored and inserted into templates. A mutable binding that currently holds a slice may be reassigned. That doesn&#39;t make the slice contents mutable.</p><pre style=""><code class='codeblock'>name <span class='moth-code-operator'>~</span><span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
-name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Sam&quot;</span>  <span class='moth-code-comment'>-- reassigns the mutable binding, doesn&#39;t mutate the slice</span></code></pre><h3>Characters</h3><p>Single quotes create <code>Char</code> values.</p><h3>Template strings</h3><p>Square brackets create string templates. Templates produce owned string values and may fold at compile time or lower to runtime string construction.</p><p>Templates are the idiomatic and canonical way to:</p><ul><li>concatenate strings</li><li>interpolate values</li><li>build runtime or compile-time text</li><li>produce strings that need full template composition</li></ul><pre style=""><code class='codeblock'>first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
+name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Rob&quot;</span>  <span class='moth-code-comment'>-- reassigns the mutable binding, doesn&#39;t mutate the slice</span></code></pre><h3>Characters</h3><p>Single quotes create <code>Char</code> values.</p><h3>Template strings</h3><p>Square brackets create string templates. Templates produce owned string values and may fold at compile time or lower to runtime string construction.</p><p>Templates are the idiomatic and canonical way to:</p><ul><li>concatenate strings</li><li>interpolate values</li><li>build runtime or compile-time text</li><li>produce strings that need full template composition</li></ul><pre style=""><code class='codeblock'>first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Hello, &quot;</span>
 second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;world&quot;</span>
 message <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>first, second<span class='moth-code-parenthesis'>]</span>
 
@@ -954,7 +954,7 @@ greeting <span class='moth-code-operator'>=</span> <span class='moth-code-parent
 joined <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span>left, right<span class='moth-code-parenthesis'>]</span>
 
 <span class='moth-code-comment'>-- INVALID: + is a numeric operator only</span>
-joined <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right</code></pre><p>Source <code>String + String</code> is invalid. The accepted rule is that <code>+</code> is a numeric operator only and the compiler rejects all string <code>+</code> forms. AST typing and compile-time folding now follow that rule, while internal template lowering uses a compiler-owned append operation. Runtime equality compares string content for every <code>String</code> origin. HTML-JS normalizes template-backed map keys to that same content; HTML-Wasm compares finalized string bytes for equality, while non-JS map lowering remains deferred. See <a href="../progress">progress matrix</a> for the current target status.</p><h3>One semantic <code>String</code> type</h3><p>Quoted slices and template-produced strings share one <code>String</code> type at ordinary typed boundaries. They share:</p><ul><li>parameter and return compatibility</li><li>equality</li><li>choice payload equality</li><li>collection and map value use</li><li><code>String</code> map-key use</li><li>casts</li><li>IO and external <code>StringContent</code> boundaries</li><li>template insertion</li><li>aliases and generic use where <code>String</code> is concrete</li></ul><p>Construction origin doesn&#39;t create hidden equality, hashing, map-key or call-compatibility rules.</p><h3>Equality</h3><p><code>String</code> supports <code>is</code> and <code>is not</code>. <code>String</code> doesn&#39;t support ordering operators (<code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>).</p><pre style=""><code class='codeblock'>slice <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;hello&quot;</span>
+joined <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right</code></pre><p>Source <code>String + String</code> is invalid because <code>+</code> is a numeric operator only. Runtime equality compares content for every <code>String</code> origin, and String map keys use the same content rule. Non-JS map lowering remains target-gated. See <a href="../progress">Progress matrix</a> for current target support.</p><h3>One semantic <code>String</code> type</h3><p>Quoted slices and template-produced strings share one <code>String</code> type at ordinary typed boundaries. They share:</p><ul><li>parameter and return compatibility</li><li>equality</li><li>choice payload equality</li><li>collection and map value use</li><li><code>String</code> map-key use</li><li>casts</li><li>IO and external <code>StringContent</code> boundaries</li><li>template insertion</li><li>aliases and generic use where <code>String</code> is concrete</li></ul><p>Construction origin doesn&#39;t create hidden equality, hashing, map-key or call-compatibility rules.</p><h3>Equality</h3><p><code>String</code> supports <code>is</code> and <code>is not</code>. <code>String</code> doesn&#39;t support ordering operators (<code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>).</p><pre style=""><code class='codeblock'>slice <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;hello&quot;</span>
 template <span class='moth-code-operator'>=</span> <span class='moth-code-parenthesis'>[</span><span class='moth-code-operator'>:</span> hello<span class='moth-code-parenthesis'>]</span>
 
 <span class='moth-code-comment'>-- VALID: equality across both forms</span>
