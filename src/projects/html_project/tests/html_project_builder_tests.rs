@@ -38,7 +38,7 @@ fn build_with_test_modules(
         .into_iter()
         .map(|entry_point| create_test_module(entry_point, &mut string_table))
         .collect();
-    let project_compilation = ProjectCompilation::from_successful_modules(modules)
+    let project_compilation = ProjectCompilation::from_test_modules(modules)
         .expect("test modules should assemble entries");
     builder.build_backend(
         project_compilation,
@@ -50,8 +50,7 @@ fn build_with_test_modules(
 }
 
 fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
-    ProjectCompilation::from_successful_modules(modules)
-        .expect("test modules should assemble entries")
+    ProjectCompilation::from_test_modules(modules).expect("test modules should assemble entries")
 }
 
 fn first_invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {

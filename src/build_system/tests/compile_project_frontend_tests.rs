@@ -26,7 +26,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::settings::Config;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -61,17 +61,16 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let messages = match compile_project_frontend(
+    let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
-    ) {
-        Ok(_) => panic!("both provider and independent modules should be diagnosed"),
-        Err(messages) => messages,
-    };
+    )
+    .expect("diagnosed modules are retained in the typed frontend outcome");
+    let messages = frontend.into_render_messages(&mut string_table);
 
     assert_eq!(
         messages.error_count(),
@@ -144,17 +143,16 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
         PackageOrigin::Builder,
     );
 
-    let messages = match compile_project_frontend(
+    let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
-    ) {
-        Ok(_) => panic!("both independent source packages should be diagnosed"),
-        Err(messages) => messages,
-    };
+    )
+    .expect("diagnosed source packages are retained in the typed frontend outcome");
+    let messages = frontend.into_render_messages(&mut string_table);
 
     assert!(
         messages.error_count() >= 2,
@@ -180,6 +178,76 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
             .iter()
             .any(|path| path.ends_with("packages/second/@mod.moth")),
         "later independent package should still compile: {diagnosed_paths:?}"
+    );
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[test]
+fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_errors() {
+    let dir = temp_dir("graph_outcomes_package_diagnosed_blocks_project");
+    let package = dir.join("packages/broken");
+    let src = dir.join("src");
+    fs::create_dir_all(&package).expect("should create package root");
+    fs::create_dir_all(&src).expect("should create entry root");
+    fs::write(
+        dir.join("config.moth"),
+        "entry_root #= \"src\"\npackage_folders #= { \"packages\" }\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "import @broken { run }\nvalue = run()\n",
+    )
+    .expect("should write blocked project consumer");
+    fs::write(
+        package.join("@mod.moth"),
+        "export:\n    run || -> Int:\n        return missing_package_value\n    ;\n;\n",
+    )
+    .expect("should write diagnosed source package");
+
+    let mut config = Config::new(dir.clone());
+    config.entry_root = PathBuf::from("src");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface.source_packages.register_filesystem_root(
+        "broken",
+        package,
+        PackageOrigin::Builder,
+    );
+
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("a diagnosed package with blocked project consumers is a retained outcome");
+
+    assert_eq!(
+        frontend.source_packages[0].boundary.diagnosed.len(),
+        1,
+        "package diagnostic should be retained in its own boundary"
+    );
+    assert_eq!(
+        frontend.project.blocked.len(),
+        1,
+        "project consumer should be blocked, not an infrastructure failure"
+    );
+    assert_eq!(
+        frontend.project.diagnosed.len(),
+        0,
+        "the project boundary itself should have no diagnostic"
+    );
+
+    let messages = frontend.into_render_messages(&mut string_table);
+    assert_eq!(
+        messages.error_count(),
+        1,
+        "the package diagnostic should render once"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
@@ -218,7 +286,18 @@ io.line(result)
         &mut string_table,
     )
     .expect("same-module generated constants should use their own TIR store");
-    let (_, _, sidecars) = frontend.into_parts();
+    let sidecars = frontend
+        .project
+        .generated
+        .sidecars()
+        .iter()
+        .chain(
+            frontend
+                .source_packages
+                .iter()
+                .flat_map(|package| package.boundary.generated.sidecars().iter()),
+        )
+        .collect::<Vec<_>>();
 
     assert_eq!(
         sidecars.len(),
@@ -290,7 +369,18 @@ same_private_box PrivateBox of Bool = forward(private_box)
         &mut string_table,
     )
     .expect("public generic nominal arguments should materialise");
-    let (_, _, sidecars) = frontend.into_parts();
+    let sidecars = frontend
+        .project
+        .generated
+        .sidecars()
+        .iter()
+        .chain(
+            frontend
+                .source_packages
+                .iter()
+                .flat_map(|package| package.boundary.generated.sidecars().iter()),
+        )
+        .collect::<Vec<_>>();
 
     assert_eq!(
         sidecars.len(),
@@ -419,7 +509,18 @@ wrapped Wrapper = identity(make())
         &mut string_table,
     )
     .expect("facade-hidden nominal closure should materialise");
-    let (_, _, sidecars) = frontend.into_parts();
+    let sidecars = frontend
+        .project
+        .generated
+        .sidecars()
+        .iter()
+        .chain(
+            frontend
+                .source_packages
+                .iter()
+                .flat_map(|package| package.boundary.generated.sidecars().iter()),
+        )
+        .collect::<Vec<_>>();
 
     assert_eq!(sidecars.len(), 1);
     let sidecar = &sidecars[0];
@@ -797,7 +898,7 @@ fn provider_created_package_registry_survives_into_module() {
     .expect("provider-backed import should compile");
 
     let module = modules
-        .project_modules()
+        .successful_module_views()
         .next()
         .expect("expected one module");
 
@@ -861,7 +962,7 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     .expect("provider-backed imports should compile");
 
     let module = modules
-        .project_modules()
+        .successful_module_views()
         .next()
         .expect("expected one module");
 
@@ -919,7 +1020,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     .expect("unreachable provider-backed call should compile");
 
     let module = modules
-        .project_modules()
+        .successful_module_views()
         .next()
         .expect("expected one module");
     assert!(
@@ -1002,7 +1103,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     .expect("unused @html canvas wrapper should compile");
 
     let module = modules
-        .project_modules()
+        .successful_module_views()
         .next()
         .expect("expected one module");
     assert!(
@@ -1118,7 +1219,7 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
     .expect("expected Ok for nominal type module");
 
     let module = modules
-        .project_modules()
+        .successful_module_views()
         .next()
         .expect("expected compiled module");
     let point_path = InternedPath::from_single_str("test.moth", &mut string_table)
@@ -1297,7 +1398,10 @@ fn directory_project_discovers_multiple_entry_modules() {
         "expected Ok for multi-module directory project"
     );
     assert_eq!(
-        result.expect("checked above").project_modules().count(),
+        result
+            .expect("checked above")
+            .successful_module_views()
+            .count(),
         2,
         "expected exactly two modules"
     );
@@ -1337,7 +1441,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     .expect("expected Ok for multi-module directory project");
 
     let second_module = modules
-        .project_modules()
+        .successful_module_views()
         .find(|module| {
             module
                 .metadata
@@ -1423,7 +1527,9 @@ fn provider_backed_grouped_import_compiles_and_reuses_cache() {
         "same canonical JS file should be resolved through the provider once"
     );
     assert!(
-        modules.project_modules().any(module_contains_external_call),
+        modules
+            .successful_module_views()
+            .any(module_contains_external_call),
         "HIR should lower provider-backed grouped calls to external function IDs"
     );
 
@@ -1464,7 +1570,9 @@ fn provider_backed_namespace_import_exposes_function_and_type_members() {
         "namespace import should resolve the JS file once"
     );
     assert!(
-        modules.project_modules().any(module_contains_external_call),
+        modules
+            .successful_module_views()
+            .any(module_contains_external_call),
         "namespace member calls should lower to external function IDs"
     );
 
@@ -1517,7 +1625,9 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
         "different canonical JS files with the same basename should get separate provider results"
     );
     assert!(
-        modules.project_modules().any(module_contains_external_call),
+        modules
+            .successful_module_views()
+            .any(module_contains_external_call),
         "calls through both provider-created packages should lower to external IDs"
     );
 
@@ -1553,7 +1663,9 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
     .expect("same-package opaque type should pass to function expecting that exact type");
 
     assert!(
-        modules.project_modules().any(module_contains_external_call),
+        modules
+            .successful_module_views()
+            .any(module_contains_external_call),
         "HIR should contain external calls for make_widget and use_widget"
     );
 
@@ -1580,17 +1692,16 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface = builder_surface_with_dummy_js_provider(Arc::clone(&calls));
 
-    let messages = match compile_project_frontend(
+    let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
-    ) {
-        Ok(_) => panic!("cross-package opaque type mismatch should be rejected"),
-        Err(messages) => messages,
-    };
+    )
+    .expect("diagnosed modules are retained in the typed frontend outcome");
+    let messages = frontend.into_render_messages(&mut string_table);
 
     assert!(
         messages.error_diagnostics().any(|diagnostic| {
@@ -1701,7 +1812,7 @@ fn html_js_provider_namespace_import_resolves() {
 
     assert!(
         modules
-            .project_modules()
+            .successful_module_views()
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should preserve namespace JS call export metadata"
     );
@@ -1742,7 +1853,7 @@ fn html_js_provider_grouped_import_resolves() {
 
     assert!(
         modules
-            .project_modules()
+            .successful_module_views()
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should preserve grouped alias JS export metadata"
     );
@@ -1783,7 +1894,7 @@ fn html_js_provider_grouped_alias_for_function_and_opaque_type_resolves() {
 
     assert!(
         modules
-            .project_modules()
+            .successful_module_views()
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should contain provider export metadata for aliased JS function"
     );
@@ -1870,7 +1981,7 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     .expect("repeated JS imports should compile");
 
     let module = modules
-        .project_modules()
+        .successful_module_views()
         .next()
         .expect("expected one module");
 
@@ -1916,7 +2027,7 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
 
     assert!(
         modules
-            .project_modules()
+            .successful_module_views()
             .any(|module| module_contains_external_module_export(module, "getCanvas")),
         "HIR should contain JS export metadata for fallible JS function"
     );
@@ -1978,6 +2089,153 @@ fn single_file_rejects_source_package_moth_folder_collision() {
             )
         }),
         "expected SourceFileFolderCollision diagnostic, got {messages:?}"
+    );
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[test]
+fn diagnosed_provider_retains_independent_successful_module() {
+    let dir = temp_dir("graph_outcomes_success_beside_diagnosed");
+    fs::create_dir_all(dir.join("provider")).expect("should create provider module");
+    fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
+    fs::create_dir_all(dir.join("independent")).expect("should create independent module");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("@page.moth"),
+        "import @provider { run }\nvalue = run()\n",
+    )
+    .expect("should write blocked consumer");
+    fs::write(
+        dir.join("consumer/@mod.moth"),
+        "import @provider { run }\nvalue = run()\n",
+    )
+    .expect("should write second blocked consumer");
+    fs::write(
+        dir.join("provider/+mod.moth"),
+        "export:\n    run || -> Int:\n        return missing_provider_value\n    ;\n;\n",
+    )
+    .expect("should write diagnosed provider");
+    fs::write(dir.join("independent/@mod.moth"), "value = 7\n")
+        .expect("should write independent successful module");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .expect("typed outcome retains successes beside diagnostics");
+
+    assert_eq!(
+        frontend.project.diagnosed.len(),
+        1,
+        "provider diagnostic should appear once"
+    );
+    assert_eq!(
+        frontend.project.blocked.len(),
+        2,
+        "both consumers of the diagnosed provider should be blocked"
+    );
+    let successful_paths = frontend
+        .successful_module_views()
+        .map(|module| module.metadata.entry_point.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        successful_paths
+            .iter()
+            .any(|path| path.ends_with("independent/@mod.moth")),
+        "independent successful module should be retained: {successful_paths:?}"
+    );
+
+    let messages = frontend.into_render_messages(&mut string_table);
+    assert_eq!(
+        messages.error_count(),
+        1,
+        "provider diagnostic should be rendered once"
+    );
+    let diagnosed_paths = messages
+        .error_diagnostics()
+        .map(|diagnostic| {
+            diagnostic
+                .primary_location
+                .scope
+                .to_path_buf(&messages.string_table)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        diagnosed_paths
+            .iter()
+            .any(|path| path.ends_with("provider/+mod.moth")),
+        "provider diagnostic should be retained: {diagnosed_paths:?}"
+    );
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[test]
+fn source_package_warning_retained_by_frontend_outcome() {
+    let dir = temp_dir("source_package_warning_frontend_outcome");
+    let package = dir.join("packages/warnpkg");
+    let src = dir.join("src");
+    fs::create_dir_all(&package).expect("should create package root");
+    fs::create_dir_all(&src).expect("should create entry root");
+    fs::write(
+        dir.join("config.moth"),
+        "entry_root #= \"src\"\npackage_folders #= { \"packages\" }\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(
+        package.join("@mod.moth"),
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write warning package root");
+
+    let mut config = Config::new(dir.clone());
+    config.entry_root = PathBuf::from("src");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface.source_packages.register_filesystem_root(
+        "warnpkg",
+        package,
+        PackageOrigin::Builder,
+    );
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("warning source package should compile");
+
+    let warning_codes = frontend
+        .successful_module_views()
+        .flat_map(|module| {
+            module
+                .metadata
+                .warnings
+                .iter()
+                .map(|warning| warning.kind.code().to_owned())
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        warning_codes.iter().any(|code| code == "MOTH-RULE-0022"),
+        "source-package warning should be retained: {warning_codes:?}"
+    );
+
+    let messages = frontend.into_render_messages(&mut string_table);
+    assert!(
+        messages.warning_count() >= 1,
+        "render boundary should retain the source-package warning"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");

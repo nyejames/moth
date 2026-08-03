@@ -93,6 +93,48 @@ if value is:
 }
 
 #[test]
+fn frontend_benchmark_retains_source_package_warning() {
+    let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
+    let temp_dir = tempfile::tempdir().expect("should create temp dir");
+    let root = temp_dir.path();
+    let package = root.join("packages/warnpkg");
+    let src = root.join("src");
+    std::fs::create_dir_all(&package).expect("should create package root");
+    std::fs::create_dir_all(&src).expect("should create entry root");
+    std::fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\npackage_folders #= { \"packages\" }\n",
+    )
+    .expect("should write config");
+    std::fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
+    std::fs::write(
+        package.join("@mod.moth"),
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write warning package root");
+
+    let options = FrontendBenchmarkOptions {
+        entry_path: root.to_path_buf(),
+        build_profile: FrontendBenchmarkBuildProfile::Dev,
+    };
+
+    let report = run_frontend_benchmark(options)
+        .expect("source-package warning should remain a successful benchmark");
+    assert!(
+        report.warning_count >= 1,
+        "source-package warning should be retained by the frontend benchmark"
+    );
+    assert!(
+        report
+            .warning_codes
+            .iter()
+            .any(|code| code == "MOTH-RULE-0022"),
+        "source-package warning code should be retained: {:?}",
+        report.warning_codes
+    );
+}
+
+#[test]
 fn frontend_benchmark_fails_for_missing_file() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
 

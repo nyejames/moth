@@ -392,6 +392,7 @@ struct SourceInventory {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceTreeIndex {
     entry_root: PathBuf,
+    package_identity: StablePackageIdentity,
     module_identities: ModuleIdentityTable,
     module_roots: ModuleRootTable,
     sources: Vec<SourceRecord>,
@@ -884,6 +885,7 @@ impl SourceTreeIndex {
 
         Ok(Self {
             entry_root,
+            package_identity: boundary_package,
             module_identities,
             module_roots,
             sources,
@@ -947,6 +949,11 @@ impl SourceTreeIndex {
 
     pub(crate) fn entry_root(&self) -> &Path {
         &self.entry_root
+    }
+
+    /// The stable package identity shared by every module in this boundary.
+    pub(crate) fn stable_package_identity(&self) -> &StablePackageIdentity {
+        &self.package_identity
     }
 
     /// The canonical root file of the module rooted at this boundary's entry root.

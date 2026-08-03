@@ -6,9 +6,7 @@
 //! remaining backend-agnostic.
 
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{
-    BuildBootstrap, ProjectBuilder, bootstrap_project_build, collect_frontend_warnings,
-};
+use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
@@ -132,13 +130,7 @@ fn execute_check(path: &str) -> CheckOutcome {
                 "command.check.compile_project_frontend",
                 compile_frontend_start,
             );
-            let warnings = collect_frontend_warnings(
-                frontend
-                    .project_artifacts()
-                    .iter()
-                    .map(|artifact| &artifact.module),
-            );
-            CompilerMessages::from_diagnostics(warnings, string_table)
+            frontend.into_render_messages(&mut string_table)
         }
         Err(messages) => {
             log_check_timing(

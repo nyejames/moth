@@ -50,11 +50,11 @@ impl ModuleId {
         self.0
     }
 
-    /// Construct a `ModuleId` from a raw table slot index for focused tests.
+    /// Construct a `ModuleId` from a raw table slot index.
     ///
-    /// WHAT: lets graph tests build out-of-range identities to exercise defensive edge
-    /// validation. Production code receives `ModuleId` values only from the identity table.
-    #[cfg(test)]
+    /// WHAT: lets synthetic single-module boundaries and focused tests build dense identities.
+    /// Production callers must use only validated ranges; defensive validation still rejects
+    /// out-of-range values at every boundary that consumes the handle.
     pub(crate) fn from_index(index: usize) -> ModuleId {
         ModuleId(index)
     }

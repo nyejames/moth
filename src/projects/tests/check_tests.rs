@@ -47,6 +47,41 @@ fn check_compiles_single_file_without_writing_artifacts() {
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
+#[test]
+fn check_retains_source_package_warning() {
+    let root = temp_dir("check_source_package_warning");
+    let package = root.join("packages/warnpkg");
+    let src = root.join("src");
+    fs::create_dir_all(&package).expect("should create package root");
+    fs::create_dir_all(&src).expect("should create entry root");
+    fs::write(
+        root.join("config.moth"),
+        "entry_root #= \"src\"\npackage_folders #= { \"packages\" }\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(
+        package.join("@mod.moth"),
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write warning package root");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+    );
+    assert!(
+        !outcome.messages.has_errors(),
+        "check should not treat a source-package warning as an error"
+    );
+    assert!(
+        outcome.messages.warning_count() >= 1,
+        "check should retain the source-package warning"
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
 #[cfg(unix)]
 #[test]
 fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {

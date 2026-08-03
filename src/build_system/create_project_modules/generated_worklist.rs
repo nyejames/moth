@@ -308,7 +308,7 @@ impl GeneratedFunctionWorklistDelta {
 
 /// One project/package boundary's exact generated summaries and explicit sidecar lane.
 #[derive(Default)]
-pub(super) struct BoundaryGeneratedFunctionStore {
+pub(crate) struct BoundaryGeneratedFunctionStore {
     summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
     sidecars: Vec<GeneratedFunctionSidecar>,
 }
@@ -353,8 +353,15 @@ impl BoundaryGeneratedFunctionStore {
         Ok(())
     }
 
-    pub(super) fn into_sidecars(self) -> Vec<GeneratedFunctionSidecar> {
-        self.sidecars
+    /// Borrow this boundary's completed sidecars in deterministic publication order.
+    pub(crate) fn sidecars(&self) -> &[GeneratedFunctionSidecar] {
+        &self.sidecars
+    }
+
+    /// Append one sidecar for focused tests that build real boundary payloads.
+    #[cfg(test)]
+    pub(crate) fn push_sidecar_for_test(&mut self, sidecar: GeneratedFunctionSidecar) {
+        self.sidecars.push(sidecar);
     }
 }
 

@@ -13,7 +13,8 @@
 //! - `prepared_source`          — state-safe retained source and token inputs
 //! - `prepared_source_store`    — project-boundary prepare-once store indexed by `SourceId`
 //! - `prepared_module`          — retained module-preparation payload handed to semantic compilation
-//! - `provider_store`           — completed immutable artefacts and per-module publication state
+//! - `module_artifact_store`    — completed immutable artefacts, dense slot mapping and outcomes
+//! - `compiled_boundary`        — retained project/source-package graph boundaries and frontend outcome
 //! - `source_discovery`         — single-file source traversal and structural provider resolution
 //! - `source_scanning`          — retained single-pass source tokenisation and import extraction
 //! - `project_structure_diagnostics` — typed Stage 0 project diagnostics
@@ -24,18 +25,19 @@
 //! applied to `Config`.
 
 mod compilation;
+pub(crate) mod compiled_boundary;
 mod frontend_orchestration;
 pub(crate) mod generated_worklist;
-mod module_identity;
+pub(crate) mod module_artifact_store;
+pub(crate) mod module_identity;
 mod module_inventory;
 mod module_namespace;
 mod prepared_module;
 mod prepared_source;
 mod prepared_source_store;
-mod project_module_graph;
+pub(crate) mod project_module_graph;
 mod project_roots;
 mod project_structure_diagnostics;
-mod provider_store;
 mod source_discovery;
 pub(crate) mod source_discovery_error;
 pub(crate) mod source_loading;
@@ -54,7 +56,6 @@ pub(crate) use crate::projects::settings;
 #[cfg(test)]
 pub(crate) use std::fs;
 
-use crate::build_system::build::ProjectFrontendCompilation;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 
 use crate::compiler_frontend::FrontendBuildProfile;
@@ -66,6 +67,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::build_system::BuildProfile;
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
+
+pub(crate) use compiled_boundary::ProjectFrontendCompilation;
 
 // -------------------------
 //  Compilation Entry Point

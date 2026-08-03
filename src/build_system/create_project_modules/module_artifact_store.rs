@@ -1,10 +1,11 @@
-//! Completed canonical module artefact storage and provider publication state.
+//! Completed canonical module artefact storage and per-module outcome state.
 //!
-//! WHAT: stores successful immutable artefacts contiguously and maps every project `ModuleId` to
-//! an unavailable, successful, diagnosed or blocked slot.
+//! WHAT: stores successful immutable artefacts contiguously and retains the dense `ModuleId ->
+//! CompiledModuleArtifactId` slot mapping plus diagnosed/blocked outcomes. It is the retained
+//! artefact lane of one [`CompiledGraphBoundary`](super::compiled_boundary::CompiledGraphBoundary).
 //! WHY: dependency waves need one build-owned authority that can publish only complete semantic
-//! interfaces. Consumers borrow successful artefacts by dense ID instead of cloning interfaces or
-//! opening provider syntax.
+//! interfaces, and later entry selection and warning collection must resolve by dense `ModuleId`
+//! without rebuilding an index or relying on vector layout.
 //! MUST NOT: store `ModuleSemanticDraft`, resolve source names or perform semantic compilation.
 
 use super::module_identity::ModuleId;
@@ -23,12 +24,12 @@ pub(crate) enum ProviderSlot {
     Blocked,
 }
 
-pub(crate) struct ModuleProviderStore {
+pub(crate) struct ModuleArtifactStore {
     slots: Vec<ProviderSlot>,
     artifacts: Vec<CompiledModuleArtifact>,
 }
 
-impl ModuleProviderStore {
+impl ModuleArtifactStore {
     pub(crate) fn new(module_count: usize) -> Self {
         Self {
             slots: vec![ProviderSlot::Unavailable; module_count],
@@ -72,26 +73,83 @@ impl ModuleProviderStore {
         })
     }
 
+    /// Require every dense slot to have reached a final outcome.
+    ///
+    /// A remaining `Unavailable` slot means a graph/job mismatch or scheduler regression; the
+    /// boundary must never publish an incomplete module result.
+    pub(crate) fn ensure_all_slots_completed(&self) -> Result<(), CompilerError> {
+        if let Some((index, _)) = self
+            .slots
+            .iter()
+            .enumerate()
+            .find(|(_, slot)| **slot == ProviderSlot::Unavailable)
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "ModuleId {index} never reached a completed outcome"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Require every dense slot to hold a successful artefact.
+    ///
+    /// This is the success-only gate used when assembling a linkable `ProjectCompilation`.
+    pub(crate) fn ensure_all_successful(&self) -> Result<(), CompilerError> {
+        if let Some((index, slot)) = self
+            .slots
+            .iter()
+            .enumerate()
+            .find(|(_, slot)| !matches!(slot, ProviderSlot::Successful(_)))
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "ModuleId {index} is not successful ({slot:?}) but ProjectCompilation requires every module to succeed"
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn interface(
         &self,
         module_id: ModuleId,
     ) -> Result<Option<&PublicSemanticInterface>, CompilerError> {
+        Ok(self
+            .artifact(module_id)?
+            .map(|artifact| &artifact.interface))
+    }
+
+    /// Resolve the successful artefact for one dense module identity.
+    ///
+    /// Returns `Ok(None)` for a diagnosed, blocked or unavailable slot. The mapping is retained
+    /// from publication time, so lookup never depends on artefact vector order.
+    pub(crate) fn artifact(
+        &self,
+        module_id: ModuleId,
+    ) -> Result<Option<&CompiledModuleArtifact>, CompilerError> {
         let ProviderSlot::Successful(artifact_id) = self.slot(module_id)? else {
             return Ok(None);
         };
 
         let artifact = self.artifacts.get(artifact_id.0).ok_or_else(|| {
             CompilerError::compiler_error(format!(
-                "Provider slot for ModuleId {} references missing artifact {}",
+                "ModuleId {} references missing artifact {}",
                 module_id.index(),
                 artifact_id.0
             ))
         })?;
-        Ok(Some(&artifact.interface))
+        Ok(Some(artifact))
     }
 
-    pub(crate) fn into_artifacts(self) -> Vec<CompiledModuleArtifact> {
-        self.artifacts
+    /// Iterate successful artefacts in deterministic `ModuleId` order.
+    ///
+    /// Publication follows dependency waves, which may differ from `ModuleId` order, so this
+    /// iteration walks the retained slot mapping rather than the artefact vector.
+    pub(crate) fn successful_artefacts_in_module_id_order(
+        &self,
+    ) -> impl Iterator<Item = &CompiledModuleArtifact> + '_ {
+        self.slots.iter().filter_map(|slot| match slot {
+            ProviderSlot::Successful(artifact_id) => self.artifacts.get(artifact_id.0),
+            ProviderSlot::Unavailable | ProviderSlot::Diagnosed | ProviderSlot::Blocked => None,
+        })
     }
 
     pub(crate) fn materialisation_contexts(

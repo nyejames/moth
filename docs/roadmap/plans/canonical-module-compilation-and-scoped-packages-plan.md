@@ -22,41 +22,33 @@ The architecture is accepted. Phase 5 now needs bounded closeout work, not anoth
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
-WORK_SOURCE: parent Phase 5 architecture, quality and performance review
-BASE_REVISION: 58432008fb5a1f7bb117dd226ccac773c25ed8c2 (current main HEAD; reconciled from the original 9af62e5a review base because the plan branch no longer exists and main advanced with the accepted language migration)
-STATUS: active — R5C1 implemented and validated; awaiting interim audit and checkpoint before R5C2
-CURRENT_SLICE: R5C1 — retain canonical artefacts and graph outcomes through the frontend handoff
-LAST_ACCEPTED_COMMIT: 58432008f is the current main HEAD; R5C1 changes are uncommitted pending audit
-WORKTREE: implemented directly on main per user direction; plan branch plan/canonical-module-phase5-closeout does not exist
-REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, frontend_orchestration.rs, generated_worklist.rs, provider_store.rs, build.rs, public_interface/ and generic materialisation owners
+WORK_SOURCE: parent R5C1 correction handoff (resume commit 75ccd4aaad28510308c525bc306c9a0af2b80f46)
+BASE_REVISION: 18b7870f7 (current clean main HEAD; R5C1 changes from the parent review are already committed)
+STATUS: active - R5C1 correction complete and validated; stop for parent review before R5C2
+CURRENT_SLICE: R5C1 correction - retain explicit graph boundaries, typed frontend outcomes, graph-identity entry selection and cross-boundary warnings (implemented)
+LAST_ACCEPTED_COMMIT: 3d5310196 (R5C1 correction checkpoint)
+WORKTREE: clean before this correction; implemented directly on main per user direction
+REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, frontend_orchestration.rs, generated_worklist.rs, module_artifact_store.rs, compiled_boundary.rs, build.rs, check.rs, benchmarking/frontend.rs and html_project_builder.rs
 RELEVANT_CONTEXT_NOW:
-- R2C and provider-consumer Review phases 1 and 2 are complete
-- Stage 0 owns indexed project and source-package boundaries, canonical module jobs, frozen graph waves and prepare-once source storage
-- completed provider interfaces close recursive declaration/type/trait/evidence/call-summary facts and validate before publication
-- cross-module source calls use stable function origins and borrow validation consumes completed provider summaries without foreign HIR
-- generic requests use stable identities, one transactional boundary worklist and independently lowered generated sidecars
-- normal, support and facade roots compile through graph-owned roles; API-only roots have no start
-- old reachable-file/import scanners, donor closures and legacy module-entry wave types are deleted
-- project and source-package graphs pass the current integration suite, but successful artefacts are flattened too early and several hot paths still rebuild indexes, clone large data or linearly search stable facts
-- R5C1 target: compilation.rs flattens successful CompiledModuleArtifact into Vec<Module> and clears source-package root_activity to suppress entries
+- R5C1 architecture accepted: artefacts are not flattened into Vec<Module>, package root_activity is not cleared, Deref<[Module]> is gone, builders consume module views and interfaces stay owned
+- implemented: CompiledGraphBoundary/CompiledSourcePackage retain structure, dense ModuleId->artifact mapping, generated store, diagnosed and blocked outcomes per boundary; ProjectFrontendCompilation is the typed outcome; build/dev gate on success-only boundaries; entry selection resolves graph normal-entry identities; warnings flow from every successful boundary; transitional test APIs removed
 ACCEPTANCE_CRITERIA:
-- preserve every accepted Phase 5 semantic contract
-- retain completed artefacts, interfaces and graph outcome identity through ProjectCompilation
-- remove repeated path matching, provider scans, materialisation-context scans and quadratic declaration rebuilding
-- bound generated-summary convergence with dependency-driven work rather than unconditional full rescans
-- move or share prepared source payloads without cloning complete token streams
-- split mixed-responsibility orchestration modules without adding wrappers or parallel APIs
-- complete full validation, docs and benchmark gates with zero known migration-fixture failures
+- one CompiledGraphBoundary per project and source-package graph retaining structure, dense artifact mapping, generated store, diagnosed and blocked outcomes
+- build/dev assemble ProjectCompilation only from success-only boundaries; check retains successful independent artifacts and reports diagnosed work
+- entry selection resolves graph normal-entry ModuleIds through the retained mapping; package metadata never mutates
+- warnings from every successful boundary are consistent across build, check and frontend benchmarks
+- no R5C2 import indexing, fingerprints, module-vector APIs, wrappers or duplicate graph representations
 VALIDATION_STATE:
-- baseline main HEAD passes the recorded validation gate before R5C edits; full suite not yet rerun for R5C
-DOCS_IMPACT: compiler and build-system architecture remain unchanged
-BLOCKERS_OR_OPEN_DECISIONS: none for R5C1
-AUDIT_STATE: no R5C audit yet
-DELEGATION_DECISION: bounded implementation slices with a read-only auditor after each slice that changes a stage boundary; final_auditor before Phase 5 acceptance
-NEXT_WORKER_ORDER: R5C1 only
+ - cargo fmt --all; just validate passes on the final tree (ci-clippy native/linux/windows, 3945 unit + 17 + 538 workspace tests, 1816 integration cases, docs check, bench-ci with all 58 preflight cases). bench-ci records small positive frontend/build deltas; treated as attribution evidence, not correctness proof
+DOCS_IMPACT: compiler and build-system architecture remain unchanged; plan current-state block updated only
+BLOCKERS_OR_OPEN_DECISIONS: none for R5C1 correction
+AUDIT_STATE: interim auditor (pass 1) findings resolved (single frontend timing record, no debug prints, cross-boundary blocked-provider guard with regression test). final_auditor completed with findings: generated-sidecar warnings were omitted from render/build traversal, and Unavailable module slots could pass the success-only gate. Resolved: boundary-owned successful_module_views now includes generated sidecars and is used by frontend rendering, build warning collection and ProjectCompilation::modules; ModuleArtifactStore rejects unfinished slots at boundary finalization and ProjectCompilation requires every slot successful; focused tests added for both. Full gate rerun on the final tree.
+DELEGATION_DECISION: coordinator implements the architecture-owning correction; auditor routes used for read-only review
+NEXT_WORKER_ORDER: R5C1 correction only; stop for review before R5C2
 STOP_REASON: none
-NEXT_RESUME_ACTION: implement R5C1, run focused validation and stop for review before R5C2
+NEXT_RESUME_ACTION: parent review of the R5C1 correction; do not start R5C2
 ```
+
 
 Keep this block concise. Update it after parent acceptance of each slice. Git history remains the durable implementation record, so do not append worker transcripts or complete validation logs.
 

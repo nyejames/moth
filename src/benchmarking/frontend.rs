@@ -11,9 +11,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{
-    BuildBootstrap, ProjectBuilder, bootstrap_project_build, collect_frontend_warnings,
-};
+use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
@@ -155,15 +153,7 @@ pub fn run_frontend_benchmark(
         &mut frontend_surface,
         &mut string_table,
     ) {
-        Ok(frontend) => {
-            let warnings = collect_frontend_warnings(
-                frontend
-                    .project_artifacts()
-                    .iter()
-                    .map(|artifact| &artifact.module),
-            );
-            CompilerMessages::from_diagnostics(warnings, string_table)
-        }
+        Ok(frontend) => frontend.into_render_messages(&mut string_table),
         Err(messages) => messages,
     };
 

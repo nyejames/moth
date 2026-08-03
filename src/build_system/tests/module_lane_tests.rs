@@ -1,12 +1,30 @@
 //! Focused invariant tests for the compiled `Module` lane container.
 
 use crate::build_system::build::{
-    CompiledModuleArtifact, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleExternalImport,
-    ModuleLinkFacts, ModuleRootActivity, ProjectCompilation, ProjectFrontendCompilation,
+    CompiledModuleArtifact, GeneratedFunctionSidecar, Module, ModuleCompilerMetadata,
+    ModuleExecutable, ModuleExternalImport, ModuleLinkFacts, ModuleRootActivity,
+    ProjectCompilation,
 };
+use crate::build_system::create_project_modules::compiled_boundary::{
+    BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage, DiagnosedModule,
+    ProjectFrontendCompilation,
+};
+use crate::build_system::create_project_modules::generated_worklist::BoundaryGeneratedFunctionStore;
+use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
+use crate::build_system::create_project_modules::module_identity::ModuleId;
+use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckReport, ReactiveInvalidationFact, ReactiveInvalidationKind,
+};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
@@ -27,6 +45,12 @@ use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
+    ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
+    StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
@@ -311,7 +335,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         },
     };
 
-    let error = match ProjectCompilation::from_successful_modules(vec![module]) {
+    let error = match ProjectCompilation::from_test_modules(vec![module]) {
         Ok(_) => panic!("missing external package ownership should violate entry assembly"),
         Err(error) => error,
     };
@@ -325,31 +349,15 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
     // WHY: R5C1 retains completed artefacts so interface closure, fingerprints and link owners
     //      can consume them after `compile_project_frontend` returns.
     let module = minimal_lane_module(PathBuf::from("@page.moth"), true);
-    let artifact = CompiledModuleArtifact {
-        module,
-        interface: crate::compiler_frontend::public_interface::PublicSemanticInterface {
-            module_origin:
-                crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
-                    crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
-                        "test",
-                    ),
-                    String::new(),
-                    crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
-                ),
-            export_bindings: Vec::new(),
-            export_diagnostic_provenance: Vec::new(),
-            binding_exports: Vec::new(),
-            declarations: Vec::new(),
-            reusable_evidence: Vec::new(),
-            concrete_call_summaries: Vec::new(),
-        },
-    };
-
-    let frontend = ProjectFrontendCompilation::new(vec![artifact], Vec::new(), Vec::new());
-    let project_artifacts = frontend.project_artifacts();
-    assert_eq!(project_artifacts.len(), 1, "one project artefact retained");
+    let frontend = test_frontend_from_project_modules(vec![module]);
+    let artifact = frontend
+        .project
+        .modules
+        .artifact(ModuleId::from_index(0))
+        .expect("valid module id")
+        .expect("project module should be successful");
     assert!(
-        project_artifacts[0]
+        artifact
             .module
             .metadata
             .root_activity
@@ -357,14 +365,25 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
         "project artefact root activity is retained"
     );
     assert_eq!(
-        project_artifacts[0].interface.module_origin.role(),
-        crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+        artifact.interface.module_origin.role(),
+        ModuleRootRole::Normal,
         "artefact interface survives the handoff"
     );
 
     let compilation = ProjectCompilation::from_frontend(frontend)
         .expect("one active project module assembles one entry");
     assert_eq!(compilation.module_count(), 1, "one base module");
+    let retained = compilation
+        .project
+        .modules
+        .artifact(ModuleId::from_index(0))
+        .expect("valid module id")
+        .expect("success-only compilation retains the artefact");
+    assert_eq!(
+        retained.interface.module_origin.role(),
+        ModuleRootRole::Normal,
+        "completed public interface remains accessible after success-only conversion"
+    );
     assert_eq!(
         compilation.entries().len(),
         1,
@@ -375,58 +394,22 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
 #[test]
 fn source_package_artefacts_are_retained_but_never_project_entries() {
     // WHAT: source-package artefacts are retained immutably (root activity intact) yet never
-    //       selected as project entries. Entry selection uses the project-boundary count rather
-    //       than mutating package module metadata.
-    // WHY: R5C1 forbids clearing package `root_activity` to suppress entries; the boundary index
-    //      alone must keep package modules out of project entry selection.
+    //       selected as project entries. Entry selection resolves the project graph's normal
+    //       entry identities through the retained mapping rather than mutating package metadata.
+    // WHY: R5C1 forbids clearing package `root_activity` to suppress entries; the separate graph
+    //      boundaries keep package modules out of project entry selection.
     let active_project = minimal_lane_module(PathBuf::from("src/@page.moth"), true);
     let package_root = minimal_lane_module(PathBuf::from("packages/html/@mod.moth"), true);
 
-    let frontend = ProjectFrontendCompilation::new(
-        vec![CompiledModuleArtifact {
-            module: active_project,
-            interface: crate::compiler_frontend::public_interface::PublicSemanticInterface {
-                module_origin:
-                    crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
-                        crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
-                            "test",
-                        ),
-                        String::from("page"),
-                        crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
-                    ),
-                export_bindings: Vec::new(),
-                export_diagnostic_provenance: Vec::new(),
-                binding_exports: Vec::new(),
-                declarations: Vec::new(),
-                reusable_evidence: Vec::new(),
-                concrete_call_summaries: Vec::new(),
-            },
-        }],
-        vec![CompiledModuleArtifact {
-            module: package_root,
-            interface: crate::compiler_frontend::public_interface::PublicSemanticInterface {
-                module_origin:
-                    crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
-                        crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
-                            "html",
-                        ),
-                        String::new(),
-                        crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
-                    ),
-                export_bindings: Vec::new(),
-                export_diagnostic_provenance: Vec::new(),
-                binding_exports: Vec::new(),
-                declarations: Vec::new(),
-                reusable_evidence: Vec::new(),
-                concrete_call_summaries: Vec::new(),
-            },
-        }],
-        Vec::new(),
-    );
-
-    assert_eq!(frontend.source_package_artifacts().len(), 1);
+    let frontend = test_frontend_with_source_package(active_project, package_root);
+    assert_eq!(frontend.source_packages.len(), 1);
     assert!(
-        frontend.source_package_artifacts()[0]
+        frontend.source_packages[0]
+            .boundary
+            .modules
+            .artifact(ModuleId::from_index(0))
+            .expect("valid package module id")
+            .expect("package root should be successful")
             .module
             .metadata
             .root_activity
@@ -454,6 +437,513 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
             .has_html_artifact_activity(),
         "package module metadata is unchanged by project assembly"
     );
+}
+
+fn test_frontend_from_project_modules(modules: Vec<Module>) -> ProjectFrontendCompilation {
+    let project = test_graph_boundary(modules, "test", "");
+    ProjectFrontendCompilation::new(project, Vec::new())
+}
+
+fn test_frontend_with_source_package(
+    project_module: Module,
+    package_module: Module,
+) -> ProjectFrontendCompilation {
+    let project = test_graph_boundary(vec![project_module], "test", "page");
+    let package = test_graph_boundary(vec![package_module], "html", "");
+    let package_identity =
+        StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "html");
+    ProjectFrontendCompilation::new(
+        project,
+        vec![CompiledSourcePackage {
+            package_identity,
+            root_module_id: ModuleId::from_index(0),
+            boundary: package,
+        }],
+    )
+}
+
+fn test_graph_boundary(
+    modules: Vec<Module>,
+    package_name: &str,
+    module_path: &str,
+) -> CompiledGraphBoundary {
+    let module_count = modules.len();
+    let graph = ProjectModuleGraph::from_normal_roots(
+        (0..module_count)
+            .map(|index| {
+                let origin = StableModuleOriginIdentity::from_portable_path(
+                    StablePackageIdentity::project_local(package_name),
+                    if module_path.is_empty() {
+                        format!("module_{index}")
+                    } else {
+                        module_path.to_owned()
+                    },
+                    ModuleRootRole::Normal,
+                );
+                let root_path = PathBuf::from(format!("@module_{index}.moth"));
+                (origin, root_path.clone(), root_path)
+            })
+            .collect(),
+    );
+    let mut store = ModuleArtifactStore::new(module_count);
+    for (index, module) in modules.into_iter().enumerate() {
+        let origin_path = if module_path.is_empty() {
+            format!("module_{index}")
+        } else {
+            module_path.to_owned()
+        };
+        store
+            .publish_success(
+                ModuleId::from_index(index),
+                CompiledModuleArtifact {
+                    module,
+                    interface: empty_test_interface(origin_path),
+                },
+            )
+            .expect("test store should publish each module");
+    }
+    CompiledGraphBoundary {
+        structure: graph,
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    }
+}
+
+fn empty_test_interface(module_path: String) -> PublicSemanticInterface {
+    PublicSemanticInterface {
+        module_origin: StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("test"),
+            module_path,
+            ModuleRootRole::Normal,
+        ),
+        export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
+#[test]
+fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
+    let mut store = ModuleArtifactStore::new(3);
+    store
+        .publish_success(
+            ModuleId::from_index(2),
+            CompiledModuleArtifact {
+                module: minimal_lane_module(PathBuf::from("high/@mod.moth"), true),
+                interface: empty_test_interface("high".to_owned()),
+            },
+        )
+        .expect("higher-ID provider should publish first");
+    store
+        .publish_success(
+            ModuleId::from_index(1),
+            CompiledModuleArtifact {
+                module: minimal_lane_module(PathBuf::from("low/@mod.moth"), true),
+                interface: empty_test_interface("low".to_owned()),
+            },
+        )
+        .expect("lower-ID consumer should publish second");
+    store
+        .mark_diagnosed(ModuleId::from_index(0))
+        .expect("diagnosed slot should transition");
+
+    let high = store
+        .artifact(ModuleId::from_index(2))
+        .expect("valid high module id")
+        .expect("high module should be successful");
+    assert!(high.module.metadata.entry_point.ends_with("high/@mod.moth"));
+    let low = store
+        .artifact(ModuleId::from_index(1))
+        .expect("valid low module id")
+        .expect("low module should be successful");
+    assert!(low.module.metadata.entry_point.ends_with("low/@mod.moth"));
+    assert!(
+        store
+            .artifact(ModuleId::from_index(0))
+            .expect("valid diagnosed module id")
+            .is_none(),
+        "diagnosed modules expose no artefact"
+    );
+
+    let order = store
+        .successful_artefacts_in_module_id_order()
+        .map(|artifact| artifact.module.metadata.entry_point.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        order,
+        vec![
+            PathBuf::from("low/@mod.moth"),
+            PathBuf::from("high/@mod.moth")
+        ],
+        "iteration must be deterministic in ModuleId order, not wave order"
+    );
+}
+
+#[test]
+fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
+    let package_a = test_graph_boundary(
+        vec![minimal_lane_module(
+            PathBuf::from("packages/a/@mod.moth"),
+            true,
+        )],
+        "a",
+        "",
+    );
+    let package_b = test_graph_boundary(
+        vec![minimal_lane_module(
+            PathBuf::from("packages/b/@mod.moth"),
+            true,
+        )],
+        "b",
+        "",
+    );
+    let project = test_graph_boundary(
+        vec![minimal_lane_module(PathBuf::from("@page.moth"), true)],
+        "test",
+        "page",
+    );
+    let frontend = ProjectFrontendCompilation::new(
+        project,
+        vec![
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "a",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: package_a,
+            },
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "b",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: package_b,
+            },
+        ],
+    );
+
+    let package_a_module = frontend.source_packages[0]
+        .boundary
+        .modules
+        .artifact(ModuleId::from_index(0))
+        .expect("valid package a id")
+        .expect("package a root should be successful");
+    assert!(
+        package_a_module
+            .module
+            .metadata
+            .entry_point
+            .ends_with("packages/a/@mod.moth")
+    );
+    let package_b_module = frontend.source_packages[1]
+        .boundary
+        .modules
+        .artifact(ModuleId::from_index(0))
+        .expect("valid package b id")
+        .expect("package b root should be successful");
+    assert!(
+        package_b_module
+            .module
+            .metadata
+            .entry_point
+            .ends_with("packages/b/@mod.moth")
+    );
+
+    let compilation = ProjectCompilation::from_frontend(frontend)
+        .expect("overlapping package module ids should assemble");
+    assert_eq!(compilation.module_count(), 3);
+    let module_paths = compilation
+        .modules()
+        .map(|module| module.metadata.entry_point.clone())
+        .collect::<Vec<_>>();
+    assert!(module_paths[1].ends_with("packages/a/@mod.moth"));
+    assert!(module_paths[2].ends_with("packages/b/@mod.moth"));
+    assert_eq!(
+        compilation.entries().len(),
+        1,
+        "only the project root is an entry"
+    );
+}
+
+#[test]
+fn boundary_outcome_sorting_is_independent_of_wave_order() {
+    let mut string_table = StringTable::new();
+    let mut boundary = CompiledGraphBoundary {
+        structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
+        modules: ModuleArtifactStore::new(0),
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: vec![
+            DiagnosedModule {
+                module_id: ModuleId::from_index(2),
+                diagnostics: test_module_diagnostics("z.moth", &mut string_table),
+            },
+            DiagnosedModule {
+                module_id: ModuleId::from_index(0),
+                diagnostics: test_module_diagnostics("a.moth", &mut string_table),
+            },
+        ],
+        blocked: vec![
+            BlockedModule {
+                module_id: ModuleId::from_index(1),
+                required_provider: BlockedProvider::Module(ModuleId::from_index(0)),
+            },
+            BlockedModule {
+                module_id: ModuleId::from_index(0),
+                required_provider: BlockedProvider::Module(ModuleId::from_index(2)),
+            },
+        ],
+    };
+
+    boundary.sort_outcomes();
+
+    let diagnosed_order = boundary
+        .diagnosed
+        .iter()
+        .map(|module| module.module_id.index())
+        .collect::<Vec<_>>();
+    assert_eq!(diagnosed_order, vec![0, 2]);
+    let blocked_order = boundary
+        .blocked
+        .iter()
+        .map(|module| module.module_id.index())
+        .collect::<Vec<_>>();
+    assert_eq!(blocked_order, vec![0, 1]);
+}
+
+fn test_module_diagnostics(module_path: &str, string_table: &mut StringTable) -> ModuleDiagnostics {
+    let path = InternedPath::from_single_str(module_path, string_table);
+    let name = string_table.intern("missing_name");
+    let diagnostic = CompilerDiagnostic::new(
+        DiagnosticKind::Rule(
+            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
+        ),
+        SourceLocation::new(
+            path,
+            CharPosition {
+                line_number: 1,
+                char_column: 1,
+            },
+            CharPosition {
+                line_number: 1,
+                char_column: 2,
+            },
+        ),
+        DiagnosticPayload::UnknownName {
+            name,
+            namespace: NameNamespace::Value,
+        },
+    );
+    let messages = CompilerMessages::from_diagnostic(diagnostic, string_table.clone());
+    ModuleDiagnostics::from_messages(messages).expect("user diagnostic should classify")
+}
+
+#[test]
+fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
+    let mut string_table = StringTable::new();
+    let frontend = frontend_with_sidecar_warnings(&mut string_table);
+    let messages = frontend.into_render_messages(&mut string_table);
+    let rendered_codes = messages
+        .warnings()
+        .map(|warning| warning.kind.code().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rendered_codes.len(),
+        2,
+        "project and source-package generated sidecar warnings should render"
+    );
+    assert!(
+        rendered_codes.windows(2).all(|pair| pair[0] == pair[1]),
+        "rendered generated warnings should share one code: {rendered_codes:?}"
+    );
+
+    let frontend = frontend_with_sidecar_warnings(&mut string_table);
+    let compilation = ProjectCompilation::from_frontend(frontend)
+        .expect("generated sidecar boundaries should assemble");
+    let compilation_codes = compilation
+        .modules()
+        .flat_map(|module| {
+            module
+                .metadata
+                .warnings
+                .iter()
+                .map(|warning| warning.kind.code().to_owned())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        compilation_codes.len(),
+        2,
+        "success-only compilation should retain project and source-package sidecar warnings"
+    );
+    assert_eq!(
+        compilation_codes, rendered_codes,
+        "frontend rendering and success-only compilation must retain identical warning codes"
+    );
+}
+
+#[test]
+fn success_only_conversion_rejects_unfinished_module_slots() {
+    let first_root = PathBuf::from("@first.moth");
+    let second_root = PathBuf::from("@second.moth");
+    let graph = ProjectModuleGraph::from_normal_roots(vec![
+        (
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "first".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            first_root.clone(),
+            first_root,
+        ),
+        (
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "second".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            second_root.clone(),
+            second_root,
+        ),
+    ]);
+    let mut store = ModuleArtifactStore::new(2);
+    store
+        .publish_success(
+            ModuleId::from_index(0),
+            CompiledModuleArtifact {
+                module: minimal_lane_module(PathBuf::from("@first.moth"), true),
+                interface: empty_test_interface("first".to_owned()),
+            },
+        )
+        .expect("first module should publish");
+    let boundary = CompiledGraphBoundary {
+        structure: graph,
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    };
+    let frontend = ProjectFrontendCompilation::new(boundary, Vec::new());
+
+    let error = match ProjectCompilation::from_frontend(frontend) {
+        Ok(_) => panic!("an unfinished non-entry module slot must reject ProjectCompilation"),
+        Err(error) => error,
+    };
+    assert!(
+        error.msg.contains("not successful"),
+        "unexpected success-only rejection: {error:?}"
+    );
+}
+
+fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFrontendCompilation {
+    let mut project_sidecar_module =
+        minimal_lane_module(PathBuf::from("@generated_project.moth"), true);
+    project_sidecar_module
+        .metadata
+        .warnings
+        .push(test_warning_diagnostic(
+            "generated_project.moth",
+            string_table,
+        ));
+    let mut project_generated = BoundaryGeneratedFunctionStore::default();
+    project_generated.push_sidecar_for_test(GeneratedFunctionSidecar::new(
+        generated_test_identity("generated_project"),
+        project_sidecar_module,
+    ));
+    let mut project = test_graph_boundary(
+        vec![minimal_lane_module(PathBuf::from("@page.moth"), true)],
+        "test",
+        "page",
+    );
+    project.generated = project_generated;
+
+    let mut package_sidecar_module =
+        minimal_lane_module(PathBuf::from("@generated_package.moth"), true);
+    package_sidecar_module
+        .metadata
+        .warnings
+        .push(test_warning_diagnostic(
+            "generated_package.moth",
+            string_table,
+        ));
+    let mut package_generated = BoundaryGeneratedFunctionStore::default();
+    package_generated.push_sidecar_for_test(GeneratedFunctionSidecar::new(
+        generated_test_identity("generated_package"),
+        package_sidecar_module,
+    ));
+    let mut package = test_graph_boundary(
+        vec![minimal_lane_module(
+            PathBuf::from("packages/warnpkg/@mod.moth"),
+            true,
+        )],
+        "warnpkg",
+        "",
+    );
+    package.generated = package_generated;
+
+    ProjectFrontendCompilation::new(
+        project,
+        vec![CompiledSourcePackage {
+            package_identity: StablePackageIdentity::source_package(
+                PackageOrigin::ProjectLocal,
+                "warnpkg",
+            ),
+            root_module_id: ModuleId::from_index(0),
+            boundary: package,
+        }],
+    )
+}
+
+fn test_warning_diagnostic(
+    module_path: &str,
+    string_table: &mut StringTable,
+) -> CompilerDiagnostic {
+    let path = InternedPath::from_single_str(module_path, string_table);
+    let name = string_table.intern("unused_warning_name");
+    CompilerDiagnostic::with_severity(
+        DiagnosticKind::Rule(
+            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
+        ),
+        DiagnosticSeverity::Warning,
+        SourceLocation::new(
+            path,
+            CharPosition {
+                line_number: 1,
+                char_column: 1,
+            },
+            CharPosition {
+                line_number: 1,
+                char_column: 2,
+            },
+        ),
+        DiagnosticPayload::UnknownName {
+            name,
+            namespace: NameNamespace::Value,
+        },
+    )
+}
+
+fn generated_test_identity(name: &str) -> GeneratedFunctionIdentity {
+    GeneratedFunctionIdentity::new(
+        GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "main".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            "@page.moth".to_owned(),
+            ModulePrivateExecutableCategory::GenericFunction,
+            name.to_owned(),
+            None,
+        )),
+        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([]),
+    )
 }
 
 fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {

@@ -37,7 +37,7 @@ use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOr
 use rustc_hash::FxHashMap;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Outcome of inserting one deterministic provider-before-consumer dependency edge.
 ///
@@ -164,6 +164,46 @@ pub(crate) struct ProjectModuleGraph {
 }
 
 impl ProjectModuleGraph {
+    /// Build a synthetic graph from explicit normal module roots.
+    ///
+    /// WHAT: creates one frozen `Normal` node per `(stable origin, root directory, root file)`
+    /// in the given order with dense `ModuleId` values starting at zero and no dependency edges.
+    /// WHY: single-file compilation is a synthetic-module mode with no `SourceTreeIndex`, and
+    /// focused tests need real graph boundaries without filesystem discovery. The graph keeps
+    /// the same frozen adjacency contract as discovery-built graphs.
+    pub(crate) fn from_normal_roots(
+        roots: Vec<(StableModuleOriginIdentity, PathBuf, PathBuf)>,
+    ) -> Self {
+        let node_count = roots.len();
+        let nodes = roots
+            .into_iter()
+            .enumerate()
+            .map(
+                |(index, (stable_origin, root_directory, root_file))| ProjectModuleGraphNode {
+                    module_id: ModuleId::from_index(index),
+                    stable_origin,
+                    role: ModuleRootRole::Normal,
+                    root_directory,
+                    root_file,
+                    nearest_parent: None,
+                    direct_children: Vec::new(),
+                },
+            )
+            .collect::<Vec<_>>();
+        let entry_modules = nodes.iter().map(|node| node.module_id).collect();
+
+        Self {
+            nodes,
+            entry_modules,
+            facade: None,
+            dependencies: ProjectModuleDependencies::Frozen {
+                dependency_providers: vec![Vec::new(); node_count],
+                provider_consumers: vec![Vec::new(); node_count],
+            },
+            edge_source_locations: BTreeMap::new(),
+        }
+    }
+
     /// Build the graph directly from the Stage 0 source-tree index.
     ///
     /// Consumes the index's identity table rather than recomputing it. Source ownership remains

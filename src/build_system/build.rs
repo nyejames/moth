@@ -5,6 +5,10 @@
 //! frontend/backend orchestration.
 
 use crate::build_system::BuildProfile;
+use crate::build_system::create_project_modules::compiled_boundary::{
+    CompiledGraphBoundary, CompiledModuleRef, CompiledSourcePackage, ProjectFrontendCompilation,
+    compilation_module_views,
+};
 use crate::build_system::create_project_modules::{
     compile_project_frontend, resolve_project_entry_root,
 };
@@ -30,6 +34,19 @@ use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFr
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, OriginFunctionId,
+};
+
+#[cfg(test)]
+use crate::build_system::create_project_modules::generated_worklist::BoundaryGeneratedFunctionStore;
+#[cfg(test)]
+use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
+#[cfg(test)]
+use crate::build_system::create_project_modules::module_identity::ModuleId;
+#[cfg(test)]
+use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+#[cfg(test)]
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
@@ -266,87 +283,23 @@ pub(crate) struct CompiledModuleArtifact {
     pub(crate) interface: PublicSemanticInterface,
 }
 
-/// Successful frontend result with completed canonical module artefacts and generated executables
-/// in separate lanes.
-///
-/// WHAT: owns every successful project-boundary and source-package-boundary `CompiledModuleArtifact`
-/// as immutable values, plus the generated sidecar lane. It deliberately does not flatten artefacts
-/// into a bare `Vec<Module>` because that would drop the published semantic interface and the
-/// boundary identity builders and link owners consume.
-/// WHY: `build` and `dev` hand this whole value to `ProjectCompilation` (which retains the
-/// artefacts and exposes module views), while `check` and benchmark tooling can read successful
-/// independent artefacts beside diagnosed and blocked records. Boundary identity is carried in the
-/// separate project/source-package lanes so entry selection never needs to mutate package module
-/// metadata.
-pub struct ProjectFrontendCompilation {
-    /// Project-boundary artefacts in deterministic `ModuleId` order.
-    project_artifacts: Vec<CompiledModuleArtifact>,
-    /// Source-package-boundary artefacts, immutable, in deterministic package/module order.
-    source_package_artifacts: Vec<CompiledModuleArtifact>,
-    generated_sidecars: Vec<GeneratedFunctionSidecar>,
-}
-
-impl ProjectFrontendCompilation {
-    pub(crate) fn new(
-        project_artifacts: Vec<CompiledModuleArtifact>,
-        source_package_artifacts: Vec<CompiledModuleArtifact>,
-        generated_sidecars: Vec<GeneratedFunctionSidecar>,
-    ) -> Self {
-        Self {
-            project_artifacts,
-            source_package_artifacts,
-            generated_sidecars,
-        }
-    }
-
-    pub(crate) fn project_artifacts(&self) -> &[CompiledModuleArtifact] {
-        &self.project_artifacts
-    }
-
-    #[cfg(test)]
-    pub(crate) fn source_package_artifacts(&self) -> &[CompiledModuleArtifact] {
-        &self.source_package_artifacts
-    }
-
-    /// Iterate every project-boundary module view for inspection and warnings.
-    #[cfg(test)]
-    pub(crate) fn project_modules(&self) -> impl ExactSizeIterator<Item = &Module> + '_ {
-        self.project_artifacts
-            .iter()
-            .map(|artifact| &artifact.module)
-    }
-
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Vec<CompiledModuleArtifact>,
-        Vec<CompiledModuleArtifact>,
-        Vec<GeneratedFunctionSidecar>,
-    ) {
-        (
-            self.project_artifacts,
-            self.source_package_artifacts,
-            self.generated_sidecars,
-        )
-    }
-}
-
 /// Success-only frontend payload consumed by project builders.
 ///
-/// WHAT: owns every successfully compiled canonical module artefact (project boundary first, then
-///       source-package boundaries), the explicit entry assemblies selected from dormant root
-///       activity, and the generated sidecar lane. It retains the immutable
-///       [`CompiledModuleArtifact`] values so the published [`PublicSemanticInterface`] and
-///       boundary identity survive into builders and link owners.
+/// WHAT: owns the retained project and source-package graph boundaries, the explicit entry
+///       assemblies selected from dormant root activity, and the generated sidecar lane inside
+///       each boundary. It retains immutable [`CompiledModuleArtifact`] values and their dense
+///       `ModuleId` mapping so the published [`PublicSemanticInterface`] and boundary identity
+///       survive into builders and link owners.
 /// WHY: project builders need a coherent project boundary with build-owned entry selection. A
 ///      diagnosed frontend never constructs this value, and backends no longer infer entries by
-///      filtering a flat module vector. Entry selection uses the project-boundary count at
-///      construction so it selects by boundary + root-role facts instead of mutating package
-///      module metadata.
+///      filtering a flat module vector. Entry selection resolves the project graph's normal
+///      entry identities through the retained dense mapping instead of mutating package module
+///      metadata.
 pub struct ProjectCompilation {
-    /// Project-boundary artefacts first, then source-package artefacts, in deterministic order.
-    base_artifacts: Vec<CompiledModuleArtifact>,
-    generated_sidecars: Vec<GeneratedFunctionSidecar>,
+    /// Retained project graph boundary with its artefact store and generated lane.
+    project: CompiledGraphBoundary,
+    /// Retained source-package boundaries, each with its own dense identity space.
+    source_packages: Vec<CompiledSourcePackage>,
     entries: Vec<EntryAssembly>,
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
     module_private_function_names:
@@ -360,60 +313,75 @@ pub struct ProjectCompilation {
 }
 
 impl ProjectCompilation {
-    #[cfg(test)]
-    pub(crate) fn from_successful_modules(modules: Vec<Module>) -> Result<Self, CompilerError> {
-        let artifacts = modules
-            .into_iter()
-            .map(|module| CompiledModuleArtifact {
-                module,
-                interface: test_empty_public_interface(),
-            })
-            .collect::<Vec<_>>();
-        let project_module_count = artifacts.len();
-        Self::from_successful_artifacts(artifacts, project_module_count, Vec::new())
-    }
-
     pub(crate) fn from_frontend(
         frontend: ProjectFrontendCompilation,
     ) -> Result<Self, CompilerError> {
-        let (project_artifacts, source_package_artifacts, generated_sidecars) =
-            frontend.into_parts();
-        let project_module_count = project_artifacts.len();
-        let mut base_artifacts = project_artifacts;
-        base_artifacts.extend(source_package_artifacts);
-        Self::from_successful_artifacts(base_artifacts, project_module_count, generated_sidecars)
+        let ProjectFrontendCompilation {
+            project,
+            source_packages,
+        } = frontend;
+        Self::from_successful_boundaries(project, source_packages)
     }
 
-    fn from_successful_artifacts(
-        artifacts: Vec<CompiledModuleArtifact>,
-        project_module_count: usize,
-        generated_sidecars: Vec<GeneratedFunctionSidecar>,
+    #[cfg(test)]
+    pub(crate) fn from_test_modules(modules: Vec<Module>) -> Result<Self, CompilerError> {
+        let module_count = modules.len();
+        let graph = ProjectModuleGraph::from_normal_roots(
+            (0..module_count)
+                .map(|index| {
+                    let origin = StableModuleOriginIdentity::from_portable_path(
+                        StablePackageIdentity::project_local("test"),
+                        format!("module_{index}"),
+                        ModuleRootRole::Normal,
+                    );
+                    let root_path = PathBuf::from(format!("@module_{index}.moth"));
+                    (origin, root_path.clone(), root_path)
+                })
+                .collect(),
+        );
+        let mut module_store = ModuleArtifactStore::new(module_count);
+        for (index, module) in modules.into_iter().enumerate() {
+            let module_id = ModuleId::from_index(index);
+            module_store.publish_success(
+                module_id,
+                CompiledModuleArtifact {
+                    module,
+                    interface: test_public_interface(index),
+                },
+            )?;
+        }
+        let project = CompiledGraphBoundary {
+            structure: graph,
+            modules: module_store,
+            generated: BoundaryGeneratedFunctionStore::default(),
+            diagnosed: Vec::new(),
+            blocked: Vec::new(),
+        };
+        Self::from_successful_boundaries(project, Vec::new())
+    }
+
+    fn from_successful_boundaries(
+        project: CompiledGraphBoundary,
+        source_packages: Vec<CompiledSourcePackage>,
     ) -> Result<Self, CompilerError> {
-        let base_module_count = artifacts.len();
-        let module_at = |index: usize| -> &Module {
-            if index < base_module_count {
-                &artifacts[index].module
-            } else {
-                &generated_sidecars[index - base_module_count].module
-            }
+        ensure_success_only(&project)?;
+        project.modules.ensure_all_successful()?;
+        for package in &source_packages {
+            ensure_success_only(&package.boundary)?;
+            package.boundary.modules.ensure_all_successful()?;
+        }
+
+        let module_views = compilation_module_views(&project, &source_packages);
+        let module_at = |module_ref: CompiledModuleRef| -> &Module {
+            boundary_module_at(&project, &source_packages, module_ref)
         };
         let mut function_owner_by_origin = FxHashMap::default();
         let mut function_owner_by_private_identity = FxHashMap::default();
         let mut function_owner_by_generated = FxHashMap::default();
-        for (module_index, module) in artifacts
-            .iter()
-            .map(|artifact| &artifact.module)
-            .enumerate()
-            .chain(
-                generated_sidecars
-                    .iter()
-                    .enumerate()
-                    .map(|(index, sidecar)| (base_module_count + index, &sidecar.module)),
-            )
-        {
+        for (module_ref, module) in module_views {
             for (origin, function_id) in &module.executable.hir.function_ids_by_origin {
                 if function_owner_by_origin
-                    .insert(origin.clone(), (module_index, *function_id))
+                    .insert(origin.clone(), (module_ref, *function_id))
                     .is_some()
                 {
                     return Err(CompilerError::compiler_error(format!(
@@ -423,7 +391,7 @@ impl ProjectCompilation {
             }
             for (origin, function_id) in &module.executable.hir.function_ids_by_private_origin {
                 if function_owner_by_private_identity
-                    .insert(origin.clone(), (module_index, *function_id))
+                    .insert(origin.clone(), (module_ref, *function_id))
                     .is_some()
                 {
                     return Err(CompilerError::compiler_error(format!(
@@ -433,7 +401,7 @@ impl ProjectCompilation {
             }
             for (identity, function_id) in &module.executable.hir.function_ids_by_generated {
                 if function_owner_by_generated
-                    .insert(identity.clone(), (module_index, *function_id))
+                    .insert(identity.clone(), (module_ref, *function_id))
                     .is_some()
                 {
                     return Err(CompilerError::compiler_error(format!(
@@ -457,7 +425,7 @@ impl ProjectCompilation {
             .map(|(identity, owner)| (identity.clone(), *owner))
             .collect::<Vec<_>>();
         sorted_private_functions
-            .sort_by_key(|(_, (module_index, function_id))| (*module_index, function_id.0));
+            .sort_by_key(|(_, (module_ref, function_id))| (*module_ref, function_id.0));
         let module_private_function_names = Arc::new(
             sorted_private_functions
                 .into_iter()
@@ -470,7 +438,7 @@ impl ProjectCompilation {
             .map(|(identity, owner)| (identity.clone(), *owner))
             .collect::<Vec<_>>();
         sorted_generated_functions
-            .sort_by_key(|(_, (module_index, function_id))| (*module_index, function_id.0));
+            .sort_by_key(|(_, (module_ref, function_id))| (*module_ref, function_id.0));
         let generated_function_names = Arc::new(
             sorted_generated_functions
                 .into_iter()
@@ -480,15 +448,20 @@ impl ProjectCompilation {
         );
         let mut entries = Vec::new();
 
-        // Entry selection is project-boundary-only and uses boundary + root-role facts. Source
-        // package modules retain their own dormant root activity but never become project entries,
-        // so their metadata is left immutable rather than cleared during assembly.
-        for (module_index, module) in artifacts
-            .iter()
-            .enumerate()
-            .take(project_module_count)
-            .map(|(index, artifact)| (index, &artifact.module))
-        {
+        // Entry selection resolves the project graph's normal-entry identities through the
+        // retained dense mapping. Source-package graphs are never queried as entry sources, and
+        // their root activity stays immutable.
+        for module_id in project.structure.entry_modules() {
+            let module = &project
+                .modules
+                .artifact(*module_id)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Project graph normal entry ModuleId {} has no successful artefact",
+                        module_id.index()
+                    ))
+                })?
+                .module;
             if !module.metadata.root_activity.has_html_artifact_activity() {
                 continue;
             }
@@ -497,28 +470,30 @@ impl ProjectCompilation {
                 .executable
                 .hir
                 .require_start_function("entry assembly")?;
-            let mut roots_by_module = FxHashMap::<usize, FxHashSet<FunctionId>>::default();
+            let root_module_ref = CompiledModuleRef::Project(*module_id);
+            let mut roots_by_module =
+                FxHashMap::<CompiledModuleRef, FxHashSet<FunctionId>>::default();
             roots_by_module
-                .entry(module_index)
+                .entry(root_module_ref)
                 .or_default()
                 .insert(start_function);
-            let mut pending_modules = VecDeque::from([module_index]);
+            let mut pending_modules = VecDeque::from([root_module_ref]);
             let mut reachability_by_module = FxHashMap::default();
 
-            while let Some(reachable_module_index) = pending_modules.pop_front() {
-                let mut roots = roots_by_module[&reachable_module_index]
+            while let Some(reachable_module_ref) = pending_modules.pop_front() {
+                let mut roots = roots_by_module[&reachable_module_ref]
                     .iter()
                     .copied()
                     .collect::<Vec<_>>();
                 roots.sort_by_key(|function_id| function_id.0);
-                let reachable_module = module_at(reachable_module_index);
+                let reachable_module = module_at(reachable_module_ref);
                 let reachability = collect_reachability_from_function_link_facts(
                     &reachable_module.link_facts.functions,
                     &roots,
                 )?;
 
                 for origin in &reachability.reachable_cross_module_functions {
-                    let Some((provider_module_index, provider_function_id)) =
+                    let Some((provider_module_ref, provider_function_id)) =
                         function_owner_by_origin.get(origin).copied()
                     else {
                         return Err(CompilerError::compiler_error(format!(
@@ -526,16 +501,16 @@ impl ProjectCompilation {
                         )));
                     };
                     if roots_by_module
-                        .entry(provider_module_index)
+                        .entry(provider_module_ref)
                         .or_default()
                         .insert(provider_function_id)
                     {
-                        pending_modules.push_back(provider_module_index);
+                        pending_modules.push_back(provider_module_ref);
                     }
                 }
 
                 for identity in &reachability.reachable_module_private_functions {
-                    let Some((provider_module_index, provider_function_id)) =
+                    let Some((provider_module_ref, provider_function_id)) =
                         function_owner_by_private_identity.get(identity).copied()
                     else {
                         return Err(CompilerError::compiler_error(format!(
@@ -543,16 +518,16 @@ impl ProjectCompilation {
                         )));
                     };
                     if roots_by_module
-                        .entry(provider_module_index)
+                        .entry(provider_module_ref)
                         .or_default()
                         .insert(provider_function_id)
                     {
-                        pending_modules.push_back(provider_module_index);
+                        pending_modules.push_back(provider_module_ref);
                     }
                 }
 
                 for identity in &reachability.reachable_generated_functions {
-                    let Some((generated_module_index, generated_function_id)) =
+                    let Some((generated_module_ref, generated_function_id)) =
                         function_owner_by_generated.get(identity).copied()
                     else {
                         return Err(CompilerError::compiler_error(format!(
@@ -560,39 +535,40 @@ impl ProjectCompilation {
                         )));
                     };
                     if roots_by_module
-                        .entry(generated_module_index)
+                        .entry(generated_module_ref)
                         .or_default()
                         .insert(generated_function_id)
                     {
-                        pending_modules.push_back(generated_module_index);
+                        pending_modules.push_back(generated_module_ref);
                     }
                 }
 
-                reachability_by_module.insert(reachable_module_index, reachability);
+                reachability_by_module.insert(reachable_module_ref, reachability);
             }
 
-            let reachability = reachability_by_module
-                .remove(&module_index)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Entry assembly lost its root module reachability",
-                    )
-                })?;
+            let reachability =
+                reachability_by_module
+                    .remove(&root_module_ref)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Entry assembly lost its root module reachability",
+                        )
+                    })?;
             let mut linked_modules = reachability_by_module
                 .into_iter()
-                .map(|(module_index, reachability)| LinkedModuleAssembly {
-                    module_index,
+                .map(|(module_ref, reachability)| LinkedModuleAssembly {
+                    module_ref,
                     reachability,
                 })
                 .collect::<Vec<_>>();
-            linked_modules.sort_by_key(|linked| linked.module_index);
+            linked_modules.sort_by_key(|linked| linked.module_ref);
 
             let mut external_imports = Vec::new();
             for (reachable_module, module_reachability) in std::iter::once((module, &reachability))
                 .chain(
                     linked_modules
                         .iter()
-                        .map(|linked| (module_at(linked.module_index), &linked.reachability)),
+                        .map(|linked| (module_at(linked.module_ref), &linked.reachability)),
                 )
             {
                 let reachable_package_ids = collect_reachable_external_package_ids(
@@ -615,7 +591,7 @@ impl ProjectCompilation {
             }
 
             entries.push(EntryAssembly {
-                module_index,
+                module_ref: root_module_ref,
                 reachability,
                 external_imports,
                 linked_modules,
@@ -623,8 +599,8 @@ impl ProjectCompilation {
         }
 
         Ok(Self {
-            base_artifacts: artifacts,
-            generated_sidecars,
+            project,
+            source_packages,
             entries,
             source_function_names,
             module_private_function_names,
@@ -632,26 +608,26 @@ impl ProjectCompilation {
         })
     }
 
-    /// Iterate every base module in deterministic order (project boundary first, then source
-    /// packages).
+    /// Iterate every successful module view in deterministic order.
     ///
-    /// Builders read only the executable/link/metadata lanes they already consume; the owned
-    /// `CompiledModuleArtifact` values retain their immutable interface and boundary identity.
-    pub(crate) fn modules(&self) -> impl ExactSizeIterator<Item = &Module> + '_ {
-        self.base_artifacts.iter().map(|artifact| &artifact.module)
+    /// Project modules (base artefacts then generated sidecars) come first, then each source
+    /// package boundary in package order. Builders read only the executable/link/metadata lanes;
+    /// the retained boundaries own the immutable interfaces and dense identity mapping.
+    pub(crate) fn modules(&self) -> impl Iterator<Item = &Module> + '_ {
+        self.project.successful_module_views().chain(
+            self.source_packages
+                .iter()
+                .flat_map(|package| package.boundary.successful_module_views()),
+        )
     }
 
-    /// Number of base canonical modules (project plus source-package boundaries).
+    /// Number of successful module views (base artefacts plus generated sidecars).
     pub(crate) fn module_count(&self) -> usize {
-        self.base_artifacts.len()
+        self.modules().count()
     }
 
-    fn module_at(&self, index: usize) -> &Module {
-        if index < self.base_artifacts.len() {
-            &self.base_artifacts[index].module
-        } else {
-            &self.generated_sidecars[index - self.base_artifacts.len()].module
-        }
+    fn module_at(&self, module_ref: CompiledModuleRef) -> &Module {
+        boundary_module_at(&self.project, &self.source_packages, module_ref)
     }
 
     /// Resolve every entry through this compilation's own module store.
@@ -662,9 +638,7 @@ impl ProjectCompilation {
         let mut entries = Vec::with_capacity(self.entries.len());
 
         for entry in &self.entries {
-            // Construction validates and owns both vectors together. No detached entry handle is
-            // exposed, so this dense index cannot be resolved against another compilation.
-            let module = &self.base_artifacts[entry.module_index].module;
+            let module = self.module_at(entry.module_ref);
             entries.push(ProjectEntry {
                 module,
                 reachability: &entry.reachability,
@@ -673,7 +647,7 @@ impl ProjectCompilation {
                     .linked_modules
                     .iter()
                     .map(|linked| ProjectLinkedModule {
-                        module: self.module_at(linked.module_index),
+                        module: self.module_at(linked.module_ref),
                         reachability: &linked.reachability,
                     })
                     .collect(),
@@ -707,19 +681,81 @@ fn collect_reachable_external_package_ids(
     Ok(package_ids)
 }
 
+/// Reject a boundary that contains diagnosed or blocked modules.
+///
+/// `ProjectCompilation` is success-only by construction: `build` and `dev` must never assemble a
+/// linkable payload from a partial graph.
+fn ensure_success_only(boundary: &CompiledGraphBoundary) -> Result<(), CompilerError> {
+    if let Some(diagnosed) = boundary.diagnosed.first() {
+        return Err(CompilerError::compiler_error(format!(
+            "Project compilation received a boundary with diagnosed ModuleId {}",
+            diagnosed.module_id.index()
+        )));
+    }
+    if let Some(blocked) = boundary.blocked.first() {
+        return Err(CompilerError::compiler_error(format!(
+            "Project compilation received a boundary with blocked ModuleId {}",
+            blocked.module_id.index()
+        )));
+    }
+    Ok(())
+}
+
+/// Resolve one dense module reference through the owning boundary's retained store.
+///
+/// Construction validates every reference, so a missing artefact or sidecar here is a proven
+/// internal invariant rather than a user-facing failure.
+fn boundary_module_at<'a>(
+    project: &'a CompiledGraphBoundary,
+    source_packages: &'a [CompiledSourcePackage],
+    module_ref: CompiledModuleRef,
+) -> &'a Module {
+    match module_ref {
+        CompiledModuleRef::Project(module_id) => {
+            &project
+                .modules
+                .artifact(module_id)
+                .ok()
+                .flatten()
+                .expect("project entry module ref was validated during construction")
+                .module
+        }
+        CompiledModuleRef::SourcePackage {
+            package_index,
+            module_id,
+        } => {
+            &source_packages[package_index]
+                .boundary
+                .modules
+                .artifact(module_id)
+                .ok()
+                .flatten()
+                .expect("source-package module ref was validated during construction")
+                .module
+        }
+        CompiledModuleRef::GeneratedProject(sidecar_index) => {
+            &project.generated.sidecars()[sidecar_index].module
+        }
+        CompiledModuleRef::GeneratedSourcePackage {
+            package_index,
+            sidecar_index,
+        } => &source_packages[package_index].boundary.generated.sidecars()[sidecar_index].module,
+    }
+}
+
 /// Build-owned activation record for one compiled module's dormant root work.
 ///
-/// The dense index is private to the owning `ProjectCompilation`; backends receive only the
+/// The dense module ref is private to the owning `ProjectCompilation`; backends receive only the
 /// owner-bound entry view returned by `ProjectCompilation::entries`.
 pub(crate) struct EntryAssembly {
-    module_index: usize,
+    module_ref: CompiledModuleRef,
     reachability: HirReachability,
     external_imports: Vec<ModuleExternalImport>,
     linked_modules: Vec<LinkedModuleAssembly>,
 }
 
 pub(crate) struct LinkedModuleAssembly {
-    module_index: usize,
+    module_ref: CompiledModuleRef,
     reachability: HirReachability,
 }
 
@@ -1001,6 +1037,10 @@ pub fn build_project(
             return Err(messages);
         }
     };
+    if frontend_compilation.has_diagnosed_or_blocked() {
+        log_stage_timing("build_project.total", total_start);
+        return Err(frontend_compilation.into_render_messages(&mut string_table));
+    }
     let project_compilation = ProjectCompilation::from_frontend(frontend_compilation)
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     let mut warnings: Vec<CompilerDiagnostic> = project_compilation
@@ -1177,27 +1217,17 @@ fn collect_module_warnings(module: &Module) -> Vec<CompilerDiagnostic> {
     module.metadata.warnings.clone()
 }
 
-/// Collect warnings across an iterator of module views.
-pub fn collect_frontend_warnings<'a>(
-    modules: impl IntoIterator<Item = &'a Module>,
-) -> Vec<CompilerDiagnostic> {
-    modules
-        .into_iter()
-        .flat_map(collect_module_warnings)
-        .collect()
-}
-
-/// Build an empty immutable `PublicSemanticInterface` for test-constructed artefacts.
+/// Build an immutable `PublicSemanticInterface` for one test-constructed artefact.
 ///
-/// Test helpers that wrap a bare `Module` into a `CompiledModuleArtifact` need a placeholder
-/// interface; production publication always supplies the completed interface. Keeping this in a
-/// helper avoids constructing every lane at each test site.
+/// Test helpers wrap a bare `Module` into a real `CompiledModuleArtifact` inside a real graph
+/// boundary; production publication always supplies the completed interface. The origin path is
+/// unique per module so entry assembly and interface lookup behave like real artefacts.
 #[cfg(test)]
-fn test_empty_public_interface() -> PublicSemanticInterface {
+fn test_public_interface(module_index: usize) -> PublicSemanticInterface {
     PublicSemanticInterface {
         module_origin: crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
             crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local("test"),
-            String::new(),
+            format!("module_{module_index}"),
             crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         ),
         export_bindings: Vec::new(),
