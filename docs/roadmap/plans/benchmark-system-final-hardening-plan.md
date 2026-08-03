@@ -17,11 +17,17 @@ This is an xtask hardening plan. It does not redesign compiler semantics, Stage 
 
 ```text
 WORK_ID: benchmark-system-final-hardening
-BASE_REVISION: 442a9ab7d34b5e2c44420d9a64327671950b5bc4
-STATUS: ready for implementation
+WORK_SOURCE: docs/roadmap/plans/benchmark-system-final-hardening-plan.md
+BASE_REVISION: 6750c9a57238203ba83b2a31d74d6a19ecf36d70
+BRANCH: codex/benchmark-system-final-hardening (worktree /Users/aneirinjames/projects/beanstalk/moth-benchmark-final-hardening)
+STATUS: active
 ACCEPTED: 32 workloads, 58 typed cases, shared preflight/execution, clean-only benchmark expectations, protocol-aware normal/profile history, isolated file-entry builds, bounded bench-ci, production output-plan integration
-OPEN_CORRECTIONS: dirty recorded baselines, profile snapshot/fingerprint ordering and optional current identity, infallible Drop-only directory cleanup, duplicate CLI/frontend orchestration, stringly benchmark groups, stale documentation
-NEXT_ACTION: complete Phase 0, then Phase 1 only and stop for review
+COMPLETED: Phase 1 clean committed recording; Phase 2 centralised run preparation and identity; Phase 3 profile hardening (current identity and revision non-optional, serde writers for run-manifest/detailed-observations/hotspots/history with no `{}` fallbacks, finite-value rejection before writing, history format 4 and run-manifest format 4, PROFILE_PROTOCOL_VERSION 2, explicit legacy v1-v3 adapters via StoredProfileHistoryRecord, dirty-profile artifacts-without-history policy with exact message, workflow moved to profile/run.rs with structural mod.rs, json.rs deleted)
+OPEN_CORRECTIONS: infallible Drop-only directory cleanup, duplicate CLI/frontend orchestration, stringly benchmark groups, stale documentation
+NEXT_ACTION: implement Phase 4 (explicit fallible benchmark output finalisation), then run the Phase 4 audit and checkpoint commit
+VALIDATION: Phase 0 baseline green; Phase 1 green (551 xtask tests, bench-validate, full just validate); Phase 2 green (558 xtask tests, bench-validate, bench-ci, full just validate); Phase 3 green: fmt check, 564 xtask tests (256 profile, 15 repository), bench-validate 58/58, just profile-build, full just validate (clippy native/linux/windows, 3945 workspace + 564 xtask tests, 1816 integration cases, docs check, bench-ci)
+AUDITS: Phase 1 and Phase 2 reviewed by Coordinator against plan checklists with no open findings (launcher auditor route cannot return JSON handoffs in this environment); Phase 3 reviewed by Coordinator against plan Phase 3 checklist with no open findings
+NOTES: Samply raw-index profile validation omitted with exact environmental evidence: `samply record` fails for any process here with `Encountered an error during profiling: Unknown(1100)` (verified on /bin/echo and the profile case); profile-build succeeds and the workflow fails closed with artifacts left for diagnosis and no history append
 ```
 
 Keep this capsule concise as work advances. Git history is the implementation record.

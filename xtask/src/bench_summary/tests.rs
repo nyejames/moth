@@ -1071,6 +1071,62 @@ Avg: all ~80ms, ungrouped ~80ms
 }
 
 #[test]
+fn test_update_monthly_summary_rejects_dirty_run() {
+    let cases = vec![benchmark_case("check_docs", 80.0)];
+    let mut run = benchmark_run(cases);
+    run.git_revision.dirty = Some(true);
+
+    let comparison = BenchmarkComparison::new(&run.cases, None);
+    let error = update_monthly_summary(&run, &comparison)
+        .expect_err("a dirty run must never update the tracked summary");
+    assert!(error.contains("clean and committed"));
+}
+
+#[test]
+fn test_update_monthly_summary_rejects_unknown_revision_run() {
+    let cases = vec![benchmark_case("check_docs", 80.0)];
+    let mut run = benchmark_run(cases);
+    run.git_revision.commit = None;
+
+    let comparison = BenchmarkComparison::new(&run.cases, None);
+    let error = update_monthly_summary(&run, &comparison)
+        .expect_err("an unknown-revision run must never update the tracked summary");
+    assert!(error.contains("clean and committed"));
+}
+
+#[test]
+fn test_dirty_record_cannot_enter_monthly_summary_selection() {
+    let mut dirty = local_record(80.0, 9.0);
+    dirty.git_dirty = Some(true);
+    dirty.month_key = "2026-05".to_string();
+
+    let mut unknown = local_record(90.0, 9.0);
+    unknown.commit = None;
+    unknown.month_key = "2026-05".to_string();
+
+    let clean = local_record(70.0, 9.0);
+
+    assert!(!comparable_summary_record(
+        &dirty,
+        "B7F2A9",
+        "end_to_end_cli",
+        None
+    ));
+    assert!(!comparable_summary_record(
+        &unknown,
+        "B7F2A9",
+        "end_to_end_cli",
+        None
+    ));
+    assert!(comparable_summary_record(
+        &clean,
+        "B7F2A9",
+        "end_to_end_cli",
+        None
+    ));
+}
+
+#[test]
 fn test_update_monthly_summary_fixed_thread_run_is_noop() {
     // A fixed-thread run must no-op before any summary read or write so the
     // tracked summary stays a default-thread signal. The early return means

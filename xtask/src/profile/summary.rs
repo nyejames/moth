@@ -176,7 +176,7 @@ pub(crate) fn generate_root_hotspots_json(
     samply_rate_hz: Option<f64>,
 ) -> Result<(), String> {
     let root = build_root_hotspots(cases, run_id, commit, filter, samply_rate_hz);
-    let json = format_root_hotspots_json(&root);
+    let json = format_root_hotspots_json(&root)?;
 
     let path = run_paths.root.join("profile-hotspots.json");
     fs::write(&path, json).map_err(|e| {
@@ -354,8 +354,9 @@ fn build_bucket_summary(
     entries
 }
 
-/// Format root hotspots as serde_json.
-fn format_root_hotspots_json(root: &RootProfileHotspots) -> String {
+/// Format root hotspots through serde_json, returning `Result` so a
+/// serialization failure can never fall back to an invalid payload.
+fn format_root_hotspots_json(root: &RootProfileHotspots) -> Result<String, String> {
     let cases_json: Vec<serde_json::Value> = root
         .cases
         .iter()
@@ -435,7 +436,8 @@ fn format_root_hotspots_json(root: &RootProfileHotspots) -> String {
         "cases": cases_json,
     });
 
-    serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string_pretty(&output)
+        .map_err(|error| format!("Failed to serialize profile-hotspots.json: {error}"))
 }
 
 // ---------------------------------------------------------------------------

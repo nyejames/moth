@@ -1,12 +1,16 @@
-use super::{profile_artifacts_root, select_profile_cases};
+use super::run::{profile_artifacts_root, profile_history_allowed, select_profile_cases};
 use crate::benchmark_execution::BenchmarkExecutionContext;
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
     BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload, CliBenchmarkCommand,
     FrontendBenchmarkProfile,
 };
+use crate::benchmark_repository::BenchmarkRepositorySnapshot;
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[test]
 fn profile_selection_rejects_frontend_cases_clearly() {
@@ -41,6 +45,62 @@ fn profile_artifacts_root_is_anchored_to_repository_root() {
         profiles_root,
         repository.path().join("benchmarks/local-data/profiles")
     );
+}
+
+fn init_git_repo() -> tempfile::TempDir {
+    let directory = tempfile::tempdir().expect("temporary repository should exist");
+
+    run_git_in(directory.path(), &["init"]);
+    run_git_in(
+        directory.path(),
+        &["config", "user.email", "test@example.com"],
+    );
+    run_git_in(directory.path(), &["config", "user.name", "Test"]);
+
+    directory
+}
+
+fn run_git_in(root: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .expect("git command should succeed");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn write_file(root: &Path, path: &str, contents: &str) {
+    let full_path = root.join(path);
+    if let Some(parent) = full_path.parent() {
+        fs::create_dir_all(parent).expect("parent should be creatable");
+    }
+    fs::write(full_path, contents).expect("file should be writable");
+}
+
+fn commit_all(root: &Path, message: &str) {
+    run_git_in(root, &["add", "-A"]);
+    run_git_in(root, &["commit", "-m", message]);
+}
+
+#[test]
+fn clean_profile_run_may_append_history_but_dirty_run_may_not() {
+    let repo = init_git_repo();
+    write_file(repo.path(), "fixture.moth", "value = 1\n");
+    commit_all(repo.path(), "initial");
+
+    let clean_snapshot =
+        BenchmarkRepositorySnapshot::capture(repo.path()).expect("snapshot should capture");
+    assert!(profile_history_allowed(&clean_snapshot));
+
+    write_file(repo.path(), "fixture.moth", "value = 2\n");
+    let dirty_snapshot =
+        BenchmarkRepositorySnapshot::capture(repo.path()).expect("snapshot should capture");
+    assert!(!profile_history_allowed(&dirty_snapshot));
 }
 
 fn manifest() -> BenchmarkManifest {

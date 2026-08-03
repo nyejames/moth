@@ -23,7 +23,9 @@
 
 use crate::bench_types::BenchmarkMetric;
 
-use super::history::{HistoryHotFunction, PROFILE_PROTOCOL_VERSION, ProfileHistoryRecord};
+use super::history::{
+    HistoryHotFunction, PROFILE_PROTOCOL_VERSION, ProfileHistoryRecord, StoredProfileHistoryRecord,
+};
 
 // ---------------------------------------------------------------------------
 //  Drift thresholds
@@ -153,18 +155,25 @@ pub struct CounterDrift {
 /// with the same profiling configuration. This function locates that record
 /// so `compute_drift()` can compare per-case data.
 pub fn find_comparable_previous<'a>(
-    records: &'a [ProfileHistoryRecord],
+    records: &'a [StoredProfileHistoryRecord],
     system_uuid: &str,
     filter_mode: &str,
     sample_rate_hz: Option<f64>,
     current_run_id: &str,
 ) -> Option<&'a ProfileHistoryRecord> {
-    records.iter().rfind(|record| {
-        record.run_id != current_run_id
+    records.iter().rev().find_map(|stored| {
+        let StoredProfileHistoryRecord::Current(record) = stored else {
+            // Legacy records are readable but never become drift baselines.
+            return None;
+        };
+
+        (record.run_id != current_run_id
+            && record.git_revision.is_clean_committed()
             && record.system_uuid == system_uuid
             && record.filter_mode == filter_mode
             && record.sample_rate_hz == sample_rate_hz
-            && record.profile_protocol_version == PROFILE_PROTOCOL_VERSION
+            && record.profile_protocol_version == PROFILE_PROTOCOL_VERSION)
+            .then_some(record)
     })
 }
 
@@ -203,20 +212,17 @@ pub fn compute_drift(
             continue;
         };
 
-        // Compare identity to classify the case.
-        match (&current.identity, &previous_case.identity) {
-            (Some(current_id), Some(previous_id)) => {
-                if current_id.source_fingerprint != previous_id.source_fingerprint {
-                    workload_changed_case_ids.push(current.case_id.clone());
-                    continue;
-                }
-                if current_id.measurement_fingerprint != previous_id.measurement_fingerprint {
-                    measurement_changed_case_ids.push(current.case_id.clone());
-                    continue;
-                }
-            }
-            // Legacy records without identity are not comparable.
-            _ => continue,
+        // Compare identity to classify the case. Current records always carry
+        // a typed identity; legacy records never reach this comparison.
+        if current.identity.source_fingerprint != previous_case.identity.source_fingerprint {
+            workload_changed_case_ids.push(current.case_id.clone());
+            continue;
+        }
+        if current.identity.measurement_fingerprint
+            != previous_case.identity.measurement_fingerprint
+        {
+            measurement_changed_case_ids.push(current.case_id.clone());
+            continue;
         }
 
         let current_wall = current_wall_times
@@ -378,7 +384,7 @@ pub struct DriftCaseInput {
     /// Authored case ID from the typed benchmark manifest.
     pub case_id: String,
     /// Typed measurement identity from the current run.
-    pub identity: Option<crate::bench_types::BenchmarkMeasurementIdentity>,
+    pub identity: crate::bench_types::BenchmarkMeasurementIdentity,
     /// The command executed (descriptive fact, not comparison authority).
     #[expect(dead_code)]
     pub command: String,

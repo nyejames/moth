@@ -24,20 +24,17 @@ use crate::bench_system::{SystemIdentityMode, load_or_create_system};
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
-    BenchmarkChangeKind, BenchmarkComparison, BenchmarkMeasurementIdentity, BenchmarkRecording,
-    BenchmarkRun, BenchmarkRunPolicy, BenchmarkSelection, BenchmarkSuiteKind, BenchmarkThresholds,
-    GitRevision, SuiteStats, calculate_group_stats, calculate_mean, calculate_median,
-    calculate_stage_movement, calculate_stddev, format_stage_movement_line,
-    format_top_current_stages,
+    BenchmarkChangeKind, BenchmarkComparison, BenchmarkRecording, BenchmarkRun, BenchmarkRunPolicy,
+    BenchmarkSelection, BenchmarkSuiteKind, BenchmarkThresholds, GitRevision, SuiteStats,
+    calculate_group_stats, calculate_mean, calculate_median, calculate_stage_movement,
+    calculate_stddev, format_stage_movement_line, format_top_current_stages,
 };
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, average_case_observations, execute_case, run_preflighted_suite,
 };
-use crate::benchmark_fingerprint::{BenchmarkFingerprints, compute_benchmark_fingerprints};
-use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, load_benchmark_manifest};
-use crate::benchmark_repository::{
-    BenchmarkRepositorySnapshot, verify_after_operation, verify_before_persistence,
-};
+use crate::benchmark_manifest::BenchmarkCase;
+use crate::benchmark_repository::verify_after_operation;
+use crate::benchmark_run::PreparedBenchmarkRun;
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
 use std::num::NonZeroUsize;
@@ -66,25 +63,24 @@ const OLD_BENCHMARKS_DIR: &str = "benchmarks/old-benchmarks";
 ///
 /// Ok(()) on success, or an error message on failure.
 pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
-    let manifest = load_benchmark_manifest().map_err(|error| error.to_string())?;
+    let prepared = PreparedBenchmarkRun::load()?;
 
-    // Capture repository state before any compiler construction or preflight.
-    let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
-        .map_err(|error| error.to_string())?;
-
-    let fingerprints =
-        compute_benchmark_fingerprints(&manifest).map_err(|error| error.to_string())?;
+    // Recording requires an exactly clean, committed repository before any
+    // fingerprint traversal, compiler construction or history read/write.
+    prepared.require_recording_eligible(policy.recording())?;
 
     println!("Building release compiler...");
-    let compiler = build_release_compiler_with_timers(&manifest.repository_root)?;
+    let compiler = build_release_compiler_with_timers(&prepared.manifest.repository_root)?;
     let thread_count = effective_thread_count()?;
-    let cases: Vec<BenchmarkCase> = manifest
+    let cases: Vec<BenchmarkCase> = prepared
+        .manifest
         .cli_cases()
         .filter(|case| policy.selects_case(case.quick))
         .cloned()
         .collect();
-    let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
-    let context = BenchmarkExecutionContext::new(&manifest, compiler.as_path(), &workspace);
+    let workspace = BenchmarkExecutionWorkspace::create(&prepared.manifest.repository_root)?;
+    let context =
+        BenchmarkExecutionContext::new(&prepared.manifest, compiler.as_path(), &workspace);
 
     println!(
         "Running {} benchmark cases: 1 shared preflight + {} measured",
@@ -92,24 +88,18 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
         policy.measured_iterations()
     );
 
-    let git_revision = snapshot.git_revision();
+    let git_revision = prepared.snapshot.git_revision();
 
     let result = run_preflighted_suite(
         &context,
         &cases,
         || {
             println!("Shared CLI preflight passed; starting measurements.");
-            run_benchmark_cases(
-                &context,
-                &manifest,
-                &fingerprints,
-                &cases,
-                policy.measured_iterations(),
-            )
+            run_benchmark_cases(&context, &prepared, &cases, policy.measured_iterations())
         },
         |case_results| {
             if policy.recording() == BenchmarkRecording::Record {
-                verify_before_persistence(&snapshot, &manifest.repository_root)?;
+                prepared.verify_unchanged()?;
             }
             complete_benchmark_run(case_results, thread_count, policy, &git_revision)
         },
@@ -118,7 +108,11 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
     if policy.recording() == BenchmarkRecording::Record {
         result
     } else {
-        verify_after_operation(&snapshot, &manifest.repository_root, result)
+        verify_after_operation(
+            &prepared.snapshot,
+            &prepared.manifest.repository_root,
+            result,
+        )
     }
 }
 
@@ -271,8 +265,7 @@ fn present_benchmark_run(
 /// Run all benchmark cases, returning per-case results.
 pub(crate) fn run_benchmark_cases(
     context: &BenchmarkExecutionContext<'_>,
-    manifest: &BenchmarkManifest,
-    fingerprints: &BenchmarkFingerprints,
+    prepared: &PreparedBenchmarkRun,
     cases: &[BenchmarkCase],
     measured_iterations: NonZeroUsize,
 ) -> Result<Vec<BenchmarkCaseResult>, String> {
@@ -285,14 +278,7 @@ pub(crate) fn run_benchmark_cases(
 
         println!();
 
-        let result = build_case_result(
-            context,
-            manifest,
-            fingerprints,
-            case,
-            &durations,
-            &observations,
-        )?;
+        let result = build_case_result(context, prepared, case, &durations, &observations)?;
         case_results.push(result);
     }
 
@@ -330,8 +316,7 @@ fn run_case_measurements(
 /// Build a single `BenchmarkCaseResult` from durations and observations.
 fn build_case_result(
     context: &BenchmarkExecutionContext<'_>,
-    manifest: &BenchmarkManifest,
-    fingerprints: &BenchmarkFingerprints,
+    prepared: &PreparedBenchmarkRun,
     case: &BenchmarkCase,
     durations: &[f64],
     observations: &[BenchmarkCaseObservations],
@@ -341,27 +326,14 @@ fn build_case_result(
     let stddev = calculate_stddev(durations, mean);
     let observations = average_case_observations(context, case, observations)
         .map_err(|failure| format!("Measured observations failed:\n{failure}"))?;
-    let workload = manifest
-        .workload_for(case)
-        .ok_or_else(|| format!("Benchmark case '{}' has no workload.", case.id))?;
-    let source_fingerprint = fingerprints
-        .workloads
-        .get(case.workload_index)
-        .ok_or_else(|| format!("Benchmark case '{}' has no source fingerprint.", case.id))?;
-    let measurement_fingerprint = fingerprints.cases.get(case.case_index).ok_or_else(|| {
-        format!(
-            "Benchmark case '{}' has no measurement fingerprint.",
-            case.id
-        )
-    })?;
+    let identity = prepared
+        .fingerprints
+        .identity_for(&prepared.manifest, case)
+        .map_err(|error| error.to_string())?;
 
     Ok(BenchmarkCaseResult {
         case_id: case.id.clone(),
-        identity: Some(BenchmarkMeasurementIdentity {
-            workload_id: workload.id.clone(),
-            source_fingerprint: source_fingerprint.to_string(),
-            measurement_fingerprint: measurement_fingerprint.to_string(),
-        }),
+        identity: Some(identity),
         group_name: case.group_name.clone(),
         runner: case.runner.clone(),
         mean_ms: mean,

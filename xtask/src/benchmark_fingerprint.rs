@@ -9,7 +9,7 @@
 //! attached to that workload. This hash detects change deterministically; it
 //! does not provide cryptographic security.
 
-use crate::bench_types::BENCHMARK_PROTOCOL_VERSION;
+use crate::bench_types::{BENCHMARK_PROTOCOL_VERSION, BenchmarkMeasurementIdentity};
 use crate::benchmark_manifest::{
     BENCHMARK_MANIFEST_SCHEMA_VERSION, BenchmarkCase, BenchmarkExpectation,
     BenchmarkFingerprintMode, BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload,
@@ -46,6 +46,43 @@ pub(crate) struct BenchmarkFingerprints {
     pub(crate) cases: Vec<CaseMeasurementFingerprint>,
 }
 
+impl BenchmarkFingerprints {
+    /// Construct the checked measurement identity for one case.
+    ///
+    /// The single identity helper shared by CLI, frontend and profile paths.
+    /// It fails when the workload relationship or either fingerprint lane is
+    /// missing instead of silently degrading to an optional identity.
+    pub(crate) fn identity_for(
+        &self,
+        manifest: &BenchmarkManifest,
+        case: &BenchmarkCase,
+    ) -> Result<BenchmarkMeasurementIdentity, BenchmarkIdentityError> {
+        let workload = manifest.workload_for(case).ok_or_else(|| {
+            BenchmarkIdentityError::InvalidWorkloadRelationship {
+                case_id: case.id.clone(),
+            }
+        })?;
+        let source_fingerprint = self.workloads.get(case.workload_index).ok_or_else(|| {
+            BenchmarkIdentityError::MissingWorkloadFingerprint {
+                case_id: case.id.clone(),
+                workload_index: case.workload_index,
+            }
+        })?;
+        let measurement_fingerprint = self.cases.get(case.case_index).ok_or_else(|| {
+            BenchmarkIdentityError::MissingMeasurementFingerprint {
+                case_id: case.id.clone(),
+                case_index: case.case_index,
+            }
+        })?;
+
+        Ok(BenchmarkMeasurementIdentity {
+            workload_id: workload.id.clone(),
+            source_fingerprint: source_fingerprint.to_string(),
+            measurement_fingerprint: measurement_fingerprint.to_string(),
+        })
+    }
+}
+
 impl Display for SourceWorkloadFingerprint {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -65,6 +102,47 @@ impl Display for CaseMeasurementFingerprint {
         )
     }
 }
+
+/// Failures while constructing one checked measurement identity.
+#[derive(Debug)]
+pub(crate) enum BenchmarkIdentityError {
+    /// The case does not resolve to a declared workload in the manifest.
+    InvalidWorkloadRelationship { case_id: String },
+    /// The workload fingerprint lane is missing for the case's workload index.
+    MissingWorkloadFingerprint {
+        case_id: String,
+        workload_index: usize,
+    },
+    /// The measurement fingerprint lane is missing for the case's case index.
+    MissingMeasurementFingerprint { case_id: String, case_index: usize },
+}
+
+impl Display for BenchmarkIdentityError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidWorkloadRelationship { case_id } => write!(
+                formatter,
+                "benchmark case '{case_id}' has no valid workload relationship"
+            ),
+            Self::MissingWorkloadFingerprint {
+                case_id,
+                workload_index,
+            } => write!(
+                formatter,
+                "benchmark case '{case_id}' has no source fingerprint for workload index {workload_index}"
+            ),
+            Self::MissingMeasurementFingerprint {
+                case_id,
+                case_index,
+            } => write!(
+                formatter,
+                "benchmark case '{case_id}' has no measurement fingerprint for case index {case_index}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BenchmarkIdentityError {}
 
 /// Contextual failures while resolving and reading workload inputs.
 #[derive(Debug)]

@@ -90,6 +90,15 @@ pub fn update_monthly_summary(
     run: &BenchmarkRun,
     comparison: &BenchmarkComparison,
 ) -> Result<(), String> {
+    // Defense in depth: a non-clean run must never update the tracked summary,
+    // even if a caller bypasses the recording gate.
+    if !run.git_revision.is_clean_committed() {
+        return Err(
+            "refusing to update the tracked summary from a run that is not clean and committed"
+                .to_string(),
+        );
+    }
+
     // Fixed-thread runs stay local-only. The tracked summary is a default-thread
     // signal, so a fixed-thread run no-ops before any summary read or write.
     if run.thread_count.is_some() {
@@ -108,10 +117,12 @@ pub fn update_monthly_summary(
     let system_runs: Vec<&LocalRunRecord> = month_runs
         .iter()
         .filter(|r| {
-            r.public_system_id == run.system.public_system_id
-                && r.suite_kind == persisted_suite_kind
-                && r.thread_count.is_none()
-                && r.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
+            comparable_summary_record(
+                r,
+                &run.system.public_system_id,
+                persisted_suite_kind,
+                run.thread_count,
+            )
         })
         .collect();
 
@@ -162,6 +173,23 @@ pub fn update_monthly_summary(
     fs::write(&path, content).map_err(|e| format!("Failed to write summary file: {}", e))
 }
 
+/// Whether a stored run may feed the tracked monthly summary selection.
+///
+/// Dirty and unknown-revision records stay readable local history but can
+/// never become the initial or latest public summary record.
+fn comparable_summary_record(
+    record: &LocalRunRecord,
+    public_system_id: &str,
+    suite_kind: &str,
+    thread_count: Option<u32>,
+) -> bool {
+    record.is_clean_committed()
+        && record.public_system_id == public_system_id
+        && record.suite_kind == suite_kind
+        && record.thread_count == thread_count
+        && record.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
+}
+
 /// Build the file path for a given month key.
 fn summary_path(month_key: &str) -> PathBuf {
     PathBuf::from(SUMMARIES_DIR).join(format!("{}-Summary.md", month_key))
@@ -173,7 +201,9 @@ fn load_month_runs(month_key: &str) -> Result<Vec<LocalRunRecord>, String> {
     Ok(runs
         .into_iter()
         .filter(|r| {
-            r.month_key == month_key && r.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
+            r.is_clean_committed()
+                && r.month_key == month_key
+                && r.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
         })
         .collect())
 }

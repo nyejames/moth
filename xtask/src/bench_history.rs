@@ -192,6 +192,21 @@ fn validate_v7_record(record: &LocalRunRecord) -> Result<(), String> {
     Ok(())
 }
 
+impl LocalRunRecord {
+    /// Whether this record is clean-and-committed and therefore comparable.
+    ///
+    /// A run only enters comparison or tracked-summary selection when it was
+    /// recorded from an exactly clean, committed repository: a captured commit
+    /// with `git_dirty == Some(false)`. Dirty or unknown-revision records remain
+    /// readable for local inspection but are never treated as comparable.
+    pub(crate) fn is_clean_committed(&self) -> bool {
+        self.commit
+            .as_deref()
+            .is_some_and(|commit| !commit.is_empty())
+            && self.git_dirty == Some(false)
+    }
+}
+
 /// Find the latest directly comparable run.
 pub fn find_latest_matching_run<'a>(
     runs: &'a [LocalRunRecord],
@@ -202,7 +217,8 @@ pub fn find_latest_matching_run<'a>(
     let persisted_suite_kind = suite_kind.persisted_name();
 
     runs.iter().rfind(|run| {
-        run.system_uuid == system_uuid
+        run.is_clean_committed()
+            && run.system_uuid == system_uuid
             && run.suite_kind == persisted_suite_kind
             && run.thread_count == thread_count
             && run.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
@@ -212,6 +228,13 @@ pub fn find_latest_matching_run<'a>(
 /// Append one completed current-format run.
 pub fn append_local_run(path: &Path, record: &LocalRunRecord) -> Result<(), String> {
     validate_v7_record(record)?;
+
+    if !record.is_clean_committed() {
+        return Err(
+            "refusing to record a run that is not clean and committed: recorded runs require a captured commit and no dirty state"
+                .to_string(),
+        );
+    }
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {

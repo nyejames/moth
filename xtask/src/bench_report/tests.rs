@@ -18,6 +18,52 @@ fn report_handles_no_local_history() {
 }
 
 #[test]
+fn report_ignores_dirty_latest_run() {
+    let system = test_system("SYSTEM-A");
+    let mut dirty_latest = run_record(
+        "2026-05-02T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![case_record("check_core", 42.0, vec![], vec![])],
+    );
+    dirty_latest.git_dirty = Some(true);
+
+    let clean = run_record(
+        "2026-05-01T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![case_record("check_core", 40.0, vec![], vec![])],
+    );
+
+    let report = calculate_benchmark_report(&[clean, dirty_latest], Some(&system));
+    let suite = &report.suites[0];
+    assert_eq!(suite.latest_timestamp, "2026-05-01T12:00");
+}
+
+#[test]
+fn report_ignores_unknown_revision_latest_run() {
+    let system = test_system("SYSTEM-A");
+    let mut unknown_latest = run_record(
+        "2026-05-02T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![case_record("check_core", 42.0, vec![], vec![])],
+    );
+    unknown_latest.commit = None;
+
+    let clean = run_record(
+        "2026-05-01T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![case_record("check_core", 40.0, vec![], vec![])],
+    );
+
+    let report = calculate_benchmark_report(&[clean, unknown_latest], Some(&system));
+    let suite = &report.suites[0];
+    assert_eq!(suite.latest_timestamp, "2026-05-01T12:00");
+}
+
+#[test]
 fn report_names_missing_current_system_history() {
     let system = test_system("SYSTEM-A");
     let report = calculate_benchmark_report(&[], Some(&system));
@@ -368,21 +414,21 @@ fn metric(name: &str, value: f64) -> LocalMetricRecord {
 /// Build a minimal `ProfileHistoryRecord` for testing.
 fn test_profile_record(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord {
     ProfileHistoryRecord {
-        format_version: 1,
+        format_version: 4,
         profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: run_id.to_string(),
         timestamp: "June 18th - 10:30".to_string(),
-        git_revision: Some(GitRevision {
+        git_revision: GitRevision {
             commit: Some("abc1234".to_string()),
-            dirty: None,
-        }),
+            dirty: Some(false),
+        },
         system_uuid: system_uuid.to_string(),
         system_display: "Test System".to_string(),
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
             case_id: "check_foo_bst".to_string(),
-            identity: Some(test_identity()),
+            identity: test_identity(),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -423,21 +469,21 @@ fn test_identity() -> BenchmarkMeasurementIdentity {
 /// Build a second profile record with different hotspot data for drift testing.
 fn test_profile_record_shifted(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord {
     ProfileHistoryRecord {
-        format_version: 1,
+        format_version: 4,
         profile_protocol_version: crate::profile::history::PROFILE_PROTOCOL_VERSION,
         run_id: run_id.to_string(),
         timestamp: "June 18th - 11:00".to_string(),
-        git_revision: Some(GitRevision {
+        git_revision: GitRevision {
             commit: Some("def5678".to_string()),
-            dirty: None,
-        }),
+            dirty: Some(false),
+        },
         system_uuid: system_uuid.to_string(),
         system_display: "Test System".to_string(),
         filter_mode: "terse".to_string(),
         sample_rate_hz: None,
         cases: vec![HistoryCaseRecord {
             case_id: "check_foo_bst".to_string(),
-            identity: Some(test_identity()),
+            identity: test_identity(),
             group_name: "core".to_string(),
             command: "check".to_string(),
             args: vec!["foo.moth".to_string()],
@@ -485,6 +531,7 @@ fn report_includes_latest_profile_run_section() {
         top_drift_item: "none".to_string(),
         agent_summary_path:
             "benchmarks/local-data/profiles/2026-06-18T10-30-abc1234/agent-summary.md".to_string(),
+        legacy_run: None,
     });
     let rendered = format_benchmark_report(&report);
 
@@ -500,7 +547,10 @@ fn report_includes_latest_profile_run_section() {
 fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
     let previous = test_profile_record("2026-06-18T10-00-old0001", "TEST-UUID-001");
     let latest = test_profile_record_shifted("2026-06-18T11-00-new0002", "TEST-UUID-001");
-    let records = vec![previous.clone(), latest.clone()];
+    let records: Vec<StoredProfileHistoryRecord> = vec![
+        StoredProfileHistoryRecord::Current(previous.clone()),
+        StoredProfileHistoryRecord::Current(latest.clone()),
+    ];
 
     // Debug: verify find_comparable_previous finds the previous record.
     let found = crate::profile::drift::find_comparable_previous(
@@ -519,7 +569,7 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
     // Debug: verify compute_drift finds the function drift.
     let drift_cases = vec![crate::profile::drift::DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
-        identity: Some(test_identity()),
+        identity: test_identity(),
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
@@ -574,7 +624,7 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
 #[test]
 fn format_top_drift_item_returns_none_when_no_comparable_previous() {
     let latest = test_profile_record("2026-06-18T10-30-abc1234", "TEST-UUID-001");
-    let records = vec![latest.clone()];
+    let records = vec![StoredProfileHistoryRecord::Current(latest.clone())];
 
     let system = test_system("TEST-UUID-001");
     let top_drift = format_top_drift_item(&records, Some(&system), &latest);

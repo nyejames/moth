@@ -21,6 +21,18 @@
 //! - Agent summaries and enriched per-case summaries (see `summary.rs`)
 
 use crate::bench_types::BenchmarkCaseObservations;
+
+/// Reject non-finite profile-owned numeric data before serialization.
+///
+/// Profile JSON writers must fail on NaN or infinite values instead of
+/// emitting invalid machine-readable artifacts.
+pub(crate) fn require_finite(value: f64, subject: &str) -> Result<(), String> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(format!("{subject} must be finite, got {value}"))
+    }
+}
 use crate::benchmark_execution::{BenchmarkCaseExecution, BenchmarkExecutionContext, execute_case};
 use crate::benchmark_manifest::BenchmarkCase;
 

@@ -36,6 +36,26 @@ fn test_observation() -> ProfileObservation {
     }
 }
 
+/// Build a test case manifest entry with a fixed identity.
+fn test_case_manifest(case_id: &str, summary_path: Option<String>) -> ProfileCaseManifest {
+    ProfileCaseManifest {
+        case_id: case_id.to_string(),
+        identity: crate::bench_types::BenchmarkMeasurementIdentity {
+            workload_id: "workload".to_string(),
+            source_fingerprint: "source".to_string(),
+            measurement_fingerprint: "measurement".to_string(),
+        },
+        group_name: "core".to_string(),
+        command: "check".to_string(),
+        args: vec!["foo.moth".to_string()],
+        observation_wall_ms: 1.0,
+        profile_path: format!("cases/{case_id}/profile.json.gz"),
+        stdout_path: format!("cases/{case_id}/stdout.log"),
+        stderr_path: format!("cases/{case_id}/stderr.log"),
+        summary_path,
+    }
+}
+
 #[test]
 fn profile_case_paths_use_authored_case_id_verbatim() {
     let run = ProfileRunPaths {
@@ -89,16 +109,17 @@ fn filter_label_returns_correct_strings() {
     // Tested indirectly through formatting, but verify the mapping.
     let git_revision = GitRevision {
         commit: Some("abc1234".to_string()),
-        dirty: None,
+        dirty: Some(false),
     };
-    let manifest = format_run_manifest_json(
+    let manifest = RunManifestFile::new(
         "test-run",
         Some(&git_revision),
         ProfileFilterMode::Terse,
         None,
         &[],
     );
-    assert!(manifest.contains(r#""filter": "terse""#));
+    let json = serde_json::to_string_pretty(&manifest).expect("manifest should serialize");
+    assert!(json.contains(r#""filter": "terse""#));
 }
 
 #[test]
@@ -110,62 +131,56 @@ fn display_label_returns_correct_strings() {
 }
 
 #[test]
-fn format_run_manifest_json_with_empty_cases() {
+fn run_manifest_file_with_empty_cases() {
     let git_revision = GitRevision {
         commit: Some("abc1234".to_string()),
-        dirty: None,
+        dirty: Some(false),
     };
-    let json = format_run_manifest_json(
+    let manifest = RunManifestFile::new(
         "2026-06-18T10-30-abc1234",
         Some(&git_revision),
         ProfileFilterMode::Normal,
         Some(500.0),
         &[],
     );
+    let json = serde_json::to_string_pretty(&manifest).expect("manifest should serialize");
 
-    assert!(json.contains(r#""format_version": 3"#));
+    assert!(json.contains(r#""format_version": 4"#));
     assert!(json.contains(r#""run_id": "2026-06-18T10-30-abc1234""#));
     assert!(json.contains(r#""commit": "abc1234""#));
     assert!(json.contains(r#""filter": "normal""#));
     assert!(json.contains(r#""samply_rate_hz": 500"#));
-    // Empty cases array spans multiple lines in manual JSON.
-    assert!(json.contains(r#""cases": ["#));
 }
 
 #[test]
-fn format_run_manifest_json_with_null_commit() {
-    let json = format_run_manifest_json("test-run", None, ProfileFilterMode::Terse, None, &[]);
+fn run_manifest_file_with_null_revision_fields() {
+    let manifest = RunManifestFile::new("test-run", None, ProfileFilterMode::Terse, None, &[]);
+    let json = serde_json::to_string_pretty(&manifest).expect("manifest should serialize");
+
     assert!(json.contains(r#""commit": null"#));
     assert!(json.contains(r#""git_dirty": null"#));
     assert!(json.contains(r#""samply_rate_hz": null"#));
 }
 
 #[test]
-fn format_run_manifest_json_with_cases() {
-    let cases = vec![ProfileCaseManifest {
-        case_id: "check_foo_bst".to_string(),
-        identity: None,
-        group_name: "core".to_string(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
-        observation_wall_ms: 500.0,
-        profile_path: "cases/check_foo_bst/profile.json.gz".to_string(),
-        stdout_path: "cases/check_foo_bst/stdout.log".to_string(),
-        stderr_path: "cases/check_foo_bst/stderr.log".to_string(),
-        summary_path: Some("cases/check_foo_bst/summary.md".to_string()),
-    }];
+fn run_manifest_file_with_cases() {
+    let mut case = test_case_manifest("check_foo_bst", None);
+    case.observation_wall_ms = 500.0;
+    case.args = vec!["foo.moth".to_string()];
+    let cases = vec![case];
 
     let git_revision = GitRevision {
         commit: Some("abc".to_string()),
-        dirty: None,
+        dirty: Some(false),
     };
-    let json = format_run_manifest_json(
+    let manifest = RunManifestFile::new(
         "test-run",
         Some(&git_revision),
         ProfileFilterMode::Deep,
         None,
         &cases,
     );
+    let json = serde_json::to_string_pretty(&manifest).expect("manifest should serialize");
 
     assert!(json.contains(r#""case_id": "check_foo_bst""#));
     assert!(!json.contains(r#""case_name""#));
@@ -175,40 +190,14 @@ fn format_run_manifest_json_with_cases() {
 }
 
 #[test]
-fn format_run_manifest_json_preserves_identity_and_optional_summary_paths() {
-    let cases = vec![
-        ProfileCaseManifest {
-            case_id: "with_identity".to_string(),
-            identity: Some(crate::bench_types::BenchmarkMeasurementIdentity {
-                workload_id: "workload".to_string(),
-                source_fingerprint: "source".to_string(),
-                measurement_fingerprint: "measurement".to_string(),
-            }),
-            group_name: "core".to_string(),
-            command: "check".to_string(),
-            args: Vec::new(),
-            observation_wall_ms: 1.0,
-            profile_path: "cases/with_identity/profile.json.gz".to_string(),
-            stdout_path: "cases/with_identity/stdout.log".to_string(),
-            stderr_path: "cases/with_identity/stderr.log".to_string(),
-            summary_path: Some("cases/with_identity/summary.md".to_string()),
-        },
-        ProfileCaseManifest {
-            case_id: "raw_index".to_string(),
-            identity: None,
-            group_name: "core".to_string(),
-            command: "check".to_string(),
-            args: Vec::new(),
-            observation_wall_ms: 2.0,
-            profile_path: "cases/raw_index/profile.json.gz".to_string(),
-            stdout_path: "cases/raw_index/stdout.log".to_string(),
-            stderr_path: "cases/raw_index/stderr.log".to_string(),
-            summary_path: None,
-        },
-    ];
+fn run_manifest_file_preserves_identity_and_optional_summary_paths() {
+    let mut with_summary = test_case_manifest("with_identity", None);
+    with_summary.summary_path = Some("cases/with_identity/summary.md".to_string());
+    let cases = vec![with_summary, test_case_manifest("raw_index", None)];
 
-    let json =
-        format_run_manifest_json("test-run", None, ProfileFilterMode::RawIndex, None, &cases);
+    let manifest =
+        RunManifestFile::new("test-run", None, ProfileFilterMode::RawIndex, None, &cases);
+    let json = serde_json::to_string_pretty(&manifest).expect("manifest should serialize");
     let document: serde_json::Value =
         serde_json::from_str(&json).expect("run manifest should be valid JSON");
     let entries = document["cases"]
@@ -219,9 +208,9 @@ fn format_run_manifest_json_preserves_identity_and_optional_summary_paths() {
     assert_eq!(entries[0]["source_fingerprint"], "source");
     assert_eq!(entries[0]["measurement_fingerprint"], "measurement");
     assert_eq!(entries[0]["summary_path"], "cases/with_identity/summary.md");
-    assert!(entries[1]["workload_id"].is_null());
-    assert!(entries[1]["source_fingerprint"].is_null());
-    assert!(entries[1]["measurement_fingerprint"].is_null());
+    assert_eq!(entries[1]["workload_id"], "workload");
+    assert_eq!(entries[1]["source_fingerprint"], "source");
+    assert_eq!(entries[1]["measurement_fingerprint"], "measurement");
     assert!(entries[1]["summary_path"].is_null());
 }
 
@@ -241,18 +230,13 @@ fn raw_index_manifest_only_advertises_written_artifacts() {
         std::fs::write(path, "written").expect("write raw-index artifact");
     }
 
-    let cases = vec![ProfileCaseManifest {
-        case_id: "raw_index_case".to_string(),
-        identity: None,
-        group_name: "core".to_string(),
-        command: "check".to_string(),
-        args: Vec::new(),
-        observation_wall_ms: 1.0,
-        profile_path: "cases/raw_index_case/profile.json.gz".to_string(),
-        stdout_path: "cases/raw_index_case/stdout.log".to_string(),
-        stderr_path: "cases/raw_index_case/stderr.log".to_string(),
-        summary_path: None,
-    }];
+    let mut case = test_case_manifest("raw_index_case", None);
+    case.args = Vec::new();
+    case.observation_wall_ms = 1.0;
+    case.profile_path = "cases/raw_index_case/profile.json.gz".to_string();
+    case.stdout_path = "cases/raw_index_case/stdout.log".to_string();
+    case.stderr_path = "cases/raw_index_case/stderr.log".to_string();
+    let cases = vec![case];
     write_run_manifest(
         &run_paths,
         "test-run",
@@ -286,20 +270,18 @@ fn raw_index_manifest_only_advertises_written_artifacts() {
 }
 
 #[test]
-fn format_observations_json_matches_plan_schema() {
+fn detailed_observations_file_matches_plan_schema() {
     let observation = test_observation();
-    let json = format_observations_json(&observation);
+    let json = serde_json::to_string_pretty(&DetailedObservationsFile::from(&observation))
+        .expect("observations should serialize");
 
-    // Must contain the expected top-level keys.
     assert!(json.contains(r#""format_version": 2"#));
     assert!(json.contains(r#""case_id": "test_case_bst""#));
     assert!(!json.contains(r#""case_name""#));
     assert!(json.contains(r#""group": "stress""#));
     assert!(json.contains(r#""wall_ms": 1234.5"#));
-    // Command array uses no space after comma in manual JSON.
-    assert!(json.contains(r#""command": ["check","test.moth"]"#));
-
-    // Stage timings and counters must be present.
+    assert!(json.contains(r#""check"#));
+    assert!(json.contains(r#""test.moth""#));
     assert!(json.contains(r#""name": "ast_ms""#));
     assert!(json.contains(r#""value": 812"#));
     assert!(json.contains(r#""name": "token_count""#));
@@ -308,18 +290,11 @@ fn format_observations_json_matches_plan_schema() {
 
 #[test]
 fn format_index_md_lists_cases() {
-    let cases = vec![ProfileCaseManifest {
-        case_id: "check_foo_bst".to_string(),
-        identity: None,
-        group_name: "core".to_string(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
-        observation_wall_ms: 500.0,
-        profile_path: "profile.json.gz".to_string(),
-        stdout_path: "stdout.log".to_string(),
-        stderr_path: "stderr.log".to_string(),
-        summary_path: Some("summary.md".to_string()),
-    }];
+    let mut case = test_case_manifest("check_foo_bst", None);
+    case.observation_wall_ms = 500.0;
+    case.profile_path = "profile.json.gz".to_string();
+    case.stdout_path = "stdout.log".to_string();
+    let cases = vec![case];
 
     let md = format_index_md("test-run", ProfileFilterMode::Terse, &cases);
 
@@ -333,23 +308,6 @@ fn format_index_md_lists_cases() {
 fn format_index_md_empty_cases() {
     let md = format_index_md("test-run", ProfileFilterMode::RawIndex, &[]);
     assert!(md.contains("Cases: 0"));
-}
-
-#[test]
-fn format_metric_array_json_empty() {
-    let result = format_metric_array_json(&[]);
-    assert_eq!(result, "[]");
-}
-
-#[test]
-fn format_metric_array_json_single_item() {
-    let metrics = vec![BenchmarkMetric {
-        name: "test_metric".to_string(),
-        value: 42.0,
-    }];
-    let result = format_metric_array_json(&metrics);
-    assert!(result.contains(r#""name": "test_metric""#));
-    assert!(result.contains(r#""value": 42"#));
 }
 
 #[test]
@@ -488,22 +446,14 @@ fn write_run_manifest_creates_valid_file() {
     let run_paths =
         ProfileRunPaths::create(&profiles_root, Some("abc1234")).expect("create run paths");
 
-    let cases = vec![ProfileCaseManifest {
-        case_id: "test_case".to_string(),
-        identity: None,
-        group_name: "core".to_string(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
-        observation_wall_ms: 100.0,
-        profile_path: "cases/test_case/profile.json.gz".to_string(),
-        stdout_path: "cases/test_case/stdout.log".to_string(),
-        stderr_path: "cases/test_case/stderr.log".to_string(),
-        summary_path: Some("cases/test_case/summary.md".to_string()),
-    }];
+    let mut case = test_case_manifest("test_case", None);
+    case.observation_wall_ms = 100.0;
+    case.summary_path = Some("cases/test_case/summary.md".to_string());
+    let cases = vec![case];
 
     let git_revision = GitRevision {
         commit: Some("abc1234".to_string()),
-        dirty: None,
+        dirty: Some(false),
     };
     write_run_manifest(
         &run_paths,
@@ -518,7 +468,7 @@ fn write_run_manifest_creates_valid_file() {
     let content = std::fs::read_to_string(run_paths.manifest_path()).expect("read manifest");
     let _: serde_json::Value =
         serde_json::from_str(&content).expect("written manifest should be valid JSON");
-    assert!(content.contains(r#""format_version": 3"#));
+    assert!(content.contains(r#""format_version": 4"#));
     assert!(content.contains(r#""case_id": "test_case""#));
 }
 

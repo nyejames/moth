@@ -14,11 +14,9 @@ use crate::bench_types::{
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
-use crate::benchmark_fingerprint::{BenchmarkFingerprints, compute_benchmark_fingerprints};
-use crate::benchmark_manifest::{
-    BenchmarkCase, BenchmarkManifest, BenchmarkRunner, load_benchmark_manifest,
-};
-use crate::benchmark_repository::{BenchmarkRepositorySnapshot, verify_after_operation};
+use crate::benchmark_manifest::{BenchmarkCase, BenchmarkRunner};
+use crate::benchmark_repository::verify_after_operation;
+use crate::benchmark_run::PreparedBenchmarkRun;
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use crate::compiler_binary::build_release_compiler_with_timers;
 use crate::frontend_bench::{present_read_only_frontend_run, run_frontend_cases};
@@ -43,28 +41,23 @@ const FRONTEND_SECTION: BenchCiSection = BenchCiSection {
 
 /// Run the complete bounded validation benchmark gate.
 pub(crate) fn run_bench_ci() -> Result<(), String> {
-    let manifest = load_benchmark_manifest().map_err(|error| error.to_string())?;
-
-    // Capture repository state before any compiler construction or preflight.
-    let snapshot = BenchmarkRepositorySnapshot::capture(&manifest.repository_root)
-        .map_err(|error| error.to_string())?;
+    let prepared = PreparedBenchmarkRun::load()?;
 
     println!("Building release compiler...");
-    let compiler = build_release_compiler_with_timers(&manifest.repository_root)?;
-    let fingerprints =
-        compute_benchmark_fingerprints(&manifest).map_err(|error| error.to_string())?;
-    let workspace = BenchmarkExecutionWorkspace::create(&manifest.repository_root)?;
-    let context = BenchmarkExecutionContext::new(&manifest, compiler.as_path(), &workspace);
+    let compiler = build_release_compiler_with_timers(&prepared.manifest.repository_root)?;
+    let workspace = BenchmarkExecutionWorkspace::create(&prepared.manifest.repository_root)?;
+    let context =
+        BenchmarkExecutionContext::new(&prepared.manifest, compiler.as_path(), &workspace);
     let thread_count = effective_thread_count()?;
     let policy = bench_ci_policy()?;
 
     println!(
         "Preflighting all {} benchmark cases before quick selection...",
-        manifest.cases.len()
+        prepared.manifest.cases.len()
     );
 
     let result = run_bench_ci_pipeline(
-        &manifest.cases,
+        &prepared.manifest.cases,
         policy,
         |cases| {
             let executions = preflight_cases(&context, cases)
@@ -83,7 +76,7 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
                 policy.measured_iterations()
             );
 
-            measure_section(section, &context, &manifest, &fingerprints, cases, policy)
+            measure_section(section, &context, &prepared, cases, policy)
         },
         |section, case_results| {
             present_section(
@@ -95,7 +88,11 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
         },
     );
 
-    verify_after_operation(&snapshot, &manifest.repository_root, result)
+    verify_after_operation(
+        &prepared.snapshot,
+        &prepared.manifest.repository_root,
+        result,
+    )
 }
 
 fn bench_ci_policy() -> Result<BenchmarkRunPolicy, String> {
@@ -110,26 +107,17 @@ fn bench_ci_policy() -> Result<BenchmarkRunPolicy, String> {
 fn measure_section(
     section: BenchCiSection,
     context: &BenchmarkExecutionContext<'_>,
-    manifest: &BenchmarkManifest,
-    fingerprints: &BenchmarkFingerprints,
+    prepared: &PreparedBenchmarkRun,
     cases: &[BenchmarkCase],
     policy: BenchmarkRunPolicy,
 ) -> Result<Vec<BenchmarkCaseResult>, String> {
     match section.suite_kind {
-        BenchmarkSuiteKind::EndToEndCli => run_benchmark_cases(
-            context,
-            manifest,
-            fingerprints,
-            cases,
-            policy.measured_iterations(),
-        ),
-        BenchmarkSuiteKind::FrontendPhases => run_frontend_cases(
-            context,
-            manifest,
-            fingerprints,
-            cases,
-            policy.measured_iterations(),
-        ),
+        BenchmarkSuiteKind::EndToEndCli => {
+            run_benchmark_cases(context, prepared, cases, policy.measured_iterations())
+        }
+        BenchmarkSuiteKind::FrontendPhases => {
+            run_frontend_cases(context, prepared, cases, policy.measured_iterations())
+        }
     }
 }
 

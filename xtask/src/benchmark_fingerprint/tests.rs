@@ -105,6 +105,133 @@ fn repository_with_files(files: &[(&str, &[u8])]) -> TempDir {
     repository
 }
 
+fn case_with_indices(workload_index: usize, case_index: usize) -> BenchmarkCase {
+    BenchmarkCase {
+        id: "fixture_case".to_string(),
+        case_index,
+        workload_index,
+        group_name: "core".to_string(),
+        quick: true,
+        expectation: BenchmarkExpectation::Clean,
+        runner: cli_runner(CliBenchmarkCommand::Check, &[]),
+    }
+}
+
+fn identity_fingerprints() -> BenchmarkFingerprints {
+    BenchmarkFingerprints {
+        workloads: vec![SourceWorkloadFingerprint {
+            first_lane: 1,
+            second_lane: 2,
+        }],
+        cases: vec![CaseMeasurementFingerprint {
+            first_lane: 3,
+            second_lane: 4,
+        }],
+    }
+}
+
+#[test]
+fn checked_identity_construction_completes_for_a_valid_case() {
+    let repository = repository_with_files(&[("project/main.moth", b"value = 1\n")]);
+    let manifest = standard_manifest(repository.path());
+    let case = case_with_indices(0, 0);
+    let fingerprints = identity_fingerprints();
+
+    let identity = fingerprints
+        .identity_for(&manifest, &case)
+        .expect("complete identity should construct");
+
+    assert_eq!(identity.workload_id, "workload");
+    assert_eq!(
+        identity.source_fingerprint,
+        "00000000000000010000000000000002"
+    );
+    assert_eq!(
+        identity.measurement_fingerprint,
+        "00000000000000030000000000000004"
+    );
+}
+
+#[test]
+fn checked_identity_rejects_missing_workload_relationship() {
+    let repository = repository_with_files(&[("project/main.moth", b"value = 1\n")]);
+    let manifest = standard_manifest(repository.path());
+    let case = case_with_indices(5, 0);
+    let fingerprints = identity_fingerprints();
+
+    let error = fingerprints
+        .identity_for(&manifest, &case)
+        .expect_err("an invalid workload relationship must fail");
+
+    assert!(matches!(
+        error,
+        BenchmarkIdentityError::InvalidWorkloadRelationship { .. }
+    ));
+}
+
+#[test]
+fn checked_identity_rejects_missing_source_fingerprint() {
+    let repository = repository_with_files(&[("project/main.moth", b"value = 1\n")]);
+    let manifest = standard_manifest(repository.path());
+    let case = case_with_indices(0, 0);
+    let fingerprints = BenchmarkFingerprints {
+        workloads: Vec::new(),
+        cases: identity_fingerprints().cases,
+    };
+
+    let error = fingerprints
+        .identity_for(&manifest, &case)
+        .expect_err("a missing source fingerprint must fail");
+
+    assert!(matches!(
+        error,
+        BenchmarkIdentityError::MissingWorkloadFingerprint { .. }
+    ));
+}
+
+#[test]
+fn checked_identity_rejects_missing_measurement_fingerprint() {
+    let repository = repository_with_files(&[("project/main.moth", b"value = 1\n")]);
+    let manifest = standard_manifest(repository.path());
+    let case = case_with_indices(0, 0);
+    let fingerprints = BenchmarkFingerprints {
+        workloads: identity_fingerprints().workloads,
+        cases: Vec::new(),
+    };
+
+    let error = fingerprints
+        .identity_for(&manifest, &case)
+        .expect_err("a missing measurement fingerprint must fail");
+
+    assert!(matches!(
+        error,
+        BenchmarkIdentityError::MissingMeasurementFingerprint { .. }
+    ));
+}
+
+#[test]
+fn cli_frontend_and_profile_paths_receive_one_identity() {
+    let repository = repository_with_files(&[("project/main.moth", b"value = 1\n")]);
+    let manifest = standard_manifest(repository.path());
+    let case = case_with_indices(0, 0);
+    let fingerprints = identity_fingerprints();
+
+    let cli_identity = fingerprints
+        .identity_for(&manifest, &case)
+        .expect("CLI identity should construct");
+    let frontend_identity = fingerprints
+        .identity_for(&manifest, &case)
+        .expect("frontend identity should construct");
+    let profile_manifest_identity = Some(
+        fingerprints
+            .identity_for(&manifest, &case)
+            .expect("profile identity should construct"),
+    );
+
+    assert_eq!(cli_identity, frontend_identity);
+    assert_eq!(Some(cli_identity), profile_manifest_identity);
+}
+
 #[test]
 fn directory_enumeration_order_does_not_change_fingerprint() {
     let first = repository_with_files(&[
