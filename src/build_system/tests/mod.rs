@@ -233,7 +233,7 @@ impl BackendBuilder for EntryTrackingBuilder {
         _string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
         self.module_count.store(
-            project_compilation.modules().len(),
+            project_compilation.module_count(),
             std::sync::atomic::Ordering::SeqCst,
         );
         self.entry_count.store(
@@ -391,12 +391,10 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
     ) -> Result<Project, CompilerMessages> {
         let homepage = project_compilation
             .modules()
-            .iter()
             .find(|module| module.metadata.entry_point.ends_with("src/@page.moth"))
             .expect("directory build should discover homepage module");
         let docs_page = project_compilation
             .modules()
-            .iter()
             .find(|module| module.metadata.entry_point.ends_with("src/docs/@page.moth"))
             .expect("directory build should discover docs module");
 

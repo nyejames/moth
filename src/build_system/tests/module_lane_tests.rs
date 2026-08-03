@@ -1,8 +1,8 @@
 //! Focused invariant tests for the compiled `Module` lane container.
 
 use crate::build_system::build::{
-    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleExternalImport, ModuleLinkFacts,
-    ModuleRootActivity, ProjectCompilation,
+    CompiledModuleArtifact, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleExternalImport,
+    ModuleLinkFacts, ModuleRootActivity, ProjectCompilation, ProjectFrontendCompilation,
 };
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::{
@@ -316,4 +316,177 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         Err(error) => error,
     };
     assert!(error.msg.contains("has no owning package"));
+}
+
+#[test]
+fn frontend_compilation_retains_project_artefact_interfaces() {
+    // WHAT: a successful project artefact keeps its published interface after the frontend
+    //       handoff instead of being flattened into a bare `Module`.
+    // WHY: R5C1 retains completed artefacts so interface closure, fingerprints and link owners
+    //      can consume them after `compile_project_frontend` returns.
+    let module = minimal_lane_module(PathBuf::from("@page.moth"), true);
+    let artifact = CompiledModuleArtifact {
+        module,
+        interface: crate::compiler_frontend::public_interface::PublicSemanticInterface {
+            module_origin:
+                crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
+                    crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
+                        "test",
+                    ),
+                    String::new(),
+                    crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+                ),
+            export_bindings: Vec::new(),
+            export_diagnostic_provenance: Vec::new(),
+            binding_exports: Vec::new(),
+            declarations: Vec::new(),
+            reusable_evidence: Vec::new(),
+            concrete_call_summaries: Vec::new(),
+        },
+    };
+
+    let frontend = ProjectFrontendCompilation::new(vec![artifact], Vec::new(), Vec::new());
+    let project_artifacts = frontend.project_artifacts();
+    assert_eq!(project_artifacts.len(), 1, "one project artefact retained");
+    assert!(
+        project_artifacts[0]
+            .module
+            .metadata
+            .root_activity
+            .has_html_artifact_activity(),
+        "project artefact root activity is retained"
+    );
+    assert_eq!(
+        project_artifacts[0].interface.module_origin.role(),
+        crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+        "artefact interface survives the handoff"
+    );
+
+    let compilation = ProjectCompilation::from_frontend(frontend)
+        .expect("one active project module assembles one entry");
+    assert_eq!(compilation.module_count(), 1, "one base module");
+    assert_eq!(
+        compilation.entries().len(),
+        1,
+        "normal root creates one entry"
+    );
+}
+
+#[test]
+fn source_package_artefacts_are_retained_but_never_project_entries() {
+    // WHAT: source-package artefacts are retained immutably (root activity intact) yet never
+    //       selected as project entries. Entry selection uses the project-boundary count rather
+    //       than mutating package module metadata.
+    // WHY: R5C1 forbids clearing package `root_activity` to suppress entries; the boundary index
+    //      alone must keep package modules out of project entry selection.
+    let active_project = minimal_lane_module(PathBuf::from("src/@page.moth"), true);
+    let package_root = minimal_lane_module(PathBuf::from("packages/html/@mod.moth"), true);
+
+    let frontend = ProjectFrontendCompilation::new(
+        vec![CompiledModuleArtifact {
+            module: active_project,
+            interface: crate::compiler_frontend::public_interface::PublicSemanticInterface {
+                module_origin:
+                    crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
+                        crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
+                            "test",
+                        ),
+                        String::from("page"),
+                        crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+                    ),
+                export_bindings: Vec::new(),
+                export_diagnostic_provenance: Vec::new(),
+                binding_exports: Vec::new(),
+                declarations: Vec::new(),
+                reusable_evidence: Vec::new(),
+                concrete_call_summaries: Vec::new(),
+            },
+        }],
+        vec![CompiledModuleArtifact {
+            module: package_root,
+            interface: crate::compiler_frontend::public_interface::PublicSemanticInterface {
+                module_origin:
+                    crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
+                        crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
+                            "html",
+                        ),
+                        String::new(),
+                        crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+                    ),
+                export_bindings: Vec::new(),
+                export_diagnostic_provenance: Vec::new(),
+                binding_exports: Vec::new(),
+                declarations: Vec::new(),
+                reusable_evidence: Vec::new(),
+                concrete_call_summaries: Vec::new(),
+            },
+        }],
+        Vec::new(),
+    );
+
+    assert_eq!(frontend.source_package_artifacts().len(), 1);
+    assert!(
+        frontend.source_package_artifacts()[0]
+            .module
+            .metadata
+            .root_activity
+            .has_html_artifact_activity(),
+        "source-package root activity is retained, not cleared"
+    );
+
+    let compilation = ProjectCompilation::from_frontend(frontend)
+        .expect("project and package artefacts should assemble");
+    assert_eq!(compilation.module_count(), 2, "both base modules retained");
+    assert_eq!(
+        compilation.entries().len(),
+        1,
+        "only the project-boundary module becomes an entry"
+    );
+    // Package module metadata is untouched: its root activity still marks it as active.
+    let package_module = compilation
+        .modules()
+        .nth(1)
+        .expect("package module retained");
+    assert!(
+        package_module
+            .metadata
+            .root_activity
+            .has_html_artifact_activity(),
+        "package module metadata is unchanged by project assembly"
+    );
+}
+
+fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
+    let start_name_path = InternedPath::from_single_str("start_entry", &mut StringTable::new());
+    let hir_module = minimal_hir_module(start_name_path);
+    let function_link_facts = collect_module_function_link_facts(&hir_module)
+        .expect("test HIR should produce function link facts");
+    Module {
+        executable: ModuleExecutable {
+            hir: hir_module,
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+        },
+        link_facts: ModuleLinkFacts {
+            external_package_registry: Arc::new(ExternalPackageRegistry::new()),
+            external_import_candidates: vec![],
+            functions: function_link_facts,
+        },
+        metadata: ModuleCompilerMetadata {
+            entry_point,
+            warnings: vec![],
+            const_top_level_fragments: vec![],
+            root_activity: if active_root {
+                ModuleRootActivity {
+                    has_non_trivial_root_body: true,
+                    ..ModuleRootActivity::default()
+                }
+            } else {
+                ModuleRootActivity::default()
+            },
+            doc_fragments: vec![],
+            rendered_path_usages: vec![],
+            materialisation_context: None,
+        },
+    }
 }

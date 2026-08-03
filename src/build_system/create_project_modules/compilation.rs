@@ -387,18 +387,12 @@ pub(crate) fn compile_single_file_frontend(
     // 6. Merge local results back into the global build context.
     let merge_delta_start = crate::timing::start_pipeline_timing();
     let remap = string_table.merge_delta_from(&result.string_table, base_len);
-    // The internal `ModuleSemanticDraft` carries the completed local public interface for the
-    // future graph consumer. The pre-provider project-compilation boundary drops it here because
-    // the current three-lane `Module` does not store it.
     let ModuleSemanticDraft {
         mut module,
         mut generated_worklist_delta,
         string_table: _,
         public_interface,
     } = result;
-    // The direct public interface is a semantic draft that the future graph consumer will resolve
-    // into a completed provider interface. Drop it until that consumer lands.
-    drop(public_interface);
     if !remap.is_identity() {
         module.remap_string_ids(&remap);
         generated_worklist_delta.remap_string_ids(&remap);
@@ -411,7 +405,11 @@ pub(crate) fn compile_single_file_frontend(
     log_stage_timing("stage0.single_file.total", total_start);
 
     Ok(ProjectFrontendCompilation::new(
-        vec![module],
+        vec![CompiledModuleArtifact {
+            module,
+            interface: public_interface,
+        }],
+        Vec::new(),
         generated_store.into_sidecars(),
     ))
 }
@@ -1248,29 +1246,22 @@ pub(crate) fn compile_directory_frontend(
         blocked: _,
     } = project_outcome;
 
-    let mut compiled_modules = Vec::new();
-    for artifact in project_provider_store.into_artifacts() {
-        compiled_modules.push(artifact.module);
-    }
+    // Retain every completed project artefact (module + immutable interface) in deterministic
+    // `ModuleId` order. Source-package artefacts stay immutable and carry their own dormant root
+    // activity; entry selection is project-boundary-only, so package metadata is never cleared.
+    let project_artifacts = project_provider_store.into_artifacts();
+    let mut source_package_artifacts = Vec::new();
     let mut generated_modules = project_generated_store.into_sidecars();
     for package in completed_source_packages {
-        for artifact in package.outcome.provider_store.into_artifacts() {
-            let mut module = artifact.module;
-
-            // Source-package roots participate in semantic compilation and may provide
-            // executable functions, but they are never project entry candidates. Their
-            // dormant root activity belongs to the package boundary and must not create
-            // a page when the executable lane is joined to the project link store.
-            module.metadata.root_activity = Default::default();
-            compiled_modules.push(module);
-        }
+        source_package_artifacts.extend(package.outcome.provider_store.into_artifacts());
         generated_modules.extend(package.outcome.generated_store.into_sidecars());
     }
 
     log_stage_timing("stage0.directory.total", total_start);
 
     Ok(ProjectFrontendCompilation::new(
-        compiled_modules,
+        project_artifacts,
+        source_package_artifacts,
         generated_modules,
     ))
 }

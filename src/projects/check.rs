@@ -127,12 +127,17 @@ fn execute_check(path: &str) -> CheckOutcome {
         &mut frontend_surface,
         &mut string_table,
     ) {
-        Ok(modules) => {
+        Ok(frontend) => {
             log_check_timing(
                 "command.check.compile_project_frontend",
                 compile_frontend_start,
             );
-            let warnings = collect_frontend_warnings(&modules);
+            let warnings = collect_frontend_warnings(
+                frontend
+                    .project_artifacts()
+                    .iter()
+                    .map(|artifact| &artifact.module),
+            );
             CompilerMessages::from_diagnostics(warnings, string_table)
         }
         Err(messages) => {

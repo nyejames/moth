@@ -23,12 +23,12 @@ The architecture is accepted. Phase 5 now needs bounded closeout work, not anoth
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
 WORK_SOURCE: parent Phase 5 architecture, quality and performance review
-BASE_REVISION: 9af62e5a9475d529c6d1012d73b977d5cc0fe42c
-STATUS: queued — Phase 5 closeout deferred while language migration Stage B is active. Resume at R5C1.
+BASE_REVISION: 58432008fb5a1f7bb117dd226ccac773c25ed8c2 (current main HEAD; reconciled from the original 9af62e5a review base because the plan branch no longer exists and main advanced with the accepted language migration)
+STATUS: active — R5C1 implemented and validated; awaiting interim audit and checkpoint before R5C2
 CURRENT_SLICE: R5C1 — retain canonical artefacts and graph outcomes through the frontend handoff
-LAST_ACCEPTED_COMMIT: 9af62e5a9475d529c6d1012d73b977d5cc0fe42c is the pushed Phase 5 review checkpoint, not the final Phase 5 acceptance boundary
-WORKTREE: implementation must branch from the review checkpoint; this plan replacement is on plan/canonical-module-phase5-closeout
-REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, current Phase 5 diff, compilation.rs, frontend_orchestration.rs, generated_worklist.rs, public_interface/ and generic_functions/materialisation owners
+LAST_ACCEPTED_COMMIT: 58432008f is the current main HEAD; R5C1 changes are uncommitted pending audit
+WORKTREE: implemented directly on main per user direction; plan branch plan/canonical-module-phase5-closeout does not exist
+REQUIRED_RELOADS: startup files, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, frontend_orchestration.rs, generated_worklist.rs, provider_store.rs, build.rs, public_interface/ and generic materialisation owners
 RELEVANT_CONTEXT_NOW:
 - R2C and provider-consumer Review phases 1 and 2 are complete
 - Stage 0 owns indexed project and source-package boundaries, canonical module jobs, frozen graph waves and prepare-once source storage
@@ -38,6 +38,7 @@ RELEVANT_CONTEXT_NOW:
 - normal, support and facade roots compile through graph-owned roles; API-only roots have no start
 - old reachable-file/import scanners, donor closures and legacy module-entry wave types are deleted
 - project and source-package graphs pass the current integration suite, but successful artefacts are flattened too early and several hot paths still rebuild indexes, clone large data or linearly search stable facts
+- R5C1 target: compilation.rs flattens successful CompiledModuleArtifact into Vec<Module> and clears source-package root_activity to suppress entries
 ACCEPTANCE_CRITERIA:
 - preserve every accepted Phase 5 semantic contract
 - retain completed artefacts, interfaces and graph outcome identity through ProjectCompilation
@@ -47,17 +48,13 @@ ACCEPTANCE_CRITERIA:
 - split mixed-responsibility orchestration modules without adding wrappers or parallel APIs
 - complete full validation, docs and benchmark gates with zero known migration-fixture failures
 VALIDATION_STATE:
-- latest recorded checkpoint passes native/Linux/Windows Clippy, 3,834 workspace tests, 17 CLI tests, 500 package tests and all 1,812 integration executions
-- just validate and bench-ci pass the docs module-root-relative import migration and benchmark
-  fixture import corrections; the remaining Phase 5 closeout work is architectural rather than a
-  migration-fixture blocker
-- this review is repository-aware and read-only; the full validation suite was not rerun by the reviewer
-DOCS_IMPACT: compiler and build-system architecture remain unchanged; the active plan is replaced and the downstream HTML-Wasm plan still needs a separate refresh for the removed flat handoff and old start-reachability wording
-BLOCKERS_OR_OPEN_DECISIONS: no semantic design blocker; the only open implementation boundary is how far generated call-summary reanalysis can be narrowed without redesigning the borrow checker
-AUDIT_STATE: Phase 5 is on track; parent review found closeout issues in artefact retention, lookup/index ownership, generic metadata compaction, summary convergence, prepared-source ownership and module organisation
-DELEGATION_DECISION: bounded implementation slices with a read-only parent audit after each slice that changes a stage boundary
+- baseline main HEAD passes the recorded validation gate before R5C edits; full suite not yet rerun for R5C
+DOCS_IMPACT: compiler and build-system architecture remain unchanged
+BLOCKERS_OR_OPEN_DECISIONS: none for R5C1
+AUDIT_STATE: no R5C audit yet
+DELEGATION_DECISION: bounded implementation slices with a read-only auditor after each slice that changes a stage boundary; final_auditor before Phase 5 acceptance
 NEXT_WORKER_ORDER: R5C1 only
-STOP_REASON: parent review pause before Phase 5 acceptance
+STOP_REASON: none
 NEXT_RESUME_ACTION: implement R5C1, run focused validation and stop for review before R5C2
 ```
 

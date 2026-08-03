@@ -155,8 +155,13 @@ pub fn run_frontend_benchmark(
         &mut frontend_surface,
         &mut string_table,
     ) {
-        Ok(modules) => {
-            let warnings = collect_frontend_warnings(&modules);
+        Ok(frontend) => {
+            let warnings = collect_frontend_warnings(
+                frontend
+                    .project_artifacts()
+                    .iter()
+                    .map(|artifact| &artifact.module),
+            );
             CompilerMessages::from_diagnostics(warnings, string_table)
         }
         Err(messages) => messages,

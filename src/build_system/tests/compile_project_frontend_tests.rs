@@ -218,7 +218,7 @@ io.line(result)
         &mut string_table,
     )
     .expect("same-module generated constants should use their own TIR store");
-    let (_, sidecars) = frontend.into_parts();
+    let (_, _, sidecars) = frontend.into_parts();
 
     assert_eq!(
         sidecars.len(),
@@ -290,7 +290,7 @@ same_private_box PrivateBox of Bool = forward(private_box)
         &mut string_table,
     )
     .expect("public generic nominal arguments should materialise");
-    let (_, sidecars) = frontend.into_parts();
+    let (_, _, sidecars) = frontend.into_parts();
 
     assert_eq!(
         sidecars.len(),
@@ -419,7 +419,7 @@ wrapped Wrapper = identity(make())
         &mut string_table,
     )
     .expect("facade-hidden nominal closure should materialise");
-    let (_, sidecars) = frontend.into_parts();
+    let (_, _, sidecars) = frontend.into_parts();
 
     assert_eq!(sidecars.len(), 1);
     let sidecar = &sidecars[0];
@@ -796,7 +796,10 @@ fn provider_created_package_registry_survives_into_module() {
     )
     .expect("provider-backed import should compile");
 
-    let module = modules.first().expect("expected one module");
+    let module = modules
+        .project_modules()
+        .next()
+        .expect("expected one module");
 
     assert!(
         !module.link_facts.external_import_candidates.is_empty(),
@@ -857,7 +860,10 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     )
     .expect("provider-backed imports should compile");
 
-    let module = modules.first().expect("expected one module");
+    let module = modules
+        .project_modules()
+        .next()
+        .expect("expected one module");
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -912,7 +918,10 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     )
     .expect("unreachable provider-backed call should compile");
 
-    let module = modules.first().expect("expected one module");
+    let module = modules
+        .project_modules()
+        .next()
+        .expect("expected one module");
     assert!(
         module_contains_external_module_export(module, "getNumber"),
         "HIR should keep the unreachable function body and provider package metadata"
@@ -992,7 +1001,10 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     )
     .expect("unused @html canvas wrapper should compile");
 
-    let module = modules.first().expect("expected one module");
+    let module = modules
+        .project_modules()
+        .next()
+        .expect("expected one module");
     assert!(
         module
             .link_facts
@@ -1105,7 +1117,10 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
     )
     .expect("expected Ok for nominal type module");
 
-    let module = modules.first().expect("expected compiled module");
+    let module = modules
+        .project_modules()
+        .next()
+        .expect("expected compiled module");
     let point_path = InternedPath::from_single_str("test.moth", &mut string_table)
         .join_str("Point", &mut string_table);
     let nominal_id = module
@@ -1282,7 +1297,7 @@ fn directory_project_discovers_multiple_entry_modules() {
         "expected Ok for multi-module directory project"
     );
     assert_eq!(
-        result.expect("checked above").len(),
+        result.expect("checked above").project_modules().count(),
         2,
         "expected exactly two modules"
     );
@@ -1322,7 +1337,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     .expect("expected Ok for multi-module directory project");
 
     let second_module = modules
-        .iter()
+        .project_modules()
         .find(|module| {
             module
                 .metadata
@@ -1408,7 +1423,7 @@ fn provider_backed_grouped_import_compiles_and_reuses_cache() {
         "same canonical JS file should be resolved through the provider once"
     );
     assert!(
-        modules.iter().any(module_contains_external_call),
+        modules.project_modules().any(module_contains_external_call),
         "HIR should lower provider-backed grouped calls to external function IDs"
     );
 
@@ -1449,7 +1464,7 @@ fn provider_backed_namespace_import_exposes_function_and_type_members() {
         "namespace import should resolve the JS file once"
     );
     assert!(
-        modules.iter().any(module_contains_external_call),
+        modules.project_modules().any(module_contains_external_call),
         "namespace member calls should lower to external function IDs"
     );
 
@@ -1502,7 +1517,7 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
         "different canonical JS files with the same basename should get separate provider results"
     );
     assert!(
-        modules.iter().any(module_contains_external_call),
+        modules.project_modules().any(module_contains_external_call),
         "calls through both provider-created packages should lower to external IDs"
     );
 
@@ -1538,7 +1553,7 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
     .expect("same-package opaque type should pass to function expecting that exact type");
 
     assert!(
-        modules.iter().any(module_contains_external_call),
+        modules.project_modules().any(module_contains_external_call),
         "HIR should contain external calls for make_widget and use_widget"
     );
 
@@ -1686,7 +1701,7 @@ fn html_js_provider_namespace_import_resolves() {
 
     assert!(
         modules
-            .iter()
+            .project_modules()
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should preserve namespace JS call export metadata"
     );
@@ -1727,7 +1742,7 @@ fn html_js_provider_grouped_import_resolves() {
 
     assert!(
         modules
-            .iter()
+            .project_modules()
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should preserve grouped alias JS export metadata"
     );
@@ -1768,7 +1783,7 @@ fn html_js_provider_grouped_alias_for_function_and_opaque_type_resolves() {
 
     assert!(
         modules
-            .iter()
+            .project_modules()
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should contain provider export metadata for aliased JS function"
     );
@@ -1854,7 +1869,10 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     )
     .expect("repeated JS imports should compile");
 
-    let module = modules.first().expect("expected one module");
+    let module = modules
+        .project_modules()
+        .next()
+        .expect("expected one module");
 
     assert_eq!(
         module.link_facts.external_import_candidates.len(),
@@ -1898,7 +1916,7 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
 
     assert!(
         modules
-            .iter()
+            .project_modules()
             .any(|module| module_contains_external_module_export(module, "getCanvas")),
         "HIR should contain JS export metadata for fallible JS function"
     );

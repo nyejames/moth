@@ -107,7 +107,7 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .map_err(|error| error.into_messages(string_table.clone()))?
         };
 
-        if project_compilation.modules().is_empty() {
+        if project_compilation.module_count() == 0 {
             return Err(CompilerMessages::from_error(
                 CompilerError::compiler_error(
                     "HTML builder expected at least one compiled module but got 0.",
