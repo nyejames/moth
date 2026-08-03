@@ -73,9 +73,9 @@ export:
                     ),
                     linear-gradient(
                         145deg,
-                        #abd7ed 0%,
-                        #bdd9f8 23%,
-                        #cdddff 83%,
+                        #c7eafc 0%,
+                        #e5effc 12%,
+                        #d7e3fc 91%,
                         #bac9ff 100%
                     );
 
@@ -100,7 +100,7 @@ export:
         }
 
         .container code:not(.codeblock) {
-            color: light-dark(hsl(333, 92%, 43%), #c444aff9);
+            color: light-dark(hsl(339, 100%, 50%), #c444aff9);
             font-family: var(--moth-font-family-monospace);
         }
 
