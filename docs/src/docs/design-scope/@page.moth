@@ -31,7 +31,7 @@ import @styles {
 }
 
 page_title #= "Design scope"
-page_description #= "Moth's design principles, deferred features and intentionally excluded language families."
+page_description #= "Moth's design principles, deferred features, open questions and intentionally excluded language families."
 page_head #= language_theme_head
 
 #[navbar]
@@ -41,12 +41,13 @@ page_head #= language_theme_head
 
     # Design scope
 
-    Moth admits a feature only when it fits the language's small, explicit
-    source model. Features marked deferred belong to that model but still await
-    implementation. Features outside scope conflict with it.
+    Moth distinguishes three outcomes for a proposed feature. Accepted
+    deferred work belongs to the language model but still awaits implementation.
+    Open design questions have no accepted contract yet. Features outside scope
+    conflict with the language model.
 
-    This distinction prevents an unsupported feature from looking like a design
-    promise, and it explains why Moth chooses constrained templates, choices and
+    These distinctions prevent an unsupported feature from looking like a design
+    promise, and they explain why Moth chooses constrained templates, choices and
     static traits over broader mechanisms found in other languages.
 ]
 
@@ -63,7 +64,7 @@ page_head #= language_theme_head
 #[section:
     [doc_level:
         [$insert("key"):deferred-and-outside-scope]
-        [$insert("title"):Deferred and outside scope]
+        [$insert("title"):Deferred, open and outside scope]
         [$insert("advanced"):[deferred_and_outside_scope]]
 
         [deferred_and_outside_scope_basic]

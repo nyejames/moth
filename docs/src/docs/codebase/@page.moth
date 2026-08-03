@@ -23,7 +23,7 @@ page_head #= theme_head
     - @./compiler-design (Compiler design): staged pipeline, task-reading matrix and cross-cutting contracts
     - @./memory-management (Memory management): reference semantics, borrow validation, lifetime regions, ownership and backend lowering
     - @./style-guide (Codebase development standards): implementation style, test strategy and validation gates
-    - @./design-scope (Design scope): accepted mechanisms, constraints and intentionally excluded complexity
+    - @../design-scope (Design scope, public authority): accepted mechanisms, constraints and intentionally excluded complexity
     - @./language (Compiler-facing language reference): bridge to the canonical language overview
     - @../progress (Progress matrix): current implementation status and known gaps
     - @https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (Roadmap): planned work and design direction

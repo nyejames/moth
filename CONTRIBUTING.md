@@ -36,7 +36,7 @@ More technical details about the language, compiler and build system.
 - [Compiler design overview](docs/compiler-design-overview.md)
 - [Build system overview](docs/build-system-design.md)
 - [Memory-management overview](docs/src/docs/codebase/memory-management/overview.mtf)
-- [Design scope](docs/src/docs/codebase/design-scope/overview.mtf)
+- [Design scope](docs/src/docs/design-scope/)
 - [Repository index](index.md)
 
 ### Development standards

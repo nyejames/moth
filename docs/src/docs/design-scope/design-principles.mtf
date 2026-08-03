@@ -1,4 +1,8 @@
-Moth keeps the source language small. Compiler complexity is acceptable when it makes the programmer-facing model simpler, safer and more predictable.
+Moth keeps the source language small. Compiler complexity is acceptable when it
+makes the programmer-facing model simpler, safer and more predictable. Keep
+source behaviour statically resolved and locally inspectable. Hide backend
+optimisation behind stable semantics so implementation techniques do not become
+source-language obligations.
 
 ### Central bias
 
@@ -77,7 +81,18 @@ Moth keeps the source language small. Compiler complexity is acceptable when it 
     ]
 ]
 
+### Design review questions
+
+- Does this introduce a new source category when an existing mechanism is enough?
+- Does it make behaviour more implicit?
+- Does it need whole-program or solver-heavy reasoning?
+- Does it introduce erased runtime machinery?
+- Does it leak backend representation?
+- Does it expose optimisation mechanics?
+- Is it accepted but unimplemented, undecided or intentionally excluded?
+- Does it make code harder to inspect locally?
+
 ### Read next
 
-- @#deferred-and-outside-scope (Deferred and outside scope)
+- @#deferred-and-outside-scope (Deferred, open and outside scope)
 - @#excluded-language-families (Excluded language families)

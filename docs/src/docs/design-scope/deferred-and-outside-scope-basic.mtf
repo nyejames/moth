@@ -1,17 +1,20 @@
-Moth has two kinds of features that aren't available today.
+Moth has three ways to describe a feature that isn't available today.
 
-### Deferred: coming later
+### Accepted but not built yet
 
-Some features belong to the accepted design but aren't built yet. A deferred
-feature may have a targeted compiler diagnostic, or its syntax may remain
-unrecognised until implementation starts. Examples include declared memory
-groups and recursive choice types.
+Some features belong to the accepted design but aren't built yet. Examples
+include declared memory groups and recursive choice types. These features may
+appear in the progress matrix as implementation work.
 
-### Outside scope: not planned
+### Still being considered
 
-Other features are intentionally excluded. They don't fit Moth's design
-goals. The compiler rejects them, but the error message won't say "coming soon"
-because they aren't coming.
+Some ideas have no final contract. Moth may consider distinct primitive-backed
+nominal wrappers, but transparent aliases remain transparent either way.
+
+### Not part of Moth's design
+
+Some features conflict with Moth's design goals. The compiler rejects them, and
+the error message won't say "coming soon" because they aren't accepted work.
 
 ### Why exclude features?
 

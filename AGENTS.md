@@ -38,6 +38,11 @@ Use:
 - `docs/roadmap/roadmap.md` for sequencing, active plans, and genuinely deferred design
 - `index.md` only as a file and module locator
 
+The public unsuffixed Design Scope files under `docs/src/docs/design-scope/` own
+accepted deferred implementation, open design questions and excluded language
+boundaries. The progress matrix tracks implementation of accepted design only
+and must not add open or outside-scope features as standalone rows.
+
 ## Instruction priority
 
 1. The explicit user request for the current task

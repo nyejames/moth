@@ -196,13 +196,12 @@ topic navigation.
 
 ## Design scope
 
-The public Design Scope route owns the source-facing exclusion inventory:
+The public Design Scope route forms the sole authority for accepted, open and
+excluded language boundaries:
 
 - `docs/src/docs/design-scope/design-principles.mtf`
 - `docs/src/docs/design-scope/deferred-and-outside-scope.mtf`
 - `docs/src/docs/design-scope/excluded-language-families.mtf`
-
-The codebase summary at `docs/src/docs/codebase/design-scope/overview.mtf` links to the public route without competing with it.
 
 ## Memory and lifetimes
 

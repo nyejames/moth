@@ -1,27 +1,52 @@
-Moth separates future work into two categories.
+Moth separates future work and exclusions into three categories.
 
-### Deferred
+### Deferred, open and outside scope
 
-Deferred features fit Moth's language design but aren't implemented yet or
-aren't part of the current source surface. The compiler rejects deferred syntax
-with structured diagnostics pointing to the feature's status.
+The progress matrix tracks implementation of accepted design. It intentionally
+omits open design questions and outside-scope features.
+
+### Accepted deferred implementation
+
+The semantic or architectural contract for a deferred feature fits Moth's
+language design. Implementation may be absent, partial or target-limited. A
+deferred feature may appear in the progress matrix and may have a structured
+deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 
 Examples of deferred features:
 
 - declared memory groups (`group` / `into`)
+- mandatory lifetime-region and escape validation
 - choice payload field access without pattern matching
 - nested choice payload patterns
 - recursive choice types
-- generic external package functions
+- generic external package functions and types
 - package manager, versions and lockfiles
 - broader standard trait taxonomy
 - field/path reactive subscriptions
 
+### Open design question
+
+An open design question has no final accepted contract. It may or may not enter
+the language. It isn't a promise and must not appear in the progress matrix. A
+roadmap document or discussion doesn't make it accepted design, and the
+compiler needn't provide a "coming later" diagnostic.
+
+Current open questions include:
+
+- distinct primitive-backed nominal wrapper or newtype syntax
+- narrow references to named, monomorphic, non-capturing functions
+
+Transparent aliases remain transparent regardless of whether a distinct
+primitive-backed nominal wrapper enters the language.
+
 ### Outside scope
 
-Outside-scope features conflict with the intended language model. They need an
-explicit design change before implementation. The compiler rejects these forms
-with ordinary diagnostics.
+An outside-scope mechanism conflicts with the intended language model and needs
+an explicit design-philosophy change before implementation. The exhaustive
+excluded-family inventory below records these mechanisms. They don't appear in
+the progress matrix.
+
+The compiler rejects outside-scope forms with ordinary diagnostics.
 
 Outside-scope features aren't "not yet implemented." They're intentionally
 excluded because they would make the language broader, more implicit, more
@@ -32,9 +57,11 @@ list.
 
 ### How to tell the difference
 
-If a feature could be added without changing Moth's core design, it's
-deferred. If adding it would require rethinking the language model, it's
-outside scope.
+Ask whether Moth already has an accepted contract for the feature. If it does
+and implementation remains absent, partial or target-limited, the feature is
+deferred. If the mechanism conflicts with Moth's language model, it stays
+outside scope. A proposal with neither an accepted contract nor a conflict with
+that model remains an open design question.
 
 ### Diagnostic distinction
 

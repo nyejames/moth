@@ -35,5 +35,5 @@ Backend optimisations may become finer without changing source semantics.
 
 ### Related concepts
 
-- For the design rationale see @../codebase/design-scope (Design scope).
+- For the design rationale see @../design-scope (Design scope).
 - For templates see @../templates (Templates).

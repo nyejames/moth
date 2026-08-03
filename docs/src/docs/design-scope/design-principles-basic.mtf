@@ -22,4 +22,7 @@ add a second way to do it.
 - fewer syntax forms to learn
 - code from different authors looks similar
 - the compiler can give clear error messages
+- behaviour stays explicit instead of relying on hidden magic
+- the language keeps a small surface area
+- the compiler can resolve code statically
 - optimisations happen behind the scenes

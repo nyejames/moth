@@ -1,78 +1,140 @@
-The following surfaces are intentionally outside Moth's language design scope. A feature listed here shouldn't be implemented unless the language philosophy is explicitly changed first.
+This file forms the exhaustive inventory of language mechanisms outside
+Moth's design scope. A listed feature needs an explicit change to the language
+philosophy before implementation.
 
-### Macros and metaprogramming
+### Macros and broad metaprogramming
 
-General-purpose macros, procedural macros, derive macros and AST macros create a second compile-time language and make code harder to inspect. Templates, constants and builder directives are the constrained compile-time surface.
+General-purpose macros, procedural macros, derive macros and AST macros create
+a second compile-time language and make code harder to inspect. Templates,
+constants and builder directives provide the constrained compile-time surface.
 
-### General closures and function values
+### General closures and broad function-value mechanisms
 
-General closures, anonymous function values, generic function values and higher-order polymorphism add broad function-value semantics and solver pressure. Reactivity is the constrained UI-oriented mechanism intended to cover many closure-heavy template cases.
+General closures, anonymous callable values, generic function values and
+higher-order polymorphism are outside scope. These mechanisms add broad
+function-value semantics and solver pressure. Reactivity covers many
+closure-heavy template cases without adding general function values. Hidden
+event-handler closures remain outside the language model as well.
 
 ### Dynamic trait values
 
-Dynamic trait values and trait objects require erased wrappers, runtime dispatch, dynamic-safety rules, backend-specific runtime support and a second meaning for trait names. Use choices for runtime heterogeneity and generic trait bounds for static reuse.
+Dynamic trait values and trait objects require erased wrappers, runtime
+dispatch, dynamic-safety rules, backend-specific runtime support and a second
+meaning for trait names. Use choices for runtime heterogeneity and generic
+trait bounds for static reuse.
 
 ### Trait-level programming
 
-Trait inheritance, trait aliases, trait composition, default methods, associated types and associated constants turn traits into a type-level programming system rather than simple method contracts.
+Trait inheritance, trait aliases, trait composition, default methods, associated
+types and associated constants turn traits into a type-level programming system
+rather than simple method contracts.
 
 ### Generic traits and generic trait methods
 
-Generic traits and generic trait methods make trait solving significantly more complex and create Rust-like abstraction patterns.
+Generic traits and generic trait methods make trait solving significantly more
+complex and create Rust-like abstraction patterns.
 
 ### Conformance extensions
 
-Blanket, conditional, negative or specialised conformance requires coherence and specialisation rules outside Moth's simplicity target. Structural conformance must not silently imply conformance. `Type must TRAIT` stays explicit.
+Blanket, conditional, negative, specialised and structural conformance require
+coherence and specialisation rules outside Moth's simplicity target. Structural
+conformance must not silently imply conformance from matching method shapes.
+`Type must TRAIT` stays explicit. File-local evidence-backed bound dispatch
+outside reusable conformance, output coercion, operator integration, automatic
+primitive conformance and derive-style hashing, ordering, formatting, iteration
+or serialisation families also stay outside scope.
 
-### Constraint extensions
+### Constraint sublanguage
 
-Type-set constraints, union constraints, underlying-type constraints and user-defined numeric or operator constraints make generic bounds a constraint sublanguage. Generic bounds name traits only.
+Type-set constraints, union constraints, underlying-type constraints and
+user-defined numeric or operator constraints turn generic bounds into a
+constraint sublanguage. Generic bounds name traits only. `where` clauses remain
+outside the source constraint model.
 
 ### Operator overloading
 
-Operators stay compiler-owned and predictable. No source-visible operator overloading.
+Operators stay compiler-owned and predictable. Moth has no source-visible
+operator overloading.
 
 ### Source-authored receiver extensions
 
-Source-authored receiver methods for builtins, imported types, dependency package types, external opaque types or types declared in another file are rejected. Receiver methods belong only to the same file as their nominal receiver type.
+Cross-file, builtin, imported and foreign receiver extensions remain outside
+scope. Source-authored receiver methods belong only to the same file as their
+nominal receiver type. Methods for dependency package types and external opaque
+types must use free functions.
 
-### User-defined map semantics
+### User-extensible map semantics
 
-User-defined `HASHABLE`, custom map hashers or comparers and user-defined keys for builtin maps are rejected. Builtin map syntax stays scalar-keyed. More sophisticated maps belong in packages as ordinary structs.
+User-defined `HASHABLE`, custom map hashers or comparers and user-defined keys
+for builtin maps stay outside the language. Builtin map syntax stays
+scalar-keyed. More sophisticated maps belong in packages as ordinary structs.
+
+Builtin keys remain limited to `String`, `Int`, `Bool` and `Char`. The builtin
+map surface excludes `Float`, structs, choices, collections, maps, traits,
+functions, external opaque types and generic parameters as key families. It
+also excludes hashset syntax, map equality, indexing syntax, mutable entry
+APIs, const maps, fixed-capacity maps and specialised map variants.
 
 ### First-class result values
 
-First-class public `Result` values and result pattern matching stay outside the language. `Error!`, postfix `!` and `catch` form the error path. Authors can define ordinary choices when they want explicit result-like domain values.
+First-class public `Result` values and result pattern matching stay outside the
+language. `Error!`, postfix `!` and `catch` form the error path. Authors can
+define ordinary choices when they want explicit result-like domain values.
 
-### Exceptions and invariant assertions
+### User-defined cast extensions
 
-Expected failures use `Error!`. Invariants use `assert`. No public exception system. The two lanes stay distinct: `Error!` handles recoverable failure, `assert` handles impossible invariant violation.
+User-defined cast target types, generic cast target parameters, external opaque
+cast targets, generic cast traits, broad return-type-directed conversion and
+implicit conversion chosen from distant context remain outside scope. Cast
+evidence stays compiler-owned and explicit.
+
+### Exceptions and catchable panic systems
+
+Expected failures use `Error!`. Invariants use `assert`. Moth has no public
+exception or catchable panic system. The two lanes stay distinct: `Error!`
+handles recoverable failure and `assert` handles impossible invariant
+violation.
 
 ### Reflection and type introspection
 
-Reflection, runtime type IDs, compile-time type inspection and type-returning functions encourage generic metaprogramming and weaken static readability.
+Reflection, type values, runtime type IDs, compile-time type inspection and
+type-returning functions encourage generic metaprogramming and weaken static
+readability.
 
 ### Higher-kinded types
 
-Higher-kinded types, type functions, partial type application and parameterised type aliases introduce a type-level abstraction language.
+Higher-kinded types, type functions, partial application and parameterized type
+aliases introduce a type-level abstraction language.
 
-### Const generics
+### User const generics
 
-User const generics beyond fixed collection capacity are rejected. Capacity syntax remains a small built-in collection feature, not a general type parameter system.
+User const generics beyond fixed collection capacity stay outside the language.
+Capacity syntax remains a small built-in collection feature, not a general type
+parameter system.
 
 ### Source-visible memory annotation systems
 
-Source-visible lifetime, reference-category and ownership annotation systems stay outside the language. Moth omits explicit reference types and lifetime syntax, not references themselves. The compiler tracks ownership and lifetimes internally.
+Source-visible lifetime, reference-category and ownership annotation systems
+stay outside the language. Moth omits explicit reference types and lifetime
+syntax, not references themselves. The compiler tracks ownership and lifetimes
+internally. Source-visible lifetime parameters, temporary-reference syntax,
+explicit move syntax and separate borrowed and owned function signatures remain
+outside scope.
 
 ### Source-visible RC and dynamic shared ownership
 
-Source-visible RC, retain/release, weak ownership, finalisers and unrestricted dynamic shared ownership are outside language design scope. Internal backend RC remains allowed for already-legal topology. Diagnostics, common-owner groups, `copy` and builder lifecycle roots replace source-level RC.
+Source-visible RC, retain/release, weak ownership, finalisers and unrestricted
+dynamic shared ownership stay outside the language. Internal backend RC remains
+allowed for already-legal topology. Diagnostics, common-owner groups, `copy`
+and builder lifecycle roots replace source-level RC.
 
 ### Backend-specific semantics leaking into source
 
-Backend-specific observable semantics must not leak into the language. Source semantics stay backend-neutral. Backends receive validated topology and may not reconsider source legality.
+Backend-specific observable source semantics must not leak into the language.
+Source semantics stay backend-neutral. Backends receive validated topology and
+may not reconsider source legality.
 
 ### Read next
 
 - @#design-principles (Design principles)
-- @#deferred-and-outside-scope (Deferred and outside scope)
+- @#deferred-and-outside-scope (Deferred, open and outside scope)

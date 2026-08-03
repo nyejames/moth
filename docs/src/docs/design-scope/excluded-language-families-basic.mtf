@@ -5,15 +5,15 @@ Moth says no to many features that other languages include. Here is why.
 Macros create a second language inside your code. Moth uses templates,
 constants and builder directives for compile-time work instead.
 
-### No closures or function values
+### No general closures or higher-order function values
 
-General closures add complexity to the type system and make code harder to
-follow. Moth uses reactivity for the common UI pattern that closures
-usually solve.
+General closures and higher-order function values add complexity to the type
+system and make code harder to follow. Moth uses reactivity for the common UI
+pattern that closures usually solve.
 
-### No trait objects
+### No dynamic trait values
 
-Trait objects need runtime dispatch and hidden wrappers. Moth uses
+Dynamic trait values need runtime dispatch and hidden wrappers. Moth uses
 choices for runtime variety and generic bounds for static reuse.
 
 ### No operator overloading
@@ -25,6 +25,12 @@ Operators in Moth always do the same thing. You can't redefine `+` or
 
 You can't inspect types at runtime or write code that examines other code's
 structure. This keeps programs predictable and easy to read.
+
+### No explicit lifetime and ownership type system
+
+Moth keeps lifetime and ownership rules behind the compiler. Source code uses
+explicit copies and exclusive access without adding lifetime or ownership
+annotations.
 
 ### The pattern
 

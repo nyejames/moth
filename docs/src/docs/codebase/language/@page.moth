@@ -76,7 +76,7 @@ page_head #= theme_head
 #[section, $md:
     ## Related design
 
-    - @../design-scope (Design scope): accepted mechanisms and intentionally excluded complexity
+    - @../../design-scope (Design scope, public authority): accepted mechanisms and intentionally excluded complexity
     - @../memory-management/access-and-aliasing (Access and aliasing): shared reads, explicit copies and exclusive access
     - @../compiler-design (Compiler design overview): stage ownership and cross-stage data flow
     - @../../progress (Progress matrix): current implementation support and known gaps

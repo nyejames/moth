@@ -48,7 +48,6 @@ page_head #= theme_head
 
     - @./codebase (Codebase overview)
     - @./codebase/memory-management (Memory management)
-    - @./codebase/design-scope (Design scope)
     - @./codebase/style-guide (Development standards)
 
     ## Future design drafts

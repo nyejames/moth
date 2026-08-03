@@ -1,6 +1,6 @@
 # Codebase documentation
 
-`docs/src/docs/codebase/**` owns memory design, design scope, implementation style, testing and validation.
+`docs/src/docs/codebase/**` owns memory design, implementation style, testing and validation.
 
 `docs/src/docs/codebase/language/overview.mtf` routes contributors to the
 canonical focused references for source syntax and observable language
@@ -22,8 +22,8 @@ behaviour, diagnostics, compiler stages, backends, tests or fixtures.
 For compiler architecture and stage ownership, use
 `docs/compiler-design-overview.md`, the canonical technical design reference.
 
-For design-boundary questions, read
-`docs/src/docs/codebase/design-scope/overview.mtf`.
+For design-boundary questions, read the public Design Scope authority at
+`docs/src/docs/design-scope/`.
 
 For build-system or project orchestration questions, read `docs/build-system-design.md`.
 
@@ -69,4 +69,5 @@ Keep detailed contracts in `docs/compiler-design-overview.md` and `docs/build-sy
 - Keep ownership and backend optimisation behind stable source semantics.
 - Distinguish unimplemented design from intentionally excluded design.
 
-See `docs/src/docs/codebase/design-scope/overview.mtf` for the high-level rationale and `docs/compiler-design-overview.md` for concrete compiler architecture.
+See `docs/src/docs/design-scope/` for the high-level rationale and
+`docs/compiler-design-overview.md` for concrete compiler architecture.
