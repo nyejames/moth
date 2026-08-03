@@ -26,7 +26,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, BenchmarkRunner};
 use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
-use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
 use crate::compiler_binary::{CompilerBinary, build_profiling_compiler_with_timers};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -251,6 +251,11 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
 
         println!("done");
     }
+
+    // Explicitly finalise run-owned outputs before drift, verification and
+    // history persistence. Local profile artifacts stay for diagnosis when
+    // cleanup fails, but the failure is reported.
+    finalise_workspace(&workspace, Ok(()))?;
 
     // ---------------------------------------------------------------
     //  Enriched per-case summaries and root summary artifacts

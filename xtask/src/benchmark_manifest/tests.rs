@@ -16,9 +16,17 @@ fn create_entry(repository_root: &Path, relative_path: &str) {
     File::create(path).expect("entry should be creatable");
 }
 
+fn create_directory_entry(repository_root: &Path, relative_path: &str) {
+    let path = repository_root.join(relative_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("entry parent should be creatable");
+    }
+    fs::create_dir_all(path).expect("directory entry should be creatable");
+}
+
 fn minimal_manifest(entry: &str, case_id: &str) -> String {
     format!(
-        r#"schema = 2
+        r#"schema = 3
 
 [[workload]]
 id = "workload"
@@ -44,7 +52,7 @@ args = []
 
 fn two_workload_manifest(first_entry: &str, second_entry: &str) -> String {
     format!(
-        r#"schema = 2
+        r#"schema = 3
 
 [[workload]]
 id = "first_workload"
@@ -85,12 +93,186 @@ args = []
     )
 }
 
+fn directory_build_manifest(entry: &str, roots: &[&str], excludes: &[&str]) -> String {
+    let roots_str = roots
+        .iter()
+        .map(|root| format!("\"{root}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let excludes_str = excludes
+        .iter()
+        .map(|exclude| format!("\"{exclude}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"schema = 3
+
+[[workload]]
+id = "workload"
+entry = "{entry}"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["{entry}"]
+fingerprint_excludes = [{excludes_str}]
+generated_output_roots = [{roots_str}]
+
+[[case]]
+id = "build_case"
+workload = "workload"
+group = "core"
+quick = false
+expectation = "clean"
+
+[case.runner]
+kind = "cli"
+command = "build"
+args = []
+"#
+    )
+}
+
+#[test]
+fn directory_build_workload_with_declared_roots_loads() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest(
+            "project",
+            &["dev", "release"],
+            &["project/dev", "project/release"],
+        ),
+    );
+    let manifest = load_manifest_at(&path, directory.path()).expect("manifest should load");
+
+    assert_eq!(
+        manifest.workloads[0].generated_output_roots,
+        vec![PathBuf::from("dev"), PathBuf::from("release")]
+    );
+}
+
+#[test]
+fn file_workload_with_generated_roots_fails() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "fixture.moth");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest("fixture.moth", &["dev"], &[]),
+    );
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("file workloads must not declare generated output roots");
+    assert!(error.to_string().contains("file workloads may not declare"));
+}
+
+#[test]
+fn directory_build_workload_without_roots_fails() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest("project", &[], &[]),
+    );
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("directory build workloads must declare at least one root");
+    assert!(
+        error
+            .to_string()
+            .contains("must declare at least one generated output root")
+    );
+}
+
+#[test]
+fn generated_root_without_matching_exclude_fails() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest("project", &["dev"], &[]),
+    );
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("a generated root must be covered by an explicit fingerprint exclude");
+    assert!(error.to_string().contains("explicit fingerprint exclude"));
+}
+
+#[test]
+fn duplicate_generated_roots_fail() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest("project", &["dev", "dev"], &["project/dev"]),
+    );
+    let error =
+        load_manifest_at(&path, directory.path()).expect_err("duplicate generated roots must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("duplicate generated output root")
+    );
+}
+
+#[test]
+fn ascii_case_colliding_generated_roots_fail() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest("project", &["dev", "DEV"], &["project/dev"]),
+    );
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("ASCII-case-colliding generated roots must fail");
+    assert!(error.to_string().contains("only by ASCII case"));
+}
+
+#[test]
+fn overlapping_generated_roots_fail() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest(
+            "project",
+            &["dev", "dev/sub"],
+            &["project/dev", "project/dev/sub"],
+        ),
+    );
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("overlapping generated roots must fail");
+    assert!(error.to_string().contains("must not overlap"));
+}
+
+#[test]
+#[cfg(unix)]
+fn symlink_generated_root_fails() {
+    let directory = tempdir().expect("temporary repository should exist");
+    let entry_path = directory.path().join("project");
+    std::fs::create_dir_all(&entry_path).expect("project directory should be creatable");
+    std::fs::create_dir_all(entry_path.join("real-dev"))
+        .expect("real output directory should be creatable");
+    std::os::unix::fs::symlink(entry_path.join("real-dev"), entry_path.join("dev"))
+        .expect("symlink should be creatable");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest("project", &["dev"], &["project/dev"]),
+    );
+    let error =
+        load_manifest_at(&path, directory.path()).expect_err("a symlink generated root must fail");
+    assert!(error.to_string().contains("must not be a symlink"));
+}
+
 #[test]
 fn valid_manifest_preserves_source_order_and_resolves_workloads() {
     let directory = tempdir().expect("temporary repository should exist");
     create_entry(directory.path(), "first.moth");
     create_entry(directory.path(), "second.moth");
-    let contents = r#"schema = 2
+    let contents = r#"schema = 3
 
 [[workload]]
 id = "first_workload"
@@ -219,6 +401,7 @@ struct ExpectedWorkload {
     fingerprint_mode: BenchmarkFingerprintMode,
     roots: &'static [&'static str],
     excludes: &'static [&'static str],
+    generated_roots: &'static [&'static str],
 }
 
 #[derive(Clone, Copy)]
@@ -249,6 +432,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmark-root-single-file.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "speed_test",
@@ -257,6 +441,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/speed-test.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "docs",
@@ -265,6 +450,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::Partitioned,
             roots: &["docs/config.moth", "docs/src"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "template_stress",
@@ -273,6 +459,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/template-stress.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "type_stress",
@@ -281,6 +468,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/type-stress.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "fold_stress",
@@ -289,6 +477,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/fold-stress.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "pattern_stress",
@@ -297,6 +486,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/pattern-stress.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "collection_stress",
@@ -305,6 +495,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/collection-stress.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "environment_stress",
@@ -313,6 +504,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/environment-stress.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "one_module_kitchen_sink",
@@ -321,6 +513,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/one-module-kitchen-sink.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "deep_scope_churn",
@@ -329,6 +522,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/deep-scope-churn.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "template_render_plan_churn",
@@ -337,6 +531,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/template-render-plan-churn.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "constant_dag_churn",
@@ -345,6 +540,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/constant-dag-churn.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "expression_rpn_churn",
@@ -353,6 +549,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/expression-rpn-churn.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "generic_trait_churn",
@@ -361,6 +558,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/generic-trait-churn.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "collection_map_borrow_churn",
@@ -369,6 +567,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/adversarial/collection-map-borrow-churn.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "module_graph",
@@ -380,6 +579,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/module-graph/dev",
                 "benchmarks/module-graph/release",
             ],
+            generated_roots: &["dev", "release"],
         },
         ExpectedWorkload {
             id: "import_fanout",
@@ -391,6 +591,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/import-fanout/dev",
                 "benchmarks/import-fanout/release",
             ],
+            generated_roots: &["dev", "release"],
         },
         ExpectedWorkload {
             id: "external_js_imports",
@@ -402,6 +603,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/external-js-imports/dev",
                 "benchmarks/external-js-imports/release",
             ],
+            generated_roots: &["dev", "release"],
         },
         ExpectedWorkload {
             id: "module_root_stress",
@@ -413,6 +615,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/module-root-stress/dev",
                 "benchmarks/module-root-stress/release",
             ],
+            generated_roots: &["dev", "release"],
         },
         ExpectedWorkload {
             id: "import_external_churn",
@@ -424,6 +627,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/adversarial/import-external-churn/dev",
                 "benchmarks/adversarial/import-external-churn/release",
             ],
+            generated_roots: &["dev", "release"],
         },
         ExpectedWorkload {
             id: "borrow_stress",
@@ -432,6 +636,7 @@ fn repository_manifest_has_complete_ordered_authority() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/borrow-stress.moth"],
             excludes: &[],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "module_root_role_mix",
@@ -443,6 +648,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/module-root-role-mix/scratch",
                 "benchmarks/module-root-role-mix/generated",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "tiny_one_file",
@@ -454,6 +660,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/tiny-one-file/dev",
                 "benchmarks/parallelism/tiny-one-file/release",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "tiny_two_files",
@@ -465,6 +672,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/tiny-two-files/dev",
                 "benchmarks/parallelism/tiny-two-files/release",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "tiny_seven_files",
@@ -476,6 +684,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/tiny-seven-files/dev",
                 "benchmarks/parallelism/tiny-seven-files/release",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "tiny_eight_files",
@@ -487,6 +696,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/tiny-eight-files/dev",
                 "benchmarks/parallelism/tiny-eight-files/release",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "many_tiny_files",
@@ -498,6 +708,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/many-tiny-files/dev",
                 "benchmarks/parallelism/many-tiny-files/release",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "many_medium_files",
@@ -509,6 +720,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/many-medium-files/dev",
                 "benchmarks/parallelism/many-medium-files/release",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "many_markdown_assets",
@@ -520,6 +732,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/many-markdown-assets/dev",
                 "benchmarks/parallelism/many-markdown-assets/release",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "many_modules_one_file_each",
@@ -531,6 +744,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/many-modules-one-file-each/dev",
                 "benchmarks/parallelism/many-modules-one-file-each/release",
             ],
+            generated_roots: &[],
         },
         ExpectedWorkload {
             id: "few_modules_many_files_each",
@@ -542,6 +756,7 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/few-modules-many-files-each/dev",
                 "benchmarks/parallelism/few-modules-many-files-each/release",
             ],
+            generated_roots: &[],
         },
     ];
     let expected_cases = [
@@ -969,6 +1184,14 @@ fn repository_manifest_has_complete_ordered_authority() {
             actual.fingerprint_excludes,
             expected
                 .excludes
+                .iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            actual.generated_output_roots,
+            expected
+                .generated_roots
                 .iter()
                 .map(PathBuf::from)
                 .collect::<Vec<_>>()
@@ -1406,7 +1629,7 @@ fn workload_path_io_error_renders_complete_context() {
 
 fn full_tree_manifest(entry: &str, case_id: &str) -> String {
     format!(
-        r#"schema = 2
+        r#"schema = 3
 
 [[workload]]
 id = "workload"
@@ -1437,7 +1660,7 @@ fn partitioned_manifest(entry: &str, roots: &[&str], case_id: &str) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        r#"schema = 2
+        r#"schema = 3
 
 [[workload]]
 id = "workload"

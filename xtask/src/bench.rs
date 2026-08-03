@@ -35,7 +35,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::BenchmarkCase;
 use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
-use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
 use crate::compiler_binary::build_release_compiler_with_timers;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -90,20 +90,22 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
 
     let git_revision = prepared.snapshot.git_revision();
 
-    let result = run_preflighted_suite(
-        &context,
-        &cases,
-        || {
-            println!("Shared CLI preflight passed; starting measurements.");
-            run_benchmark_cases(&context, &prepared, &cases, policy.measured_iterations())
-        },
-        |case_results| {
+    let measured = run_preflighted_suite(&context, &cases, || {
+        println!("Shared CLI preflight passed; starting measurements.");
+        run_benchmark_cases(&context, &prepared, &cases, policy.measured_iterations())
+    });
+
+    let result = match measured {
+        Ok(case_results) => {
+            // Explicit finalisation precedes verification and persistence.
+            finalise_workspace(&workspace, Ok(()))?;
             if policy.recording() == BenchmarkRecording::Record {
                 prepared.verify_unchanged()?;
             }
             complete_benchmark_run(case_results, thread_count, policy, &git_revision)
-        },
-    );
+        }
+        Err(operation) => finalise_workspace(&workspace, Err(operation)),
+    };
 
     if policy.recording() == BenchmarkRecording::Record {
         result

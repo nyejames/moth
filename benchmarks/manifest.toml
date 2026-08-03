@@ -1,4 +1,4 @@
-schema = 2
+schema = 3
 
 [[workload]]
 id = "root_single_file"
@@ -118,6 +118,7 @@ entry = "benchmarks/module-graph"
 fingerprint_mode = "full_tree"
 fingerprint_roots = ["benchmarks/module-graph"]
 fingerprint_excludes = ["benchmarks/module-graph/dev", "benchmarks/module-graph/release"]
+generated_output_roots = ["dev", "release"]
 
 [[workload]]
 id = "import_fanout"
@@ -125,6 +126,7 @@ entry = "benchmarks/import-fanout"
 fingerprint_mode = "full_tree"
 fingerprint_roots = ["benchmarks/import-fanout"]
 fingerprint_excludes = ["benchmarks/import-fanout/dev", "benchmarks/import-fanout/release"]
+generated_output_roots = ["dev", "release"]
 
 [[workload]]
 id = "external_js_imports"
@@ -132,6 +134,7 @@ entry = "benchmarks/external-js-imports"
 fingerprint_mode = "full_tree"
 fingerprint_roots = ["benchmarks/external-js-imports"]
 fingerprint_excludes = ["benchmarks/external-js-imports/dev", "benchmarks/external-js-imports/release"]
+generated_output_roots = ["dev", "release"]
 
 [[workload]]
 id = "module_root_stress"
@@ -139,6 +142,7 @@ entry = "benchmarks/module-root-stress"
 fingerprint_mode = "full_tree"
 fingerprint_roots = ["benchmarks/module-root-stress"]
 fingerprint_excludes = ["benchmarks/module-root-stress/dev", "benchmarks/module-root-stress/release"]
+generated_output_roots = ["dev", "release"]
 
 [[workload]]
 id = "import_external_churn"
@@ -146,6 +150,7 @@ entry = "benchmarks/adversarial/import-external-churn"
 fingerprint_mode = "full_tree"
 fingerprint_roots = ["benchmarks/adversarial/import-external-churn"]
 fingerprint_excludes = ["benchmarks/adversarial/import-external-churn/dev", "benchmarks/adversarial/import-external-churn/release"]
+generated_output_roots = ["dev", "release"]
 
 [[workload]]
 id = "borrow_stress"

@@ -13,7 +13,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const BENCHMARK_MANIFEST_PATH: &str = "benchmarks/manifest.toml";
-pub(crate) const BENCHMARK_MANIFEST_SCHEMA_VERSION: u32 = 2;
+pub(crate) const BENCHMARK_MANIFEST_SCHEMA_VERSION: u32 = 3;
 
 /// Authored fingerprint boundary mode for one workload.
 ///
@@ -55,6 +55,12 @@ pub(crate) struct BenchmarkWorkload {
     pub(crate) fingerprint_mode: BenchmarkFingerprintMode,
     pub(crate) fingerprint_roots: Vec<PathBuf>,
     pub(crate) fingerprint_excludes: Vec<PathBuf>,
+    /// Declared generated output roots, relative to the workload entry.
+    ///
+    /// These are cleanup authority only: they are validated as absent before
+    /// the first `build` execution and removed by the run workspace on
+    /// finalisation. They never act as source or config semantics.
+    pub(crate) generated_output_roots: Vec<PathBuf>,
 }
 
 /// One authored case with a compact index into the manifest workloads.
@@ -236,6 +242,8 @@ struct RawBenchmarkWorkload {
     fingerprint_mode: BenchmarkFingerprintMode,
     fingerprint_roots: Vec<String>,
     fingerprint_excludes: Vec<String>,
+    #[serde(default)]
+    generated_output_roots: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -461,6 +469,14 @@ fn validate_manifest(
             fingerprint_excludes.push(exclude_path);
         }
 
+        let generated_output_roots = validate_generated_output_roots(
+            manifest_path,
+            &raw_workload.id,
+            &entry,
+            &raw_workload.generated_output_roots,
+            &fingerprint_excludes,
+        )?;
+
         workloads.push(BenchmarkWorkload {
             id: raw_workload.id,
             entry: entry.relative,
@@ -475,6 +491,7 @@ fn validate_manifest(
                 .map(|root| root.relative)
                 .collect(),
             fingerprint_excludes,
+            generated_output_roots,
         });
     }
 
@@ -569,6 +586,23 @@ fn validate_manifest(
                 BenchmarkRunner::Frontend { profile }
             }
         };
+
+        if let BenchmarkRunner::Cli {
+            command: CliBenchmarkCommand::Build,
+            ..
+        } = runner
+        {
+            let workload = &workloads[workload_index];
+            if workload.entry_kind == BenchmarkEntryKind::Directory
+                && workload.generated_output_roots.is_empty()
+            {
+                return Err(invalid(
+                    manifest_path,
+                    format!("case '{}'", raw_case.id),
+                    "directory workload with a CLI build case must declare at least one generated output root",
+                ));
+            }
+        }
 
         cases.push(BenchmarkCase {
             id: raw_case.id,
@@ -853,6 +887,108 @@ fn workload_path_error(
         authored_path: authored_path.to_owned(),
         source,
     }
+}
+
+/// Validate declared generated output roots for one workload.
+///
+/// Roots are cleanup authority only. File workloads declare none; directory
+/// roots must be strict descendants of the entry, disjoint (including ASCII
+/// case collisions), non-symlink when present, and each covered by an exact
+/// fingerprint exclude. The roots are expected to be absent at run start, so
+/// they are validated logically rather than as existing workload paths.
+fn validate_generated_output_roots(
+    manifest_path: &Path,
+    workload_id: &str,
+    entry: &ValidatedWorkloadPath,
+    authored_roots: &[String],
+    fingerprint_excludes: &[PathBuf],
+) -> Result<Vec<PathBuf>, BenchmarkManifestError> {
+    const FIELD: &str = "generated output root";
+
+    if !entry.is_directory && !authored_roots.is_empty() {
+        return Err(invalid(
+            manifest_path,
+            format!("workload '{workload_id}'"),
+            "file workloads may not declare generated output roots",
+        ));
+    }
+
+    let mut roots: Vec<PathBuf> = Vec::with_capacity(authored_roots.len());
+    for authored_root in authored_roots {
+        let relative_path = validate_relative_path(
+            manifest_path,
+            format!("workload '{workload_id}'"),
+            FIELD,
+            authored_root,
+        )?;
+
+        // Roots are entry-relative, so any validated relative path is inside
+        // the entry by construction; the strict-descendant guarantee comes
+        // from the shared relative-path rules (no '.', '..', absolute or
+        // platform-prefixed components).
+
+        // Reject duplicate, overlapping and ASCII-case-colliding roots.
+        let canonical_spelling = relative_path.to_string_lossy().to_ascii_lowercase();
+        for existing in &roots {
+            if existing == &relative_path {
+                return Err(invalid(
+                    manifest_path,
+                    format!("workload '{workload_id}'"),
+                    format!("duplicate generated output root '{authored_root}'"),
+                ));
+            }
+            let existing_spelling = existing.to_string_lossy().to_ascii_lowercase();
+            if existing_spelling == canonical_spelling {
+                return Err(invalid(
+                    manifest_path,
+                    format!("workload '{workload_id}'"),
+                    format!(
+                        "generated output root '{authored_root}' differs from '{}' only by ASCII case",
+                        existing.display()
+                    ),
+                ));
+            }
+            if relative_path.starts_with(existing) || existing.starts_with(&relative_path) {
+                return Err(invalid(
+                    manifest_path,
+                    format!("workload '{workload_id}'"),
+                    format!(
+                        "generated output roots '{}' and '{authored_root}' must not overlap",
+                        existing.display()
+                    ),
+                ));
+            }
+        }
+
+        // A root that already exists must not be a symlink.
+        let absolute_path = entry.canonical.join(&relative_path);
+        if let Ok(metadata) = std::fs::symlink_metadata(&absolute_path)
+            && metadata.file_type().is_symlink()
+        {
+            return Err(invalid(
+                manifest_path,
+                format!("workload '{workload_id}'"),
+                format!("generated output root '{authored_root}' must not be a symlink"),
+            ));
+        }
+
+        // Each root must be covered by an exact fingerprint exclude.
+        let exclude = entry.relative.join(&relative_path);
+        if !fingerprint_excludes.contains(&exclude) {
+            return Err(invalid(
+                manifest_path,
+                format!("workload '{workload_id}'"),
+                format!(
+                    "generated output root '{authored_root}' must be covered by an explicit fingerprint exclude '{}'",
+                    exclude.display()
+                ),
+            ));
+        }
+
+        roots.push(relative_path);
+    }
+
+    Ok(roots)
 }
 
 /// Validate fingerprint roots against the declared boundary mode.

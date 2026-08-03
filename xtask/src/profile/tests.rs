@@ -112,6 +112,7 @@ fn manifest() -> BenchmarkManifest {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: vec!["fixture.moth".into()],
             fingerprint_excludes: Vec::new(),
+            generated_output_roots: Vec::new(),
         }],
         cases: vec![
             BenchmarkCase {
@@ -157,6 +158,7 @@ fn observation_and_samply_receive_one_resolved_invocation() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: vec!["fixture.moth".into()],
             fingerprint_excludes: Vec::new(),
+            generated_output_roots: Vec::new(),
         }],
         cases: vec![BenchmarkCase {
             id: "cli_case".to_owned(),

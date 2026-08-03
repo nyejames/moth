@@ -30,7 +30,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, FrontendBenchmarkProfile};
 use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
-use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
 use std::num::NonZeroUsize;
 
 /// Run the complete frontend benchmark suite.
@@ -76,20 +76,22 @@ pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), 
     let thread_count = effective_thread_count()?;
     let git_revision = prepared.snapshot.git_revision();
 
-    let result = run_preflighted_suite(
-        &context,
-        &cases,
-        || {
-            println!("Shared frontend preflight passed; starting measurements.");
-            run_frontend_cases(&context, &prepared, &cases, policy.measured_iterations())
-        },
-        |case_results| {
+    let measured = run_preflighted_suite(&context, &cases, || {
+        println!("Shared frontend preflight passed; starting measurements.");
+        run_frontend_cases(&context, &prepared, &cases, policy.measured_iterations())
+    });
+
+    let result = match measured {
+        Ok(case_results) => {
+            // Explicit finalisation precedes verification and persistence.
+            finalise_workspace(&workspace, Ok(()))?;
             if policy.recording() == BenchmarkRecording::Record {
                 prepared.verify_unchanged()?;
             }
             complete_frontend_run(case_results, thread_count, policy, &git_revision)
-        },
-    );
+        }
+        Err(operation) => finalise_workspace(&workspace, Err(operation)),
+    };
 
     if policy.recording() == BenchmarkRecording::Record {
         result

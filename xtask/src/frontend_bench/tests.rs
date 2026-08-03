@@ -112,6 +112,7 @@ fn frontend_case_uses_typed_dev_profile_and_workload_entry() {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: vec!["fixture".into()],
             fingerprint_excludes: vec![],
+            generated_output_roots: Vec::new(),
         }],
         cases: vec![],
         manifest_path: "manifest.toml".into(),

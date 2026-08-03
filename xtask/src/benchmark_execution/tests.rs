@@ -378,22 +378,17 @@ fn failed_preflight_prevents_measurement_callback_invocation() {
     let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
     let measurement_called = Cell::new(false);
 
-    let result = run_preflighted_suite(
-        &context,
-        &manifest.cases,
-        || {
-            measurement_called.set(true);
-            Ok(())
-        },
-        |_| Ok(()),
-    );
+    let result = run_preflighted_suite(&context, &manifest.cases, || {
+        measurement_called.set(true);
+        Ok(())
+    });
 
     assert!(result.is_err());
     assert!(!measurement_called.get());
 }
 
 #[test]
-fn failed_measurement_prevents_history_callback_invocation() {
+fn failed_measurement_returns_without_persistence_boundary() {
     let fixture = CliFixture::new();
     let compiler = fixture.mock_path("failed_measurement");
     create_output_executable(
@@ -406,20 +401,12 @@ fn failed_measurement_prevents_history_callback_invocation() {
     let workspace =
         BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
     let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
-    let history_called = Cell::new(false);
 
-    let result = run_preflighted_suite(
-        &context,
-        &manifest.cases,
-        || Err::<(), _>("measured iteration failed".to_owned()),
-        |_| {
-            history_called.set(true);
-            Ok(())
-        },
-    );
+    let result = run_preflighted_suite(&context, &manifest.cases, || {
+        Err::<(), _>("measured iteration failed".to_owned())
+    });
 
     assert_eq!(result, Err("measured iteration failed".to_owned()));
-    assert!(!history_called.get());
 }
 
 #[test]
@@ -618,6 +605,7 @@ impl CliFixture {
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: vec![PathBuf::from(entry)],
             fingerprint_excludes: Vec::new(),
+            generated_output_roots: Vec::new(),
         }
     }
 

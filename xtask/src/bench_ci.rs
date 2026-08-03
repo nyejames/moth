@@ -17,7 +17,7 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{BenchmarkCase, BenchmarkRunner};
 use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
-use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
 use crate::compiler_binary::build_release_compiler_with_timers;
 use crate::frontend_bench::{present_read_only_frontend_run, run_frontend_cases};
 
@@ -88,6 +88,7 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
         },
     );
 
+    let result = finalise_workspace(&workspace, result);
     verify_after_operation(
         &prepared.snapshot,
         &prepared.manifest.repository_root,

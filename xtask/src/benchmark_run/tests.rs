@@ -59,6 +59,7 @@ fn fixture_manifest(repository_root: &Path) -> BenchmarkManifest {
         fingerprint_mode: BenchmarkFingerprintMode::FullTree,
         fingerprint_roots: vec![PathBuf::from("fixture.moth")],
         fingerprint_excludes: Vec::new(),
+        generated_output_roots: Vec::new(),
     };
     let case = crate::benchmark_manifest::BenchmarkCase {
         id: "fixture_check".to_string(),

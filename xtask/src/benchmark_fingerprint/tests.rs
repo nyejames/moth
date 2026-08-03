@@ -66,6 +66,7 @@ fn manifest(
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             fingerprint_roots: roots.iter().map(PathBuf::from).collect(),
             fingerprint_excludes: excludes.iter().map(PathBuf::from).collect(),
+            generated_output_roots: Vec::new(),
         }],
         cases,
         manifest_path: repository_root.join("benchmarks/manifest.toml"),
@@ -707,6 +708,7 @@ fn bulk_api_preserves_manifest_workload_order() {
                 fingerprint_mode: BenchmarkFingerprintMode::FullTree,
                 fingerprint_roots: vec!["first.moth".into()],
                 fingerprint_excludes: vec![],
+                generated_output_roots: Vec::new(),
             },
             BenchmarkWorkload {
                 id: "second".to_owned(),
@@ -715,6 +717,7 @@ fn bulk_api_preserves_manifest_workload_order() {
                 fingerprint_mode: BenchmarkFingerprintMode::FullTree,
                 fingerprint_roots: vec!["second.moth".into()],
                 fingerprint_excludes: vec![],
+                generated_output_roots: Vec::new(),
             },
         ],
         cases: vec![
@@ -785,6 +788,6 @@ fn versioned_fingerprint_has_stable_hex_encoding() {
 
     assert_eq!(
         source_fingerprint(&manifest).to_string(),
-        "6c7e9ae6a2156e7c273c3c3ab1234807"
+        "b4b07c90354f2c8937c40b9bd0f5f432"
     );
 }

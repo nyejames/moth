@@ -14,7 +14,7 @@ use crate::bench_observations::{
 use crate::bench_types::BenchmarkCaseObservations;
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest,
-    BenchmarkManifestError, BenchmarkRunner, CliBenchmarkInvocation,
+    BenchmarkManifestError, BenchmarkRunner, CliBenchmarkCommand, CliBenchmarkInvocation,
 };
 use crate::benchmark_status::{BenchmarkDiagnosticStatus, BenchmarkStatusError};
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
@@ -156,22 +156,20 @@ pub(crate) fn preflight_cases(
     }
 }
 
-/// Preflight a complete selection, measure it, then enter its completion path.
+/// Preflight a complete selection, then measure it.
 ///
-/// The two callbacks form the suite's failure-safety boundary: preflight must
-/// succeed before measurement begins, and measurement must succeed before a
-/// caller can write history or summaries from the completed result.
+/// Preflight must succeed before measurement begins. The caller owns the
+/// explicit finalisation -> verification -> persistence sequence after the
+/// measurements return, so cleanup failures abort persistence on every path.
 pub(crate) fn run_preflighted_suite<T>(
     context: &BenchmarkExecutionContext<'_>,
     cases: &[BenchmarkCase],
     measure: impl FnOnce() -> Result<T, String>,
-    complete: impl FnOnce(T) -> Result<(), String>,
-) -> Result<(), String> {
+) -> Result<T, String> {
     preflight_cases(context, cases)
         .map_err(|failures| format_case_failures("preflight", &failures))?;
 
-    let measurements = measure()?;
-    complete(measurements)
+    measure()
 }
 
 pub(crate) fn format_case_failures(
@@ -294,6 +292,25 @@ fn execute_cli_case(
         )
     })?;
 
+    // A successful directory build must not leave an undeclared output
+    // manifest behind. The bounded recursive scan runs once at finalisation.
+    if invocation.command == CliBenchmarkCommand::Build
+        && let Some(workload) = context.manifest.workload_for(case)
+        && workload.entry_kind == BenchmarkEntryKind::Directory
+    {
+        let entry_path = context.manifest.repository_root.join(&workload.entry);
+        context
+            .workspace
+            .check_directory_build_output(&entry_path)
+            .map_err(|error| {
+                infrastructure_failure(
+                    context,
+                    case,
+                    format!("workspace output check failed: {error}"),
+                )
+            })?;
+    }
+
     Ok(successful_execution(
         context,
         case,
@@ -309,15 +326,8 @@ fn execute_frontend_case(
     context: &BenchmarkExecutionContext<'_>,
     case: &BenchmarkCase,
 ) -> Result<BenchmarkCaseExecution, BenchmarkCaseFailure> {
-    // Register compiler output directories for cleanup so the frontend build
-    // does not leave artifacts in the repository after the run.
-    if let Some(workload) = context.manifest.workload_for(case)
-        && workload.entry_kind == BenchmarkEntryKind::Directory
-    {
-        let entry_path = context.manifest.repository_root.join(&workload.entry);
-        context.workspace.register_directory_artifacts(&entry_path);
-    }
-
+    // Frontend cases register no generated output roots: the in-process
+    // frontend API performs no repository output writing.
     let report = run_one_frontend_case(context.manifest, case).map_err(|message| {
         case_failure(
             context,

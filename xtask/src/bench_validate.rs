@@ -10,7 +10,7 @@ use crate::benchmark_execution::{
 };
 use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
-use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
 use crate::compiler_binary::build_release_compiler_with_timers;
 
 /// Preflight all benchmark cases without recording history or summaries.
@@ -36,6 +36,7 @@ pub fn validate_all_benchmarks() -> Result<(), String> {
         Err(failures) => Err(format_case_failures("preflight", &failures)),
     };
 
+    let result = finalise_workspace(&workspace, result);
     verify_after_operation(
         &prepared.snapshot,
         &prepared.manifest.repository_root,
