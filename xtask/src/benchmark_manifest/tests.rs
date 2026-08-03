@@ -152,6 +152,38 @@ fn directory_build_workload_with_declared_roots_loads() {
 }
 
 #[test]
+fn unknown_group_fails_manifest_loading() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "fixture.moth");
+
+    let contents = r#"schema = 3
+
+[[workload]]
+id = "workload"
+entry = "fixture.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["fixture.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "case"
+workload = "workload"
+group = "bogus"
+quick = false
+expectation = "clean"
+
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+"#;
+    let path = write_manifest(directory.path(), contents);
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("an unknown group must fail manifest loading");
+    assert!(error.to_string().contains("unknown group 'bogus'"));
+}
+
+#[test]
 fn file_workload_with_generated_roots_fails() {
     let directory = tempdir().expect("temporary repository should exist");
     create_entry(directory.path(), "fixture.moth");
@@ -1206,7 +1238,7 @@ fn repository_manifest_has_complete_ordered_authority() {
 
         assert_eq!(actual.id, expected.id);
         assert_eq!(workload.id, expected.workload_id);
-        assert_eq!(actual.group_name, expected.group);
+        assert_eq!(actual.group_name.persistence_spelling(), expected.group);
         assert_eq!(actual.quick, expected.quick);
         assert_eq!(actual.expectation, BenchmarkExpectation::Clean);
 

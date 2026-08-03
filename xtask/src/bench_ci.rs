@@ -5,7 +5,6 @@
 //! WHY: validation needs complete correctness coverage without running or
 //! recording both full ten-iteration performance suites.
 
-use crate::bench::{present_read_only_benchmark_run, run_benchmark_cases};
 use crate::bench_history::effective_thread_count;
 use crate::bench_types::{
     BenchmarkCaseResult, BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSelection,
@@ -17,9 +16,9 @@ use crate::benchmark_execution::{
 use crate::benchmark_manifest::{BenchmarkCase, BenchmarkRunner};
 use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
+use crate::benchmark_suite::{measure_cases, present_read_only};
 use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
 use crate::compiler_binary::build_release_compiler_with_timers;
-use crate::frontend_bench::{present_read_only_frontend_run, run_frontend_cases};
 
 const BENCH_CI_MEASURED_ITERATIONS: usize = 3;
 
@@ -106,20 +105,13 @@ fn bench_ci_policy() -> Result<BenchmarkRunPolicy, String> {
 }
 
 fn measure_section(
-    section: BenchCiSection,
+    _section: BenchCiSection,
     context: &BenchmarkExecutionContext<'_>,
     prepared: &PreparedBenchmarkRun,
     cases: &[BenchmarkCase],
     policy: BenchmarkRunPolicy,
 ) -> Result<Vec<BenchmarkCaseResult>, String> {
-    match section.suite_kind {
-        BenchmarkSuiteKind::EndToEndCli => {
-            run_benchmark_cases(context, prepared, cases, policy.measured_iterations())
-        }
-        BenchmarkSuiteKind::FrontendPhases => {
-            run_frontend_cases(context, prepared, cases, policy.measured_iterations())
-        }
-    }
+    measure_cases(context, prepared, cases, policy.measured_iterations())
 }
 
 fn present_section(
@@ -128,14 +120,7 @@ fn present_section(
     thread_count: Option<u32>,
     selection: BenchmarkSelection,
 ) -> Result<(), String> {
-    match section.suite_kind {
-        BenchmarkSuiteKind::EndToEndCli => {
-            present_read_only_benchmark_run(case_results, thread_count, selection)
-        }
-        BenchmarkSuiteKind::FrontendPhases => {
-            present_read_only_frontend_run(case_results, thread_count, selection)
-        }
-    }
+    present_read_only(case_results, section.suite_kind, thread_count, selection)
 }
 
 /// Preserve the gate ordering: complete preflight first, then derive and run

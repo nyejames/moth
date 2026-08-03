@@ -237,7 +237,7 @@ fn test_format_group_average_line() {
 
     assert_eq!(
         format_group_average_line(&suite, &groups),
-        "Avg: all ~75ms, core ~100ms, docs ~50ms"
+        "Avg: all ~75ms, Core ~100ms, Docs ~50ms"
     );
 }
 
@@ -251,8 +251,8 @@ fn test_generate_system_block_with_change() {
     assert!(
         block.contains("Change since initial benchmark: -12ms avg; 1 faster, 0 slower; 1/1 cases")
     );
-    assert!(block.contains("Initial: all ~80ms, core ~120ms, docs ~60ms"));
-    assert!(block.contains("Latest: all ~68ms, core ~108ms, docs ~48ms"));
+    assert!(block.contains("Initial: all ~80ms, Core ~120ms, Docs ~60ms"));
+    assert!(block.contains("Latest: all ~68ms, Core ~108ms, Docs ~48ms"));
     assert!(block.contains("Case spread latest: ~9ms"));
 }
 
@@ -308,7 +308,7 @@ fn test_generate_system_block_reports_case_set_changed() {
     assert!(block.contains("Change since initial benchmark: case set changed"));
     assert!(!block.contains("Change since initial benchmark: 0ms avg"));
     assert!(block.contains(
-        "Latest: all ~49ms, core ~105ms, docs ~105ms, stress ~11ms, module ~11ms, borrow ~12ms"
+        "Latest: all ~49ms, Core ~105ms, Docs ~105ms, Stress ~11ms, Module ~11ms, Borrow ~12ms"
     ));
 }
 

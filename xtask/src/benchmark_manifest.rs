@@ -5,6 +5,7 @@
 //! WHY: Benchmark commands need one strict source of case order, runner
 //! semantics and filesystem ownership instead of path-derived text lists.
 
+use crate::bench_types::BenchmarkGroup;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
@@ -69,7 +70,7 @@ pub(crate) struct BenchmarkCase {
     pub(crate) id: String,
     pub(crate) case_index: usize,
     pub(crate) workload_index: usize,
-    pub(crate) group_name: String,
+    pub(crate) group_name: BenchmarkGroup,
     pub(crate) quick: bool,
     pub(crate) expectation: BenchmarkExpectation,
     pub(crate) runner: BenchmarkRunner,
@@ -508,13 +509,13 @@ fn validate_manifest(
                 "duplicate global ID",
             ));
         }
-        if raw_case.group.trim().is_empty() {
-            return Err(invalid(
+        let group_name = BenchmarkGroup::parse_spelling(&raw_case.group).ok_or_else(|| {
+            invalid(
                 manifest_path,
                 format!("case '{}'", raw_case.id),
-                "group must not be empty",
-            ));
-        }
+                format!("unknown group '{}'", raw_case.group),
+            )
+        })?;
         let expectation = match raw_case.expectation.as_str() {
             "clean" => BenchmarkExpectation::Clean,
             other => {
@@ -608,7 +609,7 @@ fn validate_manifest(
             id: raw_case.id,
             case_index: cases.len(),
             workload_index,
-            group_name: raw_case.group,
+            group_name,
             quick: raw_case.quick,
             expectation,
             runner,

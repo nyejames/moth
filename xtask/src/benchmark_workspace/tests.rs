@@ -1,6 +1,7 @@
 //! Tests for the run-scoped benchmark workspace and explicit output lifecycle.
 
 use super::*;
+use crate::bench_types::BenchmarkGroup;
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
     BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload, CliBenchmarkCommand,
@@ -38,7 +39,7 @@ fn cli_case(
         id: id.to_owned(),
         case_index: 0,
         workload_index,
-        group_name: "core".to_owned(),
+        group_name: BenchmarkGroup::Core,
         quick: false,
         expectation: BenchmarkExpectation::Clean,
         runner: BenchmarkRunner::Cli {
@@ -285,7 +286,7 @@ fn frontend_case_registers_no_root() {
         id: "project_frontend".to_owned(),
         case_index: 0,
         workload_index: 0,
-        group_name: "core".to_owned(),
+        group_name: BenchmarkGroup::Core,
         quick: false,
         expectation: BenchmarkExpectation::Clean,
         runner: BenchmarkRunner::Frontend {

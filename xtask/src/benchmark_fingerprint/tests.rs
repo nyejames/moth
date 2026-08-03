@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::bench_types::{
-    BenchmarkCaseObservations, BenchmarkCaseResult, BenchmarkComparison,
+    BenchmarkCaseObservations, BenchmarkCaseResult, BenchmarkComparison, BenchmarkGroup,
     BenchmarkMeasurementIdentity,
 };
 use crate::benchmark_manifest::{
@@ -47,7 +47,7 @@ fn manifest(
             id: format!("case_{index}"),
             case_index: index,
             workload_index: 0,
-            group_name: "test".to_owned(),
+            group_name: BenchmarkGroup::Core,
             quick: false,
             expectation: BenchmarkExpectation::Clean,
             runner,
@@ -111,7 +111,7 @@ fn case_with_indices(workload_index: usize, case_index: usize) -> BenchmarkCase 
         id: "fixture_case".to_string(),
         case_index,
         workload_index,
-        group_name: "core".to_string(),
+        group_name: BenchmarkGroup::Core,
         quick: true,
         expectation: BenchmarkExpectation::Clean,
         runner: cli_runner(CliBenchmarkCommand::Check, &[]),
@@ -725,7 +725,7 @@ fn bulk_api_preserves_manifest_workload_order() {
                 id: "second_case".to_owned(),
                 case_index: 0,
                 workload_index: 1,
-                group_name: "test".to_owned(),
+                group_name: BenchmarkGroup::Core,
                 quick: false,
                 expectation: BenchmarkExpectation::Clean,
                 runner: second_runner.clone(),
@@ -734,7 +734,7 @@ fn bulk_api_preserves_manifest_workload_order() {
                 id: "first_case".to_owned(),
                 case_index: 1,
                 workload_index: 0,
-                group_name: "test".to_owned(),
+                group_name: BenchmarkGroup::Core,
                 quick: false,
                 expectation: BenchmarkExpectation::Clean,
                 runner: first_runner.clone(),

@@ -156,22 +156,6 @@ pub(crate) fn preflight_cases(
     }
 }
 
-/// Preflight a complete selection, then measure it.
-///
-/// Preflight must succeed before measurement begins. The caller owns the
-/// explicit finalisation -> verification -> persistence sequence after the
-/// measurements return, so cleanup failures abort persistence on every path.
-pub(crate) fn run_preflighted_suite<T>(
-    context: &BenchmarkExecutionContext<'_>,
-    cases: &[BenchmarkCase],
-    measure: impl FnOnce() -> Result<T, String>,
-) -> Result<T, String> {
-    preflight_cases(context, cases)
-        .map_err(|failures| format_case_failures("preflight", &failures))?;
-
-    measure()
-}
-
 pub(crate) fn format_case_failures(
     execution_phase: &str,
     failures: &[BenchmarkCaseFailure],

@@ -143,6 +143,22 @@ impl BenchmarkSuiteKind {
         }
     }
 
+    /// Label used in the no-system fallback result line.
+    pub(crate) fn read_only_avg_label(&self) -> &'static str {
+        match self {
+            BenchmarkSuiteKind::EndToEndCli => "avg",
+            BenchmarkSuiteKind::FrontendPhases => "frontend avg",
+        }
+    }
+
+    /// Recording command named by the no-baseline fallback message.
+    pub(crate) fn record_command_hint(&self) -> &'static str {
+        match self {
+            BenchmarkSuiteKind::EndToEndCli => "just bench",
+            BenchmarkSuiteKind::FrontendPhases => "just bench-frontend",
+        }
+    }
+
     /// Primary metric name for this suite kind.
     pub fn primary_metric_name(&self) -> &'static str {
         match self {
@@ -165,6 +181,76 @@ pub struct BenchmarkMeasurementIdentity {
     pub source_fingerprint: String,
     /// Case measurement fingerprint covering source, protocol, runner and expectation.
     pub measurement_fingerprint: String,
+}
+
+/// Closed set of public benchmark groups.
+///
+/// The enum is the one group authority: it owns the manifest spelling, the
+/// persisted spelling, the display label and the stable sort order. Unknown
+/// authored groups fail manifest validation; legacy records with unknown
+/// group names stay readable but are never comparable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum BenchmarkGroup {
+    Core,
+    Docs,
+    Stress,
+    Module,
+    Parallelism,
+    Borrow,
+}
+
+impl BenchmarkGroup {
+    /// Persisted spelling, kept stable so normal history never changes shape.
+    ///
+    /// The manifest spelling is identical to the persisted spelling and is
+    /// owned by `parse_spelling`.
+    pub(crate) fn persistence_spelling(self) -> &'static str {
+        match self {
+            Self::Core => "core",
+            Self::Docs => "docs",
+            Self::Stress => "stress",
+            Self::Module => "module",
+            Self::Parallelism => "parallelism",
+            Self::Borrow => "borrow",
+        }
+    }
+
+    /// Human-readable display label used in summaries and terminal output.
+    pub(crate) fn display_label(self) -> &'static str {
+        match self {
+            Self::Core => "Core",
+            Self::Docs => "Docs",
+            Self::Stress => "Stress",
+            Self::Module => "Module",
+            Self::Parallelism => "Parallelism",
+            Self::Borrow => "Borrow",
+        }
+    }
+
+    /// Stable sort order; lower values sort first.
+    pub(crate) fn sort_order(self) -> usize {
+        match self {
+            Self::Core => 0,
+            Self::Docs => 1,
+            Self::Stress => 2,
+            Self::Module => 3,
+            Self::Parallelism => 4,
+            Self::Borrow => 5,
+        }
+    }
+
+    /// Parse an authored or persisted spelling.
+    pub(crate) fn parse_spelling(spelling: &str) -> Option<Self> {
+        match spelling {
+            "core" => Some(Self::Core),
+            "docs" => Some(Self::Docs),
+            "stress" => Some(Self::Stress),
+            "module" => Some(Self::Module),
+            "parallelism" => Some(Self::Parallelism),
+            "borrow" => Some(Self::Borrow),
+            _ => None,
+        }
+    }
 }
 
 /// A single benchmark case result after measured iterations.
@@ -1133,7 +1219,11 @@ pub fn calculate_group_stats(cases: &[BenchmarkCaseResult]) -> Vec<BenchmarkGrou
         .collect();
 
     stats.sort_by(|left, right| {
-        group_sort_key(&left.group_name).cmp(&group_sort_key(&right.group_name))
+        let (left_order, left_name) = group_sort_order(&left.group_name);
+        let (right_order, right_name) = group_sort_order(&right.group_name);
+        left_order
+            .cmp(&right_order)
+            .then_with(|| left_name.cmp(right_name))
     });
 
     stats
@@ -1144,14 +1234,14 @@ struct BenchmarkGroupStatsBuilder {
     case_means: Vec<f64>,
 }
 
-fn group_sort_key(group_name: &str) -> (usize, &str) {
-    match group_name {
-        "core" => (0, group_name),
-        "docs" => (1, group_name),
-        "stress" => (2, group_name),
-        "module" => (3, group_name),
-        "borrow" => (4, group_name),
-        _ => (usize::MAX, group_name),
+/// Stable group sort order owned by `BenchmarkGroup`.
+///
+/// Unknown persisted names (legacy-only records) sort after every accepted
+/// group so they can never reorder the public summary surface.
+fn group_sort_order(group_name: &str) -> (usize, &str) {
+    match BenchmarkGroup::parse_spelling(group_name) {
+        Some(group) => (group.sort_order(), group_name),
+        None => (usize::MAX, group_name),
     }
 }
 

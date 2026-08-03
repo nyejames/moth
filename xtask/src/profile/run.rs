@@ -234,7 +234,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
                 .fingerprints
                 .identity_for(&prepared.manifest, case)
                 .map_err(|error| error.to_string())?,
-            group_name: case.group_name.clone(),
+            group_name: case.group_name.persistence_spelling().to_string(),
             command: invocation.command.as_str().to_owned(),
             args: invocation.args.clone(),
             observation_wall_ms: observation.wall_ms,

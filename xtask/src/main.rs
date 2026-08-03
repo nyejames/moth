@@ -23,7 +23,6 @@
 mod bench;
 mod bench_ci;
 mod bench_history;
-mod bench_migration;
 mod bench_observations;
 mod bench_report;
 mod bench_summary;
@@ -37,6 +36,7 @@ mod benchmark_manifest;
 mod benchmark_repository;
 mod benchmark_run;
 mod benchmark_status;
+mod benchmark_suite;
 mod benchmark_workspace;
 mod compiler_binary;
 mod frontend_bench;

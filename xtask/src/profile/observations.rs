@@ -94,7 +94,7 @@ pub(crate) fn run_observation(
 
     Ok(ProfileObservation {
         case_id: case.id.clone(),
-        group_name: case.group_name.clone(),
+        group_name: case.group_name.persistence_spelling().to_string(),
         command: invocation.command.as_str().to_owned(),
         command_args: invocation.args,
         wall_ms: total_duration_ms,

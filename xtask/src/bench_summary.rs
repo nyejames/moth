@@ -213,8 +213,8 @@ fn load_month_runs(month_key: &str) -> Result<Vec<LocalRunRecord>, String> {
 /// ```markdown
 /// ## End-to-end CLI / macOS M1 (B7F2A9)
 /// Change since initial benchmark: -12ms avg
-/// Initial: all ~80ms, core ~120ms, docs ~60ms
-/// Latest: all ~68ms, core ~100ms, docs ~55ms
+/// Initial: all ~80ms, Core ~120ms, Docs ~60ms
+/// Latest: all ~68ms, Core ~100ms, Docs ~55ms
 /// Case spread latest: ~9ms
 /// ```
 ///
@@ -325,7 +325,7 @@ fn format_month_change_line(comparison: &BenchmarkComparison) -> String {
 /// ```markdown
 /// # End-to-end CLI / macOS M1 (B7F2A9): May 10th - 15:21
 /// **-10ms avg**; 1 faster, 0 slower; 8/8 cases
-/// Avg: all ~68ms, core ~100ms, docs ~55ms
+/// Avg: all ~68ms, Core ~100ms, Docs ~55ms
 /// ```
 fn generate_run_entry(run: &BenchmarkRun, comparison: &BenchmarkComparison) -> SummaryRunEntry {
     let mut body_lines = vec![
@@ -401,12 +401,21 @@ fn format_group_average_list(suite: &SuiteStats, groups: &[BenchmarkGroupStats])
     parts.extend(groups.iter().map(|group| {
         format!(
             "{} {}",
-            group.group_name,
+            group_display_label(&group.group_name),
             format_average_ms(group.average_ms)
         )
     }));
 
     parts.join(", ")
+}
+
+/// Render one group name through the typed display label, keeping legacy
+/// persisted names readable.
+fn group_display_label(group_name: &str) -> &str {
+    match crate::bench_types::BenchmarkGroup::parse_spelling(group_name) {
+        Some(group) => group.display_label(),
+        None => group_name,
+    }
 }
 
 /// Parse an existing summary file.

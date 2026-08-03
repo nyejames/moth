@@ -1,6 +1,7 @@
 //! Focused contracts for one prepared benchmark run.
 
 use super::*;
+use crate::bench_types::BenchmarkGroup;
 use crate::benchmark_manifest::{
     BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode, BenchmarkRunner,
     BenchmarkWorkload, CliBenchmarkCommand,
@@ -65,7 +66,7 @@ fn fixture_manifest(repository_root: &Path) -> BenchmarkManifest {
         id: "fixture_check".to_string(),
         case_index: 0,
         workload_index: 0,
-        group_name: "core".to_string(),
+        group_name: BenchmarkGroup::Core,
         quick: true,
         expectation: BenchmarkExpectation::Clean,
         runner: BenchmarkRunner::Cli {

@@ -1,3 +1,5 @@
+use crate::bench_types::BenchmarkGroup;
+
 use moth::benchmarking::{
     FrontendBenchmarkCounter, FrontendBenchmarkReport, FrontendBenchmarkStage,
 };
@@ -146,7 +148,7 @@ fn frontend_case() -> BenchmarkCase {
         id: "frontend_fixture".to_string(),
         case_index: 0,
         workload_index: 0,
-        group_name: "core".to_string(),
+        group_name: BenchmarkGroup::Core,
         quick: false,
         expectation: BenchmarkExpectation::Clean,
         runner: BenchmarkRunner::Frontend {

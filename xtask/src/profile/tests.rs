@@ -1,4 +1,5 @@
 use super::run::{profile_artifacts_root, profile_history_allowed, select_profile_cases};
+use crate::bench_types::BenchmarkGroup;
 use crate::benchmark_execution::BenchmarkExecutionContext;
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
@@ -119,7 +120,7 @@ fn manifest() -> BenchmarkManifest {
                 id: "cli_case".to_owned(),
                 case_index: 0,
                 workload_index: 0,
-                group_name: "core".to_owned(),
+                group_name: BenchmarkGroup::Core,
                 quick: false,
                 expectation: BenchmarkExpectation::Clean,
                 runner: BenchmarkRunner::Cli {
@@ -131,7 +132,7 @@ fn manifest() -> BenchmarkManifest {
                 id: "frontend_case".to_owned(),
                 case_index: 1,
                 workload_index: 0,
-                group_name: "core".to_owned(),
+                group_name: BenchmarkGroup::Core,
                 quick: false,
                 expectation: BenchmarkExpectation::Clean,
                 runner: BenchmarkRunner::Frontend {
@@ -164,7 +165,7 @@ fn observation_and_samply_receive_one_resolved_invocation() {
             id: "cli_case".to_owned(),
             case_index: 0,
             workload_index: 0,
-            group_name: "core".to_owned(),
+            group_name: BenchmarkGroup::Core,
             quick: false,
             expectation: BenchmarkExpectation::Clean,
             runner: BenchmarkRunner::Cli {

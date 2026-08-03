@@ -1,13 +1,14 @@
-use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tempfile::TempDir;
 
+use crate::bench_types::BenchmarkGroup;
+
 use super::{
     BenchmarkExecutionContext, BenchmarkFailureKind, average_case_observations, execute_case,
-    preflight_cases, run_preflighted_suite, validate_total_duration,
+    preflight_cases, validate_total_duration,
 };
 use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric};
 use crate::benchmark_manifest::{
@@ -368,48 +369,6 @@ fn preflight_executes_every_case_once_and_aggregates_failures_in_manifest_order(
 }
 
 #[test]
-fn failed_preflight_prevents_measurement_callback_invocation() {
-    let fixture = CliFixture::new();
-    let compiler = fixture.mock_path("failed_preflight");
-    create_output_executable(&compiler, "", "preflight failed", 1);
-    let manifest = fixture.single_cli_manifest();
-    let workspace =
-        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
-    let measurement_called = Cell::new(false);
-
-    let result = run_preflighted_suite(&context, &manifest.cases, || {
-        measurement_called.set(true);
-        Ok(())
-    });
-
-    assert!(result.is_err());
-    assert!(!measurement_called.get());
-}
-
-#[test]
-fn failed_measurement_returns_without_persistence_boundary() {
-    let fixture = CliFixture::new();
-    let compiler = fixture.mock_path("failed_measurement");
-    create_output_executable(
-        &compiler,
-        "MOTH_BENCH status errors=0 warnings=0\nMOTH_BENCH timing command.check.total=1ms",
-        "",
-        0,
-    );
-    let manifest = fixture.single_cli_manifest();
-    let workspace =
-        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
-
-    let result = run_preflighted_suite(&context, &manifest.cases, || {
-        Err::<(), _>("measured iteration failed".to_owned())
-    });
-
-    assert_eq!(result, Err("measured iteration failed".to_owned()));
-}
-
-#[test]
 fn failure_evidence_keeps_stdout_and_stderr_separate_and_bounded() {
     let fixture = CliFixture::new();
     let compiler = fixture.mock_path("bounded");
@@ -645,7 +604,7 @@ fn cli_case(
         id: id.to_owned(),
         case_index: 0,
         workload_index,
-        group_name: "core".to_owned(),
+        group_name: BenchmarkGroup::Core,
         quick: false,
         expectation: BenchmarkExpectation::Clean,
         runner: BenchmarkRunner::Cli {
@@ -660,7 +619,7 @@ fn frontend_case(id: &str, workload_index: usize) -> BenchmarkCase {
         id: id.to_owned(),
         case_index: 0,
         workload_index,
-        group_name: "core".to_owned(),
+        group_name: BenchmarkGroup::Core,
         quick: false,
         expectation: BenchmarkExpectation::Clean,
         runner: BenchmarkRunner::Frontend {
