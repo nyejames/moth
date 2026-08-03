@@ -11,13 +11,14 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md) (resume at R5C1)
 - [Final benchmark system hardening](./plans/benchmark-system-final-hardening-plan.md)
+- [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md) (resume at R5C1)
 
 ## Queued implementation chain
 
 - [$code directive moth highlighting improvements](./plans/code-block-highlighting-expansion-and-optimisation-plan.md)
 - [TIR follow up cleanup](./plans/tir-corrections-and-simplification-plan.md)
+- [growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
 - [Anonymous const records](./plans/anonymous-const-records-plan.md)
 - [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
 - [Imported build values and project globals](./plans/imported-build-values-and-project-globals-plan.md)
