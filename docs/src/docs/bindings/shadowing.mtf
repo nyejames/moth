@@ -10,7 +10,7 @@ Moth doesn't allow a visible name to be redeclared.
     ;
 ]
 
-### Contract
+### Rules
 
 - A declaration can't reuse a value name that stays visible.
 - A declaration can't collide with a visible type, alias, import, builtin or reserved name.

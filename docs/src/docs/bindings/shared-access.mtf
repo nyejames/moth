@@ -29,8 +29,7 @@ A later use of a shared alias can prevent overlapping mutation:
     shared_items = items
 
     -- Invalid because shared_items is used again after the mutation.
-    ~items.push("c") catch:
-    ;
+    ~items.push("c")
 
     io.line([: [shared_items.length()] items])
 ]

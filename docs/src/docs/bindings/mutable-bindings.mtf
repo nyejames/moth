@@ -24,8 +24,7 @@ Declaration mutability and call-site exclusive access are separate operations.
 
 [codeblock, $code("moth"):
     add_name |names ~{String}, name String|:
-        ~names.push(name) catch:
-        ;
+        ~names.push(name)
     ;
 
     names ~{String} = {}

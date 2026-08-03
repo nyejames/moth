@@ -4,8 +4,7 @@
     items ~= {"a", "b"}
     independent_items ~= copy items
 
-    ~items.push("c") catch:
-    ;
+    ~items.push("c")
 
     io.line([: original length: [items.length()]])
     io.line([: copied length: [independent_items.length()]])

@@ -14,8 +14,7 @@ Collections also need a mutable binding before they can change:
 [codeblock, $code("moth"):
     names ~{String} = {}
 
-    ~names.push("Priya") catch:
-    ;
+    ~names.push("Priya")
 ]
 
 The `~` before `names.push` requests exclusive access for that call. It is

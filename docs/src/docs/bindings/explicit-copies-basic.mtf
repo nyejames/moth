@@ -4,11 +4,10 @@ Use `copy` when two stored values need to change independently.
     names ~= {"Priya", "Rob"}
     copied_names ~= copy names
 
-    ~names.push("Linus") catch:
-    ;
+    ~names.push("Stella")
 ]
 
-Changing `names` does not add `"Linus"` to `copied_names`.
+Changing `names` does not add `"Stella"` to `copied_names`.
 
 This is different from a normal assignment:
 
