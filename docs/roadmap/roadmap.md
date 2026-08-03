@@ -11,9 +11,8 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [final documentation cleanup](./plans/documentation-scope-and-status-cleanup-plan.md)
-- [Final benchmark system hardening](./plans/benchmark-system-final-hardening-plan.md)
 - [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md) (resume at R5C1)
+- [Final benchmark system hardening](./plans/benchmark-system-final-hardening-plan.md)
 
 ## Queued implementation chain
 
