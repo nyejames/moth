@@ -1,13 +1,18 @@
 //! Built-in `$code` template style support.
 //!
+//! The HTML builder registers `$code` as a style directive and the frontend
+//! formatter registry executes it; this module is the HTML-project owner of
+//! the directive implementation.
+//!
 //! This module owns both halves of the feature:
 //! - parsing the narrow `$code` / `$code("ext")` directive syntax
 //! - converting compile-time body string runs into safe HTML with optional syntax highlighting
 //!
 //! The shared template formatter pipeline owns whitespace normalization before code reaches this
-//! module. This module owns escaping, presentation and the `<code>` wrapper. Exact Moth source-word
-//! classification comes from the compiler-owned keyword module; this module never keeps a second
-//! current Moth word list.
+//! module. This module owns presentation and the `<code>` wrapper; HTML character escaping is
+//! shared with `$escape_html` through `styles/escape_html.rs`. Exact Moth source-word classification
+//! comes from the compiler-owned keyword module; this module never keeps a second current Moth word
+//! list.
 //!
 //! The production scanner is one byte-indexed pass over borrowed source slices. It batches plain
 //! runs, escapes directly into one owned output string per text piece and uses maximal munch for
@@ -29,6 +34,7 @@ use crate::compiler_frontend::keywords::{
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::html_project::styles::escape_html::push_escaped_html_text;
 use std::sync::Arc;
 
 /// One language-neutral presentation role shared by every code language profile.
@@ -75,20 +81,41 @@ impl CodeHighlightRole {
 ///      lexical behaviour until they adopt the shared palette in the same pass.
 const NON_MOTH_OPERATOR_BYTES: &[u8] = b"=:-+*/%^!?|&<>~@#$`";
 
+/// Contract-list kind for the Moth heuristic.
+///
+/// WHAT: distinguishes trait conformance lists (`must`, `must not`) from
+///       generic-bound lists after `is` inside a generic declaration.
+/// WHY: commas continue conformance lists but end a generic bound list so the
+///      next identifier can be a new generic parameter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContractListKind {
+    Conformance,
+    GenericBound,
+}
+
 /// Bounded contract-list state for the Moth heuristic.
 ///
-/// WHAT: remembers whether the next ALL_CAPS identifier sits inside trait or
-///       conformance syntax (`must`, `must not`, generic `is` or a comma/`and`
-///       continuation).
+/// WHAT: remembers whether the next ALL_CAPS identifier is a contract name and
+///       which kind of list expects it.
 /// WHY: ALL_CAPS casing alone must never decide the Contract role, so the
 ///      scanner needs a tiny expectation that structural boundaries reset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MothContractExpectation {
+enum ContractState {
     None,
-    AfterMust,
-    AfterMustNot,
-    AfterIs,
-    InContractList,
+    ExpectName(ContractListKind),
+    AfterName(ContractListKind),
+}
+
+/// Exact byte position expected for a declaration-name role.
+///
+/// WHAT: records the source start of the one identifier a non-Moth keyword
+///       (such as `function` or `trait`) may colour.
+/// WHY: a pending role without a position can leak to a later word across
+///      delimiters, comments, strings or newlines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExpectedWordRole {
+    start: usize,
+    role: CodeHighlightRole,
 }
 
 pub(crate) fn code_formatter_factory(
@@ -189,7 +216,7 @@ impl TemplateFormatter for CodeTemplateFormatter {
                     }
 
                     if self.language == CodeLanguage::Text {
-                        push_escaped_text(&mut output, text);
+                        push_escaped_html_text(&mut output, text);
                     } else {
                         highlight_code_html_into(text, self.language, &mut output);
                     }
@@ -251,7 +278,7 @@ fn highlight_code_html_into(source: &str, language: CodeLanguage, output: &mut S
 /// One byte-indexed scanner pass over a borrowed source slice.
 ///
 /// WHAT: owns the current position, the plain-run start, the language profile
-///       and the bounded Moth contract expectation.
+///       and the bounded Moth and non-Moth contextual state.
 /// WHY: a small state owner keeps the scanning control flow explicit and lets
 ///      every helper read source bytes without copying identifiers or words.
 struct CodeScanner<'source> {
@@ -260,8 +287,10 @@ struct CodeScanner<'source> {
     index: usize,
     plain_start: usize,
     language: CodeLanguage,
-    moth_contract_expectation: MothContractExpectation,
-    pending_word_role: Option<CodeHighlightRole>,
+    contract_state: ContractState,
+    generic_declaration: bool,
+    in_pipe_group: bool,
+    expected_word_role: Option<ExpectedWordRole>,
 }
 
 impl<'source> CodeScanner<'source> {
@@ -272,8 +301,10 @@ impl<'source> CodeScanner<'source> {
             index: 0,
             plain_start: 0,
             language,
-            moth_contract_expectation: MothContractExpectation::None,
-            pending_word_role: None,
+            contract_state: ContractState::None,
+            generic_declaration: false,
+            in_pipe_group: false,
+            expected_word_role: None,
         }
     }
 
@@ -305,6 +336,21 @@ impl<'source> CodeScanner<'source> {
                 }
 
                 if self.language == CodeLanguage::Moth {
+                    // Each structural `|` opens or closes a paired pipe group.
+                    if byte == b'|' {
+                        self.in_pipe_group = !self.in_pipe_group;
+                        self.scan_delimiter(output);
+                        return;
+                    }
+
+                    // Commas continue conformance lists but end a generic bound list.
+                    if byte == b',' {
+                        self.transition_after_comma();
+                        self.expected_word_role = None;
+                        self.index += 1;
+                        return;
+                    }
+
                     if byte == b'$' && self.moth_directive_starts_here() {
                         self.scan_moth_directive(output);
                         return;
@@ -315,7 +361,7 @@ impl<'source> CodeScanner<'source> {
                         return;
                     }
 
-                    if matches!(byte, b':' | b';' | b'|') {
+                    if matches!(byte, b':' | b';') {
                         if self.operator_length().is_some() {
                             self.scan_operator(output);
                         } else {
@@ -330,17 +376,21 @@ impl<'source> CodeScanner<'source> {
                     return;
                 }
 
-                // Structural Moth boundaries reset the contract expectation.
+                // Structural Moth boundaries end declaration context.
                 if self.language == CodeLanguage::Moth
                     && matches!(
                         byte,
                         b'\n' | b'=' | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}'
                     )
                 {
-                    self.moth_contract_expectation = MothContractExpectation::None;
+                    self.reset_declaration_context();
                 }
 
-                // Plain punctuation and whitespace stay in the batched plain run.
+                // Plain punctuation stays in the batched plain run; horizontal
+                // whitespace keeps an armed declaration-name expectation alive.
+                if !matches!(byte, b' ' | b'\t') {
+                    self.expected_word_role = None;
+                }
                 self.index += 1;
             }
         }
@@ -372,84 +422,117 @@ impl<'source> CodeScanner<'source> {
             .chars()
             .next()
             .expect("scan position is always on a char boundary");
+        self.expected_word_role = None;
         self.index += ch.len_utf8();
     }
 
     fn scan_word(&mut self, output: &mut String) {
         let word_start = self.index;
-        self.flush_plain(output);
+        let word_end = self.word_end(word_start);
+        let word = &self.source[word_start..word_end];
 
-        while self.index < self.bytes.len() {
-            let byte = self.bytes[self.index];
+        if let Some(role) = self.word_role(word, word_start, word_end) {
+            self.emit_highlighted_range(output, word_start, word_end, role);
+        } else {
+            // Unhighlighted words stay part of the current plain run: the cursor
+            // advances but `plain_start` is untouched, so the whole run flushes
+            // in one write at the next span or end of input.
+            self.index = word_end;
+        }
+    }
+
+    /// Returns the byte index just past one identifier word.
+    ///
+    /// WHAT: scans ASCII alphanumerics and underscores, consumes one scalar for
+    ///       any non-ASCII byte, then includes an attached `return!` / `cast!`
+    ///       bang for Moth.
+    /// WHY: the word range is computed locally so the shared emitter can hold the
+    ///      single invariant that the cursor is still at the token start.
+    fn word_end(&self, start: usize) -> usize {
+        let mut end = start;
+
+        while end < self.bytes.len() {
+            let byte = self.bytes[end];
             if byte.is_ascii() {
                 if byte.is_ascii_alphanumeric() || byte == b'_' {
-                    self.index += 1;
+                    end += 1;
                 } else {
                     break;
                 }
             } else {
-                self.advance_unicode();
+                let ch = self.source[end..]
+                    .chars()
+                    .next()
+                    .expect("scan position is always on a char boundary");
+                end += ch.len_utf8();
             }
         }
 
         // `return!` and `cast!` keep the attached bang inside the keyword span.
         if self.language == CodeLanguage::Moth
-            && self.index < self.bytes.len()
-            && self.bytes[self.index] == b'!'
-            && attached_bang_keyword_token_kind(&self.source[word_start..self.index]).is_some()
+            && end < self.bytes.len()
+            && self.bytes[end] == b'!'
+            && attached_bang_keyword_token_kind(&self.source[start..end]).is_some()
         {
-            self.index += 1;
+            end += 1;
         }
 
-        let word = &self.source[word_start..self.index];
-        self.emit_word(output, word);
-        self.plain_start = self.index;
+        end
     }
 
-    fn emit_word(&mut self, output: &mut String, word: &str) {
+    /// Classifies one scanned word, returning its role if it gets a span.
+    fn word_role(
+        &mut self,
+        word: &str,
+        word_start: usize,
+        word_end: usize,
+    ) -> Option<CodeHighlightRole> {
         if self.language == CodeLanguage::Moth {
-            self.emit_moth_word(output, word);
-            return;
-        }
-
-        if let Some(role) = self.pending_word_role.take() {
-            push_role_span_escaped(output, role, word);
-            return;
-        }
-
-        if is_keyword(word, self.language) {
-            self.set_non_moth_lookahead(word);
-            push_role_span_escaped(output, CodeHighlightRole::Keyword, word);
-        } else if is_type_keyword(word, self.language) {
-            push_role_span_escaped(output, CodeHighlightRole::Type, word);
-        } else if is_literal_word(word, self.language) {
-            push_role_span_escaped(output, CodeHighlightRole::Literal, word);
-        } else if self.language != CodeLanguage::Generic
-            && word.chars().next().is_some_and(|ch| ch.is_uppercase())
-        {
-            push_role_span_escaped(output, CodeHighlightRole::Nominal, word);
+            self.moth_word_role(word, word_end)
         } else {
-            output.push_str(word);
+            self.non_moth_word_role(word, word_start, word_end)
         }
+    }
+
+    /// Classifies one non-Moth word against the exact-position expectation and
+    /// the direct per-language word table.
+    fn non_moth_word_role(
+        &mut self,
+        word: &str,
+        word_start: usize,
+        word_end: usize,
+    ) -> Option<CodeHighlightRole> {
+        if let Some(expected) = self.expected_word_role.take()
+            && expected.start == word_start
+        {
+            return Some(expected.role);
+        }
+
+        let class = classify_non_moth_word(self.language, word);
+        if let Some(next_role) = class.next_identifier_role
+            && let Some(next_start) = self.next_identifier_start(word_end)
+        {
+            self.expected_word_role = Some(ExpectedWordRole {
+                start: next_start,
+                role: next_role,
+            });
+        }
+
+        class.role.or_else(|| {
+            (self.language != CodeLanguage::Generic
+                && word.chars().next().is_some_and(|ch| ch.is_uppercase()))
+            .then_some(CodeHighlightRole::Nominal)
+        })
     }
 
     /// Classifies one Moth word through the compiler-owned classes and the
     /// bounded lexical heuristics.
-    fn emit_moth_word(&mut self, output: &mut String, word: &str) {
-        let Some(role) = self.moth_word_role(word) else {
-            output.push_str(word);
-            return;
-        };
-
-        push_role_span_escaped(output, role, word);
-    }
-
-    fn moth_word_role(&mut self, word: &str) -> Option<CodeHighlightRole> {
+    fn moth_word_role(&mut self, word: &str, word_end: usize) -> Option<CodeHighlightRole> {
         // Attached bang forms are keyword spans.
         if let Some(prefix) = word.strip_suffix('!')
             && attached_bang_keyword_token_kind(prefix).is_some()
         {
-            self.moth_contract_expectation = MothContractExpectation::None;
+            self.reset_declaration_context();
             return Some(CodeHighlightRole::Keyword);
         }
 
@@ -463,15 +546,31 @@ impl<'source> CodeScanner<'source> {
 
             // Word-level contract-list transitions.
             match word {
-                "must" => self.moth_contract_expectation = MothContractExpectation::AfterMust,
-                "not" if self.moth_contract_expectation == MothContractExpectation::AfterMust => {
-                    self.moth_contract_expectation = MothContractExpectation::AfterMustNot;
+                "type" => {
+                    self.generic_declaration = true;
+                    self.contract_state = ContractState::None;
                 }
-                "is" => self.moth_contract_expectation = MothContractExpectation::AfterIs,
-                "and"
-                    if self.moth_contract_expectation
-                        == MothContractExpectation::InContractList => {}
-                _ => self.moth_contract_expectation = MothContractExpectation::None,
+                "must" => {
+                    self.generic_declaration = false;
+                    self.contract_state = ContractState::ExpectName(ContractListKind::Conformance);
+                }
+                "not"
+                    if self.contract_state
+                        == ContractState::ExpectName(ContractListKind::Conformance) => {}
+                "is" => {
+                    self.contract_state = if self.generic_declaration {
+                        ContractState::ExpectName(ContractListKind::GenericBound)
+                    } else {
+                        ContractState::None
+                    };
+                }
+                "and" if matches!(self.contract_state, ContractState::AfterName(_)) => {
+                    let ContractState::AfterName(kind) = self.contract_state else {
+                        unreachable!("guarded by the match arm above");
+                    };
+                    self.contract_state = ContractState::ExpectName(kind);
+                }
+                _ => self.contract_state = ContractState::None,
             }
 
             return Some(role);
@@ -479,63 +578,110 @@ impl<'source> CodeScanner<'source> {
 
         // Canonical builtin spellings that are not tokenizer keywords.
         if word == ERROR_TYPE_NAME {
-            self.moth_contract_expectation = MothContractExpectation::None;
+            self.contract_state = ContractState::None;
             return Some(CodeHighlightRole::Type);
         }
 
-        if word == IO_NAMESPACE_NAME && self.bytes.get(self.index) == Some(&b'.') {
-            self.moth_contract_expectation = MothContractExpectation::None;
+        if word == IO_NAMESPACE_NAME && self.bytes.get(word_end) == Some(&b'.') {
+            self.contract_state = ContractState::None;
             return Some(CodeHighlightRole::Type);
         }
 
         if is_all_caps_word(word) {
-            let in_contract_context = self.moth_contract_expectation
-                != MothContractExpectation::None
-                || self.all_caps_followed_by_must(self.index);
-            self.moth_contract_expectation = MothContractExpectation::None;
+            let in_contract_context = self.contract_state != ContractState::None
+                || self.all_caps_followed_by_must(word_end);
+            self.contract_state = if in_contract_context {
+                let kind = match self.contract_state {
+                    ContractState::ExpectName(kind) | ContractState::AfterName(kind) => kind,
+                    // An ALL_CAPS name followed by `must` declares a trait.
+                    ContractState::None => ContractListKind::Conformance,
+                };
+                ContractState::AfterName(kind)
+            } else {
+                ContractState::None
+            };
 
-            if in_contract_context {
-                self.moth_contract_expectation = MothContractExpectation::InContractList;
-                return Some(CodeHighlightRole::Contract);
-            }
-
-            return None;
+            return in_contract_context.then_some(CodeHighlightRole::Contract);
         }
 
         if is_pascal_case_word(word) {
-            self.moth_contract_expectation = MothContractExpectation::None;
+            self.contract_state = ContractState::None;
             return Some(CodeHighlightRole::Nominal);
         }
 
-        // Ordinary identifiers become functions only before `(` or `|`.
-        self.moth_contract_expectation = MothContractExpectation::None;
-        match self.next_non_horizontal_whitespace_byte(self.index) {
-            Some(b'(') | Some(b'|') => Some(CodeHighlightRole::Function),
+        // Ordinary identifiers become functions only before `(` or a pipe that
+        // opens a new group; identifiers inside `|...|` stay plain.
+        self.contract_state = ContractState::None;
+        match self.next_non_horizontal_whitespace_byte(word_end) {
+            Some(b'(') => Some(CodeHighlightRole::Function),
+            Some(b'|') if !self.in_pipe_group => Some(CodeHighlightRole::Function),
             _ => None,
         }
     }
 
-    fn set_non_moth_lookahead(&mut self, word: &str) {
-        match self.language {
-            CodeLanguage::JavaScript | CodeLanguage::TypeScript | CodeLanguage::Shell
-                if word == "function" =>
-            {
-                self.pending_word_role = Some(CodeHighlightRole::Function);
+    /// Resets contract-list and generic-declaration context at structural
+    /// boundaries so later source cannot inherit stale expectations.
+    fn reset_declaration_context(&mut self) {
+        self.contract_state = ContractState::None;
+        self.generic_declaration = false;
+    }
+
+    /// Continues a conformance list after a comma or ends a generic bound list
+    /// so the next word can be a new generic parameter.
+    fn transition_after_comma(&mut self) {
+        self.contract_state = match self.contract_state {
+            ContractState::AfterName(ContractListKind::Conformance) => {
+                ContractState::ExpectName(ContractListKind::Conformance)
             }
-            CodeLanguage::Python if word == "def" => {
-                self.pending_word_role = Some(CodeHighlightRole::Function);
+            ContractState::AfterName(ContractListKind::GenericBound) => ContractState::None,
+            _ => self.contract_state,
+        };
+    }
+
+    /// Returns the start of the next identifier after horizontal whitespace, or
+    /// `None` when the next source position cannot begin one.
+    fn next_identifier_start(&self, from: usize) -> Option<usize> {
+        let mut index = from;
+
+        while index < self.bytes.len() {
+            match self.bytes[index] {
+                b' ' | b'\t' => index += 1,
+                b'a'..=b'z' | b'A'..=b'Z' | b'_' => return Some(index),
+                _ => {
+                    let ch = self.source[index..]
+                        .chars()
+                        .next()
+                        .expect("scan position is always on a char boundary");
+                    if ch.is_alphanumeric() {
+                        return Some(index);
+                    }
+                    return None;
+                }
             }
-            CodeLanguage::Rust if word == "fn" => {
-                self.pending_word_role = Some(CodeHighlightRole::Function);
-            }
-            CodeLanguage::TypeScript if word == "interface" => {
-                self.pending_word_role = Some(CodeHighlightRole::Contract);
-            }
-            CodeLanguage::Rust if word == "trait" => {
-                self.pending_word_role = Some(CodeHighlightRole::Contract);
-            }
-            _ => {}
         }
+
+        None
+    }
+
+    /// Flushes the plain run, emits one token inside a role span, then advances
+    /// the cursor. This is the only path that owns the complete flush/span/cursor
+    /// sequence for highlighted runs.
+    fn emit_highlighted_range(
+        &mut self,
+        output: &mut String,
+        token_start: usize,
+        token_end: usize,
+        role: CodeHighlightRole,
+    ) {
+        debug_assert_eq!(self.index, token_start);
+        debug_assert!(token_start <= token_end);
+        debug_assert!(token_end <= self.bytes.len());
+
+        self.flush_plain(output);
+        push_role_span_escaped(output, role, &self.source[token_start..token_end]);
+
+        self.index = token_end;
+        self.plain_start = token_end;
     }
 
     fn scan_line_comment(&mut self, output: &mut String) {
@@ -548,14 +694,8 @@ impl<'source> CodeScanner<'source> {
             end += 1;
         }
 
-        self.flush_plain(output);
-        push_role_span_escaped(
-            output,
-            CodeHighlightRole::Comment,
-            &self.source[run_start..end],
-        );
-        self.index = end;
-        self.plain_start = end;
+        self.expected_word_role = None;
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Comment);
     }
 
     fn scan_quoted_run(&mut self, output: &mut String) {
@@ -596,70 +736,49 @@ impl<'source> CodeScanner<'source> {
             }
         }
 
-        self.flush_plain(output);
-        push_role_span_escaped(
-            output,
-            CodeHighlightRole::String,
-            &self.source[run_start..end],
-        );
-        self.index = end;
-        self.plain_start = end;
+        self.expected_word_role = None;
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::String);
     }
 
     fn scan_delimiter(&mut self, output: &mut String) {
         let run_start = self.index;
-        self.flush_plain(output);
-        self.index += 1;
+        let end = self.index + 1;
 
         if self.language == CodeLanguage::Moth {
-            self.moth_contract_expectation = MothContractExpectation::None;
+            self.reset_declaration_context();
         }
 
-        push_role_span_escaped(
-            output,
-            CodeHighlightRole::Delimiter,
-            &self.source[run_start..self.index],
-        );
-        self.plain_start = self.index;
+        self.expected_word_role = None;
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Delimiter);
     }
 
     fn scan_moth_directive(&mut self, output: &mut String) {
         let run_start = self.index;
-        self.index += 1;
+        let mut end = self.index + 1;
 
-        while self.index < self.bytes.len() {
-            let byte = self.bytes[self.index];
+        while end < self.bytes.len() {
+            let byte = self.bytes[end];
             if byte.is_ascii_alphanumeric() || byte == b'_' {
-                self.index += 1;
+                end += 1;
             } else {
                 break;
             }
         }
 
-        self.flush_plain(output);
-        push_role_span_escaped(
-            output,
-            CodeHighlightRole::Directive,
-            &self.source[run_start..self.index],
-        );
-        self.plain_start = self.index;
+        self.expected_word_role = None;
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Directive);
     }
 
     fn scan_moth_path(&mut self, output: &mut String) {
         let run_start = self.index;
-        self.index += 1;
+        let mut end = self.index + 1;
 
-        while self.index < self.bytes.len() && is_moth_path_byte(self.bytes[self.index]) {
-            self.index += 1;
+        while end < self.bytes.len() && is_moth_path_byte(self.bytes[end]) {
+            end += 1;
         }
 
-        self.flush_plain(output);
-        push_role_span_escaped(
-            output,
-            CodeHighlightRole::String,
-            &self.source[run_start..self.index],
-        );
-        self.plain_start = self.index;
+        self.expected_word_role = None;
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::String);
     }
 
     fn scan_number(&mut self, output: &mut String) {
@@ -669,14 +788,8 @@ impl<'source> CodeScanner<'source> {
             _ => self.legacy_number_end(),
         };
 
-        self.flush_plain(output);
-        push_role_span_escaped(
-            output,
-            CodeHighlightRole::Number,
-            &self.source[run_start..end],
-        );
-        self.index = end;
-        self.plain_start = end;
+        self.expected_word_role = None;
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Number);
     }
 
     /// Recognises Moth numeric runs: digits with separators, a decimal fraction
@@ -752,21 +865,16 @@ impl<'source> CodeScanner<'source> {
         };
 
         let run_start = self.index;
-        self.flush_plain(output);
-        self.index += length;
+        let end = run_start + length;
 
         // Moth operators are structural boundaries for the contract heuristic,
         // including `=`, `->`, `<=` and `>=`, which never continue a contract list.
         if self.language == CodeLanguage::Moth {
-            self.moth_contract_expectation = MothContractExpectation::None;
+            self.reset_declaration_context();
         }
 
-        push_role_span_escaped(
-            output,
-            CodeHighlightRole::Operator,
-            &self.source[run_start..self.index],
-        );
-        self.plain_start = self.index;
+        self.expected_word_role = None;
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Operator);
     }
 
     fn operator_length(&self) -> Option<usize> {
@@ -875,7 +983,16 @@ impl<'source> CodeScanner<'source> {
     }
 
     fn moth_path_starts_here(&self) -> bool {
-        matches!(self.bytes.get(self.index + 1), Some(byte) if is_moth_path_byte(*byte))
+        if !matches!(self.bytes.get(self.index + 1), Some(byte) if is_moth_path_byte(*byte)) {
+            return false;
+        }
+
+        // A path may start only at a lexical boundary: not directly after another
+        // `@` and not after a path or identifier continuation byte. This keeps
+        // invalid doubled prefixes such as `@@name` visible as plain source.
+        !(self.index > 0
+            && (self.bytes[self.index - 1] == b'@'
+                || is_moth_path_byte(self.bytes[self.index - 1])))
     }
 
     fn all_caps_followed_by_must(&self, word_end: usize) -> bool {
@@ -908,7 +1025,7 @@ impl<'source> CodeScanner<'source> {
 
     fn flush_plain(&mut self, output: &mut String) {
         if self.plain_start < self.index {
-            push_escaped_text(output, &self.source[self.plain_start..self.index]);
+            push_escaped_html_text(output, &self.source[self.plain_start..self.index]);
         }
         self.plain_start = self.index;
     }
@@ -957,165 +1074,113 @@ fn push_role_span_escaped(output: &mut String, role: CodeHighlightRole, text: &s
     output.push_str("<span class='");
     output.push_str(role.class_name());
     output.push_str("'>");
-    push_escaped_text(output, text);
+    push_escaped_html_text(output, text);
     output.push_str("</span>");
 }
 
-fn is_keyword(word: &str, language: CodeLanguage) -> bool {
+/// Direct non-Moth word classification result.
+///
+/// WHAT: carries the current word role and the optional role for the exact next
+///       identifier, so one classifier owns all per-language vocabulary.
+struct NonMothWordClass {
+    role: Option<CodeHighlightRole>,
+    next_identifier_role: Option<CodeHighlightRole>,
+}
+
+/// Classifies one non-Moth word from direct per-language matches.
+///
+/// WHAT: returns the word role and optionally arms a declaration-name role for
+///       the exact next identifier. `Generic` has no language vocabulary.
+/// WHY: one local classifier replaces the previous keyword/type/literal helper
+///      trio plus the loose pending-role state.
+fn classify_non_moth_word(language: CodeLanguage, word: &str) -> NonMothWordClass {
+    let mut role = None;
+    let mut next_identifier_role = None;
+
     match language {
-        CodeLanguage::Text | CodeLanguage::Moth => false,
-        CodeLanguage::JavaScript => matches!(
-            word,
-            "if" | "else"
-                | "return"
-                | "break"
-                | "continue"
-                | "for"
-                | "while"
-                | "in"
-                | "function"
-                | "const"
-                | "let"
-                | "var"
-        ),
-        CodeLanguage::TypeScript | CodeLanguage::Generic => matches!(
-            word,
-            "if" | "else"
-                | "return"
-                | "break"
-                | "continue"
-                | "for"
-                | "while"
-                | "in"
-                | "function"
-                | "const"
-                | "let"
-                | "var"
-                | "type"
-                | "interface"
-                | "enum"
-        ),
-        CodeLanguage::Python => matches!(
-            word,
-            "if" | "elif"
-                | "else"
-                | "return"
-                | "break"
-                | "continue"
-                | "for"
-                | "while"
-                | "in"
-                | "def"
-                | "class"
-                | "import"
-                | "from"
-                | "as"
-        ),
-        CodeLanguage::Rust => matches!(
-            word,
-            "if" | "else"
-                | "return"
-                | "break"
-                | "continue"
-                | "for"
-                | "while"
-                | "in"
-                | "fn"
-                | "let"
-                | "mut"
-                | "const"
-                | "static"
-                | "struct"
-                | "enum"
-                | "impl"
-                | "trait"
-                | "mod"
-                | "use"
-                | "pub"
-                | "crate"
-                | "super"
-                | "self"
-                | "match"
-                | "async"
-                | "await"
-                | "move"
-                | "ref"
-                | "type"
-                | "where"
-                | "unsafe"
-                | "extern"
-                | "dyn"
-        ),
-        CodeLanguage::Shell => matches!(
-            word,
-            "if" | "then"
-                | "else"
-                | "elif"
-                | "fi"
-                | "for"
-                | "while"
-                | "do"
-                | "done"
-                | "in"
-                | "function"
-        ),
+        CodeLanguage::JavaScript => match word {
+            "if" | "else" | "return" | "break" | "continue" | "for" | "while" | "in" | "const"
+            | "let" | "var" => role = Some(CodeHighlightRole::Keyword),
+            "true" | "false" | "null" | "undefined" => {
+                role = Some(CodeHighlightRole::Literal);
+            }
+            "function" => {
+                role = Some(CodeHighlightRole::Keyword);
+                next_identifier_role = Some(CodeHighlightRole::Function);
+            }
+            _ => {}
+        },
+        CodeLanguage::TypeScript => match word {
+            "if" | "else" | "return" | "break" | "continue" | "for" | "while" | "in" | "const"
+            | "let" | "var" | "type" | "enum" => {
+                role = Some(CodeHighlightRole::Keyword);
+            }
+            "number" | "string" | "boolean" | "unknown" | "never" | "void" | "any" => {
+                role = Some(CodeHighlightRole::Type);
+            }
+            "true" | "false" | "null" | "undefined" => {
+                role = Some(CodeHighlightRole::Literal);
+            }
+            "function" => {
+                role = Some(CodeHighlightRole::Keyword);
+                next_identifier_role = Some(CodeHighlightRole::Function);
+            }
+            "interface" => {
+                role = Some(CodeHighlightRole::Keyword);
+                next_identifier_role = Some(CodeHighlightRole::Contract);
+            }
+            _ => {}
+        },
+        CodeLanguage::Python => match word {
+            "if" | "elif" | "else" | "return" | "break" | "continue" | "for" | "while" | "in"
+            | "class" | "import" | "from" | "as" => {
+                role = Some(CodeHighlightRole::Keyword);
+            }
+            "True" | "False" | "None" => role = Some(CodeHighlightRole::Literal),
+            "def" => {
+                role = Some(CodeHighlightRole::Keyword);
+                next_identifier_role = Some(CodeHighlightRole::Function);
+            }
+            _ => {}
+        },
+        CodeLanguage::Rust => match word {
+            "if" | "else" | "return" | "break" | "continue" | "for" | "while" | "in" | "let"
+            | "mut" | "const" | "static" | "struct" | "enum" | "impl" | "mod" | "use" | "pub"
+            | "crate" | "super" | "self" | "match" | "async" | "await" | "move" | "ref"
+            | "type" | "where" | "unsafe" | "extern" | "dyn" => {
+                role = Some(CodeHighlightRole::Keyword);
+            }
+            "i8" | "i16" | "i32" | "i64" | "i128" | "u8" | "u16" | "u32" | "u64" | "u128"
+            | "isize" | "usize" | "f32" | "f64" | "bool" | "char" | "str" => {
+                role = Some(CodeHighlightRole::Type);
+            }
+            "true" | "false" => role = Some(CodeHighlightRole::Literal),
+            "fn" => {
+                role = Some(CodeHighlightRole::Keyword);
+                next_identifier_role = Some(CodeHighlightRole::Function);
+            }
+            "trait" => {
+                role = Some(CodeHighlightRole::Keyword);
+                next_identifier_role = Some(CodeHighlightRole::Contract);
+            }
+            _ => {}
+        },
+        CodeLanguage::Shell => match word {
+            "if" | "then" | "else" | "elif" | "fi" | "for" | "while" | "do" | "done" | "in" => {
+                role = Some(CodeHighlightRole::Keyword)
+            }
+            "true" | "false" => role = Some(CodeHighlightRole::Literal),
+            "function" => {
+                role = Some(CodeHighlightRole::Keyword);
+                next_identifier_role = Some(CodeHighlightRole::Function);
+            }
+            _ => {}
+        },
+        CodeLanguage::Generic | CodeLanguage::Text | CodeLanguage::Moth => {}
     }
-}
 
-fn is_type_keyword(word: &str, language: CodeLanguage) -> bool {
-    match language {
-        CodeLanguage::Generic | CodeLanguage::Text | CodeLanguage::Moth => false,
-        CodeLanguage::TypeScript => matches!(
-            word,
-            "number" | "string" | "boolean" | "unknown" | "never" | "void" | "any"
-        ),
-        CodeLanguage::Rust => matches!(
-            word,
-            "i8" | "i16"
-                | "i32"
-                | "i64"
-                | "i128"
-                | "u8"
-                | "u16"
-                | "u32"
-                | "u64"
-                | "u128"
-                | "isize"
-                | "usize"
-                | "f32"
-                | "f64"
-                | "bool"
-                | "char"
-                | "str"
-        ),
-        CodeLanguage::JavaScript | CodeLanguage::Python | CodeLanguage::Shell => false,
-    }
-}
-
-fn is_literal_word(word: &str, language: CodeLanguage) -> bool {
-    match language {
-        CodeLanguage::JavaScript | CodeLanguage::TypeScript => {
-            matches!(word, "true" | "false" | "null" | "undefined")
-        }
-        CodeLanguage::Python => matches!(word, "True" | "False" | "None"),
-        CodeLanguage::Rust | CodeLanguage::Shell => matches!(word, "true" | "false"),
-        CodeLanguage::Generic | CodeLanguage::Text | CodeLanguage::Moth => false,
-    }
-}
-
-fn push_escaped_text(output: &mut String, text: &str) {
-    for ch in text.chars() {
-        push_escaped_char(output, ch);
-    }
-}
-
-fn push_escaped_char(output: &mut String, ch: char) {
-    match ch {
-        '&' => output.push_str("&amp;"),
-        '<' => output.push_str("&lt;"),
-        '>' => output.push_str("&gt;"),
-        '"' => output.push_str("&quot;"),
-        '\'' => output.push_str("&#39;"),
-        _ => output.push(ch),
+    NonMothWordClass {
+        role,
+        next_identifier_role,
     }
 }

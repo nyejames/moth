@@ -429,11 +429,11 @@ greeting_prefix <span class='moth-code-operator'>#=</span> <span class='moth-cod
     <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>greeting_prefix<span class='moth-code-delimiter'>]</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>]</span>
 <span class='moth-code-delimiter'>;</span></code></pre><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- @page.moth</span>
 
-<span class='moth-code-keyword'>import</span> @greeting<span class='moth-code-string'>@greeting</span> <span class='moth-code-delimiter'>{</span> greet <span class='moth-code-delimiter'>}</span>
+<span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@greeting</span> <span class='moth-code-delimiter'>{</span> greet <span class='moth-code-delimiter'>}</span>
 
 visitor <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 
-<span class='moth-code-delimiter'>[</span>$html<span class='moth-code-directive'>$html</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$html</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-operator'>&lt;</span>p<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>[</span><span class='moth-code-function'>greet</span><span class='moth-code-delimiter'>(</span>visitor<span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>p<span class='moth-code-operator'>&gt;</span>
 <span class='moth-code-delimiter'>]</span></code></pre><p>The final fragment the series aims at:</p><pre style=""><code class='codeblock'>&lt;p&gt;Hello, Priya!&lt;/p&gt;</code></pre><p>Priya never changes. The file names never change. The fragment never changes. Side examples may wander for a paragraph, then come back to this greeting.</p><h2>What each stage hands the next</h2><p>One checkpoint strip runs through every article:</p><pre style=""><code class='codeblock'>project tree
 -&gt; command and config

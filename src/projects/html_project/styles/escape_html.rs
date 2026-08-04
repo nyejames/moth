@@ -1,12 +1,16 @@
-//! HTML-project-owned `$escape_html` formatter.
+//! HTML-project-owned HTML text escaping.
 //!
 //! WHAT:
-//! - Escapes HTML-sensitive characters in compile-time body string runs.
+//! - `push_escaped_html_text` is the single allocation-free writer for the five
+//!   HTML-sensitive bytes, shared by the `$code` highlighter and the `$escape_html`
+//!   formatter.
+//! - `EscapeHtmlTemplateFormatter` is the public `$escape_html` directive wrapper.
 //! - Preserves opaque child anchors so frontend composition semantics remain unchanged.
 //!
 //! WHY:
 //! - HTML escaping is output-policy behavior owned by the HTML project builder, not a core
-//!   language directive.
+//!   language directive. One writer keeps `$code` and `$escape_html` from duplicating the
+//!   same five-byte escape loop.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
@@ -18,6 +22,33 @@ use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::sync::Arc;
+
+/// Writes `text` with the five ASCII HTML-sensitive bytes escaped.
+///
+/// WHAT: copies safe UTF-8 slice batches between the escape bytes and replaces only
+///       `& < > " '` with their named entities.
+/// WHY: every replacement byte is ASCII, so the byte indexes between escapes stay
+///      valid UTF-8 boundaries and plain text is copied without decoding every scalar.
+pub(super) fn push_escaped_html_text(output: &mut String, text: &str) {
+    let mut chunk_start = 0;
+
+    for (index, byte) in text.bytes().enumerate() {
+        let replacement: &str = match byte {
+            b'&' => "&amp;",
+            b'<' => "&lt;",
+            b'>' => "&gt;",
+            b'"' => "&quot;",
+            b'\'' => "&#39;",
+            _ => continue,
+        };
+
+        output.push_str(&text[chunk_start..index]);
+        output.push_str(replacement);
+        chunk_start = index + 1;
+    }
+
+    output.push_str(&text[chunk_start..]);
+}
 
 #[derive(Debug)]
 struct EscapeHtmlTemplateFormatter;
@@ -35,17 +66,7 @@ impl TemplateFormatter for EscapeHtmlTemplateFormatter {
                 FormatterInputPiece::Text(text_piece) => {
                     let text = string_table.resolve(text_piece.text);
                     let mut escaped = String::with_capacity(text.len());
-
-                    for ch in text.chars() {
-                        match ch {
-                            '&' => escaped.push_str("&amp;"),
-                            '<' => escaped.push_str("&lt;"),
-                            '>' => escaped.push_str("&gt;"),
-                            '"' => escaped.push_str("&quot;"),
-                            '\'' => escaped.push_str("&#39;"),
-                            _ => escaped.push(ch),
-                        }
-                    }
+                    push_escaped_html_text(&mut escaped, text);
 
                     FormatterOutputPiece::Text(escaped)
                 }

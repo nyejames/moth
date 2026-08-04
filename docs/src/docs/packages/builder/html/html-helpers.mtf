@@ -176,8 +176,9 @@ These constants produce CSS property values for style slots.
 ### The `$code` directive
 
 `$code` renders a balanced template body as an HTML code block with lexical
-highlighting. It is a frontend template directive, so it works in any Moth
-template.
+highlighting. The HTML builder registers it as a style directive; the frontend
+formatter registry executes the hook, so it is available in HTML-builder
+projects.
 
 Supported aliases:
 
@@ -190,11 +191,11 @@ Supported aliases:
 - `bash` / `sh` / `shell`
 
 [codeblock, $code("moth"):
-    [codeblock, $code("moth"):
-        render |name String| -> String:
-            return "Hello, " + name
-        ;
-    ]
+[codeblock, $code("moth"):
+    render |name String| -> String:
+        return ["Hello, ", name]
+    ;
+]
 ]
 
 `$code` escapes HTML-sensitive characters and wraps the body in

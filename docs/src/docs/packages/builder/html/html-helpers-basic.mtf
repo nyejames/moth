@@ -32,7 +32,9 @@ directly.
 
 ### `$code` code blocks
 
-`$code` highlights a balanced template body as a code block.
+`$code` highlights a balanced template body as a code block. The HTML builder
+registers it as a style directive, executed through the frontend formatter
+registry.
 
 [codeblock, $code("moth"):
     [codeblock, $code("moth"): value = 42]

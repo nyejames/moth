@@ -24,6 +24,8 @@ must_contain = [
     "<span class='moth-code-operator'>//=</span>",
     "<span class='moth-code-operator'>..</span>",
     "<span class='moth-code-operator'>::</span>",
+    "<span class='moth-code-keyword'>if</span> option <span class='moth-code-operator'>is</span> <span class='moth-code-delimiter'>|</span>value<span class='moth-code-delimiter'>|</span>",
+    "value <span class='moth-code-operator'>is</span> MAX_SIZE",
     "<span class='moth-code-keyword'>async</span>",
     "<span class='moth-code-keyword'>return!</span>",
     "<span class='moth-code-keyword'>cast!</span>",
@@ -35,9 +37,13 @@ must_contain = [
 must_not_contain = [
     "moth-code-struct",
     "moth-code-parenthesis",
+    "@core/io<span class='moth-code-string'>@core/io</span>",
+    "@web/canvas<span class='moth-code-string'>@web/canvas</span>",
+    "$slot<span class='moth-code-directive'>$slot</span>",
     "<span class='moth-code-contract'>PI</span>",
     "<span class='moth-code-contract'>TAU</span>",
     "<span class='moth-code-contract'>E</span>",
+    "<span class='moth-code-contract'>MAX_SIZE</span>",
     "<span class='moth-code-keyword'>in</span>",
     "<span class='moth-code-keyword'>group</span>",
     "<span class='moth-code-keyword'>into</span>",
@@ -53,4 +59,7 @@ must_contain_in_order = [
 must_contain_exactly_once = [
     "<span class='moth-code-operator'>//=</span>",
     "<span class='moth-code-operator'>::</span>",
+    "<span class='moth-code-directive'>$slot</span>",
+    "<span class='moth-code-string'>@core/io</span>",
+    "<span class='moth-code-string'>@web/canvas</span>",
 ]

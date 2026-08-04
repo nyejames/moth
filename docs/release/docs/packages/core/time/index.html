@@ -739,7 +739,7 @@ td {
 
 
 
-        <p><code>@core/time</code> separates elapsed time from wall-clock time. Import it when you need to measure durations or work with UTC timestamps.</p><h3>Three types of time</h3><ul><li><code>Duration</code> for elapsed amounts</li><li><code>TimeMark</code> for measuring elapsed time and frame deltas</li><li><code>Timestamp</code> for real-world UTC instants</li></ul><p>These types stay opaque. Pass them to the package functions. Do not construct them with struct syntax.</p><h3>Measuring elapsed time</h3><p>Use <code>TimeMark</code> for a monotonic measurement point. Use <code>Duration</code> for the elapsed amount.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/time<span class='moth-code-string'>@core/time</span> <span class='moth-code-delimiter'>{</span>
+        <p><code>@core/time</code> separates elapsed time from wall-clock time. Import it when you need to measure durations or work with UTC timestamps.</p><h3>Three types of time</h3><ul><li><code>Duration</code> for elapsed amounts</li><li><code>TimeMark</code> for measuring elapsed time and frame deltas</li><li><code>Timestamp</code> for real-world UTC instants</li></ul><p>These types stay opaque. Pass them to the package functions. Do not construct them with struct syntax.</p><h3>Measuring elapsed time</h3><p>Use <code>TimeMark</code> for a monotonic measurement point. Use <code>Duration</code> for the elapsed amount.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/time</span> <span class='moth-code-delimiter'>{</span>
     <span class='moth-code-nominal'>TimeMark</span>,
     mark_now,
     duration_between,
@@ -752,7 +752,7 @@ current <span class='moth-code-operator'>=</span> <span class='moth-code-functio
 delta <span class='moth-code-operator'>=</span> <span class='moth-code-function'>duration_between</span><span class='moth-code-delimiter'>(</span>previous, current<span class='moth-code-delimiter'>)</span>
 previous <span class='moth-code-operator'>=</span> current
 
-seconds <span class='moth-code-operator'>=</span> <span class='moth-code-function'>as_seconds</span><span class='moth-code-delimiter'>(</span>delta<span class='moth-code-delimiter'>)</span></code></pre><p>This shape works for frame-delta style code without requiring a scheduler or animation package.</p><h3>UTC timestamps</h3><p>Use <code>Timestamp</code> for real-world UTC instants that may be logged, stored or exchanged with external systems.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/time<span class='moth-code-string'>@core/time</span> <span class='moth-code-delimiter'>{</span>
+seconds <span class='moth-code-operator'>=</span> <span class='moth-code-function'>as_seconds</span><span class='moth-code-delimiter'>(</span>delta<span class='moth-code-delimiter'>)</span></code></pre><p>This shape works for frame-delta style code without requiring a scheduler or animation package.</p><h3>UTC timestamps</h3><p>Use <code>Timestamp</code> for real-world UTC instants that may be logged, stored or exchanged with external systems.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/time</span> <span class='moth-code-delimiter'>{</span>
     <span class='moth-code-nominal'>Timestamp</span>,
     timestamp_from_iso_string,
     timestamp_from_unix_milliseconds,
@@ -771,7 +771,7 @@ created <span class='moth-code-operator'>=</span> <span class='moth-code-functio
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>@core/time</code> separates elapsed time from wall-clock time. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.</p><p><code>@core/time</code> carries Core origin with ExternalBinding backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3>Import roots</h3><p>Import individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/time<span class='moth-code-string'>@core/time</span> <span class='moth-code-delimiter'>{</span>
+    <p><code>@core/time</code> separates elapsed time from wall-clock time. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.</p><p><code>@core/time</code> carries Core origin with ExternalBinding backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3>Import roots</h3><p>Import individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/time</span> <span class='moth-code-delimiter'>{</span>
     <span class='moth-code-nominal'>Duration</span>,
     <span class='moth-code-nominal'>TimeMark</span>,
     mark_now,
@@ -779,7 +779,7 @@ created <span class='moth-code-operator'>=</span> <span class='moth-code-functio
     as_seconds,
 <span class='moth-code-delimiter'>}</span>
 
-<span class='moth-code-keyword'>import</span> @core/time<span class='moth-code-string'>@core/time</span>
+<span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/time</span>
 
 previous <span class='moth-code-operator'>=</span> time.<span class='moth-code-function'>mark_now</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Opaque types</h3><p>The package exposes three opaque types. Do not construct them with struct syntax or inspect their fields. Pass them to the package functions.</p><table style="">
             
@@ -837,7 +837,7 @@ previous <span class='moth-code-operator'>=</span> time.<span class='moth-code-f
              <td style=""><p> <code>timestamp_from_iso_string(text)</code></p></td> <td style=""><p> <code>String</code></p></td> <td style=""><p> <code>Timestamp, Error!</code></p></td> <td style=""><p> yes</p></td>
         </tr>
             
-</table><p><code>timestamp_from_iso_string</code> is the only fallible function. Invalid ISO strings return through <code>Error!</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/time<span class='moth-code-string'>@core/time</span> <span class='moth-code-delimiter'>{</span>
+</table><p><code>timestamp_from_iso_string</code> is the only fallible function. Invalid ISO strings return through <code>Error!</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/time</span> <span class='moth-code-delimiter'>{</span>
     <span class='moth-code-nominal'>Timestamp</span>,
     timestamp_from_iso_string,
     timestamp_from_unix_milliseconds,

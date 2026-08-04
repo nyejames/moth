@@ -6,6 +6,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::projects::html_project::styles::code::{
     CodeLanguage, code_formatter, highlight_code_html,
 };
+use crate::projects::html_project::styles::escape_html::escape_html_formatter;
 
 #[test]
 fn generic_code_highlighter_marks_syntax_but_not_keywords() {
@@ -497,9 +498,10 @@ fn moth_highlighter_marks_directives_and_import_paths() {
     );
 
     let double_at = highlight_code_html("@@name", CodeLanguage::Moth);
-    assert!(
-        double_at.contains("<span class='moth-code-string'>@name</span>"),
-        "second @ starts a path, got: {double_at}"
+    assert_eq!(
+        double_at,
+        "<span class='moth-code-operator'>@</span><span class='moth-code-operator'>@</span>name",
+        "doubled @ must stay visible as two operator spans, got: {double_at}"
     );
 }
 
@@ -644,4 +646,247 @@ fn moth_contract_state_resets_at_operator_boundaries() {
         !assign.contains("<span class='moth-code-contract'>NEXT</span>"),
         "NEXT must not be a contract after =, got: {assign}"
     );
+}
+
+#[test]
+fn moth_directive_and_path_emit_exactly_once() {
+    let directive = highlight_code_html("$md", CodeLanguage::Moth);
+    assert_eq!(
+        directive, "<span class='moth-code-directive'>$md</span>",
+        "a directive must emit exactly one span, got: {directive}"
+    );
+
+    let path = highlight_code_html("@core/io", CodeLanguage::Moth);
+    assert_eq!(
+        path, "<span class='moth-code-string'>@core/io</span>",
+        "a path must emit exactly one span, got: {path}"
+    );
+
+    let import = highlight_code_html("import @core/io", CodeLanguage::Moth);
+    assert_eq!(
+        import,
+        "<span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/io</span>",
+        "import plus path must emit each token once, got: {import}"
+    );
+}
+
+#[test]
+fn highlighted_output_preserves_every_source_byte_exactly_once() {
+    let cases = [
+        "value",
+        "héllo π_value 名前",
+        "-- comment <&>",
+        "\"quoted <&>\" and 'single'",
+        "$md($slot)",
+        "import @core/io {print, line}",
+        "a //= b += c .. d :: e -> f => g",
+        "return! cast! value",
+        "Label must DISPLAY_TEXT",
+        "value 42\n-- note",
+    ];
+
+    for source in cases {
+        let highlighted = highlight_code_html(source, CodeLanguage::Moth);
+        let stripped = strip_role_spans(&highlighted);
+        let expected = escape_source_for_comparison(source);
+        assert_eq!(
+            stripped, expected,
+            "span-free output must equal escaped input for {source:?}\ngot: {stripped}\nhighlighted: {highlighted}"
+        );
+    }
+}
+
+#[test]
+fn escape_html_formatter_covers_all_special_chars_and_unicode() {
+    let mut string_table = StringTable::new();
+    let formatter = escape_html_formatter();
+
+    let id = string_table.intern("<tag>&\"quoted\" 'single' héllo π");
+    let input = FormatterInput {
+        pieces: vec![FormatterInputPiece::Text(FormatterTextPiece {
+            text: id,
+            location: SourceLocation::default(),
+        })],
+    };
+
+    let output = formatter
+        .formatter
+        .format(input, &mut string_table)
+        .expect("escape formatter should succeed");
+    let content = match &output.output.pieces[0] {
+        FormatterOutputPiece::Text(text) => text,
+        _ => panic!("Expected text output"),
+    };
+
+    assert_eq!(
+        content,
+        "&lt;tag&gt;&amp;&quot;quoted&quot; &#39;single&#39; héllo π"
+    );
+}
+
+#[test]
+fn non_moth_declaration_roles_target_only_the_exact_next_identifier() {
+    let anonymous = highlight_code_html("function (value) {}", CodeLanguage::JavaScript);
+    assert_eq!(
+        anonymous,
+        "<span class='moth-code-keyword'>function</span> <span class='moth-code-delimiter'>(</span>value<span class='moth-code-delimiter'>)</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>",
+        "anonymous function must not colour value, got: {anonymous}"
+    );
+
+    let comment = highlight_code_html("function // note\nname", CodeLanguage::JavaScript);
+    assert!(
+        !comment.contains("<span class='moth-code-function'>name</span>"),
+        "comment must interrupt the declaration lookahead, got: {comment}"
+    );
+
+    let newline = highlight_code_html("function\nname", CodeLanguage::JavaScript);
+    assert!(
+        !newline.contains("<span class='moth-code-function'>name</span>"),
+        "newline must interrupt the declaration lookahead, got: {newline}"
+    );
+
+    let delimiter = highlight_code_html("function : name", CodeLanguage::JavaScript);
+    assert!(
+        !delimiter.contains("<span class='moth-code-function'>name</span>"),
+        "delimiter must interrupt the declaration lookahead, got: {delimiter}"
+    );
+
+    let typescript = highlight_code_html("interface (User)", CodeLanguage::TypeScript);
+    assert!(
+        !typescript.contains("<span class='moth-code-contract'>User</span>"),
+        "interface lookahead must not jump past a delimiter, got: {typescript}"
+    );
+}
+
+#[test]
+fn generic_profile_has_no_language_word_vocabulary() {
+    let highlighted = highlight_code_html("function string true None", CodeLanguage::Generic);
+
+    assert!(!highlighted.contains("moth-code-keyword"));
+    assert!(!highlighted.contains("moth-code-type"));
+    assert!(!highlighted.contains("moth-code-literal"));
+    assert!(!highlighted.contains("moth-code-nominal"));
+    assert!(highlighted.contains("function string true None"));
+}
+
+#[test]
+fn moth_pipe_groups_keep_captures_and_parameters_plain() {
+    let declaration = highlight_code_html("render |value|", CodeLanguage::Moth);
+    assert_eq!(
+        declaration,
+        "<span class='moth-code-function'>render</span> <span class='moth-code-delimiter'>|</span>value<span class='moth-code-delimiter'>|</span>",
+        "only the declaration name before a pipe group is a function, got: {declaration}"
+    );
+
+    let capture = highlight_code_html("if option is |value|", CodeLanguage::Moth);
+    assert_eq!(
+        capture,
+        "<span class='moth-code-keyword'>if</span> option <span class='moth-code-operator'>is</span> <span class='moth-code-delimiter'>|</span>value<span class='moth-code-delimiter'>|</span>",
+        "captured value must stay plain inside pipes, got: {capture}"
+    );
+
+    let parameters = highlight_code_html("render |title, count| -> String:", CodeLanguage::Moth);
+    assert!(
+        parameters.contains("<span class='moth-code-function'>render</span>"),
+        "declaration name must stay a function, got: {parameters}"
+    );
+    assert!(
+        !parameters.contains("<span class='moth-code-function'>title</span>")
+            && !parameters.contains("<span class='moth-code-function'>count</span>"),
+        "untyped parameters inside pipes must stay plain, got: {parameters}"
+    );
+}
+
+#[test]
+fn moth_generic_bounds_are_contracts_only_in_generic_declarations() {
+    let comparison = highlight_code_html("value is MAX_SIZE", CodeLanguage::Moth);
+    assert!(
+        !comparison.contains("<span class='moth-code-contract'>MAX_SIZE</span>"),
+        "ordinary is comparison must not colour MAX_SIZE as a contract, got: {comparison}"
+    );
+
+    let generic = highlight_code_html(
+        "render type Item is DISPLAY_TEXT |value A|",
+        CodeLanguage::Moth,
+    );
+    assert!(
+        generic.contains("<span class='moth-code-contract'>DISPLAY_TEXT</span>"),
+        "generic bound trait must be a contract, got: {generic}"
+    );
+    assert!(
+        !generic.contains("<span class='moth-code-contract'>A</span>"),
+        "generic parameter after the bound list must not be a contract, got: {generic}"
+    );
+}
+
+#[test]
+fn moth_conformance_and_generic_commas_classify_differently() {
+    let conformance = highlight_code_html("Label must FIRST, SECOND", CodeLanguage::Moth);
+    assert!(
+        conformance.contains("<span class='moth-code-contract'>FIRST</span>"),
+        "FIRST must be a conformance contract, got: {conformance}"
+    );
+    assert!(
+        conformance.contains("<span class='moth-code-contract'>SECOND</span>"),
+        "SECOND must continue the conformance list, got: {conformance}"
+    );
+
+    let generic = highlight_code_html("type A is FIRST, B is SECOND", CodeLanguage::Moth);
+    assert!(
+        generic.contains("<span class='moth-code-contract'>FIRST</span>"),
+        "FIRST must be a generic bound contract, got: {generic}"
+    );
+    assert!(
+        generic.contains("<span class='moth-code-nominal'>B</span>"),
+        "B must return to a nominal generic parameter after the comma, got: {generic}"
+    );
+    assert!(
+        generic.contains("<span class='moth-code-contract'>SECOND</span>"),
+        "SECOND must be a contract after the second is, got: {generic}"
+    );
+}
+
+/// Removes highlighter role spans, returning the escaped text written by the scanner.
+///
+/// WHY: source preservation is measured by comparing the span-free output with an
+///      independent escape of the input.
+fn strip_role_spans(highlighted: &str) -> String {
+    let mut stripped = String::with_capacity(highlighted.len());
+    let mut rest = highlighted;
+
+    while let Some(open_start) = rest.find("<span class='moth-code-") {
+        stripped.push_str(&rest[..open_start]);
+        let open_end = rest[open_start..]
+            .find("'>")
+            .expect("role span always closes its opening tag")
+            + open_start
+            + 2;
+        let after_open = &rest[open_end..];
+        let close_start = after_open
+            .find("</span>")
+            .expect("role span always has a closing tag");
+        stripped.push_str(&after_open[..close_start]);
+        rest = &after_open[close_start + "</span>".len()..];
+    }
+
+    stripped.push_str(rest);
+    stripped
+}
+
+/// Independent oracle for the five HTML escapes used by the highlighter.
+fn escape_source_for_comparison(source: &str) -> String {
+    let mut escaped = String::with_capacity(source.len());
+
+    for ch in source.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+
+    escaped
 }

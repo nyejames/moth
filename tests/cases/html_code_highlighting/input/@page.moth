@@ -59,6 +59,10 @@ import @html { codeblock }
         TAU #= 6.28318
         E #= 2.71828
 
+        -- captures and ordinary comparisons stay plain
+        if option is |value|
+        value is MAX_SIZE
+
         -- builtin namespace, Error, attached bangs
         io.line("hello")
         io = "plain variable"

@@ -739,7 +739,7 @@ td {
 
 
 
-        <p><code>@core/random</code> gives you random number helpers. Import it when you need random <code>Float</code> or <code>Int</code> values.</p><h3>Importing</h3><p>Bring in the functions you need with a grouped import.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/random<span class='moth-code-string'>@core/random</span> <span class='moth-code-delimiter'>{</span>random_float, random_int<span class='moth-code-delimiter'>}</span>
+        <p><code>@core/random</code> gives you random number helpers. Import it when you need random <code>Float</code> or <code>Int</code> values.</p><h3>Importing</h3><p>Bring in the functions you need with a grouped import.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/random</span> <span class='moth-code-delimiter'>{</span>random_float, random_int<span class='moth-code-delimiter'>}</span>
 
 value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>random_float</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
 die_roll <span class='moth-code-operator'>=</span> <span class='moth-code-function'>random_int</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>6</span><span class='moth-code-delimiter'>)</span>
@@ -748,9 +748,9 @@ die_roll <span class='moth-code-operator'>=</span> <span class='moth-code-functi
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>@core/random</code> provides random number helpers. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.</p><p><code>@core/random</code> carries Core origin with ExternalBinding backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3>Import roots</h3><p>Import individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/random<span class='moth-code-string'>@core/random</span> <span class='moth-code-delimiter'>{</span>random_float, random_int<span class='moth-code-delimiter'>}</span>
+    <p><code>@core/random</code> provides random number helpers. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.</p><p><code>@core/random</code> carries Core origin with ExternalBinding backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3>Import roots</h3><p>Import individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/random</span> <span class='moth-code-delimiter'>{</span>random_float, random_int<span class='moth-code-delimiter'>}</span>
 
-<span class='moth-code-keyword'>import</span> @core/random<span class='moth-code-string'>@core/random</span>
+<span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/random</span>
 
 value <span class='moth-code-operator'>=</span> random.<span class='moth-code-function'>random_float</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
 die_roll <span class='moth-code-operator'>=</span> random.<span class='moth-code-function'>random_int</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>6</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Functions</h3><table style="">

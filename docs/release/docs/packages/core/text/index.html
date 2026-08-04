@@ -739,7 +739,7 @@ td {
 
 
 
-        <p><code>@core/text</code> gives you helper functions for <code>String</code> values. Import it when you need to check length, emptiness or substrings.</p><h3>Importing</h3><p>Bring in the functions you need with a grouped import.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/text<span class='moth-code-string'>@core/text</span> <span class='moth-code-delimiter'>{</span>length, contains<span class='moth-code-delimiter'>}</span>
+        <p><code>@core/text</code> gives you helper functions for <code>String</code> values. Import it when you need to check length, emptiness or substrings.</p><h3>Importing</h3><p>Bring in the functions you need with a grouped import.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/text</span> <span class='moth-code-delimiter'>{</span>length, contains<span class='moth-code-delimiter'>}</span>
 
 name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 count <span class='moth-code-operator'>=</span> <span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span>name<span class='moth-code-delimiter'>)</span>
@@ -749,9 +749,9 @@ has_stalk <span class='moth-code-operator'>=</span> <span class='moth-code-funct
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>@core/text</code> provides helper functions for <code>String</code> values. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.</p><p><code>@core/text</code> carries Core origin with ExternalBinding backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3>Import roots</h3><p>Import individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> @core/text<span class='moth-code-string'>@core/text</span> <span class='moth-code-delimiter'>{</span>length, contains<span class='moth-code-delimiter'>}</span>
+    <p><code>@core/text</code> provides helper functions for <code>String</code> values. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.</p><p><code>@core/text</code> carries Core origin with ExternalBinding backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3>Import roots</h3><p>Import individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/text</span> <span class='moth-code-delimiter'>{</span>length, contains<span class='moth-code-delimiter'>}</span>
 
-<span class='moth-code-keyword'>import</span> @core/text<span class='moth-code-string'>@core/text</span>
+<span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/text</span>
 
 name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 count <span class='moth-code-operator'>=</span> text.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span>name<span class='moth-code-delimiter'>)</span></code></pre><h3>Functions</h3><p>All functions take <code>String</code> parameters with shared access. Parameters stay positional-only. Named arguments lack support because binding-backed packages do not expose source-function features.</p><table style="">

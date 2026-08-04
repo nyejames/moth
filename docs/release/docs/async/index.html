@@ -495,7 +495,7 @@ td {
     white-space: pre;
     overflow-x: auto;
 "><code class='codeblock'><span class='moth-code-function'>producer</span> <span class='moth-code-delimiter'>|</span>writer <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>[</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>i</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-delimiter'>|</span>i<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
         i <span class='moth-code-operator'>&gt;&gt;</span> writer
         <span class='moth-code-keyword'>yield</span>
     <span class='moth-code-delimiter'>;</span>
@@ -519,7 +519,7 @@ td {
     max-width: 100%;
     white-space: pre;
     overflow-x: auto;
-"><code class='codeblock'><span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>1_000_000</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>i</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+"><code class='codeblock'><span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>1_000_000</span> <span class='moth-code-delimiter'>|</span>i<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
     i <span class='moth-code-operator'>&gt;&gt;</span> writer
 
     <span class='moth-code-keyword'>if</span> i <span class='moth-code-operator'>%</span> <span class='moth-code-number'>128</span> <span class='moth-code-operator'>is</span> <span class='moth-code-number'>0</span><span class='moth-code-delimiter'>:</span>
@@ -559,7 +559,7 @@ td {
     white-space: pre;
     overflow-x: auto;
 "><code class='codeblock'><span class='moth-code-function'>producer</span> <span class='moth-code-delimiter'>|</span>writer <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-function'>i</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-delimiter'>|</span>i<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
         i <span class='moth-code-operator'>&gt;&gt;</span> writer
         <span class='moth-code-keyword'>yield</span>
     <span class='moth-code-delimiter'>;</span>
