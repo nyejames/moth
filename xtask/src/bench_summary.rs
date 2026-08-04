@@ -723,10 +723,14 @@ fn build_summary_content(
     content.push_str(SECTION_SEPARATOR);
     content.push_str("\n\n");
 
-    // Runs section
-    for entry in run_entries {
+    // Runs section: entries are separated by blank lines but the file must
+    // not end with a trailing blank line.
+    for (index, entry) in run_entries.iter().enumerate() {
+        if index > 0 {
+            content.push('\n');
+        }
         content.push_str(entry.to_markdown().trim_end());
-        content.push_str("\n\n");
+        content.push('\n');
     }
 
     content

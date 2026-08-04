@@ -20,4 +20,3 @@ Avg: all ~16ms, Core ~16ms, Docs ~187ms, Stress ~9ms, Module ~9ms, Borrow ~6ms
 # Frontend phases / macOS Apple Silicon (6D851D): August 4th - 07:50
 **baseline**; 31 cases, avg ~73ms
 Avg: all ~73ms, Core ~55ms, Docs ~1276ms, Stress ~37ms, Module ~32ms, Parallelism ~28ms, Borrow ~20ms
-
