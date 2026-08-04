@@ -44,7 +44,7 @@ use super::frontend_orchestration::{
     FrontendModuleBuildContext, ModuleCompilationOutcome, ModulePreparationContext,
     SourceProviderMaterialisationSet, module_timing_label, record_module_input_counters,
 };
-use super::generated_worklist::{BoundaryGeneratedFunctionStore, CompletedGeneratedFunctionView};
+use super::generated_worklist::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::module_inventory;
@@ -345,8 +345,6 @@ pub(crate) fn compile_single_file_frontend(
     let source_provider_imports = SourceProviderImportSet::default();
     let source_provider_materialisations = SourceProviderMaterialisationSet::default();
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
-    let imported_generated = CompletedGeneratedFunctionView::new(std::iter::empty())
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let compile_context = FrontendModuleBuildContext {
         config,
         build_profile,
@@ -363,7 +361,7 @@ pub(crate) fn compile_single_file_frontend(
         prepared,
         &entry_path,
         module_label,
-        generated_store.session(&imported_generated),
+        generated_store.session(),
     ) {
         Ok(ModuleCompilationOutcome::Success(compiled)) => *compiled,
         Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)) => {
@@ -818,12 +816,6 @@ fn compile_module_waves(
 ) -> Result<CompiledGraphBoundary, CompilerMessages> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
-    let imported_generated = CompletedGeneratedFunctionView::new(
-        completed_packages
-            .iter()
-            .map(|package| &package.boundary.generated),
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     // One direct lookup index per boundary so module binding never scans every provider edge,
     // source-package import or completed package for each retained import shell.
@@ -937,7 +929,7 @@ fn compile_module_waves(
                     source_package_import_index: &source_package_import_index,
                     completed_packages,
                 };
-                compile_context.compile(job, generated_store.session(&imported_generated))
+                compile_context.compile(job, generated_store.session())
             };
             match outcome.outcome {
                 DirectoryModuleTaskOutcome::Success(compiled) => {

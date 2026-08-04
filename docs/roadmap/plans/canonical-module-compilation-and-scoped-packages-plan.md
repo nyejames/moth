@@ -23,23 +23,21 @@ Phase 5 does not implement the new path or resource language surface. It complet
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
-WORK_SOURCE: parent review of checkpoint a3f8a00aff344934cba83e3602c03e577f5d1b46
-IMPLEMENTED_CHECKPOINT: a3f8a00aff344934cba83e3602c03e577f5d1b46
-REPOSITORY_STATE: checkpoint committed on main; verify worktree state on resume
-STATUS: paused - R5C6 is blocked
-CURRENT_SLICE: R5C5B generated boundary ownership
+WORK_SOURCE: parent review of checkpoint a3f8a00aff344934cba83e3602c03e577f5d1b46 and plan rebase ba4bc925
+IMPLEMENTED_CHECKPOINT: R5C5B checkpoint (pending Gate A review)
+REPOSITORY_STATE: one coordinator checkpoint commit for R5C5B; parallel benchmark and highlighter corrections committed separately
+STATUS: paused - Gate A review required
+CURRENT_SLICE: R5C5B generated boundary ownership (complete, awaiting review)
 ACCEPTED_FROM_CHECKPOINT:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal for correctness
-- exact materialisation rows and unified generated records as retained direction, pending the corrections below
-REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, language-overview.md, generated_worklist.rs, compilation.rs, compiled_boundary.rs, module_artifact_store.rs, frontend_orchestration.rs, build.rs, tokenizer/tokens.rs and ast/generic_functions/materialisation.rs
-VALIDATION_STATE: a3f8a00 records a full green just validate gate; the parent review did not independently rerun it
-BLOCKERS:
-- generated request deduplication and executable lookup are incorrectly global across package boundaries
-- CompiledGraphBoundary validation is not a complete slot-to-outcome bijection
-NEXT_WORKER_ORDER: R5C5B -> review -> R5C1B/R5C4B -> review -> R5C6A -> review -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Phase 5 exit review -> mandatory handoff
-STOP_REASON: R5C6 node identity is invalid until generated ownership is boundary scoped
-NEXT_RESUME_ACTION: implement R5C5B only, validate and stop
+- R5C5B boundary-scoped generated ownership, per-boundary lookup and stable package-identity symbol assignment
+REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, generated_worklist.rs, compilation.rs, compiled_boundary.rs, module_artifact_store.rs, frontend_orchestration.rs, build.rs
+VALIDATION_STATE: full just validate green at the R5C5B checkpoint (workspace tests, integration 1817/1817, clippy, docs, bench-ci)
+BLOCKERS: none
+NEXT_WORKER_ORDER: Gate A review -> R5C1B/R5C4B -> Gate B review -> R5C6A -> Gate C review -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Phase 5 exit review -> mandatory handoff
+STOP_REASON: plan requires stopping for Gate A after R5C5B
+NEXT_RESUME_ACTION: accept Gate A, then implement R5C1B and R5C4B
 FOLLOW_UP_BOUNDARY: path values, dependency clauses and resource linking
 ```
 

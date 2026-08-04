@@ -92,11 +92,6 @@ fn store_with(
     store
 }
 
-fn empty_view() -> CompletedGeneratedFunctionView<'static> {
-    CompletedGeneratedFunctionView::new(std::iter::empty())
-        .expect("empty generated view should build")
-}
-
 fn facts(name: &str) -> GeneratedRequestFacts {
     GeneratedRequestFacts {
         identity: generated_identity(name),
@@ -117,8 +112,7 @@ fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_
     let alpha = generated_identity("alpha");
     let beta = generated_identity("beta");
     let known = BoundaryGeneratedFunctionStore::default();
-    let imported = empty_view();
-    let mut worklist = GeneratedFunctionWorklist::new(&known, &imported);
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
 
     let ids = worklist.register_module_requests(
         &module_origin(),
@@ -148,8 +142,7 @@ fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_
 #[test]
 fn duplicate_requesters_and_dependency_edges_are_recorded_once() {
     let known = BoundaryGeneratedFunctionStore::default();
-    let imported = empty_view();
-    let mut worklist = GeneratedFunctionWorklist::new(&known, &imported);
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
     let parent_id =
         worklist.register_module_requests(&module_origin(), [facts("parent"), facts("parent")])[0];
 
@@ -167,8 +160,7 @@ fn completed_boundary_summary_suppresses_rematerialisation() {
     let identity = generated_identity("known");
     let expected = summary();
     let known = store_with(identity.clone(), expected.clone());
-    let imported = empty_view();
-    let mut worklist = GeneratedFunctionWorklist::new(&known, &imported);
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
 
     let ids = worklist.register_module_requests(&module_origin(), [facts("known")]);
 
@@ -181,8 +173,7 @@ fn completed_boundary_summary_suppresses_rematerialisation() {
 fn session_allocates_only_new_records() {
     let known_identity = generated_identity("known");
     let known = store_with(known_identity, summary());
-    let imported = empty_view();
-    let mut worklist = GeneratedFunctionWorklist::new(&known, &imported);
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
 
     let known_ids = worklist.register_module_requests(&module_origin(), [facts("known")]);
     assert!(known_ids.is_empty());
@@ -204,8 +195,7 @@ fn session_allocates_only_new_records() {
 #[test]
 fn request_records_own_diagnostic_facts() {
     let known = BoundaryGeneratedFunctionStore::default();
-    let imported = empty_view();
-    let mut worklist = GeneratedFunctionWorklist::new(&known, &imported);
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
     let first_location = SourceLocation::new(
         crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
             "src/a.moth",
@@ -245,6 +235,83 @@ fn every_completed_record_has_one_identity_summary_and_sidecar() {
     assert_eq!(store.sidecars().count(), 1);
     assert_eq!(store.summary(&identity), Some(&expected));
     assert_eq!(store.sidecar_at(0).unwrap().identity, identity);
+}
+
+#[test]
+fn equal_generated_identities_publish_across_independent_boundaries() {
+    let identity = generated_identity("shared");
+    let mut first_store = BoundaryGeneratedFunctionStore::default();
+    first_store
+        .publish(GeneratedFunctionWorklistDelta {
+            records: vec![CompletedGeneratedFunction {
+                identity: identity.clone(),
+                summary: summary(),
+                sidecar: test_sidecar(identity.clone()),
+            }],
+        })
+        .unwrap();
+    let mut second_store = BoundaryGeneratedFunctionStore::default();
+    second_store
+        .publish(GeneratedFunctionWorklistDelta {
+            records: vec![CompletedGeneratedFunction {
+                identity: identity.clone(),
+                summary: summary(),
+                sidecar: test_sidecar(identity.clone()),
+            }],
+        })
+        .unwrap();
+
+    assert_eq!(first_store.sidecars().count(), 1);
+    assert_eq!(second_store.sidecars().count(), 1);
+    assert_eq!(first_store.sidecar_at(0).unwrap().identity, identity);
+    assert_eq!(second_store.sidecar_at(0).unwrap().identity, identity);
+}
+
+#[test]
+fn session_does_not_suppress_requests_known_only_in_another_boundary() {
+    let identity = generated_identity("shared");
+    let other_boundary = store_with(identity.clone(), summary());
+    let local_boundary = BoundaryGeneratedFunctionStore::default();
+    let mut local_worklist = GeneratedFunctionWorklist::new(&local_boundary);
+
+    let ids = local_worklist.register_module_requests(&module_origin(), [facts("shared")]);
+
+    assert_eq!(
+        ids.len(),
+        1,
+        "an identity completed in another boundary must still materialise locally"
+    );
+    assert!(local_worklist.summary(&identity).is_none());
+    assert!(other_boundary.summary(&identity).is_some());
+}
+
+#[test]
+fn session_summary_lookup_stays_inside_its_own_boundary() {
+    let identity = generated_identity("shared");
+    let first_summary = summary();
+    let mut second_summary = summary();
+    second_summary.parameters.push(
+        crate::compiler_frontend::public_call_summary::PublicCallParameterSummary {
+            access: crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared,
+            mutation: crate::compiler_frontend::public_call_summary::PublicCallMutationEffect::NoWrite,
+            transfer_eligibility: crate::compiler_frontend::public_call_summary::PublicCallTransferEligibility::Ineligible,
+            transfer_effect: crate::compiler_frontend::public_call_summary::PublicCallTransferEffect::NeverConsumes,
+            reactive_effect: crate::compiler_frontend::public_call_summary::PublicCallReactiveEffect::None,
+        },
+    );
+    let first_store = store_with(identity.clone(), first_summary.clone());
+    let second_store = store_with(identity.clone(), second_summary.clone());
+
+    let first_worklist = GeneratedFunctionWorklist::new(&first_store);
+    let second_worklist = GeneratedFunctionWorklist::new(&second_store);
+
+    assert_eq!(first_worklist.summary(&identity), Some(&first_summary));
+    assert_eq!(second_worklist.summary(&identity), Some(&second_summary));
+    assert_ne!(
+        first_worklist.summary(&identity),
+        second_worklist.summary(&identity),
+        "equal identities in unrelated boundaries must not share summaries"
+    );
 }
 
 #[test]

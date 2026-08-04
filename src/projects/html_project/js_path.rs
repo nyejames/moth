@@ -79,12 +79,15 @@ pub(crate) struct HtmlJsCompileInput<'a> {
             String,
         >,
     >,
+    /// Generated symbol lookup for the entry module's project boundary.
     pub(crate) generated_function_names: Arc<
         std::collections::HashMap<
             crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
             String,
         >,
     >,
+    /// Every generated symbol name assigned to this compilation, in deterministic order.
+    pub(crate) all_generated_function_names: Arc<Vec<String>>,
     pub(crate) compile_input: &'a HtmlModuleCompileInput<'a>,
     pub(crate) output_path: PathBuf,
 }
@@ -104,6 +107,7 @@ pub(crate) fn compile_html_module_js(
         source_function_names,
         module_private_function_names,
         generated_function_names,
+        all_generated_function_names,
         compile_input: input,
         output_path,
     } = input;
@@ -137,7 +141,7 @@ pub(crate) fn compile_html_module_js(
                 linked.reachability.backend_selection().clone(),
                 Arc::clone(&source_function_names),
                 Arc::clone(&module_private_function_names),
-                Arc::clone(&generated_function_names),
+                Arc::clone(&linked.generated_function_names),
             );
             let linked_js = lower_hir_to_js(
                 &linked.module.executable.hir,
@@ -197,7 +201,7 @@ pub(crate) fn compile_html_module_js(
             source_function_names
                 .values()
                 .chain(module_private_function_names.values())
-                .chain(generated_function_names.values())
+                .chain(all_generated_function_names.iter())
                 .cloned(),
         );
     }

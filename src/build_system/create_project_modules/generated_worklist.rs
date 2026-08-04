@@ -4,8 +4,9 @@
 //! dense request IDs, requester/dependency records, exact completed summaries and the separate
 //! generated-sidecar lane.
 //! WHY: generic call inference belongs to AST, but aggregation, deduplication, fixed-point
-//! scheduling and sidecar placement belong to the build boundary. A module compiles against a
-//! transactional session and publishes its delta only after the module succeeds.
+//! scheduling and sidecar placement belong to the owning build boundary. A session reuses only
+//! its own boundary's completed store and transactional delta; equal generated identities may
+//! coexist in unrelated boundaries and are never suppressed or resolved across them.
 
 use crate::build_system::build::GeneratedFunctionSidecar;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -93,7 +94,6 @@ pub(crate) struct CompletedGeneratedFunction {
 /// the containing module has completed and its string IDs have been merged.
 pub(super) struct GeneratedFunctionWorklist<'a> {
     known: &'a BoundaryGeneratedFunctionStore,
-    imported: &'a CompletedGeneratedFunctionView<'a>,
     records: Vec<GeneratedRequestRecord>,
     ids_by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedRequestId>,
     completed_records: Vec<CompletedGeneratedFunction>,
@@ -101,13 +101,9 @@ pub(super) struct GeneratedFunctionWorklist<'a> {
 }
 
 impl<'a> GeneratedFunctionWorklist<'a> {
-    fn new(
-        known: &'a BoundaryGeneratedFunctionStore,
-        imported: &'a CompletedGeneratedFunctionView<'a>,
-    ) -> Self {
+    fn new(known: &'a BoundaryGeneratedFunctionStore) -> Self {
         Self {
             known,
-            imported,
             records: Vec::new(),
             ids_by_identity: FxHashMap::default(),
             completed_records: Vec::new(),
@@ -152,7 +148,6 @@ impl<'a> GeneratedFunctionWorklist<'a> {
         let mut request_ids = Vec::with_capacity(requests.len());
         for request in requests {
             if self.known.by_identity.contains_key(&request.identity)
-                || self.imported.by_identity.contains_key(&request.identity)
                 || self.completed_by_identity.contains_key(&request.identity)
             {
                 continue;
@@ -290,7 +285,6 @@ impl<'a> GeneratedFunctionWorklist<'a> {
             .and_then(|id| self.completed_records.get(id.index()))
             .map(|record| &record.summary)
             .or_else(|| self.known.summary(identity))
-            .or_else(|| self.imported.summary(identity))
     }
 
     pub(super) fn completed_summaries(
@@ -301,9 +295,6 @@ impl<'a> GeneratedFunctionWorklist<'a> {
             summaries.insert(record.identity.clone(), record.summary.clone());
         }
         for record in &self.known.records {
-            summaries.insert(record.identity.clone(), record.summary.clone());
-        }
-        for record in &self.imported.records {
             summaries.insert(record.identity.clone(), record.summary.clone());
         }
         summaries
@@ -404,11 +395,8 @@ impl BoundaryGeneratedFunctionStore {
             .map(|record| &record.summary)
     }
 
-    pub(super) fn session<'a>(
-        &'a self,
-        imported: &'a CompletedGeneratedFunctionView<'a>,
-    ) -> GeneratedFunctionWorklist<'a> {
-        GeneratedFunctionWorklist::new(self, imported)
+    pub(super) fn session<'a>(&'a self) -> GeneratedFunctionWorklist<'a> {
+        GeneratedFunctionWorklist::new(self)
     }
 
     pub(super) fn publish(
@@ -455,50 +443,6 @@ impl BoundaryGeneratedFunctionStore {
         let record_id = GeneratedFunctionId(self.records.len());
         self.by_identity.insert(record.identity.clone(), record_id);
         self.records.push(record);
-    }
-}
-
-/// Borrowed fixed-leaf view over every completed generated function outside one boundary.
-///
-/// WHAT: flattens completed package stores into one direct summary lookup without cloning
-///       summaries into each consuming boundary.
-/// WHY: imported generated records are immutable leaves; one borrowed view per boundary
-///      compilation keeps cross-boundary lookup exact without per-module map copies.
-pub(crate) struct CompletedGeneratedFunctionView<'a> {
-    records: Vec<&'a CompletedGeneratedFunction>,
-    by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedFunctionId>,
-}
-
-impl<'a> CompletedGeneratedFunctionView<'a> {
-    pub(crate) fn new(
-        stores: impl IntoIterator<Item = &'a BoundaryGeneratedFunctionStore>,
-    ) -> Result<Self, CompilerError> {
-        let mut records = Vec::new();
-        let mut by_identity = FxHashMap::default();
-        for store in stores {
-            for record in &store.records {
-                if by_identity.contains_key(&record.identity) {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Generated identity {:?} is published by more than one completed source-package boundary",
-                        record.identity
-                    )));
-                }
-                let record_id = GeneratedFunctionId(records.len());
-                by_identity.insert(record.identity.clone(), record_id);
-                records.push(record);
-            }
-        }
-        Ok(Self {
-            records,
-            by_identity,
-        })
-    }
-
-    fn summary(&self, identity: &GeneratedFunctionIdentity) -> Option<&PublicCallSummary> {
-        self.by_identity
-            .get(identity)
-            .and_then(|id| self.records.get(id.index()))
-            .map(|record| &record.summary)
     }
 }
 

@@ -54,7 +54,7 @@ use crate::compiler_frontend::public_call_summary::{
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
-    ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
+    ModulePrivateExecutableIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -928,6 +928,458 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
         compilation_codes, rendered_codes,
         "frontend rendering and success-only compilation must retain identical warning codes"
     );
+}
+
+#[test]
+fn project_and_package_boundaries_may_contain_equal_generated_identities() {
+    let shared_identity = generated_test_identity("shared");
+    let package_origin = package_origin_identity("sharedpkg", "sharedpkg/@mod.moth");
+    let package_facade = OriginFunctionId::new_free(package_origin, "facade".to_owned());
+
+    let project_module = lane_module_with_generated_and_cross_module_calls(
+        PathBuf::from("@page.moth"),
+        true,
+        Some(shared_identity.clone()),
+        std::slice::from_ref(&package_facade),
+    );
+    let mut package_module = lane_module_with_generated_and_cross_module_calls(
+        PathBuf::from("packages/sharedpkg/@mod.moth"),
+        false,
+        Some(shared_identity.clone()),
+        &[],
+    );
+    package_module
+        .executable
+        .hir
+        .function_ids_by_origin
+        .insert(package_facade, FunctionId(0));
+
+    let mut project = test_graph_boundary(vec![project_module], "test", "page");
+    project.generated = {
+        let mut store = BoundaryGeneratedFunctionStore::default();
+        store.push_completed_for_test(CompletedGeneratedFunction {
+            identity: shared_identity.clone(),
+            summary: generated_test_summary(),
+            sidecar: lane_sidecar(
+                shared_identity.clone(),
+                PathBuf::from("@project_shared_generated.moth"),
+            ),
+        });
+        store
+    };
+    let mut package = test_graph_boundary(vec![package_module], "sharedpkg", "");
+    package.generated = {
+        let mut store = BoundaryGeneratedFunctionStore::default();
+        store.push_completed_for_test(CompletedGeneratedFunction {
+            identity: shared_identity.clone(),
+            summary: generated_test_summary(),
+            sidecar: lane_sidecar(
+                shared_identity.clone(),
+                PathBuf::from("packages/sharedpkg/@package_shared_generated.moth"),
+            ),
+        });
+        store
+    };
+
+    let frontend = ProjectFrontendCompilation::new(
+        project,
+        test_package_registry(vec![CompiledSourcePackage {
+            package_identity: StablePackageIdentity::source_package(
+                PackageOrigin::ProjectLocal,
+                "sharedpkg",
+            ),
+            root_module_id: ModuleId::from_index(0),
+            boundary: package,
+        }]),
+    )
+    .expect("equal generated identities across boundaries should validate");
+
+    let compilation = ProjectCompilation::from_frontend(frontend)
+        .expect("equal generated identities across project and package boundaries must assemble");
+    let entries = compilation.entries();
+    assert_eq!(entries.len(), 1, "one project root becomes one entry");
+    let entry = &entries[0];
+    assert_eq!(
+        entry.linked_modules.len(),
+        3,
+        "the entry links the package module and both boundary-local sidecars"
+    );
+    let project_sidecar = entry
+        .linked_modules
+        .iter()
+        .find(|linked| {
+            linked
+                .module
+                .metadata
+                .entry_point
+                .ends_with("@project_shared_generated.moth")
+        })
+        .expect("project-boundary sidecar should be linked");
+    let package_sidecar = entry
+        .linked_modules
+        .iter()
+        .find(|linked| {
+            linked
+                .module
+                .metadata
+                .entry_point
+                .ends_with("@package_shared_generated.moth")
+        })
+        .expect("package-boundary sidecar should be linked");
+    let project_name = project_sidecar
+        .generated_function_names
+        .get(&shared_identity)
+        .expect("project boundary owns a symbol for the shared identity");
+    let package_name = package_sidecar
+        .generated_function_names
+        .get(&shared_identity)
+        .expect("package boundary owns a symbol for the shared identity");
+    assert_ne!(
+        project_name, package_name,
+        "equal identities in unrelated boundaries must receive distinct symbols"
+    );
+    assert!(
+        entry.all_generated_function_names.contains(project_name)
+            && entry.all_generated_function_names.contains(package_name),
+        "the entry reserves every generated symbol across boundaries"
+    );
+}
+
+#[test]
+fn package_cannot_resolve_an_unrelated_package_sidecar() {
+    let shared_identity = generated_test_identity("shared");
+    let package_origin = package_origin_identity("a", "a/@mod.moth");
+    let package_facade = OriginFunctionId::new_free(package_origin, "facade".to_owned());
+
+    let project_module = lane_module_with_generated_and_cross_module_calls(
+        PathBuf::from("@page.moth"),
+        true,
+        None,
+        std::slice::from_ref(&package_facade),
+    );
+    let mut package_a_module = lane_module_with_generated_and_cross_module_calls(
+        PathBuf::from("packages/a/@mod.moth"),
+        false,
+        Some(shared_identity.clone()),
+        &[],
+    );
+    package_a_module
+        .executable
+        .hir
+        .function_ids_by_origin
+        .insert(package_facade, FunctionId(0));
+    let package_a = test_graph_boundary(vec![package_a_module], "a", "");
+    let mut package_b = test_graph_boundary(
+        vec![minimal_lane_module(
+            PathBuf::from("packages/b/@mod.moth"),
+            false,
+        )],
+        "b",
+        "",
+    );
+    package_b.generated = {
+        let mut store = BoundaryGeneratedFunctionStore::default();
+        store.push_completed_for_test(CompletedGeneratedFunction {
+            identity: shared_identity.clone(),
+            summary: generated_test_summary(),
+            sidecar: lane_sidecar(
+                shared_identity.clone(),
+                PathBuf::from("packages/b/@generated.moth"),
+            ),
+        });
+        store
+    };
+
+    let frontend = ProjectFrontendCompilation::new(
+        test_graph_boundary(vec![project_module], "test", "page"),
+        test_package_registry(vec![
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "a",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: package_a,
+            },
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "b",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: package_b,
+            },
+        ]),
+    )
+    .expect("frontend boundaries should validate");
+
+    let error = match ProjectCompilation::from_frontend(frontend) {
+        Ok(_) => panic!("a package must not resolve another package's sidecar"),
+        Err(error) => error,
+    };
+    assert!(
+        error.msg.contains("in its calling boundary"),
+        "unexpected boundary-scoped resolution failure: {error:?}"
+    );
+}
+
+#[test]
+fn independent_packages_publish_equal_generated_identities_in_any_order() {
+    let shared_identity = generated_test_identity("shared");
+    let facade_a = OriginFunctionId::new_free(
+        package_origin_identity("a", "a/@mod.moth"),
+        "facade".to_owned(),
+    );
+    let facade_b = OriginFunctionId::new_free(
+        package_origin_identity("b", "b/@mod.moth"),
+        "facade".to_owned(),
+    );
+
+    let package_module_for = |prefix: &str, facade: &OriginFunctionId| -> Module {
+        let mut module = lane_module_with_generated_and_cross_module_calls(
+            PathBuf::from(format!("packages/{prefix}/@mod.moth")),
+            false,
+            Some(shared_identity.clone()),
+            &[],
+        );
+        module
+            .executable
+            .hir
+            .function_ids_by_origin
+            .insert(facade.clone(), FunctionId(0));
+        module
+    };
+
+    let frontend_for = |order: [&str; 2]| -> ProjectFrontendCompilation {
+        let (first_prefix, second_prefix) = (order[0], order[1]);
+        let project_module = lane_module_with_generated_and_cross_module_calls(
+            PathBuf::from("@page.moth"),
+            true,
+            None,
+            &[
+                if first_prefix == "a" {
+                    facade_a.clone()
+                } else {
+                    facade_b.clone()
+                },
+                if second_prefix == "a" {
+                    facade_a.clone()
+                } else {
+                    facade_b.clone()
+                },
+            ],
+        );
+        let packages = order
+            .iter()
+            .map(|prefix| {
+                let facade = if *prefix == "a" { &facade_a } else { &facade_b };
+                let mut boundary =
+                    test_graph_boundary(vec![package_module_for(prefix, facade)], prefix, "");
+                boundary.generated = {
+                    let mut store = BoundaryGeneratedFunctionStore::default();
+                    store.push_completed_for_test(CompletedGeneratedFunction {
+                        identity: shared_identity.clone(),
+                        summary: generated_test_summary(),
+                        sidecar: lane_sidecar(
+                            shared_identity.clone(),
+                            PathBuf::from(format!("packages/{prefix}/@generated.moth")),
+                        ),
+                    });
+                    store
+                };
+                CompiledSourcePackage {
+                    package_identity: StablePackageIdentity::source_package(
+                        PackageOrigin::ProjectLocal,
+                        prefix,
+                    ),
+                    root_module_id: ModuleId::from_index(0),
+                    boundary,
+                }
+            })
+            .collect::<Vec<_>>();
+        ProjectFrontendCompilation::new(
+            test_graph_boundary(vec![project_module], "test", "page"),
+            test_package_registry(packages),
+        )
+        .expect("frontend should validate")
+    };
+
+    let first = frontend_for(["a", "b"]);
+    let second = frontend_for(["b", "a"]);
+
+    let symbols_by_prefix = |frontend: ProjectFrontendCompilation| {
+        let compilation = ProjectCompilation::from_frontend(frontend)
+            .expect("two packages may publish equal generated identities in either order");
+        assert_eq!(
+            compilation.module_count(),
+            5,
+            "two package base modules plus one sidecar each, beside the project root"
+        );
+        let entries = compilation.entries();
+        assert_eq!(entries.len(), 1);
+        let mut symbols = rustc_hash::FxHashMap::default();
+        for linked_module in &entries[0].linked_modules {
+            if let Some(name) = linked_module.generated_function_names.get(&shared_identity) {
+                let prefix = if linked_module
+                    .module
+                    .metadata
+                    .entry_point
+                    .starts_with("packages/a/")
+                {
+                    "a"
+                } else {
+                    "b"
+                };
+                symbols.insert(prefix.to_owned(), name.clone());
+            }
+        }
+        assert_eq!(
+            symbols.len(),
+            2,
+            "each package boundary resolves its own local symbol for the shared identity"
+        );
+        symbols
+    };
+
+    let first_symbols = symbols_by_prefix(first);
+    let second_symbols = symbols_by_prefix(second);
+    assert_eq!(
+        first_symbols, second_symbols,
+        "reversing package registration order must not change any boundary's assigned symbols"
+    );
+
+    // Each package remains coherent when the other boundary is removed.
+    for prefix in ["a", "b"] {
+        let facade = if prefix == "a" {
+            facade_a.clone()
+        } else {
+            facade_b.clone()
+        };
+        let project_module = lane_module_with_generated_and_cross_module_calls(
+            PathBuf::from("@page.moth"),
+            true,
+            None,
+            &[facade],
+        );
+        let mut boundary = test_graph_boundary(
+            vec![package_module_for(
+                prefix,
+                if prefix == "a" { &facade_a } else { &facade_b },
+            )],
+            prefix,
+            "",
+        );
+        boundary.generated = {
+            let mut store = BoundaryGeneratedFunctionStore::default();
+            store.push_completed_for_test(CompletedGeneratedFunction {
+                identity: shared_identity.clone(),
+                summary: generated_test_summary(),
+                sidecar: lane_sidecar(
+                    shared_identity.clone(),
+                    PathBuf::from(format!("packages/{prefix}/@generated.moth")),
+                ),
+            });
+            store
+        };
+        let frontend = ProjectFrontendCompilation::new(
+            test_graph_boundary(vec![project_module], "test", "page"),
+            test_package_registry(vec![CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    prefix,
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary,
+            }]),
+        )
+        .expect("single-package frontend should validate");
+        let compilation = ProjectCompilation::from_frontend(frontend)
+            .expect("one package alone must stay coherent");
+        assert_eq!(compilation.module_count(), 3);
+    }
+}
+
+fn package_origin_identity(prefix: &str, module_path: &str) -> StableModuleOriginIdentity {
+    StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, prefix),
+        module_path.to_owned(),
+        ModuleRootRole::Normal,
+    )
+}
+
+fn lane_module_with_generated_and_cross_module_calls(
+    entry_point: PathBuf,
+    active_root: bool,
+    generated_call: Option<GeneratedFunctionIdentity>,
+    cross_module_calls: &[OriginFunctionId],
+) -> Module {
+    let start_name_path = InternedPath::from_single_str("start_entry", &mut StringTable::new());
+    let mut hir_module = minimal_hir_module(start_name_path);
+    if let Some(identity) = generated_call {
+        hir_module.blocks[0].statements.push(HirStatement {
+            id: HirNodeId(7),
+            kind: HirStatementKind::Call {
+                target: CallTarget::Generated(identity),
+                args: vec![],
+                result: None,
+            },
+            location: SourceLocation::default(),
+        });
+    }
+    for (index, origin) in cross_module_calls.iter().enumerate() {
+        hir_module.blocks[0].statements.push(HirStatement {
+            id: HirNodeId(8 + index as u32),
+            kind: HirStatementKind::Call {
+                target: CallTarget::CrossModule(origin.clone()),
+                args: vec![],
+                result: None,
+            },
+            location: SourceLocation::default(),
+        });
+    }
+    let function_link_facts = collect_module_function_link_facts(&hir_module)
+        .expect("test HIR should produce function link facts");
+    Module {
+        executable: ModuleExecutable {
+            hir: hir_module,
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+        },
+        link_facts: ModuleLinkFacts {
+            external_package_registry: Arc::new(ExternalPackageRegistry::new()),
+            external_import_candidates: vec![],
+            functions: function_link_facts,
+        },
+        metadata: ModuleCompilerMetadata {
+            entry_point,
+            warnings: vec![],
+            const_top_level_fragments: vec![],
+            root_activity: if active_root {
+                ModuleRootActivity {
+                    has_non_trivial_root_body: true,
+                    ..ModuleRootActivity::default()
+                }
+            } else {
+                ModuleRootActivity::default()
+            },
+            doc_fragments: vec![],
+            rendered_path_usages: vec![],
+            materialisation_context: None,
+        },
+    }
+}
+
+fn lane_sidecar(
+    identity: GeneratedFunctionIdentity,
+    entry_point: PathBuf,
+) -> GeneratedFunctionSidecar {
+    let mut module = minimal_lane_module(entry_point, false);
+    module
+        .executable
+        .hir
+        .function_ids_by_generated
+        .insert(identity.clone(), FunctionId(0));
+    GeneratedFunctionSidecar::new(identity, module)
 }
 
 #[test]

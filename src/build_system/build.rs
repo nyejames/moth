@@ -6,7 +6,7 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::compiled_boundary::{
-    CompiledGraphBoundary, CompiledModuleRef, CompletedSourcePackageRegistry,
+    CompiledGraphBoundary, CompiledModuleRef, CompletedSourcePackageRegistry, PackageBoundaryId,
     ProjectFrontendCompilation, compilation_module_views,
 };
 use crate::build_system::create_project_modules::{
@@ -33,7 +33,7 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFragment};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
-    ModulePrivateExecutableIdentity, OriginFunctionId,
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
 
 #[cfg(test)]
@@ -304,12 +304,31 @@ pub struct ProjectCompilation {
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
     module_private_function_names:
         Arc<std::collections::HashMap<ModulePrivateExecutableIdentity, String>>,
+    /// Project-boundary generated symbol map keyed by identity.
     generated_function_names: Arc<
         std::collections::HashMap<
             crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
             String,
         >,
     >,
+    /// Per-package-boundary generated symbol maps keyed by identity.
+    ///
+    /// Equal generated identities may exist in unrelated boundaries, so each boundary owns its
+    /// own name lookup while all names stay globally unique.
+    package_generated_function_names: FxHashMap<
+        PackageBoundaryId,
+        Arc<
+            std::collections::HashMap<
+                crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+                String,
+            >,
+        >,
+    >,
+    /// Every generated symbol name in deterministic assignment order.
+    ///
+    /// Builders reserve the complete name set once so boundary-local lookup maps can stay
+    /// identity-keyed without risking JS identifier collisions between boundaries.
+    all_generated_function_names: Arc<Vec<String>>,
 }
 
 impl ProjectCompilation {
@@ -380,7 +399,11 @@ impl ProjectCompilation {
         };
         let mut function_owner_by_origin = FxHashMap::default();
         let mut function_owner_by_private_identity = FxHashMap::default();
-        let mut function_owner_by_generated = FxHashMap::default();
+        let mut project_generated_owners = FxHashMap::default();
+        let mut package_generated_owners = FxHashMap::<
+            PackageBoundaryId,
+            FxHashMap<GeneratedFunctionIdentity, (CompiledModuleRef, FunctionId)>,
+        >::default();
         for (module_ref, module) in module_views {
             for (origin, function_id) in &module.executable.hir.function_ids_by_origin {
                 if function_owner_by_origin
@@ -403,13 +426,36 @@ impl ProjectCompilation {
                 }
             }
             for (identity, function_id) in &module.executable.hir.function_ids_by_generated {
-                if function_owner_by_generated
-                    .insert(identity.clone(), (module_ref, *function_id))
-                    .is_some()
-                {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Project compilation contains duplicate generated function identity {identity:?}"
-                    )));
+                let owner = (module_ref, *function_id);
+                match module_ref {
+                    CompiledModuleRef::GeneratedProject(_) => {
+                        if project_generated_owners
+                            .insert(identity.clone(), owner)
+                            .is_some()
+                        {
+                            return Err(CompilerError::compiler_error(format!(
+                                "Project boundary contains duplicate generated function identity {identity:?}"
+                            )));
+                        }
+                    }
+                    CompiledModuleRef::GeneratedSourcePackage { package_id, .. } => {
+                        if package_generated_owners
+                            .entry(package_id)
+                            .or_default()
+                            .insert(identity.clone(), owner)
+                            .is_some()
+                        {
+                            return Err(CompilerError::compiler_error(format!(
+                                "Source package @{} contains duplicate generated function identity {identity:?}",
+                                source_packages.package(package_id)?.import_prefix()
+                            )));
+                        }
+                    }
+                    CompiledModuleRef::Project(_) | CompiledModuleRef::SourcePackage { .. } => {
+                        return Err(CompilerError::compiler_error(format!(
+                            "Base module {module_ref:?} owns generated function identity {identity:?}"
+                        )));
+                    }
                 }
             }
         }
@@ -436,19 +482,67 @@ impl ProjectCompilation {
                 .map(|(index, (identity, _))| (identity, format!("__moth_private_fn_{index}")))
                 .collect(),
         );
-        let mut sorted_generated_functions = function_owner_by_generated
-            .iter()
-            .map(|(identity, owner)| (identity.clone(), *owner))
-            .collect::<Vec<_>>();
-        sorted_generated_functions
-            .sort_by_key(|(_, (module_ref, function_id))| (*module_ref, function_id.0));
-        let generated_function_names = Arc::new(
-            sorted_generated_functions
-                .into_iter()
-                .enumerate()
-                .map(|(index, (identity, _))| (identity, format!("__moth_generated_fn_{index}")))
-                .collect(),
+
+        // Generated symbol names stay globally unique (one JS bundle may mix boundaries) while
+        // lookup maps stay keyed by identity within one boundary. Names are assigned in
+        // deterministic owner order: project sidecars in publication order, then each source
+        // package in stable import-prefix order.
+        let mut generated_function_names =
+            std::collections::HashMap::<GeneratedFunctionIdentity, String>::default();
+        let mut package_generated_function_names = FxHashMap::<
+            PackageBoundaryId,
+            Arc<std::collections::HashMap<GeneratedFunctionIdentity, String>>,
+        >::default();
+        let mut all_generated_function_names = Vec::new();
+        let mut assign_generated_names =
+            |owners: &FxHashMap<GeneratedFunctionIdentity, (CompiledModuleRef, FunctionId)>,
+             names: &mut std::collections::HashMap<GeneratedFunctionIdentity, String>,
+             next_index: &mut usize| {
+                let mut sorted = owners
+                    .iter()
+                    .map(|(identity, owner)| (identity.clone(), *owner))
+                    .collect::<Vec<_>>();
+                sorted.sort_by_key(|(_, (module_ref, function_id))| (*module_ref, function_id.0));
+                for (identity, _) in sorted {
+                    let name = format!("__moth_generated_fn_{next_index}");
+                    *next_index += 1;
+                    names.insert(identity, name.clone());
+                    all_generated_function_names.push(name);
+                }
+            };
+        let mut next_generated_index = 0usize;
+        assign_generated_names(
+            &project_generated_owners,
+            &mut generated_function_names,
+            &mut next_generated_index,
         );
+        // Package name assignment sorts on the stable import prefix, never on registration
+        // order, so reversing package publication order cannot change any boundary's symbols.
+        let mut sorted_packages = package_generated_owners
+            .keys()
+            .copied()
+            .map(|package_id| {
+                let prefix = source_packages
+                    .package(package_id)?
+                    .import_prefix()
+                    .to_owned();
+                Ok((prefix, package_id))
+            })
+            .collect::<Result<Vec<_>, CompilerError>>()?;
+        sorted_packages.sort();
+        for (_, package_id) in sorted_packages {
+            let mut names =
+                std::collections::HashMap::<GeneratedFunctionIdentity, String>::default();
+            assign_generated_names(
+                &package_generated_owners[&package_id],
+                &mut names,
+                &mut next_generated_index,
+            );
+            package_generated_function_names.insert(package_id, Arc::new(names));
+        }
+        let generated_function_names = Arc::new(generated_function_names);
+        let all_generated_function_names = Arc::new(all_generated_function_names);
+
         let mut entries = Vec::new();
 
         // Entry selection resolves the project graph's normal-entry identities through the
@@ -530,11 +624,15 @@ impl ProjectCompilation {
                 }
 
                 for identity in &reachability.reachable_generated_functions {
-                    let Some((generated_module_ref, generated_function_id)) =
-                        function_owner_by_generated.get(identity).copied()
-                    else {
+                    let Some((generated_module_ref, generated_function_id)) = generated_owner_for(
+                        &project_generated_owners,
+                        &package_generated_owners,
+                        reachable_module_ref,
+                        identity,
+                    )
+                    .copied() else {
                         return Err(CompilerError::compiler_error(format!(
-                            "Entry assembly could not resolve generated function identity {identity:?}"
+                            "Entry assembly could not resolve generated function identity {identity:?} in its calling boundary"
                         )));
                     };
                     if roots_by_module
@@ -608,6 +706,8 @@ impl ProjectCompilation {
             source_function_names,
             module_private_function_names,
             generated_function_names,
+            package_generated_function_names,
+            all_generated_function_names,
         })
     }
 
@@ -653,15 +753,36 @@ impl ProjectCompilation {
                     .map(|linked| ProjectLinkedModule {
                         module: self.module_at(linked.module_ref),
                         reachability: &linked.reachability,
+                        generated_function_names: self
+                            .generated_function_names_for(linked.module_ref),
                     })
                     .collect(),
                 source_function_names: Arc::clone(&self.source_function_names),
                 module_private_function_names: Arc::clone(&self.module_private_function_names),
                 generated_function_names: Arc::clone(&self.generated_function_names),
+                all_generated_function_names: Arc::clone(&self.all_generated_function_names),
             });
         }
 
         entries
+    }
+
+    /// The generated symbol lookup map for one module's owning boundary.
+    fn generated_function_names_for(
+        &self,
+        module_ref: CompiledModuleRef,
+    ) -> Arc<std::collections::HashMap<GeneratedFunctionIdentity, String>> {
+        match module_ref {
+            CompiledModuleRef::Project(_) | CompiledModuleRef::GeneratedProject(_) => {
+                Arc::clone(&self.generated_function_names)
+            }
+            CompiledModuleRef::SourcePackage { package_id, .. }
+            | CompiledModuleRef::GeneratedSourcePackage { package_id, .. } => self
+                .package_generated_function_names
+                .get(&package_id)
+                .cloned()
+                .unwrap_or_else(|| Arc::new(std::collections::HashMap::new())),
+        }
     }
 }
 
@@ -755,6 +876,32 @@ fn boundary_module_at<'a>(
     }
 }
 
+/// Resolve one generated identity only inside the boundary that made the call.
+///
+/// WHAT: generated sidecars are owned by their consuming boundary, so a module can address only
+///       the generated targets its own boundary materialised.
+/// WHY: equal generated identities may exist in unrelated boundaries; identity alone cannot
+///       select an owner during entry assembly.
+fn generated_owner_for<'a>(
+    project_owners: &'a FxHashMap<GeneratedFunctionIdentity, (CompiledModuleRef, FunctionId)>,
+    package_owners: &'a FxHashMap<
+        PackageBoundaryId,
+        FxHashMap<GeneratedFunctionIdentity, (CompiledModuleRef, FunctionId)>,
+    >,
+    calling_module: CompiledModuleRef,
+    identity: &GeneratedFunctionIdentity,
+) -> Option<&'a (CompiledModuleRef, FunctionId)> {
+    match calling_module {
+        CompiledModuleRef::Project(_) | CompiledModuleRef::GeneratedProject(_) => {
+            project_owners.get(identity)
+        }
+        CompiledModuleRef::SourcePackage { package_id, .. }
+        | CompiledModuleRef::GeneratedSourcePackage { package_id, .. } => package_owners
+            .get(&package_id)
+            .and_then(|owners| owners.get(identity)),
+    }
+}
+
 /// Build-owned activation record for one compiled module's dormant root work.
 ///
 /// The dense module ref is private to the owning `ProjectCompilation`; backends receive only the
@@ -771,10 +918,17 @@ pub(crate) struct LinkedModuleAssembly {
     reachability: HirReachability,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct ProjectLinkedModule<'a> {
     pub(crate) module: &'a Module,
     pub(crate) reachability: &'a HirReachability,
+    /// Generated symbol lookup for the linked module's own boundary.
+    pub(crate) generated_function_names: Arc<
+        std::collections::HashMap<
+            crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
+            String,
+        >,
+    >,
 }
 
 /// Owner-bound view of one entry assembly and its selected compiled module.
@@ -787,12 +941,15 @@ pub(crate) struct ProjectEntry<'a> {
     pub(crate) source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
     pub(crate) module_private_function_names:
         Arc<std::collections::HashMap<ModulePrivateExecutableIdentity, String>>,
+    /// Generated symbol lookup for the entry module's project boundary.
     pub(crate) generated_function_names: Arc<
         std::collections::HashMap<
             crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
             String,
         >,
     >,
+    /// Every generated symbol name assigned to this compilation, for JS identifier reservation.
+    pub(crate) all_generated_function_names: Arc<Vec<String>>,
 }
 
 impl Module {
