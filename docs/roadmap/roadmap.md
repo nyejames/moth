@@ -11,6 +11,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
+- [code block highligher follow up corrections](./plans/moth-code-block-highlighter-corrections-and-cleanup-plan.md)
 - [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md) (resume at R5C1)
 
 ## Queued implementation chain
@@ -34,11 +35,6 @@ The package dependency plan is design-gated. Its implementation remains blocked 
 Diagnostics may continue independently. The queued implementation chain remains ordered by hard dependency.
 
 Do not mark a plan active unless its current-state capsule says it is active.
-
-## Completed
-
-- Module root marker migration from `#` to `@`
-- [Code-block highlighting expansion and optimisation](./plans/code-block-highlighting-expansion-and-optimisation-plan.md): allocation-conscious single-pass scanner, compiler-owned Moth word classification, maximal-munch operators, shared general palette and bounded Moth lexical/contextual roles
 
 ---
 
